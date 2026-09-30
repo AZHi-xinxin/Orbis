@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <queries>
+        <package android:name="com.tencent.qqmusic" />
+        <package android:name="com.netease.cloudmusic" />
+        <package android:name="com.kugou.android" />
+        <package android:name="me.rerere.rikkahub" />
+    </queries>
+    <application>
+        <!-- No launcher or automatic permission request. Notification shortcut only. -->
+        <activity android:name="com.lover.connect.MainActivity" android:exported="false" android:label="Orbis · 手机与陪伴" />
+        <service android:name="com.lover.connect.McpService" android:exported="false" android:foregroundServiceType="specialUse" android:stopWithTask="false">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-enabled local-only companion MCP and device-context sensors." />
+        </service>
+        <service android:name="com.lover.connect.ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" android:stopWithTask="false" />
+        <service android:name="com.lover.connect.LocationTrackingService" android:exported="false" android:foregroundServiceType="location" />
+        <service android:name="com.lover.connect.AlarmRingService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Plays alarms explicitly scheduled by the user or their on-device AI client." />
+        </service>
+        <service android:name="com.lover.connect.MusicListenerService" android:exported="true" android:label="Orbis · 音乐与设备情境" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+        <service android:name="com.lover.connect.LCAccessibilityService" android:exported="false" android:label="Orbis · 屏幕观察与已授权操作" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/lc_accessibility_service_config" />
+        </service>
+        <receiver android:name="com.lover.connect.BootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name="com.lover.connect.LocationEventUploadReceiver" android:exported="false" />
+        <receiver android:name="com.lover.connect.AlarmReceiver" android:exported="false" />
+        <receiver android:name="com.lover.connect.AppUnlockReceiver" android:exported="false" />
+        <receiver android:name="com.lover.connect.UnlockAllReceiver" android:exported="false" />
+        <receiver android:name="com.lover.connect.LockScreenReceiver" android:exported="false" android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data android:name="android.app.device_admin" android:resource="@xml/lc_device_admin" />
+            <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED" /></intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -1,0 +1,621 @@
+package me.rerere.rikkahub.ui.pages.assistant.detail
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import me.rerere.rikkahub.ui.pages.setting.OrbisSettingsTopBar as LargeFlexibleTopAppBar
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import me.rerere.rikkahub.ui.pages.setting.OrbisSettingsScaffold as Scaffold
+import androidx.compose.material3.Slider
+import com.lover.connect.ui.components.StarSwitch as Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.ai.provider.ModelType
+import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import me.rerere.rikkahub.ui.components.ai.ReasoningButton
+import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.TagsInput
+import me.rerere.rikkahub.ui.components.ui.UIAvatar
+import me.rerere.rikkahub.ui.hooks.heroAnimation
+import me.rerere.rikkahub.ui.theme.CustomColors
+import me.rerere.rikkahub.utils.toFixed
+import org.koin.androidx.compose.koinViewModel
+import org.koin.core.parameter.parametersOf
+import kotlin.math.roundToInt
+import me.rerere.rikkahub.data.model.Tag as DataTag
+
+@Composable
+fun AssistantBasicPage(id: String) {
+    val vm: AssistantDetailVM = koinViewModel(
+        parameters = {
+            parametersOf(id)
+        }
+    )
+    val assistant by vm.assistant.collectAsStateWithLifecycle()
+    val providers by vm.providers.collectAsStateWithLifecycle()
+    val tags by vm.tags.collectAsStateWithLifecycle()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    Scaffold(
+        topBar = {
+            LargeFlexibleTopAppBar(
+                title = {
+                    Text(stringResource(R.string.assistant_page_tab_basic))
+                },
+                navigationIcon = {
+                    BackButton()
+                },
+                scrollBehavior = scrollBehavior,
+                colors = CustomColors.topBarColors,
+            )
+        },
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = CustomColors.topBarColors.containerColor,
+    ) { innerPadding ->
+        AssistantBasicContent(
+            innerPadding = innerPadding,
+            assistant = assistant,
+            providers = providers,
+            tags = tags,
+            onUpdate = { vm.update(it) },
+            vm = vm
+        )
+    }
+}
+
+@Composable
+internal fun AssistantBasicContent(
+    innerPadding: PaddingValues,
+    assistant: Assistant,
+    providers: List<me.rerere.ai.provider.ProviderSetting>,
+    tags: List<DataTag>,
+    onUpdate: (Assistant) -> Unit,
+    vm: AssistantDetailVM,
+    identityOnly: Boolean = false,
+    onUpdateTags: ((List<kotlin.uuid.Uuid>, List<DataTag>) -> Unit)? = null,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(innerPadding)
+            .imePadding(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        if (!identityOnly) Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            UIAvatar(
+                value = assistant.avatar,
+                name = assistant.name.ifBlank { stringResource(R.string.assistant_page_default_assistant) },
+                onUpdate = { avatar ->
+                    onUpdate(
+                        assistant.copy(
+                            avatar = avatar
+                        )
+                    )
+                },
+                modifier = Modifier
+                    .size(80.dp)
+                    .heroAnimation("assistant_${assistant.id}")
+            )
+        }
+
+        if (identityOnly) Text("头像图片在此 AI 的聊天侧栏 → 外观中修改；模型在聊天输入区选择，生成参数在对话设置中调整。",
+            style = MaterialTheme.typography.bodySmall)
+        Card(
+            colors = CustomColors.cardColorsOnSurfaceContainer
+        ) {
+            FormItem(
+                label = {
+                    Text(stringResource(R.string.assistant_page_name))
+                },
+                modifier = Modifier.padding(8.dp),
+
+                ) {
+                OutlinedTextField(
+                    value = assistant.name,
+                    onValueChange = {
+                        onUpdate(
+                            assistant.copy(
+                                name = it
+                            )
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            HorizontalDivider()
+
+            FormItem(
+                label = {
+                    Text(stringResource(R.string.assistant_page_tags))
+                },
+                modifier = Modifier.padding(8.dp),
+            ) {
+                TagsInput(
+                    value = assistant.tags,
+                    tags = tags,
+                    onValueChange = { tagIds, tagList ->
+                        onUpdateTags?.invoke(tagIds, tagList) ?: vm.updateTags(tagIds, tagList)
+                    },
+                )
+            }
+
+            HorizontalDivider()
+
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_use_assistant_avatar))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_use_assistant_avatar_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.useAssistantAvatar,
+                        onCheckedChange = {
+                            onUpdate(
+                                assistant.copy(
+                                    useAssistantAvatar = it
+                                )
+                            )
+                        }
+                    )
+                }
+            )
+        }
+
+        if (!identityOnly) Card(
+            colors = CustomColors.cardColorsOnSurfaceContainer
+        ) {
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_chat_model))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_chat_model_desc))
+                },
+                content = {
+                    ModelSelector(
+                        modelId = assistant.chatModelId,
+                        providers = providers,
+                        type = ModelType.CHAT,
+                        onSelect = {
+                            onUpdate(
+                                assistant.copy(
+                                    chatModelId = it.id
+                                )
+                            )
+                        },
+                    )
+                }
+            )
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_temperature))
+                },
+                description = {
+                    Text(
+                        text = buildAnnotatedString {
+                            append(stringResource(R.string.assistant_page_temperature_warning))
+                        }
+                    )
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.temperature != null,
+                        onCheckedChange = { enabled ->
+                            onUpdate(
+                                assistant.copy(
+                                    temperature = if (enabled) 1.0f else null
+                                )
+                            )
+                        }
+                    )
+                }
+            ) {
+                if (assistant.temperature != null) {
+                    var temperatureInput by remember(assistant.id) {
+                        mutableStateOf(assistant.temperature.toString())
+                    }
+                    val temperatureValue = temperatureInput.toFloatOrNull()
+                    OutlinedTextField(
+                        value = temperatureInput,
+                        onValueChange = { value ->
+                            temperatureInput = value
+                            value.toFloatOrNull()?.takeIf { it in 0f..2f }?.let { temperature ->
+                                onUpdate(
+                                    assistant.copy(
+                                        temperature = temperature
+                                    )
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        isError = temperatureValue == null || temperatureValue !in 0f..2f,
+                        supportingText = {
+                            Text("0 - 2")
+                        }
+                    )
+                }
+            }
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_top_p))
+                },
+                description = {
+                    Text(
+                        text = buildAnnotatedString {
+                            append(stringResource(R.string.assistant_page_top_p_warning))
+                        }
+                    )
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.topP != null,
+                        onCheckedChange = { enabled ->
+                            onUpdate(
+                                assistant.copy(
+                                    topP = if (enabled) 1.0f else null
+                                )
+                            )
+                        }
+                    )
+                }
+            ) {
+                assistant.topP?.let { topP ->
+                    var topPInput by remember(assistant.id) {
+                        mutableStateOf(topP.toString())
+                    }
+                    val topPValue = topPInput.toFloatOrNull()
+                    OutlinedTextField(
+                        value = topPInput,
+                        onValueChange = { value ->
+                            topPInput = value
+                            value.toFloatOrNull()?.takeIf { it in 0f..1f }?.let { nextTopP ->
+                                onUpdate(
+                                    assistant.copy(
+                                        topP = nextTopP
+                                    )
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        isError = topPValue == null || topPValue !in 0f..1f,
+                        supportingText = {
+                            Text("0 - 1")
+                        }
+                    )
+                }
+            }
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_context_message_limit))
+                },
+                description = {
+                    Text(
+                        text = stringResource(R.string.assistant_page_context_message_limit_desc),
+                    )
+                }
+            ) {
+                var contextMessageLimitInput by remember(
+                    assistant.id,
+                    assistant.contextMessageLimit
+                ) {
+                    mutableStateOf(assistant.contextMessageLimit.toString())
+                }
+                var contextMessageLimitFocused by remember(assistant.id) {
+                    mutableStateOf(false)
+                }
+                var showContextMessageLimitDialog by remember(assistant.id) {
+                    mutableStateOf(false)
+                }
+                val focusManager = LocalFocusManager.current
+
+                fun commitContextMessageLimit() {
+                    val value = contextMessageLimitInput.toIntOrNull()
+                    if (value == null) {
+                        contextMessageLimitInput = assistant.contextMessageLimit.toString()
+                        return
+                    }
+
+                    val normalizedValue = normalizeContextMessageLimit(value)
+                    contextMessageLimitInput = normalizedValue.toString()
+                    if (normalizedValue != assistant.contextMessageLimit) {
+                        onUpdate(assistant.copy(contextMessageLimit = normalizedValue))
+                    }
+                    if (normalizedValue != value) {
+                        showContextMessageLimitDialog = true
+                    }
+                }
+
+                val contextMessageLimitValue = contextMessageLimitInput.toIntOrNull()
+                OutlinedTextField(
+                    value = contextMessageLimitInput,
+                    onValueChange = { input ->
+                        if (input.all(Char::isDigit) &&
+                            (input.isEmpty() || input.toIntOrNull() != null)
+                        ) {
+                            contextMessageLimitInput = input
+                            input.toIntOrNull()
+                                ?.takeIf { it == 0 || it >= MIN_CONTEXT_MESSAGE_LIMIT }
+                                ?.takeIf { it != assistant.contextMessageLimit }
+                                ?.let { onUpdate(assistant.copy(contextMessageLimit = it)) }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            if (contextMessageLimitFocused && !focusState.isFocused) {
+                                commitContextMessageLimit()
+                            }
+                            contextMessageLimitFocused = focusState.isFocused
+                        },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    ),
+                    singleLine = true,
+                    isError = contextMessageLimitValue in 1 until MIN_CONTEXT_MESSAGE_LIMIT,
+                    supportingText = {
+                        Text(
+                            stringResource(
+                                R.string.assistant_page_context_message_limit_hint,
+                                MIN_CONTEXT_MESSAGE_LIMIT
+                            )
+                        )
+                    }
+                )
+
+                if (showContextMessageLimitDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showContextMessageLimitDialog = false },
+                        title = {
+                            Text(stringResource(R.string.assistant_page_context_message_limit))
+                        },
+                        text = {
+                            Text(
+                                stringResource(
+                                    R.string.assistant_page_context_message_limit_too_small,
+                                    MIN_CONTEXT_MESSAGE_LIMIT
+                                )
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showContextMessageLimitDialog = false }) {
+                                Text(stringResource(R.string.common_confirm))
+                            }
+                        }
+                    )
+                }
+
+                if (assistant.contextMessageLimit > 0) {
+                    Text(
+                        text = stringResource(R.string.assistant_page_context_message_limit_warning),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_stream_output))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_stream_output_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.streamOutput,
+                        onCheckedChange = {
+                            onUpdate(
+                                assistant.copy(
+                                    streamOutput = it
+                                )
+                            )
+                        }
+                    )
+                }
+            )
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_thinking_budget))
+                },
+            ) {
+                ReasoningButton(
+                    reasoningLevel = assistant.reasoningLevel,
+                    onUpdateReasoningLevel = { level ->
+                        onUpdate(assistant.copy(reasoningLevel = level))
+                    }
+                )
+            }
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_max_tokens))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_max_tokens_desc))
+                }
+            ) {
+                OutlinedTextField(
+                    value = assistant.maxTokens?.toString() ?: "",
+                    onValueChange = { text ->
+                        val tokens = if (text.isBlank()) {
+                            null
+                        } else {
+                            text.toIntOrNull()?.takeIf { it > 0 }
+                        }
+                        onUpdate(
+                            assistant.copy(
+                                maxTokens = tokens
+                            )
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(stringResource(R.string.assistant_page_max_tokens_no_limit))
+                    },
+                    supportingText = {
+                        if (assistant.maxTokens != null) {
+                            Text(stringResource(R.string.assistant_page_max_tokens_limit, assistant.maxTokens))
+                        } else {
+                            Text(stringResource(R.string.assistant_page_max_tokens_no_token_limit))
+                        }
+                    }
+                )
+            }
+        }
+
+        Card(
+            colors = CustomColors.cardColorsOnSurfaceContainer
+        ) {
+            FormItem(
+                modifier = Modifier.padding(8.dp),
+                label = {
+                    Text(stringResource(R.string.assistant_page_gradient_background))
+                },
+                description = {
+                    Text(stringResource(R.string.assistant_page_gradient_background_desc))
+                },
+                tail = {
+                    Switch(
+                        checked = assistant.useGradientBackground,
+                        onCheckedChange = {
+                            onUpdate(
+                                assistant.copy(
+                                    useGradientBackground = it
+                                )
+                            )
+                        }
+                    )
+                }
+            )
+
+            if (!assistant.useGradientBackground) {
+                HorizontalDivider()
+
+                BackgroundPicker(
+                    modifier = Modifier.padding(8.dp),
+                    background = assistant.background,
+                    backgroundOpacity = assistant.backgroundOpacity,
+                    onUpdate = { background ->
+                        onUpdate(
+                            assistant.copy(
+                                background = background
+                            )
+                        )
+                    }
+                )
+            }
+
+            if (!assistant.useGradientBackground && assistant.background != null) {
+                val backgroundOpacity = assistant.backgroundOpacity.coerceIn(0f, 1f)
+                HorizontalDivider()
+                FormItem(
+                    modifier = Modifier.padding(8.dp),
+                    label = {
+                        Text(stringResource(R.string.assistant_page_background_opacity))
+                    },
+                    description = {
+                        Text(stringResource(R.string.assistant_page_background_opacity_desc))
+                    }
+                ) {
+                    Slider(
+                        value = backgroundOpacity,
+                        onValueChange = {
+                            onUpdate(
+                                assistant.copy(
+                                    backgroundOpacity = it.toFixed(2).toFloatOrNull()?.coerceIn(0f, 1f) ?: 1.0f
+                                )
+                            )
+                        },
+                        valueRange = 0f..1f,
+                        steps = 19,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.assistant_page_background_opacity_value,
+                            (backgroundOpacity * 100).roundToInt()
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 上下文限制的最小有效值
+ *
+ * 低于此值时截断点几乎每轮都在移动, 提示词缓存命中率跌破 90%,
+ * 且保留的上下文通常达不到可缓存的最小长度, 限制本身失去意义
+ */
+private const val MIN_CONTEXT_MESSAGE_LIMIT = 20
+
+internal fun normalizeContextMessageLimit(value: Int): Int =
+    if (value in 1 until MIN_CONTEXT_MESSAGE_LIMIT) MIN_CONTEXT_MESSAGE_LIMIT else value

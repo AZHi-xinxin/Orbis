@@ -1,0 +1,12 @@
+LoverConnect-Enhanced 2.4.3
+
+MIT license; Copyright (c) 2026 LoverConnect and AZHi-xinxin.
+Original license: MIT.txt in this directory.
+Pinned public source:
+https://github.com/AZHi-xinxin/LoverConnect-Enhanced/tree/6552fb51a914955be9a3f9383b5cd599c23c2de0
+
+Orbis embeds an adapted lcbridge module, not a byte-identical copy of
+the upstream public application. Host identity, entry points, native
+tools and lifecycle adaptations are supplied in the Orbis source tree.
+Original component licenses remain applicable; the whole application
+retains its root AGPL-3.0 license.

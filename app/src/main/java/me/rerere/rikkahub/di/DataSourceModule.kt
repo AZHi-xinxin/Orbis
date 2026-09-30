@@ -1,0 +1,252 @@
+package me.rerere.rikkahub.di
+
+import android.content.Context
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.http.HttpHeaders
+import io.pebbletemplates.pebble.PebbleEngine
+import kotlinx.serialization.json.Json
+import me.rerere.ai.provider.ProviderManager
+import me.rerere.common.http.AcceptLanguageBuilder
+import me.rerere.rikkahub.BuildConfig
+import me.rerere.rikkahub.data.ai.AIRequestInterceptor
+import me.rerere.rikkahub.data.ai.RequestLoggingInterceptor
+import me.rerere.rikkahub.data.ai.transformers.AssistantTemplateLoader
+import me.rerere.rikkahub.data.ai.GenerationLoop
+import me.rerere.rikkahub.data.ai.TranslationHandler
+import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
+import me.rerere.rikkahub.data.api.RikkaHubAPI
+import me.rerere.rikkahub.data.api.SponsorAPI
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.orbis.OrbisCloudSettingsStore
+import me.rerere.rikkahub.data.sync.BackupManager
+import me.rerere.rikkahub.data.db.AppDatabaseFactory
+import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.fts.MessageFtsManager
+import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.network.SettingsProxySelector
+import me.rerere.rikkahub.data.network.SettingsProxyAuthenticator
+import me.rerere.rikkahub.data.network.SettingsSocks5Authenticator
+import me.rerere.rikkahub.data.sync.webdav.WebDavSync
+import me.rerere.search.SearchService
+import me.rerere.rikkahub.data.sync.S3Sync
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import org.koin.dsl.module
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+
+val dataSourceModule = module {
+    single {
+        SettingsStore(context = get(), scope = get())
+    }
+
+    single {
+        OrbisCloudSettingsStore(context = get(), scope = get<me.rerere.rikkahub.AppScope>())
+    }
+    single {
+        me.rerere.rikkahub.data.orbis.integration.OrbisIntegrationConnections(get(), get<me.rerere.rikkahub.AppScope>())
+    }
+    single {
+        me.rerere.rikkahub.data.orbis.group.OrbisGroupChats(get(), get<me.rerere.rikkahub.AppScope>(), get(), get())
+    }
+
+    single {
+        val context: Context = get()
+        AppDatabaseFactory.create(context)
+    }
+
+    single {
+        AssistantTemplateLoader(settingsStore = get())
+    }
+
+    single {
+        PebbleEngine.Builder()
+            .loader(get<AssistantTemplateLoader>())
+            .defaultLocale(Locale.getDefault())
+            .autoEscaping(false)
+            .build()
+    }
+
+    single { TemplateTransformer(engine = get(), settingsStore = get()) }
+
+    single {
+        get<AppDatabase>().conversationDao()
+    }
+
+    single {
+        get<AppDatabase>().memoryDao()
+    }
+
+    single {
+        get<AppDatabase>().genMediaDao()
+    }
+
+    single {
+        get<AppDatabase>().messageNodeDao()
+    }
+
+    single {
+        get<AppDatabase>().managedFileDao()
+    }
+
+    single {
+        get<AppDatabase>().favoriteDao()
+    }
+
+    single {
+        get<AppDatabase>().workspaceDao()
+    }
+
+    single {
+        get<AppDatabase>().folderDao()
+    }
+
+    single {
+        MessageFtsManager(get())
+    }
+
+    single { McpManager(settingsStore = get(), appScope = get(), filesManager = get()) }
+
+    single {
+        GenerationLoop(
+            context = get(),
+            providerManager = get(),
+            json = get(),
+        )
+    }
+
+    single {
+        TranslationHandler(providerManager = get())
+    }
+
+    single<OkHttpClient> {
+        val settingsStore: SettingsStore = get()
+        val acceptLang = AcceptLanguageBuilder.fromAndroid(get())
+            .build()
+        java.net.Authenticator.setDefault(SettingsSocks5Authenticator(settingsStore))
+        val initialNetworkSetting = settingsStore.settingsFlow.value.networkSetting
+        val appliedProxySetting = AtomicReference(
+            Triple(
+                initialNetworkSetting.proxyUrl,
+                initialNetworkSetting.proxyUsername,
+                initialNetworkSetting.proxyPassword,
+            )
+        )
+        lateinit var client: OkHttpClient
+        client = OkHttpClient.Builder()
+            .proxySelector(SettingsProxySelector(settingsStore))
+            .proxyAuthenticator(SettingsProxyAuthenticator(settingsStore))
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.MINUTES)
+            .writeTimeout(120, TimeUnit.SECONDS)
+            .followSslRedirects(true)
+            .followRedirects(true)
+            .retryOnConnectionFailure(true)
+            .addInterceptor { chain ->
+                val networkSetting = settingsStore.settingsFlow.value.networkSetting
+                val currentProxySetting = Triple(
+                    networkSetting.proxyUrl,
+                    networkSetting.proxyUsername,
+                    networkSetting.proxyPassword,
+                )
+                if (appliedProxySetting.getAndSet(currentProxySetting) != currentProxySetting) {
+                    client.connectionPool.evictAll()
+                }
+
+                val originalRequest = chain.request()
+                val requestBuilder = originalRequest.newBuilder()
+                    .addHeader(HttpHeaders.AcceptLanguage, acceptLang)
+
+                if (originalRequest.header(HttpHeaders.UserAgent) == null) {
+                    val userAgent = settingsStore.settingsFlow.value.networkSetting.userAgent
+                        .trim()
+                        .ifEmpty { "RikkaHub-Android/${BuildConfig.VERSION_NAME}" }
+                    requestBuilder.addHeader(HttpHeaders.UserAgent, userAgent)
+                }
+
+                chain.proceed(requestBuilder.build())
+            }
+            .addNetworkInterceptor { chain ->
+                val request = chain.request()
+                val contentTypeHeader = request.header("Content-Type")
+                if (
+                    contentTypeHeader != null &&
+                    contentTypeHeader.contains(";") &&
+                    contentTypeHeader.substringBefore(";").trim().equals("application/json", ignoreCase = true)
+                ) {
+                    chain.proceed(
+                        request.newBuilder()
+                            .header("Content-Type", contentTypeHeader.substringBefore(";").trim())
+                            .build()
+                    )
+                } else {
+                    chain.proceed(request)
+                }
+            }
+            .addNetworkInterceptor(RequestLoggingInterceptor())
+            .addInterceptor(AIRequestInterceptor())
+            .addInterceptor(HttpLoggingInterceptor().apply {
+                redactHeader("Proxy-Authorization")
+                level = HttpLoggingInterceptor.Level.HEADERS
+            })
+            .build()
+        client.also { SearchService.init(it, get()) }
+    }
+
+    single {
+        SponsorAPI.create(get())
+    }
+
+    single {
+        ProviderManager(client = get(), context = get())
+    }
+
+    single { BackupManager(context = get(), database = get(), settingsStore = get(), json = get()) }
+
+    single {
+        WebDavSync(
+            backupManager = get(),
+            context = get(),
+            httpClient = get()
+        )
+    }
+
+    single<HttpClient> {
+        HttpClient(OkHttp) {
+            engine {
+                config {
+                    connectTimeout(20, TimeUnit.SECONDS)
+                    readTimeout(10, TimeUnit.MINUTES)
+                    writeTimeout(120, TimeUnit.SECONDS)
+                    followSslRedirects(true)
+                    followRedirects(true)
+                    retryOnConnectionFailure(true)
+                }
+            }
+        }
+    }
+
+    single {
+        S3Sync(
+            backupManager = get(),
+            context = get(),
+            httpClient = get()
+        )
+    }
+
+    single<Retrofit> {
+        Retrofit.Builder()
+            .baseUrl("https://api.rikka-ai.com")
+            .addConverterFactory(get<Json>().asConverterFactory("application/json; charset=UTF8".toMediaType()))
+            .build()
+    }
+
+    single<RikkaHubAPI> {
+        get<Retrofit>().create(RikkaHubAPI::class.java)
+    }
+}

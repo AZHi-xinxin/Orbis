@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The Android plugin generates the instrumentation declaration from Gradle.
+         Build with -PorbisIsolatedTests=true and explicitly select the isolated runner
+         plus the synthetic test classes. Normal builds retain AndroidJUnitRunner. -->
+</manifest>

@@ -1,0 +1,22 @@
+JetBrains Mono font attribution
+
+Bundled file: app/src/main/res/font/jetbrains_mono.ttf
+Embedded version: Version 2.304
+Copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono)
+Embedded designers: Philipp Nurullin, Konstantin Bulenkov
+Embedded license: SIL Open Font License, Version 1.1
+SHA-256: 662a196d58f1183bf2d77428b6d5283fe3f45161ab021bea4036bc98e5cac016
+
+This unmodified font was inherited from RikkaHub commit
+12ee935e0b0063dc3194d5145248795e071393cc. Its file contents match that
+upstream commit (Git blob b60e77f5dbf5505436c1904cb7a9ac4111ee76d0).
+
+Project: https://github.com/JetBrains/JetBrainsMono
+The accompanying OFL.txt reproduces the official project notice retrieved
+on 2026-09-30 from:
+https://raw.githubusercontent.com/JetBrains/JetBrainsMono/19371302b95d218af43299bce79ddbddd0bc364d/OFL.txt
+
+The font remains under the SIL Open Font License, not the application's
+software license or the separate license of the upstream font build tools.
+Attribution does not imply sponsorship or endorsement by JetBrains.

@@ -1,0 +1,23 @@
+LoverConnect provenance and license scope
+
+This module's README identifies its source baseline as LoverConnect
+2.4.3-personal (versionCode 15), with additional Orbis host adaptations.
+
+LICENSES/LoverConnect-2.4.1-MIT.txt preserves the MIT notice from the
+earlier public-source LoverConnect 2.4.1 distribution. Retain that notice
+for code inherited from that distribution.
+
+The later public LoverConnect-Enhanced v2.4.3 tag has also been checked:
+https://github.com/AZHi-xinxin/LoverConnect-Enhanced/tree/6552fb51a914955be9a3f9383b5cd599c23c2de0
+Its LICENSE retains the MIT grant and the copyright notices of
+LoverConnect and AZHi-xinxin. The complete text is preserved in
+LICENSES/LoverConnect-2.4.3-MIT.txt and in packaged license assets.
+
+The embedded module is not an unmodified copy of that public tag. Orbis
+host entry points, native tool adapters, lifecycle safeguards and other
+adaptations are supplied as source in this repository. The application
+as a whole is distributed under the root AGPL-3.0 license; original MIT
+notices remain in force for inherited MIT components. A private build
+label is not evidence of a different third-party license. This notice
+does not claim byte-for-byte parity between public and personal builds,
+and does not override any separately applicable component license.

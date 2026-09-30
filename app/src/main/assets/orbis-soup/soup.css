@@ -1,0 +1,82 @@
+/* Original ts-* cards, bowl, envelope and layout come from the owner's original.css. */
+html { color-scheme: light; background-color:#10132a; }
+body { min-height: 100%; overflow-x: hidden; }
+button,select { font: inherit; -webkit-tap-highlight-color: transparent; }
+button:focus-visible,select:focus-visible,summary:focus-visible { outline: 2px solid #875967; outline-offset: 4px; }
+button:disabled { cursor: not-allowed; opacity: .4; }
+[hidden] { display: none !important; }
+.ts-page { padding-bottom: 110px; }
+.ts-top { gap: 8px; }
+.ts-back,.ts-link { min-height: 44px; font-size: .78rem; }
+.ts-wordmark { white-space: nowrap; }
+.ts-screen { animation: none; }
+.ts-game-card::before,.ts-steam { animation: none; }
+.ts-steam { opacity: .7; }
+.soup-stars { pointer-events: none; position: fixed; inset: 0; z-index: -1; background-image: radial-gradient(circle at 12% 20%,#fff5e880 0 1px,transparent 2px),radial-gradient(circle at 83% 64%,#fff5e850 0 1px,transparent 2px),radial-gradient(circle at 40% 91%,#f4cfad60 0 1px,transparent 2px); background-size: 130px 210px,180px 220px,220px 280px; }
+.ts-select-head { padding-top: 30px; }
+.ts-game-card { display: block; }
+.ts-game-card strong { padding-right: 94px; color:#fff7ec; }
+.ts-game-card small { color:#fff3e8; }
+.ts-bowl { display: grid; }
+.ts-title { overflow-wrap: anywhere; }
+.ts-muted { color: #5e4652; }
+.ts-letter .ts-note { margin-top: 15px; }
+.ts-letter .ts-rule strong { font-size: .84rem; }
+.ts-letter .ts-rule small { display: block; font-size: .76rem; color: #695c61; }
+.ts-note { font-size: .74rem; color: #695c61; }
+.ts-mode p { font-size: .75rem; color: #68515d; }
+.ts-mode small { display: block; }
+.ts-mode { width: 100%; }
+.ts-mode strong { padding-right: 24px; }
+.ts-mode[aria-pressed=true] .ts-mode-radio::after { content: ''; position:absolute; inset:5px; border-radius:50%; background:#aa6a68; }
+.soup-library,.soup-history { margin-top: 16px; padding: 17px; border: 1px solid #ffffff80; border-radius: 20px; background: #fff9f1c7; box-shadow: 0 12px 28px #46303f15; }
+summary { cursor: pointer; min-height: 36px; font-size: .87rem; }
+.soup-library label { display: block; margin: 10px 0 5px; font-size: .8rem; }
+.soup-library select { max-width: 100%; width: 100%; min-height: 44px; border: 1px solid #78505b44; border-radius: 14px; padding: 8px 10px; background: #fffaf0; color: #3d303d; }
+.soup-library p { margin-top: 9px; }
+.soup-local-note,.soup-host-note { margin-top: 14px; color: #f6e7e4; text-shadow: 0 1px 2px #26214966; font-size: .75rem; text-align: center; }
+.soup-host-note { padding: 10px 14px; border-radius: 14px; background: #fff9f1ca; color: #614b59; text-shadow: none; }
+.soup-notice { margin: 12px 0; padding: 16px; border: 1px solid #fffcf6b3; border-radius: 19px; background: #fff5e9ed; color: #604550; font-size: .84rem; overflow-wrap: anywhere; }
+.soup-notice p { margin-bottom: 9px; white-space: pre-wrap; }
+.soup-notice .ts-btn { margin: 5px 5px 0 0; }
+.ts-game-head { gap: 8px; align-items: center; }
+.ts-game-head h1 { font-size: 2.3rem; overflow-wrap: anywhere; }
+.ts-badges { flex-wrap: wrap; flex-shrink: 0; max-width: 40%; }
+.ts-badges span { font-size: .7rem; }
+.soup-game-links { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:-12px; margin-bottom:8px; }
+.ts-soup-card { min-height: 245px; }
+.ts-soup-card blockquote { margin-top: 34px; font-size: 1.25rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ts-count small,.ts-action small { color:#69545e; font-size:.66rem; }
+.ts-count,.ts-action { background:rgba(255,250,244,.7); }
+.ts-count strong { font-size: 1rem; }
+.ts-actions { margin-top: 10px; }
+.ts-action b { font-size: .86rem; }
+.ts-log { background: rgba(255,248,240,.78); }
+.ts-log-list { max-height: 430px; }
+.ts-log-item { grid-template-columns: 29px 1fr; }
+.ts-log-main { min-width:0; }
+.ts-log-main b { font-size: .76rem; }
+.ts-log-main p { font-size: .84rem; color:#594850; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ts-answer { font-size: .74rem; }
+.ts-log-foot { font-size: .67rem; color:#65535b; }
+.soup-empty { padding: 32px 12px; text-align: center; color: #7b6570; font-family:var(--font-heading); }
+.soup-turn { width:100%; text-align:right; color:#fceee3; }
+.ts-round-action { background: #fffaf3b0; }
+.ts-round-action b { font-size: .88rem; }
+.ts-round-action small { font-size: .68rem; color:#68515d; }
+.ts-round-status .ts-note { color:#f6e7e4; }
+.ts-bottom { background:#fff9f1ec; font-size:.95rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+.soup-score { margin-top: 12px; padding: 25px 20px; border-radius:24px; border:1px solid #ffffff99; background:#fff9f1dd; }
+.soup-score h2 { text-align:center; font-family:var(--font-heading); font-size:1.3rem; margin-bottom:16px; }
+.soup-score p { color:#66505d; font-size:.82rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+.soup-score details { margin-top:12px; }
+.soup-score .ts-score-row div { font-size:.79rem; }
+.soup-score .ts-score-row progress { width:100%; height:7px; accent-color:#b8756d; }
+.soup-wide { width:100%; margin-top:14px; }
+.soup-history button { width:100%; padding:12px 0; min-height:44px; border:0; background:none; color:#604550; text-align:left; border-top:1px solid #78505b22; }
+.soup-footer { margin-top:32px; color:#eee3e3; text-align:center; font-size:.66rem; }
+.soup-footer p:first-child { font-family:var(--font-heading); letter-spacing:.12em; font-size:.85rem; margin-bottom:16px; }
+.soup-footer summary { font-size:.7rem; }
+.soup-footer button { border:0; background:none; color:inherit; font-size:.69rem; min-height:44px; padding:8px; }
+@media(max-width:360px) { .ts-page { padding-left:12px; padding-right:12px; }.ts-top { flex-wrap:wrap; }.ts-wordmark { font-size:.72rem; }.ts-select-head { margin:20px 0; padding:20px; border-radius:22px; background:rgba(255,249,241,.85); }.ts-title { font-size:2.25rem; }.ts-game-card { padding:20px; }.ts-card-play { position:static; display:inline-block; margin-top:16px; }.ts-game-card strong { padding-right:0; }.ts-game-head { flex-wrap:wrap; }.ts-actions { gap:5px; }.ts-action b { font-size:.76rem; }.ts-action small { font-size:.6rem; } }
+@media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }

@@ -1,0 +1,24 @@
+Google Sans Flex font attribution
+
+Bundled file: app/src/main/res/font/google_sans_flex.ttf
+Embedded version: Version 4.005;[3fe7d0b9f]
+Embedded copyright: Copyright 2015 Google LLC. All Rights Reserved.
+Embedded designer: Google Sans Authors
+Embedded license: SIL Open Font License, Version 1.1
+SHA-256: c6d53424121196b81de816b8daccf200e285dd506df43766db3d7e8cdf06ee30
+
+This unmodified font was inherited from RikkaHub commit
+12ee935e0b0063dc3194d5145248795e071393cc. Its file contents match that
+upstream commit (Git blob 0ca1de3530320c843f623d27d94e54bc332dcc7c).
+
+Project: https://github.com/googlefonts/googlesans-flex
+The accompanying OFL.txt and TRADEMARKS.txt reproduce the official project
+notices retrieved on 2026-09-30 from:
+https://raw.githubusercontent.com/googlefonts/googlesans-flex/main/OFL.txt
+https://raw.githubusercontent.com/googlefonts/googlesans-flex/main/TRADEMARKS.txt
+
+OFL.txt retains the official project's 2022 copyright notice; the separate
+2015 copyright notice embedded in the bundled font is preserved above.
+The font remains under the SIL Open Font License, not the application's
+software license. Attribution does not imply sponsorship or endorsement
+by Google. No Google trademark rights are granted by this application.

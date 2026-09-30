@@ -1,0 +1,145 @@
+name: Build PRoot Android executables
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - packages/proot/**
+      - packages/libandroid-shmem/**
+      - packages/libtalloc/**
+      - .github/workflows/build_proot_android.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.android_abi }}
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - termux_arch: aarch64
+            android_abi: arm64-v8a
+            elf_machine: AArch64
+          - termux_arch: x86_64
+            android_abi: x86_64
+            elf_machine: Advanced Micro Devices X86-64
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v7
+
+      - name: Build PRoot package
+        run: |
+          ./scripts/run-docker.sh \
+            ./build-package.sh -I -f -a "${{ matrix.termux_arch }}" proot
+
+      - name: Extract Android executables
+        env:
+          ANDROID_ABI: ${{ matrix.android_abi }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t debs < <(
+            find "$GITHUB_WORKSPACE" -type f -path '*/output/proot_*.deb' -print
+          )
+          if [[ ${#debs[@]} -ne 1 ]]; then
+            echo "Expected exactly one PRoot package, found ${#debs[@]}" >&2
+            printf '%s\n' "${debs[@]}" >&2
+            exit 1
+          fi
+
+          mkdir -p extracted "jniLibs/$ANDROID_ABI"
+          dpkg-deb --extract "${debs[0]}" extracted
+
+          proot_exec=$(find extracted -type f -path '*/bin/proot' -print -quit)
+          proot_loader=$(find extracted -type f -path '*/libexec/proot/loader' -print -quit)
+          if [[ -z "$proot_exec" || -z "$proot_loader" ]]; then
+            echo "The PRoot package does not contain the expected executables" >&2
+            find extracted -type f -print >&2
+            exit 1
+          fi
+
+          install -m 755 "$proot_exec" "jniLibs/$ANDROID_ABI/libproot_exec.so"
+          install -m 755 "$proot_loader" "jniLibs/$ANDROID_ABI/libproot_loader.so"
+
+      - name: Validate ELF files
+        env:
+          ANDROID_ABI: ${{ matrix.android_abi }}
+          ELF_MACHINE: ${{ matrix.elf_machine }}
+        run: |
+          set -euo pipefail
+
+          exec_file="jniLibs/$ANDROID_ABI/libproot_exec.so"
+          loader_file="jniLibs/$ANDROID_ABI/libproot_loader.so"
+
+          for elf_file in "$exec_file" "$loader_file"; do
+            machine=$(readelf --file-header "$elf_file" | sed -n 's/^ *Machine: *//p')
+            if [[ "$machine" != "$ELF_MACHINE" ]]; then
+              echo "Unexpected ELF machine for $elf_file: $machine" >&2
+              exit 1
+            fi
+          done
+
+          if readelf --dynamic "$exec_file" | grep -Eq 'Shared library: \[(libtalloc|libandroid-shmem)'; then
+            echo "PRoot still has a non-system shared-library dependency" >&2
+            readelf --dynamic "$exec_file" >&2
+            exit 1
+          fi
+
+          if readelf --dynamic "$loader_file" 2>&1 | grep -q '(NEEDED)'; then
+            echo "PRoot loader is not statically linked" >&2
+            readelf --dynamic "$loader_file" >&2
+            exit 1
+          fi
+
+          file "$exec_file" "$loader_file"
+          readelf --dynamic "$exec_file" | grep '(NEEDED)' || true
+          sha256sum "$exec_file" "$loader_file"
+
+      - name: Upload ${{ matrix.android_abi }} artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: proot-libs-${{ matrix.android_abi }}
+          path: jniLibs/${{ matrix.android_abi }}
+          if-no-files-found: error
+          retention-days: 30
+
+  bundle:
+    name: Bundle Android ABIs
+    needs: build
+    runs-on: ubuntu-slim
+    steps:
+      - name: Download arm64-v8a artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: proot-libs-arm64-v8a
+          path: jniLibs/arm64-v8a
+
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: proot-libs-x86_64
+          path: jniLibs/x86_64
+
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          find jniLibs -type f -print | sort
+          [[ $(find jniLibs -type f | wc -l) -eq 4 ]]
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: proot-jniLibs
+          path: jniLibs
+          if-no-files-found: error
+          retention-days: 30

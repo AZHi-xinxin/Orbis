@@ -1,0 +1,15 @@
+LoverConnect provenance and license scope
+
+This module's README identifies its source baseline as LoverConnect
+2.4.3-personal (versionCode 15), with additional Orbis host adaptations.
+
+The adjacent MIT.txt preserves the MIT notice from the
+earlier public-source LoverConnect 2.4.1 distribution. Retain that notice
+for code inherited from that distribution.
+
+The newer public v2.4.3 license is preserved separately in
+../loverconnect-2.4.3/MIT.txt, with its pinned source and adaptation scope
+in ../loverconnect-2.4.3/NOTICE.txt. This older notice is retained for the
+earlier inherited version and is not the sole evidence for later code.
+The Orbis application as a whole retains its root AGPL-3.0 license;
+inherited component licenses and copyright notices remain applicable.

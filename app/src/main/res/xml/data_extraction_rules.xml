@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+  <cloud-backup>
+    <!-- Local garden leaves the device only through its explicit document export. -->
+    <exclude domain="database" path="orbis-local-garden-v1.db" />
+    <exclude domain="database" path="orbis-local-garden-v1.db-wal" />
+    <exclude domain="database" path="orbis-local-garden-v1.db-shm" />
+    <exclude domain="database" path="orbis-local-garden-v1.db-journal" />
+    <!-- LC secrets, personal observations and non-exportable Keystore ciphertext stay in this sandbox. -->
+    <exclude domain="sharedpref" path="lc_config.xml" />
+    <exclude domain="sharedpref" path="lc_diagnostics.xml" />
+    <exclude domain="sharedpref" path="lc_service_control.xml" />
+    <exclude domain="sharedpref" path="lc_location_secure.xml" />
+    <exclude domain="sharedpref" path="lc_location_runtime.xml" />
+    <exclude domain="sharedpref" path="lc_device_context_config.xml" />
+    <exclude domain="sharedpref" path="lc_device_context_runtime.xml" />
+    <exclude domain="sharedpref" path="lc_mcp_security.xml" />
+    <exclude domain="sharedpref" path="lc_st_direct_grant_secure.xml" />
+    <exclude domain="sharedpref" path="lc_step_counter.xml" />
+    <exclude domain="file" path="lc_memory.json" />
+    <exclude domain="file" path="lc_eyes_log.txt" />
+    <exclude domain="file" path="lc_eyes_log.txt.bak" />
+    <exclude domain="file" path="lc_eyes_log.txt.new" />
+    <exclude domain="database" path="lc_location_events.db" />
+    <exclude domain="database" path="lc_location_events.db-wal" />
+    <exclude domain="database" path="lc_location_events.db-shm" />
+    <exclude domain="database" path="lc_location_events.db-journal" />
+  </cloud-backup>
+  <device-transfer>
+    <!-- Use the explicit portable garden backup; do not silently transfer private notes. -->
+    <exclude domain="database" path="orbis-local-garden-v1.db" />
+    <exclude domain="database" path="orbis-local-garden-v1.db-wal" />
+    <exclude domain="database" path="orbis-local-garden-v1.db-shm" />
+    <exclude domain="database" path="orbis-local-garden-v1.db-journal" />
+    <!-- LC secrets, personal observations and non-exportable Keystore ciphertext stay in this sandbox. -->
+    <exclude domain="sharedpref" path="lc_config.xml" />
+    <exclude domain="sharedpref" path="lc_diagnostics.xml" />
+    <exclude domain="sharedpref" path="lc_service_control.xml" />
+    <exclude domain="sharedpref" path="lc_location_secure.xml" />
+    <exclude domain="sharedpref" path="lc_location_runtime.xml" />
+    <exclude domain="sharedpref" path="lc_device_context_config.xml" />
+    <exclude domain="sharedpref" path="lc_device_context_runtime.xml" />
+    <exclude domain="sharedpref" path="lc_mcp_security.xml" />
+    <exclude domain="sharedpref" path="lc_st_direct_grant_secure.xml" />
+    <exclude domain="sharedpref" path="lc_step_counter.xml" />
+    <exclude domain="file" path="lc_memory.json" />
+    <exclude domain="file" path="lc_eyes_log.txt" />
+    <exclude domain="file" path="lc_eyes_log.txt.bak" />
+    <exclude domain="file" path="lc_eyes_log.txt.new" />
+    <exclude domain="database" path="lc_location_events.db" />
+    <exclude domain="database" path="lc_location_events.db-wal" />
+    <exclude domain="database" path="lc_location_events.db-shm" />
+    <exclude domain="database" path="lc_location_events.db-journal" />
+  </device-transfer>
+</data-extraction-rules>

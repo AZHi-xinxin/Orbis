@@ -1,0 +1,21 @@
+Material Color Utilities provenance in Orbis
+
+Upstream: https://github.com/material-foundation/material-color-utilities
+The inherited RikkaHub source records this submodule at commit:
+6fd88eb3e95ba1d457842e2a2bf847d06b3a018a
+
+The original Apache License 2.0 texts are retained in LICENSE and in
+dart/LICENSE, java/LICENSE, kotlin/LICENSE, swift/LICENSE, and
+typescript/LICENSE. Each of these files matches the corresponding Git blob
+in that pinned upstream tree. Existing source copyright headers are retained.
+
+cheat_sheet.png is unmodified from the same pinned upstream tree:
+SHA-256: afda7515a47587ae4405d43196bbcacb5551a1d11d6c199ef5b927fead39a9d2
+Git blob: a079ac03fc8ce523f40a71b4129b860ab53650f2
+
+Source references:
+https://github.com/material-foundation/material-color-utilities/tree/6fd88eb3e95ba1d457842e2a2bf847d06b3a018a
+https://github.com/material-foundation/material-color-utilities/blob/6fd88eb3e95ba1d457842e2a2bf847d06b3a018a/LICENSE
+
+This file adds provenance only; it does not replace the upstream license or
+imply endorsement of Orbis by the upstream authors.

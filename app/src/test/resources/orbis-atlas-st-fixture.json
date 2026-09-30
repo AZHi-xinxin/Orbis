@@ -1,0 +1,23 @@
+{
+  "schema": "orbis.st.atlas/1",
+  "generatedAt": "2026-09-26T17:29:22.275Z",
+  "truncated": false,
+  "stars": [
+    {
+      "id": "fc9eca9cc4d263e2eeeb9ca1514de863b586f54d39a57ec3bee8b116963500ca",
+      "type": "规划",
+      "storedAt": "2026-09-25T12:34:56.000000Z"
+    },
+    {
+      "id": "8a240fe4f42a86d2d9b944a96c1ec6a39bad4b67525acfdfdd5c4b92cc7fb781",
+      "type": "学习",
+      "storedAt": "2026-09-25T12:34:56.000000Z"
+    },
+    {
+      "id": "5697b0a869a7598e69111e723c6c285f7bd2c732748bea6301499dfe1230497d",
+      "type": "情感",
+      "storedAt": "2026-09-25T12:34:56.000000Z"
+    }
+  ],
+  "edges": []
+}

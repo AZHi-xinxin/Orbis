@@ -1,0 +1,53 @@
+/* Local accessibility/host adapters. Original gradient, calendar glass and orbit remain unchanged. */
+html { min-height:100%; } body { min-height:100vh; overflow-x:hidden; }
+button,input,textarea,select { font:inherit; } button { touch-action:manipulation; }
+button:focus-visible,[tabindex]:focus-visible { outline:2px solid #94645a; outline-offset:4px; }
+button:disabled { opacity:.45; cursor:default; }
+[hidden] { display:none!important; }
+#garden-main { min-height:100vh; padding-top:14px; padding-bottom:32px; }
+.local-home .top-section { padding:24px 16px 0; margin-bottom:24px; min-height:118px; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:4px; }
+.local-home .top-section > button { position:relative; left:auto; top:auto; transform:none; min-width:0; width:100%; padding:0; border:0; background:transparent; display:flex; flex-direction:column; align-items:center; gap:8px; z-index:2; color:var(--gray-500); }
+.local-home .top-section > button:last-child { font-size:.7rem; }
+.local-home .name-tag { max-width:100%; overflow:hidden; text-overflow:ellipsis; font-size:.7rem; letter-spacing:.04em; white-space:nowrap; }
+.local-flower { font-size:30px; line-height:34px; color:#8cb4d6; }
+.local-home .calendar-aura { margin-top:0; }
+.local-home .calendar__month { font-size:1.15rem; }
+.calendar__month .year-number { font-weight:700; }
+.local-home .calendar__day { font:inherit; color:var(--gray-900); border:0; background:transparent; padding:0; }
+.local-home .calendar__day--has-entry { color:var(--dawn-500); }
+.calendar__day--empty { pointer-events:none; }
+.local-home .app-footer { margin-top:28px; padding-bottom:250px; }
+.local-date-page { max-width:480px; margin:auto; padding:0 16px 40px; }
+.local-date-page .quick-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.local-date-page .quick-card { min-width:0; border:1px solid rgba(255,255,255,.5); text-align:center; }
+.local-date-page .mid-section { display:grid; grid-template-columns:1.6fr 1fr; align-items:stretch; }
+.local-date-page .song-card { width:100%; text-align:center; cursor:pointer; border:1px solid rgba(255,255,255,.5); }
+.local-date-page .anchor-card { min-width:0; }
+.local-date-page .anchor-card button { border:0; background:transparent; color:var(--gray-600); }
+.local-section { padding:18px; margin:16px 0; border:1px solid rgba(255,255,255,.6); border-radius:20px; background:rgba(255,255,255,.6); backdrop-filter:blur(16px); }
+.local-section h2 { font:600 1.1rem var(--font-heading); margin-bottom:12px; }
+.local-section p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.local-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:12px 0; }
+.local-actions button,.local-button { border:1px solid rgba(170,142,136,.35); border-radius:24px; background:rgba(255,248,238,.72); color:#735b60; padding:10px 16px; min-height:44px; }
+.local-note { font-size:.78rem; color:#6d616c; line-height:1.8; }
+.local-empty { padding:30px 14px; text-align:center; color:#736472; font-size:.86rem; }
+.local-entry { display:block; text-align:left; width:100%; border:0; border-bottom:1px solid rgba(122,84,112,.15); background:transparent; padding:14px 0; color:#44374b; }
+.local-entry strong { display:block; font-weight:500; } .local-entry small { display:block; color:#786976; margin:6px 0; }
+.local-entry .excerpt { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; }
+.local-shell { max-width:480px; margin:auto; padding:0 16px 48px; }
+.local-shell .reading-header { display:flex; gap:10px; align-items:center; margin:12px 0 22px; }
+.local-shell h1 { font:600 1.4rem var(--font-heading); }
+.local-shell label { display:block; margin:10px 0; }
+.local-shell input,.local-shell textarea,.local-shell select { max-width:100%; border:1px solid #d4bbc0; border-radius:12px; padding:10px; background:rgba(255,255,255,.65); color:#302839; }
+.local-shell textarea { width:100%; min-height:100px; }
+body:not(.at-home) .stardisc-wrap,body:not(.at-home) #garden-home-star { display:none; }
+#garden-notice { position:fixed; z-index:100; bottom:20px; left:16px; right:16px; max-width:460px; margin:auto; border-radius:16px; background:#fff9ef; padding:14px; color:#513e58; box-shadow:0 3px 24px #17132a55; }
+.local-shell.reading-page .reading-header { flex-wrap:wrap; }
+.reading-page .reading-header__actions { margin-left:auto; flex-wrap:wrap; }
+.reading-page .reading-header__actions .reading-head-btn { font-size:.72rem; width:auto; min-width:44px; padding:0 9px; border-radius:22px; }
+.reading-page .reading-shelf-shell { background:linear-gradient(145deg,rgba(255,247,230,.84),rgba(244,218,198,.78) 50%,rgba(218,210,231,.85)); }
+.reading-page .reading-empty,.reading-page .reading-loader,.reading-page .reading-error { color:#67566b; }
+.reading-page .reading-search input { min-width:0; flex:1; border:0; background:transparent; }
+.reading-page .reading-search button { flex-shrink:0; }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
+@media(max-width:350px) { .local-home .top-section { padding-left:8px;padding-right:8px;gap:0; } .name-tag{font-size:.63rem!important;} .calendar__header{padding:16px;} }

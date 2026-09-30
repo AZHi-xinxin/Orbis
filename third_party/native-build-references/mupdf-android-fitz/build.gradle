@@ -1,0 +1,103 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+
+group = 'com.artifex.mupdf'
+version = '1.26.8'
+
+buildscript {
+	repositories {
+		if (project.hasProperty('MAVEN_REPO')) {
+			maven { url MAVEN_REPO }
+		} else {
+			maven { url "file://${System.properties['user.home']}/MAVEN" }
+		}
+		google()
+		mavenCentral()
+	}
+	dependencies {
+		classpath 'com.android.tools.build:gradle:8.5.2'
+	}
+}
+
+allprojects {
+	repositories {
+		if (project.hasProperty('MAVEN_REPO')) {
+			maven { url MAVEN_REPO }
+		} else {
+			maven { url "file://${System.properties['user.home']}/MAVEN" }
+		}
+		google()
+		mavenCentral()
+	}
+}
+
+android {
+	namespace 'com.artifex.mupdf.fitz'
+	compileSdkVersion 33
+	ndkVersion '28.2.13676358'
+
+	defaultConfig {
+		minSdkVersion 21
+		targetSdkVersion 35
+
+		externalNativeBuild.ndkBuild.arguments '-j4'
+
+		// Set ABI_FILTERS in your gradle.properties file
+		if (project.hasProperty('ABI_FILTERS')) {
+			ndk.abiFilters = []
+			ndk.abiFilters.addAll(ABI_FILTERS.split(',').collect{it as String})
+		}
+	}
+
+	sourceSets {
+		main {
+			manifest.srcFile 'AndroidManifest.xml'
+			java.srcDirs 'libmupdf/platform/java/src'
+		}
+	}
+
+	externalNativeBuild {
+		ndkBuild.path 'libmupdf/platform/java/Android.mk'
+	}
+}
+
+project.afterEvaluate {
+	publishing {
+		publications {
+			release(MavenPublication) {
+				artifactId 'fitz'
+				artifact(bundleReleaseAar)
+
+				pom {
+					name = 'fitz'
+					url = 'http://www.mupdf.com'
+					licenses {
+						license {
+							name = 'GNU Affero General Public License'
+							url = 'https://www.gnu.org/licenses/agpl-3.0.html'
+						}
+					}
+				}
+				pom.withXml {
+					final dependenciesNode = asNode().appendNode('dependencies')
+					configurations.implementation.allDependencies.each {
+						def dependencyNode = dependenciesNode.appendNode('dependency')
+						dependencyNode.appendNode('groupId', it.group)
+						dependencyNode.appendNode('artifactId', it.name)
+						dependencyNode.appendNode('version', it.version)
+					}
+				}
+			}
+		}
+		repositories {
+			maven {
+				name 'Local'
+				if (project.hasProperty('MAVEN_REPO')) {
+					url = MAVEN_REPO
+				} else {
+					url = "file://${System.properties['user.home']}/MAVEN"
+				}
+			}
+		}
+	}
+}

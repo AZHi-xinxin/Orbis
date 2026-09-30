@@ -1,0 +1,80 @@
+# Public source export template: copy this file to the repository root as .gitignore.
+# Ignore rules do not remove already tracked files or sanitize an existing archive.
+# Review the export file list, credentials, personal content, and asset notices separately.
+
+# Local IDE / Gradle / Kotlin state
+*.iml
+.idea/
+.vscode/
+.gradle/
+.kotlin/
+.DS_Store
+Thumbs.db
+.cursor/
+.history/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+captures/
+
+# Generated frontend output and installed dependencies (keep lockfiles and source)
+**/node_modules/
+**/.pnpm-store/
+**/.react-router/
+**/dist/
+**/coverage/
+**/.cache/
+/web/src/main/resources/static/
+
+# Machine configuration, signing material, and runtime credentials
+local.properties
+*.local.properties
+*.local.json
+*.local.env
+.env
+.env.*
+!.env.example
+!.env.sample
+google-services.json
+secrets.properties
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.key
+*.pem
+
+# Private development resources, receipts, logs, and captures
+/app/src/debug/assets/orbis/
+/orbis-dev/
+/lcbridge/audits/
+**/private-verification/
+**/logs/
+*.log
+*.hprof
+*.trace
+*.dump
+*.bak
+*.tmp
+*~
+__pycache__/
+*.pyc
+
+# Local app data and delivery artifacts are not source.
+# Any intentional test fixture matching these rules needs individual review.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.apk
+*.aab
+*.apks
+*.zip
+*.tar
+*.tar.gz
+
+# Do not ignore Gradle wrapper JARs, Room JSON schemas, dependency lockfiles,
+# public source assets, or LICENSE / NOTICE files.
+# Example environment files must contain placeholders only, never live values.

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Orbis · 海龟汤</title><link rel="stylesheet" href="../orbis-garden/original.css"><link rel="stylesheet" href="soup.css"></head>
+<body><div class="soup-stars" aria-hidden="true"></div>
+<main class="ts-page">
+  <header class="ts-top"><button class="ts-back" id="back">← Orbis</button><span class="ts-wordmark">ORBIT ARCADE</span><button class="ts-link" id="host">主持设置</button></header>
+  <div class="soup-notice" id="notice" role="status" hidden></div>
+  <div class="soup-notice" id="blocked" hidden><p>上次保存结果未确认，原文件已保留。</p><button class="ts-btn ts-btn--ghost" data-action="reload">重新读取本机对局</button></div>
+
+  <section class="ts-screen ts-screen--active" id="screen-select">
+    <div class="ts-select-head"><p class="ts-kicker">SELECT A GAME · 选择游戏</p><h1 class="ts-title">今晚，从一个<br><em>未完成的故事</em>开始。</h1><p class="ts-muted">同一局、同一份记录、两位玩家。你与自己的 AI 一起推理，由独立主持判断。</p></div>
+    <button class="ts-game-card" id="open-turtle" aria-label="进入海龟汤"><span class="ts-card-index">GAME / 001</span><i class="ts-steam" aria-hidden="true"></i><span class="ts-bowl" aria-hidden="true"></span><small>侧向推理 · 双人协作</small><strong>海龟汤</strong><span class="ts-card-play">开始游戏 →</span></button>
+    <p class="soup-local-note">本机自动保存 · 不需要 VPS 或云端房间</p>
+  </section>
+
+  <section class="ts-screen" id="screen-rules">
+    <div class="ts-letter-wrap"><article class="ts-letter"><p class="ts-kicker">A LETTER BEFORE THE GAME</p><h2>给一起推理的你们</h2>
+      <div class="ts-rule"><b>01</b><span><strong>只问是否问题</strong><small>主持只回答：是 / 否 / 是也不是 / 无关。不能用是否回答的问题会先在本机拦下。</small></span></div>
+      <div class="ts-rule"><b>02</b><span><strong>你和伙伴轮流提问</strong><small>自己的 AI 通过单独授权的“本地海龟汤”工具参与；它的建议由你核对后才交给主持。</small></span></div>
+      <div class="ts-rule"><b>03</b><span><strong>提示逐级展开</strong><small>大方向 → 收窄范围 → 接近真相。轻松和正常模式共用三条提示；困难模式没有提示。</small></span></div>
+      <div class="ts-rule"><b>04</b><span><strong>正式提交是一场取舍</strong><small>每人一次正式提交；提交后你的提问机会结束，伙伴仍可继续。90 分及以上为完全还原。</small></span></div>
+      <p class="ts-note">选择模式与开局不调用模型。每次主持判断或评分都要再次确认，可能收费；每局最多 60 次请求，未知结果不会自动重试。放弃保留记录、不揭底；“揭示汤底”会结束猜题。</p>
+      <div class="ts-letter-actions"><button class="ts-btn ts-btn--ghost" id="rules-back">返回</button><button class="ts-btn" id="accept-rules">我知道怎么玩了 →</button></div>
+    </article><div class="ts-envelope" aria-hidden="true"></div></div>
+  </section>
+
+  <section class="ts-screen" id="screen-mode">
+    <div class="ts-mode-head"><p class="ts-kicker">CHOOSE THIS ROUND</p><h2>选择通关难度</h2><p class="ts-muted">难度改变提问与提示资源。<br>对局保存在这部手机，不会修改云端记录。</p></div>
+    <div class="ts-mode-list" role="group" aria-label="通关难度">
+      <button class="ts-mode" data-mode="EASY"><span class="ts-mode-radio" aria-hidden="true"></span><small>EASY / 01</small><strong>轻松</strong><span>不限提问数</span><span>3 次提示</span><p>慢慢靠近真相；仍有每局 60 次请求保护。</p></button>
+      <button class="ts-mode ts-mode--selected" data-mode="NORMAL"><span class="ts-mode-radio" aria-hidden="true"></span><small>NORMAL / 02</small><strong>正常</strong><span>每人 6 问</span><span>3 次提示</span><p>提交者放弃自己的剩余提问。</p></button>
+      <button class="ts-mode" data-mode="HARD"><span class="ts-mode-radio" aria-hidden="true"></span><small>HARD / 03</small><strong>困难</strong><span>每人 3 问</span><span>没有提示</span><p>线索更少，每次提问都要命中要害。</p></button>
+    </div>
+    <details class="soup-library"><summary>本地题库 · 选择或随机抽题</summary><label for="puzzle">这次想玩</label><select id="puzzle"><option value="">随机抽取一题</option></select><p class="ts-note" id="puzzle-note"></p><p class="ts-note">内置 5 道公开示例。模型也可能早已知道这些题；不传汤底不代表它会忘记已有知识。</p></details>
+    <p class="soup-host-note" id="host-note"></p><button class="ts-btn ts-start" id="start">抽取一碗汤 →</button><p class="soup-local-note">只在本机开局，此步不调用模型</p>
+  </section>
+
+  <section class="ts-screen" id="screen-game">
+    <div class="ts-game-head"><div><p class="ts-kicker" id="case-label">CURRENT CASE</p><h1 id="game-title"></h1></div><div class="ts-badges"><span id="game-mode"></span><span id="game-difficulty"></span></div></div>
+    <div class="soup-game-links"><button class="ts-link" id="game-rules">玩法规则</button><span class="ts-note" id="game-status"></span></div>
+    <article class="ts-soup-card"><span class="ts-soup-label">汤 面</span><blockquote id="face"></blockquote></article>
+    <div class="ts-counts"><div class="ts-count" id="human-count"><b>我</b><div><small>你的提问剩余</small><strong id="human-left"></strong></div></div><div class="ts-count" id="partner-count"><b>伴</b><div><small>伙伴提问剩余</small><strong id="partner-left"></strong></div></div><div class="ts-count ts-count--hint"><b>✦</b><div><small>阶梯提示</small><strong id="hint-left"></strong></div></div></div>
+    <div class="soup-notice" id="pending" hidden></div><div class="soup-notice" id="proposal" hidden></div>
+    <div class="ts-actions" id="game-actions"><button class="ts-action" data-action="ask"><b>？ 提问</b><small>是 / 否问题</small></button><button class="ts-action" data-action="hint"><b>✦ 提示</b><small>按阶梯取一条</small></button><button class="ts-action" data-action="submit"><b>✓ 提交</b><small>完整推理与评分</small></button></div>
+    <button class="soup-turn ts-link" id="take-turn" data-action="turn" hidden>这次我来继续问 →</button>
+    <div class="ts-log"><div class="ts-log-head"><strong>共同推理记录</strong><small id="log-count"></small></div><div class="ts-log-list" id="log"></div><div class="ts-log-foot">伙伴仅能读取已公开的游戏记录；未揭示的汤底不会传给它。</div></div>
+    <div id="scores"></div><div class="ts-bottom" id="bottom" hidden></div>
+    <div class="ts-round-controls" id="round-controls"><button class="ts-round-action" data-action="abandon"><b>放弃本局</b><small>保留记录，不评分、不揭底</small></button><button class="ts-round-action ts-round-action--settle" data-action="reveal"><b>揭示汤底</b><small>结束猜题，查看完整故事</small></button></div>
+    <div class="ts-round-status"><span class="ts-note">本地对局 · 自动保存</span><span class="ts-note" id="calls"></span></div>
+    <button class="ts-btn soup-wide" id="new-game" hidden>再来一碗 →</button><button class="ts-btn ts-btn--ghost soup-wide" id="return-current" hidden>返回当前对局</button>
+  </section>
+
+  <details class="soup-history" id="history-section" hidden><summary>以往的推理故事</summary><div id="history"></div></details>
+  <footer class="soup-footer"><p>Orbis · 一起靠近真相</p><details><summary>开源致谢与许可</summary><p>示例题：AZHi-xinxin / Haiguitang contributors</p><div><button data-action="source">原项目</button><button data-action="content_license">CC BY 4.0</button><button data-action="license">MIT 许可</button></div></details></footer>
+</main><script src="soup.js"></script></body></html>

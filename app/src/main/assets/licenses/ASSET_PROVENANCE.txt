@@ -1,0 +1,45 @@
+Orbis bundled visual asset provenance
+
+Upstream repository:
+https://github.com/rikkahub/rikkahub
+Pinned inherited source commit:
+12ee935e0b0063dc3194d5145248795e071393cc
+
+Fonts have separate SIL Open Font License notices in the google-sans-flex
+and jetbrains-mono subdirectories. These notices do not relicense fonts
+under the application's root software license.
+
+Inherited banner images
+-----------------------
+The following files are unchanged from the pinned RikkaHub source tree:
+
+app/src/main/assets/banner/banner-1.png
+SHA-256: 24b358b0f6f1318096682656e07fcdbb6aded43b39e531d8f83a2ebe34c1d0fc
+Git blob: 29c2915f23b6804d58e2ce098417da6285271992
+
+app/src/main/assets/banner/banner-2.png
+SHA-256: b83eedeb658542cc0fa46172296038b68f0e2a2b27f41a9c2fa3aa8fad36070d
+Git blob: de570e85e1583ff0fb8727ab54b41837140319a5
+
+app/src/main/assets/banner/banner-3.png
+SHA-256: 7d9da101b8c30b58d1643264ac9b081621d9b0c305e17e206cbb36d2186bda89
+Git blob: e5f6c61cd512c7bc4b150e9fb94b4ac278d21658
+
+The inherited repository supplies its root GNU Affero General Public
+License v3.0. No separate banner-specific artist or stock-image license
+has been established in this provenance review. This notice records the
+upstream inheritance, and does not invent a separate asset license or
+assert independent ownership of these images.
+
+Orbis launcher artwork
+----------------------
+The Orbis launcher artwork was prepared for this project from
+user-provided ribbon/star artwork, with image-generation assistance and
+Android density/layer exports. Its current 20 PNG launcher resources match
+the project's recorded branding export. They are not the upstream
+RikkaHub launcher artwork. No source reference images, private generation
+history, or user profile assets are bundled by this notice.
+
+This provenance statement is not an additional standalone trademark or
+artwork license grant. Preserve applicable rights-holder notices and the
+project's release license policy when redistributing branding.

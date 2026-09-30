@@ -1,0 +1,86 @@
+Prebuilt native library provenance
+
+The following eight files are inherited byte-for-byte from RikkaHub commit
+12ee935e0b0063dc3194d5145248795e071393cc:
+https://github.com/rikkahub/rikkahub/tree/12ee935e0b0063dc3194d5145248795e071393cc
+
+app/src/main/jniLibs/arm64-v8a/libsimple.so
+SHA-256: c6f8944d9dfed48caef04a342fcab87c5ebb7ab7bdeb7b5a8bb5e38689ccb5b8
+app/src/main/jniLibs/x86_64/libsimple.so
+SHA-256: c14959df728630ae391c081106056b5c2ee2dead3abe0a98ec794e9fa7c778e9
+document/src/main/jniLibs/arm64-v8a/libmupdf_java.so
+SHA-256: 7d4e1481abff22624396853863fd71e86349411d443dd0ae7335582e0d3fd3fb
+document/src/main/jniLibs/x86_64/libmupdf_java.so
+SHA-256: 9eb4973bcbc1633173c6cbfa1823f6a4d277a025d4610ef823ade9f5a555f8e4
+workspace/src/main/jniLibs/arm64-v8a/libproot_exec.so
+SHA-256: 06c4b8d620c960e2ae873786e81dc04d797b5af47967819b5ec4cbb7635590c9
+workspace/src/main/jniLibs/arm64-v8a/libproot_loader.so
+SHA-256: 44ef39c1e1a18c09f6e4c4b5d6f8bba82d30596598bd155ec162d05c5122ff04
+workspace/src/main/jniLibs/x86_64/libproot_exec.so
+SHA-256: 29ad3f63f5a1a030d0db8a58c6f14124386ce4a2fc31c24003b8fac3febe5a02
+workspace/src/main/jniLibs/x86_64/libproot_loader.so
+SHA-256: 914564ea1c66f50b38f18cac857fcf814c6b1ab027789178880fca1d530599b3
+
+MuPDF
+-----
+The accompanying Java bindings under document/src/main/java/com/artifex/mupdf
+retain their original Artifex copyright and AGPL-3.0-or-later notices.
+For example, fitz/Context.java states:
+Copyright (C) 2004-2021 Artifex Software, Inc.
+MuPDF project and license information:
+https://github.com/ArtifexSoftware/mupdf
+https://github.com/ArtifexSoftware/mupdf/blob/master/COPYING
+The binary contains the version identifier 1.26.8. The corresponding
+official versioned source and Android build project are:
+https://github.com/ArtifexSoftware/mupdf/tree/c1b5d46e70512666b8695fb31ff280be0eff2469
+https://github.com/ArtifexSoftware/mupdf-android-fitz/tree/0c15358b3ef0b45cd03baab47079d94447018d9f
+The Android project pins exactly that MuPDF commit as libmupdf and uses
+NDK 28.2.13676358. MuPDF-1.26.8-COPYING.txt contains its AGPL-3.0 text.
+The release native-sources archive includes these official sources and
+all 17 pinned MuPDF third-party submodule source archives, retaining
+their own licenses. See the source tree's third_party/native-build-references
+for the complete pinned source map and original build references.
+
+Simple SQLite extension and PRoot
+--------------------------------
+libsimple is loaded as a SQLite extension. Its exported symbols identify
+Simple and cppjieba. Simple's original dual MIT/GPL-3.0-or-later license
+is preserved in Simple-LICENSE.txt; Orbis uses the MIT option. The
+cppjieba MIT license is also included. A pinned upstream source snapshot
+is supplied for reference, not claimed as the exact historical build
+revision of these inherited Simple binaries.
+
+libproot_exec and libproot_loader are used by the workspace shell runner.
+The executable contains version 5.1.107.92. Its source is:
+https://github.com/termux/proot/tree/7266fb3e8516535682f5a9c8f3a7e70f6506eddb
+PRoot source headers grant GPL-2.0-or-later; the original COPYING text
+is preserved in PRoot-5.1.107.92-COPYING.txt.
+
+The RikkaHub organization publishes its Android build and extraction
+workflow, which produces libproot_exec.so and libproot_loader.so for
+arm64-v8a and x86_64:
+https://github.com/rikkahub/termux-packages/tree/d9f8efa3a3e9c368a06546b1bf64d094d46c54ad
+The recipe statically links talloc 2.4.3 and libandroid-shmem 0.7.
+Their original LGPL-3.0 and BSD-3-Clause texts are included here.
+The official dependency sources and checksums are included in the source
+map and release native-sources archive, together with the build recipe.
+
+Related upstream project references for further provenance verification:
+https://github.com/wangfenjin/simple
+https://github.com/wangfenjin/simple/blob/master/LICENSE
+https://github.com/termux/proot
+https://github.com/termux/proot/blob/master/COPYING
+The versioned sources above replace reliance on current master branches.
+No blanket relicense of these libraries under the application's root
+license is claimed. Original source headers and dependency licenses remain
+applicable.
+
+Release boundary
+----------------
+Exact equality with the RikkaHub snapshot proves unchanged inheritance.
+Version identifiers, pinned official source and build recipes provide a
+rebuild/source-availability path, not a claim of a byte-reproducible build
+audit. APK releases must retain the source package and the native-sources
+companion archive (or equivalent accessible complete source), including
+applicable dependency notices. The Simple source revision remains a
+reference snapshot rather than a proven exact historical revision.
