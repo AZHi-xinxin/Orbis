@@ -45,4 +45,6 @@ Orbis 的首次公开版本：一个原生 Android AI 客户端，把聊天、�
 
 ## 来源与致谢
 
+本发布页同时提供应用源码 ZIP，以及 `Orbis-2.6.0-native-source-index.json` 和 `Orbis-2.6.0-SOURCE-ACCESS.txt`。后两项列出所用原生组件、完整子模块和构建依赖的固定官方源码下载位置；它们是取得源码的索引，不是已镜像全部第三方源码的聚合包。源码可免费取得，无需 Orbis 账号。普通用户只需安装 APK。
+
 Orbis 最初基于 [RikkaHub](https://github.com/rikkahub/rikkahub) 开发，是独立维护的项目。上游及第三方的版权和许可声明完整保留；具体来源和核对范围见 [NOTICE](NOTICE.md)，不宣称已经完成所有第三方素材的完整许可审计。

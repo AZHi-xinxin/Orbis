@@ -5,11 +5,14 @@ Eight bundled binaries are unmodified files inherited from RikkaHub commit
 license notices are listed in
 [the native NOTICE](../../app/src/main/assets/licenses/native-libraries/NOTICE.txt).
 
-The GitHub Release supplies `Orbis-2.6.0-native-sources.zip` alongside the
-APK and application source. That companion archive contains upstream source
-archives, not executable installers. Its `SOURCES.json` records URLs,
-pinned revisions, downloaded sizes and SHA-256 values. No downloaded build
-script is executed when preparing that archive.
+The GitHub Release supplies `Orbis-2.6.0-native-source-index.json` and
+`Orbis-2.6.0-SOURCE-ACCESS.txt` alongside the APK and application source.
+The index gives the complete fixed source archive URLs, revisions and
+submodule locations on the official upstream servers. It is a source
+access index, not a claim that every upstream archive is mirrored in this
+release. Downloading these sources is free of charge and does not require
+an Orbis account. Only completed local mirrors have recorded file hashes.
+No downloaded build script was executed during release preparation.
 
 ## MuPDF 1.26.8
 
@@ -18,9 +21,9 @@ script is executed when preparing that archive.
 - The Android project's `libmupdf` submodule points to exactly the listed
   MuPDF commit. It sets NDK `28.2.13676358` and builds
   `libmupdf/platform/java/Android.mk`.
-- The companion source archive includes the complete 17 submodule source
-  archives at the commits recorded in MuPDF's tree, not just empty gitlink
-  directories. Preserve their original license files when unpacking or
+- The source index lists all 17 submodule source archives at the commits
+  recorded in MuPDF's tree, not just empty gitlink directories. Download
+  every listed submodule to assemble the source tree. Preserve their original license files when unpacking or
   redistributing. The original dependency inventory is included as
   `mupdf-1.26.8-thirdparty.rst`.
 - To build from an online checkout, recursively clone the Android build
@@ -48,7 +51,7 @@ source archives, licenses and build scripts accompany PRoot's source.
 
 Simple is used under its MIT license option. Its actual historical binary
 revision is not encoded in the inherited artifact and has not been
-established. The companion archive therefore labels this as a reference
+established. The source index therefore labels this as a reference
 snapshot, not as proven exact corresponding source:
 
 - [Simple reference source](https://github.com/wangfenjin/simple/tree/45db071ba8043ffe8a2e5dfe41f9d68fb477576c)
@@ -62,6 +65,7 @@ documents or other data.
 
 The source and build references document versions and a source-availability
 path; this release does not assert bit-for-bit reproducibility of all
-inherited historical binaries. Keep the native source companion available
-with APK downloads. A source ZIP containing only the application's Kotlin
+inherited historical binaries. Keep the complete source access index and
+working source locations available with APK downloads; repair or mirror a
+source location if it becomes unavailable. A source ZIP containing only the application's Kotlin
 and inherited `.so` files is not by itself the full native source package.

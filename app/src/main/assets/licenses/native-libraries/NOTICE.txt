@@ -36,7 +36,7 @@ https://github.com/ArtifexSoftware/mupdf/tree/c1b5d46e70512666b8695fb31ff280be0e
 https://github.com/ArtifexSoftware/mupdf-android-fitz/tree/0c15358b3ef0b45cd03baab47079d94447018d9f
 The Android project pins exactly that MuPDF commit as libmupdf and uses
 NDK 28.2.13676358. MuPDF-1.26.8-COPYING.txt contains its AGPL-3.0 text.
-The release native-sources archive includes these official sources and
+The release native-source index links these fixed official sources and
 all 17 pinned MuPDF third-party submodule source archives, retaining
 their own licenses. See the source tree's third_party/native-build-references
 for the complete pinned source map and original build references.
@@ -63,7 +63,7 @@ https://github.com/rikkahub/termux-packages/tree/d9f8efa3a3e9c368a06546b1bf64d09
 The recipe statically links talloc 2.4.3 and libandroid-shmem 0.7.
 Their original LGPL-3.0 and BSD-3-Clause texts are included here.
 The official dependency sources and checksums are included in the source
-map and release native-sources archive, together with the build recipe.
+map and release native-source index, together with the build recipe.
 
 Related upstream project references for further provenance verification:
 https://github.com/wangfenjin/simple
