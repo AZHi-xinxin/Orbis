@@ -80,6 +80,43 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class GenerationLoopLoopbackTest {
+    @Test(timeout = 60_000)
+    fun finiteThenZeroResendsEarliestSentenceInSameConversationWithoutRewritingHistory() = runBlocking<Unit> {
+        val snapshots = Json { encodeDefaults = true }
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 5) { fixture ->
+                val conversationId = Uuid.random()
+                val source = listOf(UIMessage.user("SYNTHETIC_EARLIEST_SENTENCE")) + (1..42).map {
+                    if (it % 2 == 0) UIMessage.user("synthetic user $it") else UIMessage.assistant("synthetic assistant $it")
+                }
+                val original = snapshots.encodeToString(source)
+                val finiteResult = fixture.collect(from = source, contextLimit = 20, conversationId = conversationId)
+                assertEquals(4, fixture.server.requests.size)
+                fixture.server.requests.forEach { assertFalse(it.encodedMessages.contains("SYNTHETIC_EARLIEST_SENTENCE")) }
+                assertEquals(original, snapshots.encodeToString(source))
+                assertEquals(original, snapshots.encodeToString(finiteResult.take(source.size)))
+                val limitedReceipt = generationContextReceipts.receipts.value.getValue(conversationId.toString())
+                assertEquals(20, limitedReceipt.contextMessageLimit)
+                assertFalse(limitedReceipt.firstLocalMessagePrepared)
+
+                // Same live GenerationLoop, same conversation UUID, and full local history. No
+                // restart or replacement window. Inspect actual provider HTTP JSON, not a reply.
+                val nextSource = finiteResult + UIMessage.user("synthetic new wake after setting zero")
+                val restoredResult = fixture.collect(from = nextSource, contextLimit = 0, conversationId = conversationId)
+                val restoredWire = fixture.server.requests.last()
+                assertTrue(restoredWire.encodedMessages.contains("SYNTHETIC_EARLIEST_SENTENCE"))
+                assertEquals(original, snapshots.encodeToString(restoredResult.take(source.size)))
+                assertEquals(nextSource, restoredResult.take(nextSource.size))
+                val receipt = generationContextReceipts.receipts.value.getValue(conversationId.toString())
+                assertEquals(0, receipt.contextMessageLimit)
+                assertEquals(nextSource.size, receipt.selectedMessageCount)
+                assertTrue(receipt.firstLocalMessagePrepared)
+                assertEquals(1, receipt.firstPreparedSourcePosition)
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
+    }
+
     @Test(timeout = 30_000)
     fun streamingConsultationEmitsOneExactTerminalResponseAfterToolContinuations() = runBlocking<Unit> {
         terminalEvidenceChain(streaming = true)
@@ -749,6 +786,8 @@ class GenerationLoopLoopbackTest {
 
         suspend fun collect(
             from: List<UIMessage> = initial,
+            contextLimit: Int = assistant.contextMessageLimit,
+            conversationId: Uuid = Uuid.random(),
             collectorDelayMs: Long = 0,
             durableCheckpoints: Boolean = false,
             consultationBusyWaitUntilMillis: Long? = null,
@@ -772,11 +811,11 @@ class GenerationLoopLoopbackTest {
                 },
             ) else null
             loop.generateText(
-                settings = settings, model = model, assistant = assistant, messages = from,
+                settings = settings, model = model, assistant = assistant.copy(contextMessageLimit = contextLimit), messages = from,
                 memories = listOf(AssistantMemory(1, "synthetic initial memory")),
                 tools = listOf(tool) + compaction?.tools().orEmpty(), maxSteps = maxSteps,
                 inputTransformers = listOf(changingInput, PromptInjectionTransformer),
-                outputTransformers = outputTransformers, conversationId = Uuid.random(),
+                outputTransformers = outputTransformers, conversationId = conversationId,
                 compactionControl = compaction, includeCompactionReminder = compaction != null,
                 durableCheckpoints = durableCheckpoints,
                 consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis,

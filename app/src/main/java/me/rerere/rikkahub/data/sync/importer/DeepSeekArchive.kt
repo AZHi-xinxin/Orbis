@@ -22,8 +22,12 @@ data class DeepSeekConversationPreview(
     val sourceId: String, val title: String, val createdAt: Instant, val updatedAt: Instant,
     val totalNodes: Int, val messageCount: Int, val branchPointCount: Int,
     val branches: List<DeepSeekBranchPreview>, val defaultLeafId: String, val defaultSelectionReason: String,
+    val omittedSummaryCount: Int = 0,
 )
-data class DeepSeekArchivePreview(val conversations: List<DeepSeekConversationPreview>)
+data class DeepSeekArchivePreview(
+    val conversations: List<DeepSeekConversationPreview>,
+    val warnings: List<String> = emptyList(),
+)
 
 /** Local-only, bounded streaming reader. Never extracts paths or reads user.json contents. */
 object DeepSeekArchive {
@@ -130,6 +134,10 @@ object DeepSeekArchive {
 internal object DeepSeekStrictJson {
     fun parse(text: String, checkCancelled: () -> Unit = {}): JsonElement = JsonReader(StringReader(text), checkCancelled).read()
     fun arrayItems(reader: Reader, checkCancelled: () -> Unit): Sequence<JsonElement> = JsonReader(reader, checkCancelled).arrayItems()
+    /** Streams a named array inside a small, explicitly allowed object envelope. Header order is not significant. */
+    fun objectArrayItems(reader: Reader, arrayKey: String, headerKeys: Set<String>,
+        checkCancelled: () -> Unit, validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> =
+        JsonReader(reader, checkCancelled).objectArrayItems(arrayKey, headerKeys, validateHeader)
 
     private class JsonReader(private val source: Reader, private val checkCancelled: () -> Unit) {
         private var pending = -2
@@ -152,6 +160,36 @@ internal object DeepSeekStrictJson {
                 require(separator == ',') { "deepseek_json_separator" }
             }
             whitespace(); require(peek() == -1) { "deepseek_json_trailing" }
+        }
+        fun objectArrayItems(arrayKey: String, headerKeys: Set<String>,
+            validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> = sequence {
+            whitespace(); require(next() == '{') { "archive_root_object" }; whitespace()
+            val seen = hashSetOf<String>()
+            val header = linkedMapOf<String, JsonElement>()
+            if (peek() == '}'.code) next() else while (true) {
+                whitespace(); val key = string()
+                require(seen.add(key) && (key == arrayKey || key in headerKeys)) { "archive_header_key" }
+                whitespace(); require(next() == ':') { "archive_json_separator" }; whitespace()
+                if (key == arrayKey) {
+                    require(next() == '[') { "archive_items_array" }; whitespace()
+                    if (peek() == ']'.code) next() else while (true) {
+                        yield(value(2)); whitespace()
+                        val separator = next()
+                        if (separator == ']') break
+                        require(separator == ',') { "archive_json_separator" }
+                    }
+                } else {
+                    // Envelope fields are primitives, never settings objects or another unbounded array.
+                    require(peek().toChar() !in "{[") { "archive_header_primitive" }
+                    header[key] = value(1)
+                }
+                whitespace(); val separator = next()
+                if (separator == '}') break
+                require(separator == ',') { "archive_json_separator" }
+            }
+            require(arrayKey in seen) { "archive_missing_items" }
+            whitespace(); require(peek() == -1) { "archive_json_trailing" }
+            validateHeader(JsonObject(header))
         }
         private fun value(depth: Int): JsonElement {
             require(depth <= 48 && ++values <= 2_000_000) { "deepseek_json_complexity" }

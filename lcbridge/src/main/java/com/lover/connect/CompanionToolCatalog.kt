@@ -187,7 +187,7 @@ object CompanionToolCatalog {
         })
         put(JSONObject().apply {
             put("name", "read_eyes_log")
-            put("description", "读取小L观察日记")
+            put("description", "读取 Orbis 本机观察日记")
             put("inputSchema", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {

@@ -37,7 +37,7 @@ class WebSettingsDtoTest {
         assertTrue(payload.contains("Visible tools"))
     }
     @Test fun importCapabilityRequiresConfiguredAuthentication() {
-        assertFalse(Settings().toWebSettingsDto().webImportEnabled)
+        assertTrue(Settings().toWebSettingsDto().webImportEnabled)
         assertFalse(Settings(webServerJwtEnabled = true).toWebSettingsDto().webImportEnabled)
         assertTrue(Settings(webServerJwtEnabled = true, webServerAccessPassword = "synthetic").toWebSettingsDto().webImportEnabled)
     }

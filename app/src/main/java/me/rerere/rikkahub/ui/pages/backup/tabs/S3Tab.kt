@@ -230,7 +230,7 @@ fun S3Tab(
                                     Text(
                                         when (item) {
                                             S3Config.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                            S3Config.BackupItem.FILES -> stringResource(R.string.backup_page_files)
+                                            S3Config.BackupItem.FILES -> "附件、字体、技能、课表与颜文字"
                                         }
                                     )
                                 }

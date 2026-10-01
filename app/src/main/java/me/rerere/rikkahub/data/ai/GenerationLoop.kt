@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.rikkahub.data.model.withVoiceNoteTranscripts
+
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -36,7 +38,6 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.handleTextGenerationResult
 import me.rerere.ai.ui.finishReasoning
-import me.rerere.ai.ui.limitContext
 import me.rerere.rikkahub.data.ai.compaction.COMPACT_TOOL_NAME
 import me.rerere.rikkahub.data.ai.compaction.ConversationCompactionControl
 import me.rerere.rikkahub.data.ai.compaction.CompactionReplacement
@@ -572,13 +573,12 @@ class GenerationLoop(
         consultationBusyWaitUntilMillis: Long? = null,
     ): UIMessage {
         var initialEstimate: Long? = null
+        var initialSelection: GenerationContextSelection? = null
         inputSnapshot.initializeInput {
-            val summary = messages.firstOrNull()?.takeIf { it.isCompactionSummary() }
-            val selectedMessages = if (summary != null) {
-                listOf(summary) + messages.drop(1).limitContext(assistant.contextMessageLimit)
-            } else messages.limitContext(assistant.contextMessageLimit)
+            val selection = GenerationContextSelection(messages, assistant.contextMessageLimit)
+            initialSelection = selection
             // A changed message-count projection cannot inherit the previous full request's usage.
-            if (selectedMessages.size == messages.size) {
+            if (selection.includesWholeBranch) {
                 initialEstimate = estimateCurrentContext(messages, model.id).tokens
             }
             buildList {
@@ -607,7 +607,7 @@ class GenerationLoop(
                 if (system.isNotBlank()) {
                     add(UIMessage.system(prompt = system).copy(isSynthetic = true))
                 }
-                addAll(selectedMessages)
+                addAll(selection.requestMessages())
             }.transforms(
                 transformers = transformers,
                 context = context,
@@ -630,7 +630,13 @@ class GenerationLoop(
         )
         compactionControl?.observeRequestEstimate(prepared.estimatedTokens)
         // Reversible tool deletions are private local bookkeeping, never provider input.
-        val internalMessages = prepared.messages.map { it.withoutDeletedToolRecordData() }
+        val internalMessages = prepared.messages.map { it.withoutDeletedToolRecordData().withVoiceNoteTranscripts() }
+        // Publish once per new invocation, not on tool continuations. Counts remain local, never
+        // alter prompts/cache keys, and deliberately do not claim upstream delivery or recall.
+        if (conversationId != null) initialSelection?.let { selection ->
+            generationContextReceipts.record(conversationId.toString(),
+                selection.receipt(internalMessages, System.currentTimeMillis()))
+        }
 
         var messages: List<UIMessage> = messages
         val params = TextGenerationParams(

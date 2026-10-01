@@ -32,10 +32,10 @@ class OrbisVoiceReturnPolicyTest {
         }
     }
 
-    @Test fun `ready archive requires both durable chat commit and visible summary`() {
+    @Test fun `ready archive requires visible local card but not destructive chat replacement`() {
         for (committed in listOf(false, true)) for (visible in listOf(false, true)) {
             for (ending in listOf(false, true)) {
-                val expected = if (committed && visible) OrbisVoiceReturnPhase.COMPLETE else OrbisVoiceReturnPhase.WAITING
+                val expected = if (visible) OrbisVoiceReturnPhase.COMPLETE else OrbisVoiceReturnPhase.WAITING
                 assertEquals("committed=$committed visible=$visible ending=$ending", expected,
                     phase(ready.copy(chatCommitted = committed), ending = ending, visible = visible))
             }
@@ -53,8 +53,8 @@ class OrbisVoiceReturnPolicyTest {
             OrbisVoiceReturnPhase.WAITING, OrbisVoiceReturnPhase.COMPLETE), phases)
     }
 
-    @Test fun `summary observation arriving before commit cannot dismiss the return overlay`() {
-        assertEquals(OrbisVoiceReturnPhase.WAITING, phase(ready, visible = true))
+    @Test fun `local card observation completes without changing model history`() {
+        assertEquals(OrbisVoiceReturnPhase.COMPLETE, phase(ready, visible = true))
         assertEquals(OrbisVoiceReturnPhase.COMPLETE, phase(ready.copy(chatCommitted = true), visible = true))
     }
 
@@ -72,10 +72,10 @@ class OrbisVoiceReturnPolicyTest {
         }
     }
 
-    @Test fun `persisted commit error waits during retry but fails when ending stops`() {
+    @Test fun `legacy page commit error does not hide a durable archive visible in the new local card`() {
         val failedCommit = ready.copy(error = "chat_commit_failed")
-        assertEquals(OrbisVoiceReturnPhase.WAITING, phase(failedCommit, ending = true, visible = true))
-        assertEquals(OrbisVoiceReturnPhase.FAILED, phase(failedCommit, ending = false, visible = true))
+        assertEquals(OrbisVoiceReturnPhase.COMPLETE, phase(failedCommit, ending = true, visible = true))
+        assertEquals(OrbisVoiceReturnPhase.COMPLETE, phase(failedCommit, ending = false, visible = true))
         assertEquals(OrbisVoiceReturnPhase.COMPLETE,
             phase(failedCommit.copy(error = null, chatCommitted = true), visible = true))
     }
@@ -87,6 +87,15 @@ class OrbisVoiceReturnPolicyTest {
             assertEquals(OrbisVoiceReturnPhase.FAILED,
                 phase(record, ending = false, runtimeError = "archive_failed"))
         }
+    }
+
+    @Test fun `explicit raw only returns after local card observation without claiming summary success`() {
+        val raw = ready.copy(archiveStatus = OrbisVoiceArchiveStatus.PENDING, summary = null,
+            modelTranscript = null, archiveFailureCode = "model_not_configured")
+        assertEquals(OrbisVoiceReturnPhase.COMPLETE, phase(raw, visible = true))
+        assertEquals(OrbisVoiceReturnPhase.WAITING, phase(raw))
+        assertEquals(OrbisVoiceReturnPhase.WAITING, phase(raw.copy(archiveFailureCode = null), visible = true))
+        assertEquals(OrbisVoiceReturnPhase.WAITING, phase(raw.copy(status = OrbisVoiceCallStatus.ACTIVE), visible = true))
     }
 
     @Test fun `load failure is explicit and cannot be hidden by stale complete flags`() {
@@ -102,7 +111,7 @@ class OrbisVoiceReturnPolicyTest {
 
     @Test fun `nonblank errors fail incomplete return after ending but blank errors are ignored`() {
         val committed = ready.copy(chatCommitted = true)
-        assertEquals(OrbisVoiceReturnPhase.FAILED, phase(ready.copy(error = "commit_failed"), visible = true))
+        assertEquals(OrbisVoiceReturnPhase.COMPLETE, phase(ready.copy(error = "commit_failed"), visible = true))
         assertEquals(OrbisVoiceReturnPhase.FAILED, phase(committed, runtimeError = "archive_failed", visible = false))
         for (blank in listOf(null, "", " \n\t ")) {
             assertEquals(OrbisVoiceReturnPhase.COMPLETE,

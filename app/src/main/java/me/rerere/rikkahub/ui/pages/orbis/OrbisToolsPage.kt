@@ -95,6 +95,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                     }
                 }
                 item("permissions") {
+                    OutlinedButton(onClick = { navigator.navigate(Screen.OrbisSchedule) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("日程与课表 · 你和 AI 共用")
+                    }
                     OutlinedButton(onClick = { showCalls = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("通话记录 · 摘要与完整文字记录")
                     }

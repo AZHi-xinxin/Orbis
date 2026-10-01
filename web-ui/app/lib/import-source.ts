@@ -1,7 +1,21 @@
-export const IMPORT_SOURCES = ["deepseek", "rikkahub", "codex"] as const;
+export const IMPORT_SOURCES = ["deepseek", "rikkahub", "codex", "operit", "kelivo"] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
 
 export const IMPORT_SOURCE_INFO = {
+  kelivo: {
+    label: "Kelivo", extension: ".zip", accept: ".zip,application/zip", contentType: "application/zip", maxBytes: 512 * 1024 * 1024,
+    fileLabel: "选择电脑上的 Kelivo 安卓 ZIP", limit: "最多 512 MiB，仅支持 Kelivo v2 备份中的聊天。",
+    description: "先预览再追加导出时选中的回答。附件只保留引用说明，不导入配置、密钥、人格或技能。原备份可能包含密钥，请私密保管。",
+    preview: "保留导出时选中的回答；其他版本和附件实体不迁移，历史工具仅为记录，不执行。",
+    confirmation: "我确认接收身份与所选会话；仅追加聊天，不覆盖记录，不导入设置或密钥。",
+  },
+  operit: {
+    label: "Operit", extension: ".json", accept: ".json,application/json", contentType: "application/json", maxBytes: 64 * 1024 * 1024,
+    fileLabel: "选择电脑上的 Operit v2 JSON", limit: "最多 64 MiB，仅支持 operit_chat_archive / formatVersion 2。",
+    description: "预览后选择会话，仅追加导出时选中的回答。不导入模型设置、人格、工具权限、工作区或附件实体。",
+    preview: "保留当前选中的回答；内部摘要会跳过并提示，不当作聊天或系统提示。备用回答与附件实体不迁移，历史工具只作为记录，不执行。",
+    confirmation: "我确认接收身份和所选会话；仅追加记录，不覆盖聊天或导入设置。",
+  },
   deepseek: {
     label: "DeepSeek", extension: ".zip", accept: ".zip,application/zip", contentType: "application/zip", maxBytes: 80 * 1024 * 1024,
     fileLabel: "选择电脑上的 DeepSeek ZIP", limit: "最多 80 MiB ZIP / 64 MiB 对话 JSON。",
@@ -52,6 +66,7 @@ export function validateImportFile(source: ImportSource, file: Pick<File, "name"
 }
 
 export function defaultImportPathLabel(reason: string): string {
+  if (reason.startsWith("operit_selected") || reason.startsWith("kelivo_selected")) return "导出时选中的回答";
   if (reason === "all_branches_preserved") return "全部原消息分支 · 完整保留";
   if (reason === "codex_text_only") return "可见文字 · 不含推理、工具或媒体";
   return reason === "source_current_node" ? "默认路径 · 导出时选中的位置" : "默认路径 · 最新分支";

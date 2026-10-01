@@ -53,18 +53,20 @@ import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.archiveErrorForDisplay
+import me.rerere.rikkahub.data.orbis.voice.voiceCallTranscriptView
 
 /** Local archive browsing only. Opening text never sends it to a conversation or model. */
 @Composable
 fun OrbisVoiceCallHistorySheet(
     repository: OrbisVoiceCallRepository,
     assistantId: String? = null,
+    initialCallId: String? = null,
     onRetry: (id: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val revision by repository.revision.collectAsStateWithLifecycle()
     var page by rememberSaveable(assistantId) { mutableStateOf(0) }
-    var selectedId by rememberSaveable(assistantId) { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable(assistantId, initialCallId) { mutableStateOf(initialCallId) }
     var records by remember(repository, assistantId) { mutableStateOf<List<OrbisVoiceCallRecord>>(emptyList()) }
     var selected by remember(repository, assistantId) { mutableStateOf<OrbisVoiceCallRecord?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -186,8 +188,9 @@ private fun VoiceCallHistoryDetail(
     var showActual by rememberSaveable(record.id) { mutableStateOf(false) }
     var confirmArchive by rememberSaveable(record.id) { mutableStateOf(false) }
     val closed = record.status == OrbisVoiceCallStatus.ENDED || record.status == OrbisVoiceCallStatus.INTERRUPTED
-    val restoreSummary = record.archiveStatus == OrbisVoiceArchiveStatus.READY && !record.chatCommitted
-    val canRetry = closed && record.connectedAtMs != null && (restoreSummary ||
+    val transcriptView = remember(record) { voiceCallTranscriptView(record) }
+    val actualTranscript = transcriptView.entries
+    val canRetry = !transcriptView.sourceUnavailable && closed && record.connectedAtMs != null && (
         record.archiveStatus == OrbisVoiceArchiveStatus.FAILED || record.archiveStatus == OrbisVoiceArchiveStatus.PENDING)
     LazyColumn(modifier, contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -197,25 +200,27 @@ private fun VoiceCallHistoryDetail(
                     fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text(voiceCallDurationLabel(record), color = colors.mutedInk, fontSize = 12.sp)
                 SelectionContainer { Text("记录 ID：${record.id}", color = colors.mutedInk, fontSize = 11.sp) }
-                Text(voiceCallArchiveLabel(record), color = colors.mutedInk, fontSize = 12.sp)
+                Text(if (transcriptView.sourceUnavailable) "部分记录暂不可读取 · 原文件保留" else voiceCallArchiveLabel(record),
+                    color = colors.mutedInk, fontSize = 12.sp)
+                if (transcriptView.sourceUnavailable) Text(
+                    "通话源记录格式异常，以下只显示仍可读取的已保存内容。为避免遗漏，暂不发起归档；原文件没有被修改，请先备份并检查记录。",
+                    color = colors.mutedInk, fontSize = 12.sp, lineHeight = 18.sp)
                 record.endReason?.let { Text("结束方式：$it", color = colors.mutedInk, fontSize = 12.sp) }
                 record.endReasonText?.let { Text("结束原因：$it", color = colors.mutedInk, fontSize = 12.sp) }
                 record.endError?.let { Text("通话中断详情：$it", color = colors.mutedInk, fontSize = 12.sp) }
                 record.archiveErrorForDisplay()?.let {
                     SelectionContainer { Text("归档未完成原因：$it", color = colors.mutedInk, fontSize = 12.sp) }
                 }
-                if (canRetry) TextButton(onClick = { if (restoreSummary) onRetry() else confirmArchive = true }, enabled = !retryRequested) {
+                if (canRetry) TextButton(onClick = { confirmArchive = true }, enabled = !retryRequested) {
                     Text(when {
-                        restoreSummary && retryRequested -> "正在恢复聊天摘要…"
-                        restoreSummary -> "恢复聊天摘要"
                         retryRequested -> "已请求重新整理…"
-                        else -> "请本次 AI 重新整理"
+                        else -> "重新归档"
                     })
                 }
-                if (canRetry) Text(if (restoreSummary) "只恢复已保存的摘要，不请求模型，也不恢复旧队列。" else
+                if (canRetry) Text(
                     "可单独整理这一通已保存的原文。不会恢复旧队列、重发旧消息或执行工具；原文始终保留。",
                     color = colors.mutedInk, fontSize = 11.sp, lineHeight = 17.sp)
-                if (retryError) Text(if (restoreSummary) "暂时未能恢复聊天摘要，请稍后重试。" else "暂时未能开始整理，请稍后重试。",
+                if (retryError) Text("暂时未能开始整理，请稍后重试。",
                     color = colors.mutedInk, fontSize = 12.sp)
             }
         }
@@ -229,22 +234,31 @@ private fun VoiceCallHistoryDetail(
         item {
             HorizontalDivider(color = colors.border)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !showActual, onClick = { showActual = false }, label = { Text("AI 书写全文") })
+                FilterChip(selected = !showActual, onClick = { showActual = false }, label = { Text("归档模型整理") })
                 FilterChip(selected = showActual, onClick = { showActual = true }, label = { Text("实际逐条记录") })
             }
         }
         if (showActual) {
-            if (record.transcript.isEmpty()) item { Text("尚无已保存的逐条记录。", color = colors.mutedInk, fontSize = 13.sp) }
-            items(record.transcript, key = { it.id }) { entry ->
+            if (actualTranscript.isEmpty()) item { Text("尚无已保存的逐条记录。", color = colors.mutedInk, fontSize = 13.sp) }
+            items(actualTranscript, key = { it.id }) { entry ->
+                var showOriginalAsr by rememberSaveable(record.id, entry.id) { mutableStateOf(false) }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(voiceCallRole(entry.role) + " · " + voiceCallTime(entry.timestampMs), color = colors.mutedInk,
                         fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     SelectionContainer { Text(entry.content, color = colors.ink, fontSize = 13.sp, lineHeight = 21.sp) }
+                    entry.originalTranscript?.takeIf { it != entry.content }?.let { original ->
+                        TextButton(onClick = { showOriginalAsr = !showOriginalAsr }) {
+                            Text(if (showOriginalAsr) "收起原识别" else "称呼已纠正 · 查看原识别")
+                        }
+                        if (showOriginalAsr) SelectionContainer {
+                            Text(original, color = colors.mutedInk, fontSize = 12.sp, lineHeight = 19.sp)
+                        }
+                    }
                 }
             }
         } else item {
             SelectionContainer {
-                Text(record.modelTranscript?.takeIf { it.isNotBlank() } ?: "本次 AI 尚未完成书写，可切换查看实际逐条记录。",
+                Text(record.modelTranscript?.takeIf { it.isNotBlank() } ?: "归档模型尚未完成整理，可切换查看实际逐条记录。",
                     color = colors.ink, fontSize = 13.sp, lineHeight = 21.sp)
             }
         }
@@ -252,7 +266,7 @@ private fun VoiceCallHistoryDetail(
     if (confirmArchive) AlertDialog(
         onDismissRequest = { confirmArchive = false },
         title = { Text("仅整理这一次通话？") },
-        text = { Text("将使用这次通话原来的 AI 和模型，只发送已保存的本次通话原文，生成摘要及文字记录。可能产生模型费用。不会继续旧队列、调用工具或重开麦克风；失败不会自动重试，原文不会删除。") },
+        text = { Text("只发送已保存的本次通话文字，由设置中的归档模型生成摘要；主归档模型失败时可使用你配置的备用模型，可能产生模型费用。不会继续旧队列、调用工具或重开麦克风；都失败时保留原文与重试入口。可在系统设置 → 模型设置中配置。") },
         confirmButton = { TextButton(onClick = { confirmArchive = false; onRetry() }) { Text("确认整理") } },
         dismissButton = { TextButton(onClick = { confirmArchive = false }) { Text("取消") } },
     )
@@ -266,12 +280,12 @@ private fun voiceCallTime(timeMs: Long): String = DateFormat.getTimeInstance(Dat
 private fun voiceCallDurationLabel(record: OrbisVoiceCallRecord): String = when (record.status) {
     OrbisVoiceCallStatus.CONNECTING -> "正在连接"
     OrbisVoiceCallStatus.ACTIVE -> "通话中"
-    OrbisVoiceCallStatus.INTERRUPTED -> "通话已中断"
+    OrbisVoiceCallStatus.INTERRUPTED -> OrbisVoiceCallProtocol.title(record.durationMs).removeSurrounding("【", "】") + "（异常终止）"
     OrbisVoiceCallStatus.ENDED -> OrbisVoiceCallProtocol.title(record.durationMs).removeSurrounding("【", "】")
 }
 
 private fun voiceCallArchiveLabel(record: OrbisVoiceCallRecord): String = when (record.archiveStatus) {
-    OrbisVoiceArchiveStatus.READY -> if (!record.chatCommitted) "已归档 · 聊天摘要待恢复" else "已归档"
+    OrbisVoiceArchiveStatus.READY -> "已归档 · 原文保留"
     OrbisVoiceArchiveStatus.GENERATING -> "AI 正在整理"
     OrbisVoiceArchiveStatus.FAILED -> "整理未完成 · 原文保留"
     OrbisVoiceArchiveStatus.PENDING -> if (record.status == OrbisVoiceCallStatus.ACTIVE || record.status == OrbisVoiceCallStatus.CONNECTING)

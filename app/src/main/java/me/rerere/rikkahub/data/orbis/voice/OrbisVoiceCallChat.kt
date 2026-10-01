@@ -37,7 +37,7 @@ internal fun voiceTurnForModel(callId: String, text: String): String =
 
 internal fun voiceArchiveRequest(record: OrbisVoiceCallRecord): String =
     OrbisVoiceCallProtocol.end(record) + "\n【已结束语音通话】收音和播放已经停止，后续回复不会自动朗读。" +
-        "请由你本人为本次通话收尾，不调用其他模型代写。只输出一个 JSON 对象，两个字符串字段：summary（本次通话简要摘要，保留你的视角），" +
+        "你是独立的记录整理器，不扮演通话中的任何一方。只输出一个 JSON 对象，两个字符串字段：summary（仅据原文归纳本次通话），" +
         "transcript（按顺序写出本次通话的文字记录，标明说话者；不虚构未说过的话）。" +
         "只写本次通话，不汇总之前的聊天；工具回执、系统提示不是任何一方亲口说的话。" +
         "宿主已另存真实原文，不需要你假装听到音色或语气。通话记录 ID：${record.id}。"

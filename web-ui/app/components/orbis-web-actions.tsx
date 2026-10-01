@@ -26,7 +26,7 @@ export function OrbisWebActions({ conversationId, appearanceOpen: appearance, on
   React.useEffect(() => {
     if (appearance) { setNickname(settings?.displaySetting.userNickname ?? ""); setMessage(null); }
   }, [appearance]);
-  const protectedAccess = settings?.webImportEnabled === true;
+  const protectedAccess = settings?.webServerJwtEnabled === true && settings?.webImportEnabled === true;
   const save = async () => {
     setSaving(true); setMessage(null);
     try {
@@ -72,7 +72,7 @@ export function OrbisWebActions({ conversationId, appearanceOpen: appearance, on
         </div>
         <div className="space-y-2"><label htmlFor="orbis-nickname" className="text-sm">你的昵称</label>
           <Input id="orbis-nickname" value={nickname} maxLength={80} disabled={!protectedAccess || saving} onChange={(event) => setNickname(event.target.value)} />
-          {!protectedAccess && <p className="text-xs text-muted-foreground">修改昵称、导入及整理上下文需要先在手机开启 Web 密码保护，再登录。</p>}
+          {!protectedAccess && <p className="text-xs text-muted-foreground">修改昵称及整理上下文需要在手机开启 Web 密码保护后登录；导入聊天不要求开启密码。</p>}
           <Button onClick={() => void save()} disabled={!protectedAccess || saving || nickname.trim().length > 80}>{saving ? "正在保存…" : "保存昵称"}</Button>
           {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
         </div>

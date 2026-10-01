@@ -3,10 +3,15 @@ package me.rerere.rikkahub.ui.pages.setting
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -18,14 +23,19 @@ import androidx.compose.material3.NavigationBarItem
 import me.rerere.rikkahub.ui.pages.setting.OrbisSettingsScaffold as Scaffold
 import com.lover.connect.ui.components.StarSwitch as Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -102,6 +112,17 @@ fun SettingModelPage(vm: SettingVM = koinViewModel()) {
 
 @Composable
 private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding: PaddingValues) {
+    var archiveChoice by remember { mutableStateOf<Pair<Model, Boolean>?>(null) }
+    var archiveError by remember { mutableStateOf<String?>(null) }
+    archiveChoice?.let { (model, fallback) ->
+        AlertDialog(onDismissRequest = { archiveChoice = null }, title = { Text("启用${if (fallback) "备用" else "主"}归档模型？") },
+            text = { Text("通话结束后可将本次通话文字发送给 ${model.displayName} 生成摘要，可能产生模型费用。它不继承聊天人格、工作区或工具；主归档失败时备用最多尝试一次。取消配置可停止以后自动使用，不影响已保存的记录。") },
+            confirmButton = { TextButton(onClick = {
+                archiveChoice = null
+                vm.setVoiceArchiveModel(model.id, fallback) { archiveError = it }
+            }) { Text("确认启用") } },
+            dismissButton = { TextButton(onClick = { archiveChoice = null }) { Text("取消") } })
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = contentPadding + PaddingValues(horizontal = 16.dp),
@@ -160,6 +181,23 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                 onSelect = { vm.updateSettings(settings.copy(compressModelId = it.id)) },
             )
         }
+        if (BuildConfig.ORBIS_ENABLED) item {
+            ModelSettingItem(title = "语音通话归档模型",
+                description = "独立整理本次已保存的通话，不依赖聊天队列。未设置时仍完整保留原文，显示未归档，不影响继续聊天。",
+                modelId = settings.orbisVoiceArchiveModelId, providers = settings.providers,
+                onSelect = { archiveChoice = it to false })
+            TextButton(enabled = settings.orbisVoiceArchiveModelId != null, onClick = {
+                vm.setVoiceArchiveModel(null, false) { archiveError = it }
+            }) { Text("不使用主归档模型") }
+            ModelSettingItem(title = "语音通话归档备用模型",
+                description = "主归档模型失败时尝试一次；两者都失败则保留原文和重新归档入口。不重发通话消息，不重做工具操作。",
+                modelId = settings.orbisVoiceArchiveFallbackModelId, providers = settings.providers,
+                onSelect = { archiveChoice = it to true })
+            TextButton(enabled = settings.orbisVoiceArchiveFallbackModelId != null, onClick = {
+                vm.setVoiceArchiveModel(null, true) { archiveError = it }
+            }) { Text("不使用备用归档模型") }
+            archiveError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }
 
@@ -184,7 +222,7 @@ private fun SuggestionSettingItem(
 }
 
 @Composable
-private fun ModelSettingItem(
+internal fun ModelSettingItem(
     title: String,
     description: String,
     modelId: Uuid?,
@@ -198,31 +236,32 @@ private fun ModelSettingItem(
         providers = providers,
         type = ModelType.CHAT,
     )
+    var showFullModelName by remember { mutableStateOf(false) }
 
     Column {
         CardGroup(title = { Text(title) }) {
             item(
                 onClick = { state.open() },
-                headlineContent = { Text(title) },
+                headlineContent = { Text(title, Modifier.fillMaxWidth().testTag("model-setting-title")) },
+                supportingContent = {
+                    // ListItem measures trailing content before the headline. A long model name
+                    // there can consume its entire width; keep only the fixed arrow in that slot.
+                    Text(
+                        text = state.currentModel?.displayName
+                            ?: stringResource(R.string.model_list_select_model),
+                        modifier = Modifier.fillMaxWidth().testTag("model-setting-value").combinedClickable(
+                            onClick = { state.open() },
+                            onLongClick = { if (state.currentModel != null) showFullModelName = true },
+                            onLongClickLabel = "查看完整模型名",
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 trailingContent = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = state.currentModel?.displayName
-                                ?: stringResource(R.string.model_list_select_model),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Icon(
-                            HugeIcons.ArrowRight01,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
+                    Icon(HugeIcons.ArrowRight01, contentDescription = null, modifier = Modifier.size(16.dp))
                 },
             )
             if (reasoningLevel != null && onUpdateReasoningLevel != null) {
@@ -246,4 +285,16 @@ private fun ModelSettingItem(
     }
 
     ModelListSheet(state = state, onSelect = onSelect)
+    if (showFullModelName) state.currentModel?.let { model ->
+        AlertDialog(
+            onDismissRequest = { showFullModelName = false },
+            title = { Text("完整模型名") },
+            text = { SelectionContainer {
+                Text("${model.displayName}\n\n模型 ID：${model.modelId}",
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                        .testTag("model-setting-full-name"))
+            } },
+            confirmButton = { TextButton(onClick = { showFullModelName = false }) { Text("知道了") } },
+        )
+    }
 }

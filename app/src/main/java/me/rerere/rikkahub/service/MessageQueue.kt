@@ -82,6 +82,15 @@ class MessageQueue(
         return next
     }
 
+    /** Caller proves no history write/provider/tool dispatch was attempted. Preserve original order/id. */
+    @Synchronized
+    internal fun retainUndispatched(message: QueuedMessage) {
+        if (state.value.messages.none { it.id == message.id }) {
+            mutableState.value = state.value.copy(messages = listOf(message) + state.value.messages)
+        }
+        pause() // explicit review, never an immediate replay loop
+    }
+
     @Synchronized
     fun remove(id: Uuid): QueuedMessage? {
         val removed = state.value.messages.find { it.id == id } ?: return null

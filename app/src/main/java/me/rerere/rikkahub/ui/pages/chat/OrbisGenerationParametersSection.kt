@@ -9,7 +9,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,11 +31,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.ai.generationContextReceipts
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterConflict
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterDraft
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterEdit
 import me.rerere.rikkahub.data.model.OrbisGenerationParameters
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
+import kotlin.math.roundToInt
 
 /** Uses the same Assistant fields and ReasoningButton as AssistantBasicPage, but edits a draft. */
 @Composable
@@ -81,10 +85,46 @@ internal fun OrbisGenerationParametersSection(
             editable, decimal = true) { change(draft.copy(topP = it)) }
     }
     Text("关闭自定义温度或 top-p 时使用模型默认值。", style = MaterialTheme.typography.bodySmall)
-    ParameterNumber("上下文消息数量上限", "orbis-generation-context", draft.contextMessageLimit,
+    Text("上下文截取", fontWeight = FontWeight.SemiBold)
+    val contextLimit = draft.contextMessageLimit.toIntOrNull()?.coerceAtLeast(0) ?: 0
+    // Keep an existing larger limit visible, without changing it just by opening this page.
+    val sliderMax = maxOf(1000, ((contextLimit.toLong() + 19) / 20 * 20).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+    Text(if (contextLimit == 0) "不限制消息数量" else "最多约 $contextLimit 条最近消息")
+    Slider(
+        value = contextLimit.toFloat(),
+        onValueChange = { change(draft.copy(contextMessageLimit = ((it / 20).roundToInt().toLong() * 20)
+            .coerceIn(0, Int.MAX_VALUE.toLong()).toString())) },
+        valueRange = 0f..sliderMax.toFloat(),
+        enabled = editable,
+        modifier = Modifier.fillMaxWidth().testTag("orbis-generation-context-slider")
+            .semantics { contentDescription = "上下文消息数量，0 表示不限制" },
+    )
+    ParameterNumber("精确设置消息上限（0 为不限制）", "orbis-generation-context", draft.contextMessageLimit,
         editable) { change(draft.copy(contextMessageLimit = it)) }
-    Text("0 表示不限制；非零至少 20。限制的是发送给模型的消息条数，不会删除聊天记录。",
+    Text("0 表示不限制；非零至少 20。沿用 RikkaHub 的阶梯式截取：到达上限后一次舍去较早的一段，再逐步累积，工具调用与结果成组保留，所以实际条数可能略有差异。本地聊天记录不会被删除。",
         style = MaterialTheme.typography.bodySmall)
+    Text("注意：未发送的旧消息，AI 在本轮看不到，可能出现记忆断层。保留聊天记录不等于保留模型记忆；改变上限或跨越截取台阶也可能降低缓存命中率。",
+        style = MaterialTheme.typography.bodySmall)
+    Text("保存为 0 后，下一次新请求会重新选择当前窗口的完整活动记录，不沿用上一轮的截取结果；无需换窗口或重启。已单独执行的上下文整理、归档和模型/网关限制不由此撤销。",
+        style = MaterialTheme.typography.bodySmall)
+    val contextReceipts by generationContextReceipts.receipts.collectAsState()
+    val receipt = contextReceipts[conversationId]
+    if (receipt == null) {
+        Text("本次启动尚无本窗口的发送前范围记录。", style = MaterialTheme.typography.bodySmall)
+    } else {
+        val limitLabel = if (receipt.contextMessageLimit <= 0) "不限制" else "上限 ${receipt.contextMessageLimit}"
+        val earliest = receipt.firstPreparedSourcePosition?.let { "第 $it 条" } ?: "无可发送原消息"
+        Text("上次新请求·本机发送前（$limitLabel）：活动记录 ${receipt.sourceMessageCount} 条，选入 ${receipt.selectedMessageCount} 条；输入变换后最早为$earliest。首条节点${if (receipt.firstLocalMessagePrepared) "已进入" else "未进入"}本机请求。",
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("orbis-generation-context-receipt"))
+        if (receipt.contextMessageLimit != baseline.contextMessageLimit) {
+            Text("上方是旧请求记录；刚保存的上限将在下一次新请求重新核对。", style = MaterialTheme.typography.bodySmall)
+        }
+        if (receipt.compactionSummaryAtStart) {
+            Text("当前活动记录以整理摘要开头；恢复 0 不会自动展开已归档的原文。", style = MaterialTheme.typography.bodySmall)
+        }
+        Text("仅记录本机发送前节点范围，不含正文；正文仍可能经过消息模板等处理，不代表网关或模型已收到、记住全部内容。重启后此记录清空。",
+            style = MaterialTheme.typography.bodySmall)
+    }
     ParameterToggle("流式输出", draft.streamOutput, editable) { change(draft.copy(streamOutput = it)) }
     ParameterNumber("最大输出 token（留空使用默认）", "orbis-generation-max-tokens", draft.maxTokens,
         editable) { change(draft.copy(maxTokens = it)) }
@@ -125,7 +165,9 @@ internal fun OrbisGenerationParametersSection(
                         baselineJson = Json.encodeToString(saved)
                         draftJson = Json.encodeToString(OrbisGenerationParameterDraft.from(saved))
                         failed = false
-                        notice = "当前 AI 参数已保存。本会话内容需使用上方按钮单独保存。"
+                        notice = if (edit.before.contextMessageLimit != saved.contextMessageLimit) {
+                            "当前 AI 参数已保存。下一次新请求将按${if (saved.contextMessageLimit == 0) "完整活动记录" else "新消息上限"}重新准备上下文；本地聊天原文未改动。本会话内容需使用上方按钮单独保存。"
+                        } else "当前 AI 参数已保存。本会话内容需使用上方按钮单独保存。"
                         onSaved()
                     } catch (cancelled: CancellationException) {
                         throw cancelled

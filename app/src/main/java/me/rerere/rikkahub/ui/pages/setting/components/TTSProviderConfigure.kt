@@ -7,8 +7,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -17,6 +22,11 @@ import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.SelectTextField
 import me.rerere.tts.provider.TTSProviderSetting
+import me.rerere.tts.provider.TTSProviderException
+import me.rerere.tts.provider.providers.ELEVENLABS_TTS_MODELS
+import me.rerere.tts.provider.providers.fetchElevenLabsTtsModels
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 @Composable
 fun TTSProviderConfigure(
@@ -864,15 +874,15 @@ private fun ElevenLabsTTSConfiguration(
     }
 
     // Model
-    val models = listOf(
-        "eleven_multilingual_v2" to "Eleven Multilingual v2",
-        "eleven_v3" to "Eleven v3",
-        "eleven_flash_v2_5" to "Eleven Flash v2.5"
-    )
+    val scope = rememberCoroutineScope()
+    var availableModels by remember(setting.baseUrl, setting.apiKey) { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var refreshingModels by remember(setting.baseUrl, setting.apiKey) { mutableStateOf(false) }
+    var modelsNotice by remember(setting.baseUrl, setting.apiKey) { mutableStateOf<String?>(null) }
+    val models = availableModels ?: ELEVENLABS_TTS_MODELS
 
     FormItem(
         label = { Text(stringResource(R.string.setting_tts_page_model)) },
-        description = { Text(stringResource(R.string.setting_tts_page_model_description)) }
+        description = { Text("支持 Eleven v4（eleven_v4），通过 Text-to-Dialogue API 使用所填音色。可手填准确模型 ID；网站活动名称不等于 API 型号。旧模型与音色不会自动切换。") }
     ) {
         SelectTextField(
             value = setting.model,
@@ -886,6 +896,30 @@ private fun ElevenLabsTTSConfiguration(
             optionToString = { (modelId, displayName) -> "$displayName ($modelId)" },
             modifier = Modifier.fillMaxWidth()
         )
+        TextButton(
+            enabled = !refreshingModels,
+            onClick = {
+                refreshingModels = true
+                modelsNotice = null
+                scope.launch {
+                    try {
+                        val result = fetchElevenLabsTtsModels(setting)
+                        availableModels = result
+                        modelsNotice = if (result.isEmpty()) "目录没有可用于此连接的 HTTP 语音模型，仍可手填准确 ID。"
+                            else "已读取 ${result.size} 个模型；请自行选择，不会自动更换当前模型。"
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        modelsNotice = (error as? TTSProviderException)?.message
+                            ?: "模型目录读取失败；请检查地址与网络，或直接手填模型 ID。"
+                    } finally {
+                        refreshingModels = false
+                    }
+                }
+            },
+        ) { Text(if (refreshingModels) "正在读取模型…" else "从服务读取模型目录") }
+        Text("只读取当前地址的 /v1/models，不会生成语音。需要 API Key 时请给 Models 读取权限；账户可用性与额度由服务方决定。V4 Turbo 的 WebSocket 连接暂不包含在此入口。")
+        modelsNotice?.let { Text(it) }
     }
 
     // Voice ID

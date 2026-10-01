@@ -24,6 +24,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.asr.ASRController
+import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
@@ -67,6 +68,8 @@ class StepASRController(
     private val httpClient: OkHttpClient,
     private val provider: ASRProviderSetting.Step
 ) : ASRController {
+    private val pcmObserver = ASRPcmObserver()
+    override fun setPcmObserver(observer: ((ByteArray, Int) -> Unit)?) = pcmObserver.set(observer)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _state = MutableStateFlow(ASRState(isAvailable = true))
@@ -114,6 +117,7 @@ class StepASRController(
     }
 
     override fun stop() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         releaseRecorder()
         _state.update { it.copy(status = ASRStatus.Stopping) }
@@ -133,7 +137,14 @@ class StepASRController(
         }
     }
 
+    override fun pauseCapture() {
+        pcmObserver.set(null)
+        recorderJob?.cancel()
+        releaseRecorder()
+    }
+
     override fun dispose() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         flushJob?.cancel()
         releaseRecorder()
@@ -142,6 +153,7 @@ class StepASRController(
 
     @SuppressLint("MissingPermission")
     private fun startRecorder() {
+        val pcmEpoch = pcmObserver.captureEpoch()
         recorderJob?.cancel()
         recorderJob = scope.launch(Dispatchers.IO) {
             val sampleRate = provider.sampleRate
@@ -170,6 +182,7 @@ class StepASRController(
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        pcmObserver.emit(pcmEpoch, buffer, read, sampleRate)
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
 
@@ -423,6 +436,7 @@ class StepASRController(
     }
 
     private fun setError(message: String) {
+        pcmObserver.set(null)
         _state.update {
             it.copy(
                 status = ASRStatus.Error,

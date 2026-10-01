@@ -35,6 +35,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.rikkahub.data.model.reanchorDeletedToolRecords
+import me.rerere.rikkahub.data.model.withCommittedVoiceNotePlayed
 import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
@@ -268,21 +269,14 @@ class ChatService(
         runCatching {
             voiceCalls.recoverInterrupted().forEach { record ->
                 val id = Uuid.parse(record.conversationId)
-                if (conversationRepo.existsConversationById(id)) {
-                    initializeConversation(id, selectAssistant = false)
-                    snapshotVoiceCall(record.id, id)
-                    enqueueCallMessage(id, record.id,
-                        OrbisVoiceCallProtocol.end(record) + "\n【语音通话已中断并结束】当前已不在通话中，原文保留，摘要尚未完成。",
-                        "ended_notice", answer = false)
-                }
+                // Read source only: no session initialization, queue, tool, model or journal acknowledgement.
+                val stored = conversationRepo.getConversationById(id) ?: return@forEach
+                if (stored.assistantId.toString() != record.assistantId) return@forEach
+                val recovered = runCatching { withContext(Dispatchers.IO) { generationJournal.recover(stored)?.conversation } }
+                    .getOrNull() ?: stored
+                voiceCalls.update(record.id) { captureVoiceCallSource(it, recovered, finished = true,
+                    capturedAtMs = System.currentTimeMillis(), authoritativeLiveSnapshot = false) }
             }
-            var offset = 0
-            do {
-                val page = voiceCalls.list(limit = 100, offset = offset)
-                page.filter { it.archiveStatus == OrbisVoiceArchiveStatus.READY && !it.chatCommitted }
-                    .forEach { retryVoiceCallArchive(it.id) }
-                offset += page.size
-            } while (page.size == 100)
         }.onFailure { Log.w(TAG, "Voice call recovery failed; original history retained", it) }
     }
 
@@ -312,6 +306,7 @@ class ChatService(
     fun enqueueCallMessage(conversationId: Uuid, callId: String, text: String,
         kind: String = "turn", answer: Boolean = true, messageId: Uuid = Uuid.random(),
         shouldEnqueue: () -> Boolean = { true }): Deferred<String?> {
+        require(kind !in setOf("archive", "restore")) { "归档只能使用独立记录整理入口，不能进入聊天队列。" }
         val session = getOrCreateSession(conversationId)
         val reply = CompletableDeferred<String?>()
         synchronized(session) {
@@ -327,12 +322,14 @@ class ChatService(
     }
 
     /** Accepted speech survives process death even if it has not yet left the chat queue. */
-    fun enqueueVoiceCallUtterance(conversationId: Uuid, callId: String, text: String): Deferred<String?> {
+    fun enqueueVoiceCallUtterance(conversationId: Uuid, callId: String, text: String,
+        originalTranscript: String? = null): Deferred<String?> {
         val binding = VoiceReplyBinding(conversationId, callId, Uuid.random())
         val observer = appScope.async(start = CoroutineStart.LAZY) {
             val queued = voiceIngressMutex.withLock {
                 voiceCalls.update(callId) { it.copy(transcript = it.transcript +
-                    OrbisVoiceTranscriptEntry(binding.messageId.toString(), "USER", text, System.currentTimeMillis(), binding.messageId.toString())) }
+                    OrbisVoiceTranscriptEntry(binding.messageId.toString(), "USER", text, System.currentTimeMillis(), binding.messageId.toString(),
+                        originalTranscript = originalTranscript?.takeIf { it != text })) }
                 if (binding.cancelled) return@async null
                 enqueueCallMessage(conversationId, callId, text, messageId = binding.messageId,
                     shouldEnqueue = { !binding.cancelled })
@@ -430,63 +427,35 @@ class ChatService(
     }
 
     /** Runs in the application scope; neither leaving the page nor hanging up cancels archiving. */
-    fun retryVoiceCallArchive(callId: String) = retryVoiceCallArchive(callId, isolated = false)
+    fun retryVoiceCallArchive(callId: String) = launchIndependentVoiceArchive(callId)
 
     /** Only the explicitly confirmed history-page action uses this independent, no-tools request. */
-    fun retryVoiceCallArchiveIsolated(callId: String) = retryVoiceCallArchive(callId, isolated = true)
+    fun retryVoiceCallArchiveIsolated(callId: String) = launchIndependentVoiceArchive(callId)
 
-    private fun retryVoiceCallArchive(callId: String, isolated: Boolean) {
+    private fun launchIndependentVoiceArchive(callId: String) {
         synchronized(voiceArchiveJobs) {
             if (voiceArchiveJobs[callId]?.isCompleted == false) return
             val job = appScope.launch(start = CoroutineStart.LAZY) {
-                var heldConversation: Uuid? = null
-                var ownedRequestMessageId: Uuid? = null
                 try {
                     val record = checkNotNull(voiceCalls.get(callId))
                     check(record.status == OrbisVoiceCallStatus.ENDED || record.status == OrbisVoiceCallStatus.INTERRUPTED)
                     val conversationId = Uuid.parse(record.conversationId)
-                    if (isolated) {
-                        // Do not create/initialize a session: that would recover a checkpoint and
-                        // mutate the old queue/journal before this isolated action even starts.
-                        val savedConversation = checkNotNull(conversationRepo.getConversationById(conversationId)) {
-                            "原聊天已删除；原文仍在记录库。"
-                        }
-                        archiveVoiceCallWithoutResumingQueue(record, savedConversation)
-                        return@launch
-                    }
-                    addConversationReference(conversationId)
-                    heldConversation = conversationId
-                    check(conversationRepo.existsConversationById(conversationId)) { "原聊天已删除；原文仍在记录库。" }
-                    initializeConversation(conversationId, selectAssistant = false)
-                    if (record.archiveStatus == OrbisVoiceArchiveStatus.READY) {
-                        // Do not regenerate an already completed summary; only retry the page commit.
-                        val messageId = Uuid.random().also { ownedRequestMessageId = it }
-                        checkNotNull(enqueueCallMessage(conversationId, callId, "恢复已完成的通话归档", "restore",
-                            answer = false, messageId = messageId).await()) {
-                            "聊天摘要恢复已从队列撤回，完整归档仍保留。"
-                        }
-                    } else {
-                        voiceCalls.update(callId) { it.copy(archiveStatus = OrbisVoiceArchiveStatus.GENERATING, archiveError = null) }
-                        val messageId = Uuid.random().also { ownedRequestMessageId = it }
-                        checkNotNull(enqueueCallMessage(conversationId, callId, voiceArchiveRequest(record), "archive",
-                            messageId = messageId).await()) {
-                            "归档请求已从队列撤回，通话原文仍保留，可重试。"
-                        }
-                    }
+                    // Read only already durable history; never initialize or recover the old chat session.
+                    val savedConversation = checkNotNull(conversationRepo.getConversationById(conversationId))
+                    val captured = voiceCalls.update(callId) { captureVoiceCallSource(it, savedConversation,
+                        finished = true, capturedAtMs = System.currentTimeMillis(), authoritativeLiveSnapshot = false) }
+                    archiveVoiceCallWithoutResumingQueue(captured, savedConversation)
                 } catch (e: Exception) {
                   withContext(kotlinx.coroutines.NonCancellable) {
-                    // Isolated requests never enqueue. Other attempts may withdraw only their own
-                    // exact queue item, not a previously saved request for this same call.
-                    heldConversation?.let { id -> sessions[id]?.messageQueue?.let { queue ->
-                        ownedVoiceArchiveQueueItem(isolated, ownedRequestMessageId, callId, queue.state.value.messages)
-                            ?.let { queue.remove(it) }
-                    } }
+                    val code = (e as? VoiceArchiveFailure)?.safeCode ?: if (e is CancellationException)
+                        "archive_interrupted" else "archive_persistence_failed"
                     runCatching { voiceCalls.update(callId) { it.copy(
-                        archiveStatus = if (it.archiveStatus == OrbisVoiceArchiveStatus.READY) it.archiveStatus else OrbisVoiceArchiveStatus.FAILED,
-                        archiveError = e.message ?: "归档未完成，原文已保留，可重试。") } }
+                        archiveStatus = if (it.archiveStatus == OrbisVoiceArchiveStatus.READY) it.archiveStatus
+                            else if (code == "model_not_configured") OrbisVoiceArchiveStatus.PENDING else OrbisVoiceArchiveStatus.FAILED,
+                        archiveFailureCode = code, archiveError = voiceArchiveFailureMessage(code)) } }
                   }
                   if (e is CancellationException) throw e
-                } finally { heldConversation?.let(::removeConversationReference) }
+                }
             }
             voiceArchiveJobs[callId] = job
             job.start()
@@ -494,69 +463,36 @@ class ChatService(
     }
 
     private suspend fun archiveVoiceCallWithoutResumingQueue(record: OrbisVoiceCallRecord, savedConversation: Conversation) {
-        var archived = record
         if (record.archiveStatus != OrbisVoiceArchiveStatus.READY) {
-            val request = prepareIsolatedVoiceArchive(record, savedConversation, settingsStore.settingsFlow.first { !it.init })
-            voiceCalls.update(record.id) { it.copy(archiveStatus = OrbisVoiceArchiveStatus.GENERATING, archiveError = null) }
-            // Do not invoke GenerationLoop, checkpoint recovery, finishPendingTools, or queue.resume.
-            // Only this immutable archive is sent; model-generated tool calls are never executed.
-            val result = kotlinx.coroutines.withTimeout(180_000L) {
-                providerManager.getProviderByType(request.provider).generateText(
-                    providerSetting = request.provider, messages = request.messages, params = request.params)
-            }
-            check(result.message.getTools().isEmpty()) { "AI 返回了工具调用，未执行；通话原文保留，请检查后再整理。" }
-            val written = checkNotNull(OrbisVoiceCallProtocol.parseModelArchive(result.message.toText())) {
-                "AI 没有返回完整的摘要与文字记录；原文保留，未自动重试。"
-            }
-            archived = voiceCalls.update(record.id) { it.copy(archiveStatus = OrbisVoiceArchiveStatus.READY,
-                summary = written.summary, modelTranscript = written.transcript, archiveError = null) }
-        }
-        if (archived.chatCommitted) return
-        // A successful archive is durable even when chat-page publication cannot safely proceed.
-        // Only borrow an existing initialized session; never initialize or recover it here.
-        val session = sessions[savedConversation.id]
-        check(session != null && session.isInitialized) {
-            checkNotNull(isolatedVoiceArchiveCommitBlockReason(session != null, session?.isInitialized == true,
-                hasCheckpoint = false, busy = false, recoveryBlocked = false, ownerMatches = true))
-        }
-        session.withRefSuspend {
-            session.orbisPromptEditMutex.withLock {
-                val hasCheckpoint = withContext(Dispatchers.IO) { generationJournal.hasCheckpoint(savedConversation.id) }
-                synchronized(session) {
-                    val blocked = isolatedVoiceArchiveCommitBlockReason(
-                        sessionPresent = sessions[savedConversation.id] === session,
-                        initialized = session.isInitialized,
-                        hasCheckpoint = hasCheckpoint,
-                        busy = session.getJob() != null || session.submittingMessage != null || session.manualContextWriteInProgress,
-                        recoveryBlocked = session.generationRecoveryBlocked,
-                        ownerMatches = session.state.value.assistantId.toString() == record.assistantId,
-                    )
-                    check(blocked == null) { checkNotNull(blocked) }
-                    session.manualContextWriteInProgress = true
-                }
-                try { collapseArchivedVoiceCall(archived, session) }
-                finally { synchronized(session) { session.manualContextWriteInProgress = false } }
+            val digest = voiceArchiveSourceDigest(record)
+            val result = runIndependentVoiceArchive(record, savedConversation, settingsStore.settingsFlow.first { !it.init },
+                beforeRequest = { modelId -> voiceCalls.update(record.id) {
+                    if (voiceArchiveSourceDigest(it) != digest) throw VoiceArchiveFailure("archive_source_changed")
+                    it.copy(archiveStatus = OrbisVoiceArchiveStatus.GENERATING, archiveError = null,
+                        archiveFailureCode = null, archiveRequestCount = Math.addExact(it.archiveRequestCount, 1),
+                        archiveLastModelId = modelId.toString())
+                } }, request = { request ->
+                    // No GenerationLoop, checkpoint recovery, tools, workspace, persona or queue.resume.
+                    kotlinx.coroutines.withTimeoutOrNull(180_000L) {
+                        providerManager.getProviderByType(request.provider).generateText(
+                            providerSetting = request.provider, messages = request.messages, params = request.params)
+                    } ?: throw VoiceArchiveFailure("archive_timeout")
+                })
+            voiceCalls.update(record.id) {
+                if (voiceArchiveSourceDigest(it) != digest) throw VoiceArchiveFailure("archive_source_changed")
+                it.copy(archiveStatus = OrbisVoiceArchiveStatus.READY,
+                    summary = result.archive.summary, modelTranscript = result.archive.transcript,
+                    archiveError = null, archiveFailureCode = null)
             }
         }
+        // The chat list folds by call ownership and reads this archive directly. Summary success
+        // must not remove raw nodes, rewrite model history, resume a queue or depend on a page commit.
     }
 
     private suspend fun snapshotVoiceCall(callId: String, conversationId: Uuid,
         finished: Boolean = true): OrbisVoiceCallRecord {
-        val nodes = getConversationFlow(conversationId).value.messageNodes.filter { node ->
-            node.messages.any { it.orbisVoiceCallId == callId && it.orbisVoiceCallKind != "summary" }
-        }
-        return voiceCalls.update(callId) { old ->
-            val prior = old.sourceNodesJson?.let { JsonInstant.decodeFromString<List<MessageNode>>(it) }.orEmpty()
-            val merged = (prior + nodes).associateBy { it.id }.values.toList()
-            val seen = old.transcript.mapNotNull { it.messageId }.toSet()
-            val messages = merged.map { it.currentMessage }
-            old.copy(sourceNodesJson = JsonInstant.encodeToString(merged),
-                sourceMessageIds = (old.sourceMessageIds + messages.map { it.id.toString() }).distinct(),
-                transcript = old.transcript + messages.filter { finished && it.id.toString() !in seen }.map {
-                    OrbisVoiceTranscriptEntry(it.id.toString(), it.role.name, it.toText(),
-                        System.currentTimeMillis(), it.id.toString())
-                })
-        }
+        val conversation = getConversationFlow(conversationId).value
+        return voiceCalls.update(callId) { captureVoiceCallSource(it, conversation, finished, System.currentTimeMillis()) }
     }
 
     private suspend fun collapseArchivedVoiceCall(record: OrbisVoiceCallRecord, session: ConversationSession) {
@@ -1000,6 +936,7 @@ class ChatService(
         session: ConversationSession,
         persisted: Conversation,
         voiceInterruption: VoiceBargeInCancellation? = null,
+        preserveUnpausedQueueOnSafeFailure: Boolean = false,
     ): Conversation {
         // A public build may retain an internal build's Room rows; loading is not permission to recover them.
         if (persisted.isConsultation && !consultationFeature.enabled) return persisted
@@ -1023,7 +960,7 @@ class ChatService(
                     voiceInterruption.partialSafelySaved = true
                 return persisted
             }
-            if (voiceInterruption == null) session.messageQueue.pause()
+            if (voiceInterruption == null && !preserveUnpausedQueueOnSafeFailure) session.messageQueue.pause()
             val recovery = withContext(Dispatchers.IO) {
                 generationJournal.discardSupersededByDurableEpoch(persisted)
                 generationJournal.recover(persisted)
@@ -1054,6 +991,7 @@ class ChatService(
                 voiceInterruption.partialSafelySaved = true
                 return stored
             }
+            if (preserveUnpausedQueueOnSafeFailure && recovery.unknownToolIds.isEmpty()) return stored
             addError(IllegalStateException(if (recovery.unknownToolIds.isEmpty())
                 "已恢复上次中断时保存的回复；旧生成和队列没有自动继续。"
             else "已恢复上次回复和已保存的工具结果；部分工具外部结果未知，请先核对，未自动重试。"), persisted.id)
@@ -1141,9 +1079,16 @@ class ChatService(
     }
 
     fun resumeMessageQueue(conversationId: Uuid) {
-        sessions[conversationId]?.let {
-            it.messageQueue.resume()
-            if (!it.messageQueue.state.value.paused) acknowledgeAutomaticHold(it)
+        sessions[conversationId]?.let { session -> synchronized(session) {
+            if (session.generationRecoveryBlocked || session.manualContextWriteInProgress ||
+                session.state.value.currentMessages.any { it.getTools().any { tool -> !tool.isExecuted } }) {
+                session.messageQueue.pause()
+                addError(IllegalStateException("回复恢复或工具结果尚待核对，队列输入已保留，未继续。"), conversationId)
+                return
+            }
+            session.messageQueue.resume()
+            if (!session.messageQueue.state.value.paused) acknowledgeAutomaticHold(session)
+        }
         }
         dispatchNextQueuedMessage(conversationId)
     }
@@ -1576,6 +1521,8 @@ class ChatService(
     private fun dispatchNextQueuedMessage(conversationId: Uuid): Job? {
         val session = sessions[conversationId] ?: return null
         synchronized(session) {
+            // Check BEFORE takeNext removes an input. Recovery-blocked human messages must not disappear.
+            if (session.generationRecoveryBlocked || session.manualContextWriteInProgress || session.submittingMessage != null) return null
             // A pending tool approval is still part of the current turn.
             val next = takeNextConversationInput(
                 human = session.messageQueue, automatic = session.automaticWakeQueue,
@@ -1609,6 +1556,7 @@ class ChatService(
         val conversationId = session.id
         val content = queued.parts
         var eventInputCommitted = false
+        var inputSaveAttempted = false
         val answer = queued.answer
         val bodyEntered = java.util.concurrent.atomic.AtomicBoolean(false)
         val job = launchGenerationJob(
@@ -1621,6 +1569,7 @@ class ChatService(
                 // before taking the history snapshot, including the no-generation send path.
                 if (!session.isInitialized) initializeConversation(conversationId, selectAssistant = expectedAssistantId == null)
                 if (session.state.value.isConsultation) consultationFeature.requireEnabled()
+                require(queued.voiceCallKind !in setOf("archive", "restore")) { "旧归档队列项不再执行，请在通话记录中独立整理。" }
                 expectedAssistantId?.let { requireGardenQuickChatTarget(conversationId, it) }
                 if (queued.voiceCallKind == "opening") {
                     val opening = checkNotNull(voiceCalls.get(checkNotNull(queued.voiceCallId)))
@@ -1722,6 +1671,7 @@ class ChatService(
                         orbisVoiceCallKind = queued.voiceCallKind,
                     ).toMessageNode(),
                 )
+                inputSaveAttempted = true
                 saveConversation(conversationId, newConversation)
                 eventInputCommitted = true
                 onInputCommitted?.invoke()
@@ -1787,6 +1737,12 @@ class ChatService(
                 // The ordinary autoplay collector must not read a late voice reply again.
                 if (queued.reply == null) _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
+                // Failed preflight has not submitted a model/tool or attempted a history write.
+                // Keep exactly this human input; never requeue a possibly committed or dispatched turn.
+                if (queued.orbisEventId == null && !eventInputCommitted && !inputSaveAttempted &&
+                    queued.voiceCallKind !in setOf("archive", "restore") && e !is CancellationException) {
+                    synchronized(session) { session.messageQueue.retainUndispatched(queued) }
+                }
                 queued.orbisEventId?.let { id ->
                     withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                         if (!eventInputCommitted && session.generationRecoveryBlocked) {
@@ -1811,6 +1767,10 @@ class ChatService(
         }
         job.invokeOnCompletion { cause ->
             voiceGenerationJobs.remove(queued.id, job)
+            if (cause != null && !bodyEntered.get() && queued.orbisEventId == null &&
+                queued.voiceCallId == null) synchronized(session) {
+                session.messageQueue.retainUndispatched(queued)
+            }
             if (cause != null && !bodyEntered.get() && queued.orbisEventId != null) {
                 appScope.launch(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                     orbisEventDispatchMutex.withLock {
@@ -2145,11 +2105,15 @@ class ChatService(
                 })
                 val projected = if (handle.suffixCount == 0) projectedEditable else
                     projectedEditable.copy(messageNodes = projectedEditable.messageNodes + protectedSuffix)
-                val updated = me.rerere.rikkahub.data.model.withCommittedEventPresentation(
-                    me.rerere.rikkahub.data.model.withCommittedToolRecordEdits(projected, current), current)
+                val updated = withCommittedVoiceNotePlayed(me.rerere.rikkahub.data.model.withCommittedEventPresentation(
+                    me.rerere.rikkahub.data.model.withCommittedToolRecordEdits(projected, current), current), current)
                 withContext(Dispatchers.IO) {
                     generationJournal.checkpoint(handle, updated.assistantId, updated.compactionEpoch,
                         updated.messageNodes.drop(handle.prefixCount).dropLast(handle.suffixCount), transition)
+                }
+                voiceCallId?.let { callId ->
+                    voiceCalls.update(callId) { captureVoiceCallSource(it, updated, finished = false,
+                        capturedAtMs = System.currentTimeMillis()) }
                 }
                 // Only publish content after its bounded private tail is safely on disk.
                 updateConversation(conversationId, updated)
@@ -2400,6 +2364,9 @@ class ChatService(
             // Stream updates live in memory. A continuation can fail AFTER a real tool write,
             // so keep those results durably before releasing any following independent input.
             // This does not mark the event successful or replay its request/tools.
+            val independentFailure = !initialSession.messageQueue.state.value.paused &&
+                canContinueAfterIndependentModelFailure(it, initialConversation.currentMessages,
+                    initialSession.state.value.currentMessages, initialSession.generationRecoveryBlocked)
             val partialSnapshotSaved = try {
                 withContext(kotlinx.coroutines.NonCancellable) {
                     if (checkpointHandle != null || withContext(Dispatchers.IO) {
@@ -2407,7 +2374,8 @@ class ChatService(
                         }) {
                         initialSession.orbisPromptEditMutex.withLock {
                             val persisted = checkNotNull(conversationRepo.getConversationById(conversationId))
-                            val recovered = recoverGenerationCheckpoint(initialSession, persisted, it as? VoiceBargeInCancellation)
+                            val recovered = recoverGenerationCheckpoint(initialSession, persisted, it as? VoiceBargeInCancellation,
+                                preserveUnpausedQueueOnSafeFailure = independentFailure)
                             updateConversation(conversationId, recovered, restoreCommittedPrompt = true)
                             check(!initialSession.generationRecoveryBlocked)
                         }
@@ -2426,7 +2394,15 @@ class ChatService(
                 holdAutomaticWakes(initialSession, "partial_snapshot_not_saved")
                 false
             }
-            sessions[conversationId]?.messageQueue?.afterGenerationFailure(it, partialSnapshotSaved)
+            val mayContinue = partialSnapshotSaved && independentFailure &&
+                canContinueAfterIndependentModelFailure(it, initialConversation.currentMessages,
+                    initialSession.state.value.currentMessages, initialSession.generationRecoveryBlocked)
+            if (!mayContinue) sessions[conversationId]?.messageQueue?.afterGenerationFailure(it, partialSnapshotSaved)
+            voiceCallId?.let { id -> withContext(kotlinx.coroutines.NonCancellable) {
+                runCatching { snapshotVoiceCall(id, conversationId) }.onFailure {
+                    Log.w(TAG, "Voice source remains in generation journal; archive projection could not be updated")
+                }
+            } }
 
             if (it is CancellationException) throw it
 
@@ -2942,9 +2918,9 @@ class ChatService(
         }
         val beforeUpdate = session.state.value
         session.state.update { current ->
-            if (restoreCommittedPrompt) conversation else me.rerere.rikkahub.data.model.withCommittedEventPresentation(
+            if (restoreCommittedPrompt) conversation else withCommittedVoiceNotePlayed(me.rerere.rikkahub.data.model.withCommittedEventPresentation(
                 withCommittedOrbisPrompt(me.rerere.rikkahub.data.model.withCommittedToolRecordEdits(conversation, current), current), current,
-            )
+            ), current)
         }
         checkFilesDelete(session.state.value, beforeUpdate)
         }
@@ -3114,9 +3090,9 @@ class ChatService(
         // New forks/import-style sessions seed their inherited prompt. All subsequent
         // whole-state saves preserve the newest committed prompt, never a stale snapshot.
         val committed = if (session.isInitialized) session.state.value else conversation
-        val updatedConversation = me.rerere.rikkahub.data.model.withCommittedEventPresentation(
+        val updatedConversation = withCommittedVoiceNotePlayed(me.rerere.rikkahub.data.model.withCommittedEventPresentation(
             withCommittedOrbisPrompt(me.rerere.rikkahub.data.model.withCommittedToolRecordEdits(conversation, committed), committed), committed,
-        )
+        ), committed)
         val eventOwner = conversation.currentMessages.lastOrNull { it.role == MessageRole.USER }?.orbisEvent?.recordId
             ?.let { orbisEvents.inbox.get(it) }?.takeIf { it.conversationId == conversationId.toString() }
             ?.let { Uuid.parse(it.assistantId) }
@@ -3344,6 +3320,27 @@ class ChatService(
 
     suspend fun deleteToolRecord(conversationId: Uuid, messageId: Uuid, toolCallId: String) =
         editToolRecord(conversationId, me.rerere.rikkahub.data.model.OrbisToolRecordEdit(messageId, toolCallId, restore = false))
+
+    /** Narrow presentation edit. Do not invalidate a protected generation journal to mark playback. */
+    suspend fun saveVoiceNotePlayed(conversationId: Uuid,
+        edit: me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit, expectedAssistantId: Uuid? = null) {
+        sessions[conversationId]?.getJob()?.join()
+        withWritableHistory(conversationId) { session ->
+            val current = session.state.value
+            expectedAssistantId?.let { check(current.assistantId == it) { "语音条所属 AI 已改变，未修改。" } }
+            val node = current.messageNodes.singleOrNull { it.id == edit.nodeId } ?: return@withWritableHistory
+            val target = node.messages.singleOrNull { it.id == edit.messageId } ?: return@withWritableHistory
+            val changed = edit.applyTo(target)
+            if (changed === target) return@withWritableHistory
+            val updated = current.copy(messageNodes = current.messageNodes.map { item ->
+                if (item.id == node.id) item.copy(messages = item.messages.map { if (it.id == target.id) changed else it }) else item
+            })
+            withContext(kotlinx.coroutines.NonCancellable) {
+                conversationRepo.updateConversation(updated, requireExistingOwner = current.assistantId)
+                updateConversation(conversationId, updated)
+            }
+        }
+    }
 
     suspend fun restoreToolRecord(conversationId: Uuid, messageId: Uuid, toolCallId: String) =
         editToolRecord(conversationId, me.rerere.rikkahub.data.model.OrbisToolRecordEdit(messageId, toolCallId, restore = true))

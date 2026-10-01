@@ -78,12 +78,14 @@ fun Application.configureWebApi(
     filesManager: FilesManager
 ) {
     val jwtEnabled = settingsStore.settingsFlow.value.webServerJwtEnabled
-    val imports = if (jwtEnabled) WebDeepSeekImports(
+    val imports = WebDeepSeekImports(
         File(context.cacheDir.canonicalFile, "orbis-web-imports/${UUID.randomUUID()}"), conversationRepo, this,
         additionalFormats = mapOf("rikkahub" to WebRikkaArchiveFormat(RikkaChatImporter(context, conversationRepo, filesManager)),
-            "codex" to WebCodexArchiveFormat(conversationRepo)),
-    ) else null
-    if (imports != null) monitor.subscribe(ApplicationStopping) {
+            "codex" to WebCodexArchiveFormat(conversationRepo),
+            "operit" to WebOperitArchiveFormat(conversationRepo),
+            "kelivo" to WebKelivoArchiveFormat(me.rerere.rikkahub.data.sync.importer.KelivoChatImporter(context, conversationRepo))),
+    )
+    monitor.subscribe(ApplicationStopping) {
         runBlocking(Dispatchers.IO) { imports.close() }
     }
 
@@ -193,6 +195,8 @@ fun Application.configureWebApi(
                     deepSeekImportRoutes(requireNotNull(imports), settingsStore)
                     chatArchiveImportRoutes(imports, settingsStore, "rikkahub", "application/zip")
                     chatArchiveImportRoutes(imports, settingsStore, "codex", "application/x-ndjson")
+                    chatArchiveImportRoutes(imports, settingsStore, "operit", "application/json")
+                    chatArchiveImportRoutes(imports, settingsStore, "kelivo", "application/zip")
                 orbisContextRoutes(chatService, settingsStore)
                 orbisProfileRoutes(settingsStore)
                     conversationRoutes(chatService, conversationRepo, folderRepo, settingsStore)
@@ -203,6 +207,11 @@ fun Application.configureWebApi(
                     assetsRoutes(context)
                 }
             } else {
+                deepSeekImportRoutes(imports, settingsStore)
+                chatArchiveImportRoutes(imports, settingsStore, "rikkahub", "application/zip")
+                chatArchiveImportRoutes(imports, settingsStore, "codex", "application/x-ndjson")
+                chatArchiveImportRoutes(imports, settingsStore, "operit", "application/json")
+                chatArchiveImportRoutes(imports, settingsStore, "kelivo", "application/zip")
                 conversationRoutes(chatService, conversationRepo, folderRepo, settingsStore)
                 folderRoutes(chatService, folderRepo, settingsStore)
                 eventsRoutes(chatService, conversationRepo, folderRepo, settingsStore)

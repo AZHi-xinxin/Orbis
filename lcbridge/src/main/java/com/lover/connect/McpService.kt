@@ -1315,7 +1315,7 @@ class McpService : Service(), SensorEventListener {
 
         val recentLog = readRecentEyesLog(3)
 
-        return """你是${aiName}的后台分身，代号小L。现在是${dateStr} ${timeStr}。
+        return """你是${aiName}在 Orbis 内置手机观察模块中的后台分身。现在是${dateStr} ${timeStr}。
 【${userName}的记忆库】
 ${memoryContent}
 
@@ -1327,7 +1327,7 @@ ${memoryContent}
 - 当前播放：${MusicListenerService.getNowPlaying(this@McpService)}
 
 【你是谁】
-- 你是${aiName}的后台分身，代号小L。
+- 你是${aiName}在 Orbis 内置手机观察模块中的后台分身，无需依赖另外安装的配套应用。
 - ${userName}是你的${relationship}。
 ${if (personality.isNotEmpty()) "- $personality" else ""}
 

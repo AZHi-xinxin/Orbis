@@ -12,6 +12,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageQueueTest {
+    @Test fun `failed preflight restores exact input before later items and preserves pause`() {
+        val queue = MessageQueue()
+        queue.enqueue(listOf(UIMessagePart.Text("first")))
+        queue.enqueue(listOf(UIMessagePart.Text("second")))
+        val first = queue.takeNext()!!
+        val second = queue.state.value.messages.single()
+        queue.retainUndispatched(first)
+        assertEquals(listOf(first, second), queue.state.value.messages)
+        assertTrue(queue.state.value.paused)
+        assertNull(queue.takeNext())
+        queue.retainUndispatched(first)
+        assertEquals(listOf(first, second), queue.state.value.messages)
+        queue.resume()
+        assertEquals(first, queue.takeNext())
+    }
     private fun text(value: String) = listOf(UIMessagePart.Text(value))
 
     private fun emptyFailure() = KnownEmptyCompletionFailure.classify(

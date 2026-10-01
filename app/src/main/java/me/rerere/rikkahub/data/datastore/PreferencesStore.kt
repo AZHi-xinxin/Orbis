@@ -102,6 +102,8 @@ class SettingsStore(
         val OCR_MODEL = stringPreferencesKey("ocr_model")
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
+        val ORBIS_VOICE_ARCHIVE_MODEL = stringPreferencesKey("orbis_voice_archive_model")
+        val ORBIS_VOICE_ARCHIVE_FALLBACK_MODEL = stringPreferencesKey("orbis_voice_archive_fallback_model")
         val COMPRESS_PROMPT = stringPreferencesKey("compress_prompt")
 
         // 提供商
@@ -134,6 +136,7 @@ class SettingsStore(
 
         // ASR
         val ASR_PROVIDERS = stringPreferencesKey("asr_providers")
+        val ASR_TERM_CORRECTIONS = stringPreferencesKey("asr_term_corrections")
         val SELECTED_ASR_PROVIDER = stringPreferencesKey("selected_asr_provider")
 
         // Web Server
@@ -186,6 +189,10 @@ class SettingsStore(
                 preferences[OCR_MODEL] = settings.ocrModelId.toString()
                 preferences[OCR_PROMPT] = settings.ocrPrompt
                 preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
+                settings.orbisVoiceArchiveModelId?.let { preferences[ORBIS_VOICE_ARCHIVE_MODEL] = it.toString() }
+                    ?: preferences.remove(ORBIS_VOICE_ARCHIVE_MODEL)
+                settings.orbisVoiceArchiveFallbackModelId?.let { preferences[ORBIS_VOICE_ARCHIVE_FALLBACK_MODEL] = it.toString() }
+                    ?: preferences.remove(ORBIS_VOICE_ARCHIVE_FALLBACK_MODEL)
                 preferences[COMPRESS_PROMPT] = settings.compressPrompt
 
                 preferences[PROVIDERS] = JsonInstant.encodeToString(settings.providers)
@@ -208,6 +215,7 @@ class SettingsStore(
                 preferences[DEFAULT_TTS_PLAYBACK_SPEED] = settings.defaultTTSPlaybackSpeed.coerceIn(0.5f, 2.0f)
                 preferences[ORBIS_CONTACT] = JsonInstant.encodeToString(settings.orbisContact.normalized())
                 preferences[ASR_PROVIDERS] = JsonInstant.encodeToString(settings.asrProviders)
+                preferences[ASR_TERM_CORRECTIONS] = JsonInstant.encodeToString(settings.asrCorrections)
                 settings.selectedASRProviderId?.let {
                     preferences[SELECTED_ASR_PROVIDER] = it.toString()
                 } ?: preferences.remove(SELECTED_ASR_PROVIDER)
@@ -258,6 +266,8 @@ class SettingsStore(
                 ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
+                orbisVoiceArchiveModelId = preferences[ORBIS_VOICE_ARCHIVE_MODEL]?.let { Uuid.parse(it) },
+                orbisVoiceArchiveFallbackModelId = preferences[ORBIS_VOICE_ARCHIVE_FALLBACK_MODEL]?.let { Uuid.parse(it) },
                 compressPrompt = preferences[COMPRESS_PROMPT] ?: DEFAULT_COMPRESS_PROMPT,
                 assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
                     ?: DEFAULT_ASSISTANT_ID,
@@ -301,6 +311,8 @@ class SettingsStore(
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
                 selectedASRProviderId = preferences[SELECTED_ASR_PROVIDER]?.let { Uuid.parse(it) },
+                asrCorrections = JsonInstant.decodeFromString<me.rerere.asr.ASRTermCorrectionSettings>(
+                    preferences[ASR_TERM_CORRECTIONS] ?: "{}"),
                 modeInjections = preferences[MODE_INJECTIONS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -600,6 +612,9 @@ data class Settings(
     val ocrModelId: Uuid = Uuid.random(),
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
     val compressModelId: Uuid = Uuid.random(),
+    // Explicit opt-in; never inherit the active chat or the generic fast model.
+    val orbisVoiceArchiveModelId: Uuid? = null,
+    val orbisVoiceArchiveFallbackModelId: Uuid? = null,
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
     val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
@@ -616,6 +631,7 @@ data class Settings(
     val defaultTTSPlaybackSpeed: Float = 1.0f,
     val orbisContact: OrbisContactPreferences = OrbisContactPreferences(),
     val asrProviders: List<ASRProviderSetting> = emptyList(),
+    val asrCorrections: me.rerere.asr.ASRTermCorrectionSettings = me.rerere.asr.ASRTermCorrectionSettings(),
     val selectedASRProviderId: Uuid? = null,
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),

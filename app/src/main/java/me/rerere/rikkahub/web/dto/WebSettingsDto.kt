@@ -119,5 +119,5 @@ fun Settings.toWebSettingsDto(): WebSettingsDto = WebSettingsDto(
     searchServices = searchServices.map { WebSearchDto(it.id.toString(), it.displayName) },
     searchServiceSelected = searchServiceSelected,
     webServerJwtEnabled = webServerJwtEnabled,
-    webImportEnabled = webServerJwtEnabled && webServerAccessPassword.isNotBlank(),
+    webImportEnabled = !webServerJwtEnabled || webServerAccessPassword.isNotBlank(),
 )

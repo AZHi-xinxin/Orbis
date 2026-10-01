@@ -148,7 +148,7 @@ export function appendWebAuthQuery(url: string): string {
  * API client with unwrapped response data
  */
 const api = {
-  async uploadImport<T>(url: string, file: File, contentType: "application/zip" | "application/x-ndjson", options?: Options): Promise<T> {
+  async uploadImport<T>(url: string, file: File, contentType: "application/zip" | "application/x-ndjson" | "application/json", options?: Options): Promise<T> {
     try {
       const headers = new Headers();
       const entries = options?.headers instanceof Headers || Array.isArray(options?.headers)

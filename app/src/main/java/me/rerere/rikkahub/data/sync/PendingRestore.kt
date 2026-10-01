@@ -44,6 +44,9 @@ internal class PendingRestore(
             Json.decodeFromString<List<RestoreEntry>>(journal.readText())
         } else {
             try {
+                // Merge only the two explicitly supported local libraries, before any live move.
+                // Old backups lacking these exact entries leave both local libraries untouched.
+                OrbisLocalToolBackup.prepareBeforeJournal(File(pending, "payload"), filesDir)
                 buildEntries().also { writeDurably(journal, Json.encodeToString(it)) }
             } catch (e: Exception) {
                 // No live files have been changed yet, so this restore can be safely rejected.
@@ -94,6 +97,9 @@ internal class PendingRestore(
         val entries = paths.map { path ->
             RestoreEntry(path, install = true, hadOriginal = targetFile(path).exists())
         }.toMutableList()
+        OrbisLocalToolBackup.sidecarPaths(paths.toSet()).forEach { path ->
+            entries.add(0, RestoreEntry(path, install = false, hadOriginal = targetFile(path).exists()))
+        }
         if (paths.contains("database/${databaseFile.name}")) {
             // The new database is standalone. Keep the old DB's sidecars with the old DB only.
             for (suffix in listOf("-wal", "-shm", "-journal")) {
@@ -165,4 +171,6 @@ internal class PendingRestore(
 }
 
 /** Only thrown when original files are intact and the failed import has been isolated. */
-internal class RestoreFailedException(cause: Exception) : Exception("Backup restore failed; original files restored", cause)
+internal class RestoreFailedException(cause: Exception) : Exception(
+    OrbisLocalToolBackup.publicError(cause.message) ?: "Backup restore failed; original files restored", cause,
+)

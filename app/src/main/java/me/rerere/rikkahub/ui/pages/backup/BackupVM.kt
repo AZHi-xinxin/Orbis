@@ -44,12 +44,30 @@ class BackupVM(
     val webDavBackupItems = MutableStateFlow<UiState<List<WebDavBackupItem>>>(UiState.Idle)
     val s3BackupItems = MutableStateFlow<UiState<List<S3BackupItem>>>(UiState.Idle)
     val localBackupItems = MutableStateFlow(WebDavConfig.BackupItem.entries.toList())
-    val deepSeekImport = DeepSeekImportController(context, viewModelScope, conversationRepository) {
+    private fun importAssistantName(id: kotlin.uuid.Uuid): String? = settingsStore.settingsFlow.value.let {
+        if (it.init) null else it.assistants.firstOrNull { assistant -> assistant.id == id }?.name
+    }
+    val deepSeekImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        assistantName = ::importAssistantName) {
+        check(!settings.value.init)
+        settings.value.assistantId
+    }
+
+    val operitImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        source = ChatArchiveSource.OPERIT, assistantName = ::importAssistantName) {
+        check(!settings.value.init)
+        settings.value.assistantId
+    }
+
+    val kelivoImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        source = ChatArchiveSource.KELIVO, assistantName = ::importAssistantName) {
         check(!settings.value.init)
         settings.value.assistantId
     }
 
     override fun onCleared() {
+        kelivoImport.close()
+        operitImport.close()
         deepSeekImport.close()
         super.onCleared()
     }

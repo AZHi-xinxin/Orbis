@@ -51,6 +51,8 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.OrbisEventPresentationEdit
+import me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit
+import me.rerere.rikkahub.data.model.voiceNotePlaybackKey
 import me.rerere.rikkahub.data.model.appearanceForStyle
 import me.rerere.rikkahub.data.orbis.GARDEN_QUICK_CHAT_MAX_TEXT_BYTES
 import me.rerere.rikkahub.data.orbis.canClearGardenQuickChatDraft
@@ -60,6 +62,8 @@ import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
 import me.rerere.rikkahub.ui.components.message.MessagePartsBlock
 import me.rerere.rikkahub.ui.components.message.OrbisChatMessageLayout
 import me.rerere.rikkahub.ui.components.message.OrbisEventMessageCard
+import me.rerere.rikkahub.ui.components.message.OrbisVoiceNoteRows
+import me.rerere.rikkahub.ui.components.message.orbisVoiceNoteDisplay
 import me.rerere.rikkahub.ui.components.message.rememberChatMessageTextStyle
 import me.rerere.rikkahub.ui.components.richtext.LocalImportedHistory
 import me.rerere.rikkahub.ui.components.richtext.isDeepSeekHistory
@@ -307,6 +311,16 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
                             loading = job != null && node == nodes.lastOrNull(),
                             onToolApproval = { tool, allowed, reason, remembered -> approve(tool, allowed, reason, remembered) },
                             onToolAnswer = { tool, answer -> approve(tool, true, answer = answer) },
+                            onVoiceNotePlayed = { partIndex, outputIndex, playbackKey ->
+                                scope.launch {
+                                    try {
+                                        service.requireGardenQuickChatTarget(id, owner)
+                                        service.saveVoiceNotePlayed(id, OrbisVoiceNotePlayedEdit(node.id, message.id,
+                                            partIndex, outputIndex, playbackKey), expectedAssistantId = owner)
+                                    } catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (_: Exception) { notice = "语音已播放，但已听标记未确认保存。" }
+                                }
+                            },
                             onEventPresentation = { metadata ->
                                 service.requireGardenQuickChatTarget(id, owner)
                                 service.saveOrbisEventPresentation(id, OrbisEventPresentationEdit(
@@ -363,6 +377,7 @@ internal fun GardenQuickChatMessage(
     onToolAnswer: ((String, String) -> Unit)? = null,
     onEventPresentation: (suspend (OrbisEventMetadata) -> Unit)? = null,
     onEventOpacityChange: (suspend (Float) -> Unit)? = null,
+    onVoiceNotePlayed: ((Int, Int?, String) -> Unit)? = null,
 ) {
     val appearance = LocalSettings.current.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val segmented = BuildConfig.ORBIS_ENABLED && message.role == MessageRole.ASSISTANT && appearance.chatFlow.enabled
@@ -377,19 +392,26 @@ internal fun GardenQuickChatMessage(
         }
         return
     }
-    val content = @Composable {
+    val content: @Composable (List<UIMessagePart>) -> Unit = { displayedParts ->
         CompositionLocalProvider(LocalImportedHistory provides message.parts.isDeepSeekHistory()) {
             ProvideTextStyle(textStyle) {
-                MessagePartsBlock(assistant, message.role, model, message.parts, message.annotations,
+                MessagePartsBlock(assistant, message.role, model, displayedParts, message.annotations,
                     loading = loading, segmentedReply = segmented, messageKey = message.id.toString(),
                     onToolApproval = onToolApproval, onToolAnswer = onToolAnswer,
-                    deletedCitationTools = message.deletedToolRecords.map { it.tool })
+                    deletedCitationTools = message.parts.filterIsInstance<UIMessagePart.Tool>() + message.deletedToolRecords.map { it.tool })
             }
         }
     }
-    if (BuildConfig.ORBIS_ENABLED && !message.parts.isEmptyUIMessage()) {
-        OrbisChatMessageLayout(message, model, assistant, loading, segmented, content)
-    } else content()
+    val voiceRows = remember(message.parts, message.role) {
+        if (message.role == MessageRole.ASSISTANT) message.parts.orbisVoiceNoteDisplay() else null
+    }
+    if (voiceRows != null) {
+        OrbisVoiceNoteRows(message, voiceRows, model, assistant, loading, segmented,
+            onPlayed = { row -> onVoiceNotePlayed?.invoke(row.partIndex, row.outputIndex,
+                row.audio.voiceNotePlaybackKey(message.id.toString(), row.occurrenceKey)) }, renderParts = content)
+    } else if (BuildConfig.ORBIS_ENABLED && !message.parts.isEmptyUIMessage()) {
+        OrbisChatMessageLayout(message, model, assistant, loading, segmented) { content(message.parts) }
+    } else content(message.parts)
 }
 
 /** The main composer's palette, opacity and shape; a small text-only input, not a second ChatInputState. */

@@ -22,15 +22,16 @@ class OrbisVoiceArchiveRequestTest {
     private val conversation = Conversation(assistantId = assistant.id,
         messageNodes = listOf(UIMessage.user("unrelated-current-chat-secret").toMessageNode()))
     private fun settings() = Settings(assistantId = assistant.id, assistants = listOf(assistant),
-        chatModelId = model.id, providers = listOf(ProviderSetting.OpenAI(models = listOf(model))))
+        chatModelId = model.id, orbisVoiceArchiveModelId = model.id,
+        providers = listOf(ProviderSetting.OpenAI(models = listOf(model))))
     private fun record() = OrbisVoiceCallRecord("call-1", conversation.id.toString(), assistant.id.toString(), 1000,
         modelId = model.id.toString(), connectedAtMs = 1100, endedAtMs = 2000, durationMs = 900,
         status = OrbisVoiceCallStatus.INTERRUPTED, archiveStatus = OrbisVoiceArchiveStatus.FAILED,
         transcript = listOf(OrbisVoiceTranscriptEntry("turn-1", "USER", "原来的通话内容", 1500),
             OrbisVoiceTranscriptEntry("turn-2", "TOOL", "已成功的工具回执，不要重发", 1600)),
-        sourceNodesJson = "synthetic-exact-source-kept-locally")
+        sourceNodesJson = "[]")
 
-    @Test fun `manual archive uses original assistant and exact original model without current chat history`() {
+    @Test fun `manual archive uses explicitly selected model without either private persona or current history`() {
         val other = Assistant(name = "other AI", systemPrompt = "foreign persona")
         val otherModel = Model(modelId = "different-model")
         val selected = settings().copy(assistantId = other.id, assistants = listOf(assistant.copy(chatModelId = otherModel.id), other),
@@ -40,12 +41,12 @@ class OrbisVoiceArchiveRequestTest {
         assertEquals(model.modelId, request.params.model.modelId)
         assertEquals(listOf(MessageRole.SYSTEM, MessageRole.USER), request.messages.map { it.role })
         val text = request.messages.joinToString { it.toText() }
-        assertTrue(text.contains("original persona"))
+        assertFalse(text.contains("original persona"))
         assertFalse(text.contains("foreign persona"))
         assertFalse(text.contains("unrelated-current-chat-secret"))
         assertFalse(text.contains("synthetic-exact-source-kept-locally"))
         assertTrue(text.contains("原来的通话内容"))
-        assertTrue(text.contains("已成功的工具回执"))
+        assertFalse(text.contains("已成功的工具回执"))
         assertTrue(request.messages.last().isSynthetic)
         assertTrue(Json.parseToJsonElement(request.messages.last().toText()).jsonObject.containsKey("captured_transcript"))
     }
@@ -60,27 +61,28 @@ class OrbisVoiceArchiveRequestTest {
         assertTrue(request.params.tools.isEmpty())
         assertTrue(request.params.model.tools.isEmpty())
         assertTrue(request.params.model.customBodies.isEmpty())
-        assertEquals(listOf("temperature"), request.params.customBody.map { it.key })
+        assertTrue(request.params.customBody.isEmpty())
         assertTrue(request.params.customHeaders.isEmpty())
         assertNull(request.params.sessionId)
         assertNull(request.params.orbisConversationId)
         assertEquals(0, request.params.maxAutomaticContinuations)
     }
 
-    @Test fun `missing or replaced model never falls back to selected helper`() {
+    @Test fun `missing explicit model never inherits active chat model and old record model is not required`() {
         val other = Model(modelId = "helper")
         val changed = settings().copy(chatModelId = other.id,
             providers = listOf(ProviderSetting.OpenAI(models = listOf(other))))
         assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record(), conversation, changed) }
-        assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record().copy(modelId = null), conversation, settings()) }
-        assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record().copy(modelId = "invalid-id"), conversation, settings()) }
+        assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record(), conversation, settings().copy(orbisVoiceArchiveModelId = null)) }
+        assertEquals(model.id, prepareIsolatedVoiceArchive(record().copy(modelId = null), conversation, settings()).params.model.id)
+        assertEquals(model.id, prepareIsolatedVoiceArchive(record().copy(modelId = "old-deleted-model"), conversation, settings()).params.model.id)
     }
 
     @Test fun `active unconnected missing owner and missing raw source cannot request manual archive`() {
         assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record().copy(status = OrbisVoiceCallStatus.ACTIVE), conversation, settings()) }
         assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record().copy(connectedAtMs = null), conversation, settings()) }
         assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record(), conversation.copy(assistantId = Assistant().id), settings()) }
-        assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record(), conversation, settings().copy(assistants = emptyList())) }
+        assertEquals(model.id, prepareIsolatedVoiceArchive(record(), conversation, settings().copy(assistants = emptyList())).params.model.id)
         assertThrows(IllegalStateException::class.java) { prepareIsolatedVoiceArchive(record().copy(transcript = emptyList()), conversation, settings()) }
     }
 
@@ -94,5 +96,16 @@ class OrbisVoiceArchiveRequestTest {
         assertFalse(prompt.startsWith(OrbisVoiceCallProtocol.CALL_MODE_PREFIX))
         assertThrows(IllegalArgumentException::class.java) { incomingVoiceOpeningForModel("../unsafe", "reason") }
         assertThrows(IllegalArgumentException::class.java) { incomingVoiceOpeningForModel("call-1", "a".repeat(2001)) }
+    }
+
+    @Test fun `direct archive preparation cannot silently use a best effort UI transcript`() {
+        val damaged = record().copy(sourceNodesJson = "[{\"synthetic\":true}]")
+        assertTrue(voiceCallTranscriptView(damaged).sourceUnavailable)
+        assertTrue(voiceCallReadableTranscript(damaged).isNotEmpty())
+        val failure = assertThrows(VoiceArchiveFailure::class.java) {
+            prepareIsolatedVoiceArchive(damaged, conversation, settings())
+        }
+        assertEquals("archive_source_unreadable", failure.safeCode)
+        assertNull(failure.cause)
     }
 }

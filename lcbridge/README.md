@@ -1,4 +1,11 @@
-# Orbis embedded LC
+# Orbis embedded phone and companion module
+
+This module is already built into Orbis. Users do not need to install a separate
+companion application or configure an extra MCP connection for its native tools.
+Android permissions and any explicitly selected external model/service remain
+separate requirements. The historical names below document source provenance
+and compatibility; they are not installation dependencies. Original copyrights,
+licenses and notices are retained.
 
 This library mechanically imports the complete Java/Kotlin source and JVM tests
 of the private LC 2.4.3-personal (versionCode 15) Android application, then adapts

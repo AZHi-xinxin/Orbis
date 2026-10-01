@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import me.rerere.asr.ASRController
+import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
@@ -51,6 +52,8 @@ class VolcengineASRController(
     private val provider: ASRProviderSetting.Volcengine,
     private val enableEchoCancellation: Boolean = false,
 ) : ASRController {
+    private val pcmObserver = ASRPcmObserver()
+    override fun setPcmObserver(observer: ((ByteArray, Int) -> Unit)?) = pcmObserver.set(observer)
     override val supportsConcurrentPlayback: Boolean = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -140,11 +143,13 @@ class VolcengineASRController(
     }
 
     override fun pauseCapture() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         releaseRecorder()
     }
 
     override fun stop() {
+        pcmObserver.set(null)
         if (state.value.status == ASRStatus.Stopping) return
         val wasListening = state.value.status == ASRStatus.Listening
         val recording = recorderJob
@@ -176,6 +181,7 @@ class VolcengineASRController(
     }
 
     override fun dispose() {
+        pcmObserver.set(null)
         pauseCapture()
         finishJob?.cancel()
         val socket = webSocket
@@ -209,6 +215,7 @@ class VolcengineASRController(
 
     @SuppressLint("MissingPermission")
     private fun startRecorder(socket: WebSocket) {
+        val pcmEpoch = pcmObserver.captureEpoch()
         recorderJob?.cancel()
         releaseRecorder()
         recorderJob = scope.launch(Dispatchers.IO) {
@@ -246,6 +253,7 @@ class VolcengineASRController(
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        pcmObserver.emit(pcmEpoch, buffer, read, SAMPLE_RATE)
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
                         if (socket.queueSize() < MAX_WEBSOCKET_QUEUE_BYTES) {
@@ -283,6 +291,7 @@ class VolcengineASRController(
     }
 
     private fun setError(message: String) {
+        pcmObserver.set(null)
         pauseCapture()
         finishJob?.cancel()
         val socket = webSocket

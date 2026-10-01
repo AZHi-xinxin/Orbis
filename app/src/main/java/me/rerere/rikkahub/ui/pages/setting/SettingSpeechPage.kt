@@ -71,6 +71,7 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.pages.setting.components.ASRProviderConfigure
+import me.rerere.rikkahub.ui.pages.setting.components.AsrTermCorrectionConfigure
 import me.rerere.rikkahub.ui.pages.setting.components.TTSProviderConfigure
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.utils.plus
@@ -151,12 +152,19 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
                 )
             }
 
-            1 -> ASRProviderList(
-                settings = settings,
-                onUpdateSettings = vm::updateSettings,
-                onEdit = { editingASRProvider = it },
-                modifier = Modifier.padding(innerPadding)
-            )
+            1 -> Column(modifier = Modifier.padding(innerPadding)) {
+                AsrTermCorrectionConfigure(
+                    value = settings.asrCorrections,
+                    onSave = { vm.updateSettings(settings.copy(asrCorrections = it)) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                ASRProviderList(
+                    settings = settings,
+                    onUpdateSettings = vm::updateSettings,
+                    onEdit = { editingASRProvider = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 

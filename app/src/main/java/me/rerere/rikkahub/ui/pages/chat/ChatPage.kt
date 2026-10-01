@@ -242,7 +242,7 @@ fun ChatPage(
         setting.getAssistantById(conversation.assistantId), vm.voiceCalls,
         currentConversationId = conversation.id,
         summaryCallIds = conversation.messageNodes.mapNotNull { node ->
-            node.currentMessage.takeIf { it.orbisVoiceCallKind == "summary" }?.orbisVoiceCallId
+            node.currentMessage.takeIf { it.orbisVoiceCallKind != null }?.orbisVoiceCallId
         }.toSet())
 
     val inputState = vm.inputState
@@ -283,7 +283,7 @@ fun ChatPage(
                 val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
                 if (index >= 0) {
                     bottomFollowState.stopForNavigation()
-                    chatListState.scrollToItem(index)
+                    chatListState.scrollToItem(orbisTimelineIndex(conversation.messageNodes, index, BuildConfig.ORBIS_ENABLED))
                 }
             } else {
                 bottomFollowState.followBottom()
@@ -711,6 +711,7 @@ private fun ChatPageContent(
                 onUpdateMessage = { newNode ->
                     vm.selectMessageNode(newNode.id, newNode.selectIndex)
                 },
+                onVoiceNotePlayed = vm::saveVoiceNotePlayed,
                 onClickSuggestion = { suggestion ->
                     inputState.editingMessage = null
                     inputState.setMessageText(suggestion)
@@ -725,7 +726,7 @@ private fun ChatPageContent(
                     bottomFollowState.stopForNavigation()
                     previewMode = false
                     scope.launch {
-                        chatListState.requestScrollToItem(index)
+                        chatListState.requestScrollToItem(orbisTimelineIndex(conversation.messageNodes, index, BuildConfig.ORBIS_ENABLED))
                     }
                 },
                 onToolApproval = { toolCallId, approved, reason, remember ->

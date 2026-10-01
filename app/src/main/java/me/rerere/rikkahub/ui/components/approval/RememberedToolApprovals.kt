@@ -42,7 +42,7 @@ fun RememberedToolApprovals(assistantId: String, approvalStore: ToolApprovalStor
                     }
                 })
         }
-        Text("开启后，当前 AI 的本地、LC、Toy、云端、MCP 和工作区工具不再逐次确认，包括写入、锁应用等操作；之后你手动启用或更新的工具也适用。不会自动启用工具、授予手机系统权限或配置云端凭证，也不会代答需要你实际输入的提问。", style = MaterialTheme.typography.bodySmall)
+        Text("开启后，当前 AI 的本地、手机与陪伴、Toy、云端、MCP 和工作区工具不再逐次确认，包括写入、锁应用等操作；之后你手动启用或更新的工具也适用。不会自动启用工具、授予手机系统权限或配置云端凭证，也不会代答需要你实际输入的提问。", style = MaterialTheme.typography.bodySmall)
         Text("只对当前 AI、本机安装生效；其他 AI 不受影响。工具目标、连接、参数旧批准仍会核验。打开开关不会自行执行之前等待中的调用；关闭不影响已经开始的操作。", style = MaterialTheme.typography.bodySmall)
         Text("关闭总开关后，单项「以后允许」仍保留；要一起取消请用下面的「撤销全部」。MCP／工作区原配置的免审批仍需在原设置关闭。", style = MaterialTheme.typography.bodySmall)
         if (allowAll) Text("全开已启用；下方单项记录暂不决定是否弹出审批，关闭总开关后可逐项管理。", style = MaterialTheme.typography.bodySmall)

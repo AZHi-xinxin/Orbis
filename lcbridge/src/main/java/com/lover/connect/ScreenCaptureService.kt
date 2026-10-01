@@ -141,7 +141,7 @@ class ScreenCaptureService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "小L屏幕观察",
+                "Orbis 屏幕观察",
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
@@ -162,7 +162,7 @@ class ScreenCaptureService : Service() {
         }
         return builder
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("小L屏幕观察已授权")
+            .setContentTitle("Orbis 屏幕观察已授权")
             .setContentText("Android 10 截屏会话正在运行，点此返回 Orbis")
             .setContentIntent(pendingIntent)
             .setOngoing(true)

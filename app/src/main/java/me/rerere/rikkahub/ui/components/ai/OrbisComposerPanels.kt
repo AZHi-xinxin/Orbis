@@ -112,11 +112,16 @@ internal fun OrbisVoicePanel(
     onSpeak: () -> Unit,
     onStopSpeaking: () -> Unit,
     onConfigure: () -> Unit,
+    onVoiceNote: (() -> Unit)? = null,
+    canRecordNote: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth().heightIn(max = 224.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(5.dp)) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
         Text("语音与朗读", fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold)
+        if (onVoiceNote != null) OutlinedButton(onClick = onVoiceNote,
+            enabled = canRecognize && canRecordNote && !busy && !recording && !voiceActive,
+            modifier = Modifier.fillMaxWidth()) { Text("发送语音条 · 录音后加入草稿") }
         Text("语音输入先转成草稿。语音通话会自动发送并朗读回复，需主动开启；收起通话界面不会挂断。全局自动朗读：${if (autoRead) "开" else "关"}。",
             fontSize = 10.sp, lineHeight = 15.sp, color = OrbisTheme.colors.mutedInk)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

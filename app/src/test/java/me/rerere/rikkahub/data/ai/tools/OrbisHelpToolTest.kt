@@ -141,7 +141,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/19", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/20", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)
@@ -181,8 +181,8 @@ class OrbisHelpToolTest {
         assertEquals(first.parameters(), second.parameters())
         assertTrue(first.description.length < 180)
         val schema = first.parameters() as InputSchema.Obj
-        assertEquals(setOf("topic"), schema.properties.keys)
-        assertEquals(listOf("overview", "tools", "permissions", "limits", "local_tools"),
+        assertEquals(setOf("topic", "query", "chapter", "offset", "limit"), schema.properties.keys)
+        assertEquals(listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide"),
             schema.properties.getValue("topic").jsonObject.getValue("enum").jsonArray.map { it.jsonPrimitive.content })
     }
 
@@ -233,7 +233,7 @@ class OrbisHelpToolTest {
         assertTrue(limits.getValue("techhub_native_ui").jsonPrimitive.content.contains("dedicated_credential"))
         assertTrue(limits.getValue("native_st_star_map").jsonPrimitive.content.contains("remote_health_not_checked"))
         assertEquals("available_when_explicitly_bound_and_server_cutover_verified", limits.getValue("sentinel").jsonPrimitive.content)
-        assertEquals("available_read_only_in_orbis_debug", limits.getValue("human_manual_ui_entry").jsonPrimitive.content)
+        assertEquals("available_read_only_in_orbis", limits.getValue("human_manual_ui_entry").jsonPrimitive.content)
         assertEquals("ai_authored_compact_in_current_full_conversation_run; metadata_history; latest_only_rollback; no_auto_summary_or_forced_compaction", limits.getValue("reversible_context_compression").jsonPrimitive.content)
     }
 
@@ -376,7 +376,8 @@ class OrbisHelpToolTest {
         // private notification speech, local ringtones, and Web/import boundaries in v15;
         // v16 adds local-gain mute, scoped hangup, free opening and isolated archive safety.
         // It is never automatically injected; per-topic tool response budgets stay unchanged.
-        assertTrue("Human-only manual length=${manual.toString().length}", manual.toString().length < 14000)
+        // v20 adds local schedule, voice-note and kaomoji categories. Full chapters remain separate.
+        assertTrue("Human-only manual length=${manual.toString().length}", manual.toString().length < 16000)
     }
 
     @Test fun `calendar and call notes distinguish conditional barge in from actual device validation`() {
@@ -491,7 +492,7 @@ class OrbisHelpToolTest {
         assertTrue(scope.contains("不宣称已部署或已迁移"))
         assertTrue(scope.contains("未知回执不可自动重投"))
         val tested = limits.getValue("user_validation_notes").jsonPrimitive.content
-        listOf("日历提醒", "LC 调用", "通话短停顿", "不读取实时状态").forEach { assertTrue(tested.contains(it)) }
+        listOf("日历提醒", "内置手机工具调用", "通话短停顿", "不读取实时状态", "Operit 思考内容导入仍待修复", "端到端自更新尚未真机验收").forEach { assertTrue(tested.contains(it)) }
         assertFalse(content(help, "overview").getValue("not_integrated").jsonArray.any { it.jsonPrimitive.content == "哨兵" })
         assertFalse(run(help, topic("limits")).getValue("remote_health_checked").jsonPrimitive.boolean)
         assertEquals(limits, orbisPublicStaticManual().getValue("limits"))

@@ -7,6 +7,22 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class WebRequestPolicyTest {
+    @Test fun passwordFreeImportsDoNotRequireAPasswordOrLogin() {
+        assertTrue(canAccessSensitiveWebRoute(false, false, false, null, true))
+        assertTrue(canAccessSensitiveWebRoute(false, true, false, null, true))
+    }
+    @Test fun passwordFreeModeDoesNotOpenOtherSensitiveRoutes() {
+        assertFalse(canAccessSensitiveWebRoute(false, false, false, null, false))
+        assertFalse(canAccessSensitiveWebRoute(false, true, true, "synthetic", false))
+    }
+    @Test fun enabledPasswordStillRequiresRealLoginAndHeaderForImports() {
+        assertFalse(canAccessSensitiveWebRoute(true, false, true, "synthetic", true))
+        assertFalse(canAccessSensitiveWebRoute(true, true, false, "synthetic", true))
+        assertFalse(canAccessSensitiveWebRoute(true, true, true, null, true))
+        assertFalse(canAccessSensitiveWebRoute(true, true, true, " ", true))
+        assertTrue(canAccessSensitiveWebRoute(true, true, true, "synthetic", true))
+        assertTrue(canAccessSensitiveWebRoute(true, true, true, "synthetic", false))
+    }
     @Test fun sensitiveRequestsRequireNonemptyHeaderBearerEvenIfQueryAuthenticationSucceeded() {
         for (header in listOf(null, "", "Bearer", "Bearer ", "Bearer     ", "Bearer \t", "Basic synthetic")) {
             assertNull(sensitiveWebBearer(header))

@@ -48,6 +48,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.orbis.voice.*
 import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
+import me.rerere.rikkahub.ui.components.ai.AsrCorrectionReview
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -126,6 +127,15 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                         if (voice.transcript.isNotBlank()) Text(voice.transcript,
                             modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
                             color = cream.copy(alpha = .6f), fontSize = 13.sp)
+                        key(call.callId) {
+                            AsrCorrectionReview(
+                                review = voice.correctionNotice.review,
+                                eventId = voice.correctionNotice.eventId,
+                                dismissed = voice.correctionNotice.dismissed,
+                                onDismiss = { runtime.voiceSession.dismissCorrectionNotice(voice.correctionNotice.eventId) },
+                                contentColor = cream,
+                            )
+                        }
                         if (voice.lastReplyText.isNotBlank()) Surface(
                             shape = RoundedCornerShape(16.dp), color = cream.copy(alpha = .06f),
                         ) {
@@ -255,7 +265,7 @@ internal fun OrbisVoiceCallReturnDialog(phase: OrbisVoiceReturnPhase, onDismiss:
                             modifier = Modifier.width(180.dp), textColor = colors.onDock)
                         Text(if (failed) "通话已结束" else "正在回到聊天", color = colors.onDock, fontSize = 25.sp)
                         Text(if (failed) "记录尚未整理完成，可到「通话记录」查看详情和已保存的内容。"
-                            else "本次通话记录整理完成后，将自动返回。", color = colors.onDock.copy(alpha = .75f),
+                            else "正在准备本次通话记录。可以先返回聊天，原文会保留，归档在后台独立处理。", color = colors.onDock.copy(alpha = .75f),
                             fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         Text("麦克风已关闭", color = colors.onDock.copy(alpha = .5f), fontSize = 12.sp)
                     }

@@ -1,12 +1,9 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
-import android.util.Base64
-import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import me.rerere.tts.model.AudioChunk
-import me.rerere.tts.model.AudioFormat
 import me.rerere.tts.model.TTSRequest
 import me.rerere.tts.provider.TTSProvider
 import me.rerere.tts.provider.TTSProviderException
@@ -17,8 +14,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-
-private const val TAG = "QwenTTSProvider"
 
 class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
     private val httpClient = OkHttpClient.Builder()
@@ -47,8 +42,6 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
             })
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
-
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl.trimEnd('/')}/services/audio/tts/SpeechSynthesizer")
             .addHeader("Authorization", "Bearer ${providerSetting.apiKey}")
@@ -59,19 +52,23 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
 
         httpClient.newCall(httpRequest).execute().use { response ->
             if (!response.isSuccessful) {
-                val errorBody = response.body.string()
-                Log.e(
-                    TAG,
-                    "Qwen TTS request failed: ${response.code} ${response.message}, body: $errorBody"
-                )
                 throw TTSProviderException(
-                    message = "Qwen TTS request failed: ${response.code} ${response.message}",
+                    message = "Qwen TTS request failed: HTTP ${response.code}",
                     statusCode = response.code
                 )
             }
 
             response.body.byteStream().bufferedReader().use { reader ->
                 var currentData = StringBuilder()
+                var complete = false
+                suspend fun publish(payload: String) {
+                    parseQwenAudioFrame(payload, providerSetting.format, providerSetting.sampleRate,
+                        providerSetting.model, providerSetting.voice)?.let { chunk ->
+                        check(!complete) { "Qwen 在完成标记后返回了额外音频。" }
+                        if (chunk.isLast) complete = true
+                        emit(chunk)
+                    }
+                }
 
                 reader.lineSequence().forEach { line ->
                     when {
@@ -80,7 +77,7 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
                         }
 
                         line.isEmpty() && currentData.isNotEmpty() -> {
-                            parseSSEData(currentData.toString(), providerSetting)?.let { emit(it) }
+                            publish(currentData.toString())
                             currentData = StringBuilder()
                         }
                     }
@@ -88,50 +85,11 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
 
                 // 兼容最后一个 SSE event 后没有空行、直接 EOF 的响应。
                 if (currentData.isNotEmpty()) {
-                    parseSSEData(currentData.toString(), providerSetting)?.let { emit(it) }
+                    publish(currentData.toString())
                 }
+                check(complete) { "Qwen 未返回合成完成标记，本轮未完成。" }
             }
         }
     }
 
-    private fun parseSSEData(
-        data: String,
-        providerSetting: TTSProviderSetting.Qwen,
-    ): AudioChunk? {
-        return try {
-            val json = JSONObject(data)
-            val output = json.optJSONObject("output") ?: return null
-            val audio = output.optJSONObject("audio") ?: return null
-            val audioBase64 = audio.optString("data", "")
-            val finishReason = output.optString("finish_reason", "")
-
-            if (audioBase64.isNotEmpty()) {
-                val audioData = Base64.decode(audioBase64, Base64.DEFAULT)
-                val isLast = finishReason == "stop"
-                AudioChunk(
-                    data = audioData,
-                    format = when (providerSetting.format.lowercase()) {
-                        "mp3" -> AudioFormat.MP3
-                        "pcm" -> AudioFormat.PCM
-                        "opus" -> AudioFormat.OPUS
-                        else -> AudioFormat.WAV
-                    },
-                    sampleRate = providerSetting.sampleRate,
-                    isLast = isLast,
-                    metadata = mapOf(
-                        "provider" to "qwen",
-                        "model" to providerSetting.model,
-                        "voice" to providerSetting.voice,
-                        "format" to providerSetting.format,
-                        "sampleRate" to providerSetting.sampleRate.toString(),
-                    )
-                )
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse SSE data: $data", e)
-            null
-        }
-    }
 }

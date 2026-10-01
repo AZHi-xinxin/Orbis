@@ -37,7 +37,7 @@ class OrbisVoiceCallChatTest {
         assertTrue(end.contains("【已结束语音通话】"))
         assertTrue(end.contains("收音和播放已经停止"))
         assertTrue(end.contains("后续回复不会自动朗读"))
-        assertTrue(end.contains("不调用其他模型代写"))
+        assertTrue(end.contains("独立的记录整理器，不扮演通话中的任何一方"))
         assertTrue(end.contains("summary") && end.contains("transcript"))
         assertTrue(end.contains("只写本次通话"))
         assertTrue(end.contains("工具回执、系统提示不是任何一方亲口说的话"))

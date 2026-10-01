@@ -67,6 +67,18 @@ class BackupManager(
                             addFile(zip, file, "$folder/$relative")
                         }
                     }
+                    // Semantic, locked snapshots only. Do not scan these directories or include credentials/sidecars.
+                    val schedule = me.rerere.rikkahub.data.orbis.schedule.OrbisScheduleStore.open(context).load()
+                    val kaomoji = me.rerere.rikkahub.data.orbis.OrbisKaomojis.open(context).snapshotForBackup()
+                    for ((name, bytes) in listOf(
+                        OrbisLocalToolBackup.SCHEDULE to OrbisLocalToolBackup.encodeSchedule(schedule),
+                        OrbisLocalToolBackup.KAOMOJI to OrbisLocalToolBackup.encodeKaomoji(kaomoji),
+                    )) {
+                        currentCoroutineContext().ensureActive()
+                        zip.putNextEntry(ZipEntry(name))
+                        zip.write(bytes)
+                        zip.closeEntry()
+                    }
                 }
             }
             archive
@@ -102,7 +114,7 @@ class BackupManager(
                                 DatabaseBackup.ARCHIVE_DATABASE -> if (includeDatabase) stagedDatabase else null
                                 DatabaseBackup.WAL -> if (includeDatabase) stagedWal else null
                                 DatabaseBackup.SHM -> null // Rebuilt by SQLite; never restore shared-memory state.
-                                else -> if (includeFiles && isAttachment(entry.name)) {
+                                else -> if (includeFiles && (OrbisLocalToolBackup.maxBytes(entry.name) != null || isAttachment(entry.name))) {
                                     PendingRestore.resolveInside(File(payload, "files"), entry.name)
                                 } else null
                             } ?: continue
@@ -112,7 +124,8 @@ class BackupManager(
                             }
                             zip.getInputStream(entry).use { input ->
                                 FileOutputStream(target).use { output ->
-                                    val limit = if (entry.name == "settings.json") 8L * 1024 * 1024 else 256L * 1024 * 1024
+                                    val limit = OrbisLocalToolBackup.maxBytes(entry.name)?.toLong()
+                                        ?: if (entry.name == "settings.json") 8L * 1024 * 1024 else 256L * 1024 * 1024
                                     expandedBytes += me.rerere.rikkahub.data.sync.importer.RikkaChatArchive.copyLimited(
                                         input, output, minOf(limit, 1024L * 1024 * 1024 - expandedBytes),
                                     )
@@ -123,6 +136,10 @@ class BackupManager(
                         }
                     }
                     require(restoredEntries > 0) { "No selected data found in the backup" }
+                    try { OrbisLocalToolBackup.validateStaged(payload) }
+                    catch (failure: Exception) {
+                        throw IllegalArgumentException(OrbisLocalToolBackup.publicError(failure.message) ?: "本地工具备份校验失败；原数据未更改")
+                    }
                     require(!stagedWal.exists() || stagedDatabase.exists()) { "Backup WAL has no matching database" }
                     if (stagedDatabase.exists()) {
                         DatabaseBackup.normalize(context, stagedDatabase)

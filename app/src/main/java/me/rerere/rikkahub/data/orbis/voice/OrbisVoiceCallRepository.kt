@@ -107,6 +107,7 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
                 endReason = if (interrupted) before.endReason ?: "PROCESS_INTERRUPTED" else before.endReason,
                 endError = if (interrupted) before.endError ?: "应用中断，通话原文已保留。" else before.endError,
                 archiveError = if (archiveInterrupted) before.archiveError ?: "应用中断，归档结果未确认；原文已保留，不会自动重新请求。" else before.archiveError,
+                archiveFailureCode = if (archiveInterrupted) "process_interrupted_no_auto_retry" else before.archiveFailureCode,
                 openingStatus = if (openingInterrupted) OrbisVoiceOpeningStatus.UNKNOWN else before.openingStatus,
                 openingError = if (openingInterrupted) "应用中断，开场请求结果未确认；不会自动补发。" else before.openingError,
             )
@@ -178,11 +179,14 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
             require(after.openingStatus == before.openingStatus) { "voice_call_opening_is_terminal" }
         }
         require(!before.chatCommitted || after.chatCommitted) { "voice_call_chat_commit_cannot_reopen" }
+        require(after.archiveRequestCount >= before.archiveRequestCount) { "voice_archive_count_cannot_decrease" }
         if (before.status == OrbisVoiceCallStatus.ENDED || before.status == OrbisVoiceCallStatus.INTERRUPTED) {
             require(after.status == before.status) { "voice_call_cannot_reopen" }
         }
         if (before.archiveStatus == OrbisVoiceArchiveStatus.READY) {
-            require(after.archiveStatus == OrbisVoiceArchiveStatus.READY && after.summary == before.summary &&
+            val lateSource = !before.chatCommitted && after.archiveStatus == OrbisVoiceArchiveStatus.PENDING &&
+                after.archiveFailureCode == "archive_source_changed" && voiceArchiveSourceDigest(before) != voiceArchiveSourceDigest(after)
+            require((after.archiveStatus == OrbisVoiceArchiveStatus.READY || lateSource) && after.summary == before.summary &&
                 after.modelTranscript == before.modelTranscript) { "voice_call_completed_archive_is_immutable" }
         }
         validate(after)
@@ -194,6 +198,10 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
             "voice_call_chat_requires_complete_archive"
         }
         require(record.version == 1) { "unsupported_voice_call_archive" }
+        require(record.archiveRequestCount >= 0) { "invalid_voice_archive_count" }
+        require(record.archiveFailureCode == null || record.archiveFailureCode in VOICE_ARCHIVE_FAILURE_CODES) {
+            "invalid_voice_archive_failure_code"
+        }
         require(record.aiEndRequestedAtMs == null || record.aiEndRequestedAtMs >= 0) { "invalid_ai_end_time" }
         require(record.aiEndReasonText == null || (record.aiEndRequestedAtMs != null && record.aiEndReasonText.length <= 2000)) { "invalid_ai_end_reason" }
         require(record.endReasonText == null || record.endReasonText.length <= 2000) { "invalid_end_reason" }

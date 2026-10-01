@@ -42,6 +42,7 @@ import { ChatMessageAnnotationsRow } from "./chat-message-annotations";
 import { ChatMessageAvatarRow } from "./chat-message-avatar-row";
 import { MessageParts } from "./message-part";
 import { ImportedContentContext } from "./imported-content";
+import { isImportedHistory } from "~/lib/imported-history";
 import { OrbisEventMessage } from "./orbis-event-message";
 import { getOrbisEvent, orbisEventOriginalText } from "~/lib/orbis-event-presentation";
 
@@ -550,7 +551,7 @@ export const ChatMessage = React.memo(({
     return (
       <OrbisEventMessage key={`${message.id}:${externalEvent.recordId}`} event={externalEvent} originalText={orbisEventOriginalText(message.parts)}>
         {attachments.length > 0 && (
-          <ImportedContentContext.Provider value={message.parts.some((part) => part.metadata?.import_source === "deepseek")}>
+          <ImportedContentContext.Provider value={isImportedHistory(message.parts)}>
             <MessageParts parts={attachments} loading={false} />
           </ImportedContentContext.Provider>
         )}
@@ -581,7 +582,7 @@ export const ChatMessage = React.memo(({
               isUser ? "max-w-[85%] rounded-lg bg-muted px-4 py-3" : "w-full",
             )}
           >
-            <ImportedContentContext.Provider value={message.parts.some((part) => part.metadata?.import_source === "deepseek")}><MessageParts
+            <ImportedContentContext.Provider value={isImportedHistory(message.parts)}><MessageParts
               parts={message.parts}
               loading={loading}
               onToolApproval={onToolApproval}

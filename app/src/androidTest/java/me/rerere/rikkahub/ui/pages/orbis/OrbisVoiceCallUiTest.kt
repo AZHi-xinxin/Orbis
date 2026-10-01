@@ -21,6 +21,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceArchiveStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallProtocol
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
@@ -28,6 +29,7 @@ import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceTranscriptEntry
 import me.rerere.rikkahub.testutil.IsolatedVoiceCallArchive
 import me.rerere.rikkahub.testutil.createShellComposeRule
+import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
@@ -52,13 +54,16 @@ class OrbisVoiceCallUiTest {
 
     private var archive: IsolatedVoiceCallArchive? = null
     private val summary = "合成摘要：约好周末去公园，出门前确认天气。"
+    private val sourceMessages = listOf(UIMessage.user("周末去公园吧。"), UIMessage.assistant("好，出门前确认天气。"))
+        .map { it.copy(orbisVoiceCallId = "synthetic-call", orbisVoiceCallKind = "turn") }
     private val record = OrbisVoiceCallRecord("synthetic-call", "synthetic-window", "synthetic-assistant", 1000,
         connectedAtMs = 2000, endedAtMs = 255000, durationMs = 253000,
         status = OrbisVoiceCallStatus.ENDED, archiveStatus = OrbisVoiceArchiveStatus.READY,
         summary = summary, modelTranscript = "用户：周末去公园吧。\nAI：好，出门前确认天气。",
-        transcript = listOf(OrbisVoiceTranscriptEntry("user-turn", "user", "周末去公园吧。", 3000),
-            OrbisVoiceTranscriptEntry("assistant-turn", "assistant", "好，出门前确认天气。", 4000)),
-        sourceMessageIds = listOf("source-node-1", "source-node-2"), sourceNodesJson = "[{\"synthetic\":true}]")
+        transcript = sourceMessages.mapIndexed { index, message -> OrbisVoiceTranscriptEntry(message.id.toString(),
+            message.role.name, message.toText(), 3000L + index * 1000L, message.id.toString()) },
+        sourceMessageIds = sourceMessages.map { it.id.toString() },
+        sourceNodesJson = JsonInstant.encodeToString(sourceMessages.map { it.toMessageNode() }))
 
     @After fun removeOnlyOwnedArchive() {
         compose.waitForIdle()
@@ -150,7 +155,7 @@ class OrbisVoiceCallUiTest {
         compose.runOnIdle { assertEquals(1, reopened); assertEquals(1, backgroundClicks) }
     }
 
-    @Test fun historyScopesAssistantAndReadyRetryOnlyDispatchesRestoreWithoutChangingArchive() {
+    @Test fun historyScopesAssistantAndReadyArchiveNeedsNoChatRewriteOrModelRetry() {
         val fixture = IsolatedVoiceCallArchive().also { archive = it }
         val repository = fixture.repository()
         val ready = record.copy(error = "synthetic-page-commit-failure")
@@ -168,9 +173,10 @@ class OrbisVoiceCallUiTest {
         compose.waitUntil(5000) { compose.onAllNodesWithText(summary).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("其它 AI 的合成摘要不可见").assertDoesNotExist()
         compose.onNodeWithText(summary).performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithText("恢复聊天摘要").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("恢复聊天摘要").performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(listOf(record.id), retried) }
+        compose.waitUntil(5000) { compose.onAllNodesWithText("记录 ID：${record.id}").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("恢复聊天摘要").assertDoesNotExist()
+        compose.onNodeWithText("重新归档").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(emptyList<String>(), retried) }
         compose.onNodeWithText("实际逐条记录").performScrollTo().performClick()
         compose.onNodeWithText("周末去公园吧。").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertEquals(before, fixture.bytes()) }
@@ -191,11 +197,11 @@ class OrbisVoiceCallUiTest {
         compose.waitUntil(5000) { compose.onAllNodesWithText(neverConnected.summary!!).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(neverConnected.summary!!).performClick()
         compose.waitUntil(5000) { compose.onAllNodesWithText("记录 ID：never-connected").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("请本次 AI 重新整理").assertDoesNotExist()
+        compose.onNodeWithText("重新归档").assertDoesNotExist()
         compose.onNodeWithText("恢复聊天摘要").assertDoesNotExist()
     }
 
-    @Test fun returnScreenWaitsForDurableCommitAndObservedFoldedCard() {
+    @Test fun returnScreenWaitsForDurableArchiveAndObservedCardWithoutRewritingChat() {
         val fixture = IsolatedVoiceCallArchive().also { archive = it }
         val repository = fixture.repository()
         runBlocking { repository.create(record.copy(archiveStatus = OrbisVoiceArchiveStatus.GENERATING,
@@ -216,13 +222,11 @@ class OrbisVoiceCallUiTest {
         compose.waitForIdle()
         compose.onNodeWithTag("orbis-call-return").assertIsDisplayed()
         compose.runOnIdle { assertEquals(0, dismissed) }
-        runBlocking { repository.update(record.id) { it.copy(chatCommitted = true) } }
-        compose.waitForIdle()
-        compose.onNodeWithTag("orbis-call-return").assertIsDisplayed()
         compose.runOnIdle { assertEquals(0, dismissed); summaryVisible = true }
         compose.waitUntil(5000) { dismissed == 1 }
         compose.onNodeWithTag("orbis-call-return").assertDoesNotExist()
         assertEquals(summary, runBlocking { repository.get(record.id) }!!.summary)
+        assertEquals(false, runBlocking { repository.get(record.id) }!!.chatCommitted)
     }
 
     @Test fun pendingReturnHasAnExitWithoutCancellingOrRewritingArchive() {

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.intOrNull
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
@@ -16,8 +17,8 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.orbis.soup.createSoupTools
 
 internal const val ORBIS_HELP_TOOL_NAME = "orbis_help"
-internal const val ORBIS_MANUAL_VERSION = "orbis-help/19"
-private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools")
+internal const val ORBIS_MANUAL_VERSION = "orbis-help/20"
+private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide")
 private const val manualHostUi = "同一 App 内的原 Orbis 本地主页、原生聊天、同一 AI 的会话历史/搜索/重命名/分组、外观 DIY、本地动态星图演示与独立 ST 元信息连接设置、TechHub 和多 AI 群聊独立入口，以及模型/MCP/语音/文件/工作区/技能配置入口。"
 private const val manualStarMapDemoScope = "星点为本地合成数据，仅展示示例时间、类型与无标签关联，不读取真实 ST 记忆。"
 
@@ -34,10 +35,14 @@ private data class ManualToolCategory(val id: String, val names: List<String>, v
 }
 
 private val manualToolCategories = listOf(
-    ManualToolCategory("local_reading", listOf("orbis_reading_list", "orbis_reading_read_chapter", "orbis_reading_annotate", "orbis_reading_list_annotations"), "本机藏书阁，不需VPS。list查目录、read_chapter按书章读片段、list_annotations分页读人类/伙伴批注；annotate须本AI选用及宿主批准。只读不改人类进度，不自动上传全书。准确参数和云本地差异见local_tools。"),
-    ManualToolCategory("local_soup", listOf("orbis_soup_current", "orbis_soup_ask", "orbis_soup_hint", "orbis_soup_submit", "orbis_soup_reveal"), "本机海龟汤。current只读公开局面，未开局返回空；其余动作须本AI选用及批准。ask/submit保存待页面确认建议，不代表主持已执行。start/next由人类页面操作；不猜云端名字。准确参数见local_tools。"),
-    ManualToolCategory("local_garden", listOf("orbis_garden_list", "orbis_garden_read", "orbis_garden_create"), "本地后花园：独立 SQLite 存日记、锚点、信件和心愿，不需要 VPS 或 Supabase。人类在花园‘AI读写授权’为具体助手显式开启后才有工具；本机共用花园，授权包含人类与其他已授权 AI 的记录，读取会进入当前模型上下文。list 只取目录，read 按 ID 取正文，create 经宿主批准新增，不覆盖或删除。仅本地路线可调用；原远端模式及既有云工具/MCP 保留，不自动迁移或同步。切换存储不删除任一边数据。人类可编辑、明确删除，并通过系统文件选择器导出/合并专用明文备份（8MiB、5000条以内，冲突整份拒绝、相同跳过）；聊天ZIP不代替花园备份，附件引用保留但附件本体不复制。旧站其它云功能不冒充已本地化。"),
-    ManualToolCategory("native_sentinels", listOf("orbis_sentinel_guide", "orbis_sentinel_list", "orbis_sentinel_read", "orbis_sentinel_create", "orbis_sentinel_update", "orbis_sentinel_pause", "orbis_sentinel_resume", "orbis_sentinel_delete"), "AI 自主设置本机哨兵，一次create即可选设，无复杂定制流程或逐次确认。类别：ritual每日定点/随机窗口仪式；agreement活动静默、概率、静默时段和连续次数升级；screen_observation小L屏幕观察；night_usage夜间非聊天使用；low_battery低电量与screen_on常亮；geofence人类已设围栏；touch机器人触摸；once一次预约，另保留interval/chat_idle/chat_left/app_usage。每类参数、默认值、简单示例和权限说明可按需查orbis_sentinel_guide。仪式/约定/触摸/一次及旧自定义类由AI亲写prompt，屏幕/夜间/电量/常亮/位置只播报系统真实事实，不收AI代写正文。每条唤醒自动加宿主真实日期时间时区。长期规则一次设置持续有效，一次预约成功接收后停用。分项启停归AI，可跨自己的窗口查询；固定目标不漂移。人类在手机与陪伴→哨兵与自我唤醒查看七类折叠说明/规则/执行记录，只能操作总开关，AI不能修改。关闭新旧自动唤醒，恢复不补发；后台、权限、联网与模型影响执行，收件箱accepted不等于已回复或已出声。外部Stackchan需要已配置检测端接入，工具存在不代表旧VPS已停或迁移完成。"),
+    ManualToolCategory("local_schedule", listOf("orbis_schedule_list", "orbis_schedule_read", "orbis_schedule_create", "orbis_schedule_update", "orbis_schedule_delete"), "本机共享课表/日程，无需网关。写入须宿主批准与revision核验，不自动提醒。周重复/有效期、单次日期、重要标红及参数见guide/schedule或local_tools。"),
+    ManualToolCategory("local_kaomoji", listOf("orbis_kaomoji_list", "orbis_kaomoji_add", "orbis_kaomoji_update"), "本机文字库，AI写入经批准，保存不发送；人类点选独立发送，草稿不变，删除在人类面板。不是图片表情包；参数/冲突见guide/expressions。"),
+    ManualToolCategory("voice_notes", listOf("orbis_voice_note"), "原生语音条：text为1–4000字符，批准后用已有TTS/音色，可点击但不自动播放。可能计费，失败不自动重试；ASR纠正见guide/voice。"),
+    ManualToolCategory("device_facts", listOf("orbis_device"), "仅读设备事实/观察摘要，section=all/device/observation；不启动观察、截屏、定位或读通知/聊天，不代表情绪。"),
+    ManualToolCategory("local_reading", listOf("orbis_reading_list", "orbis_reading_read_chapter", "orbis_reading_annotate", "orbis_reading_list_annotations"), "本机藏书阁，无需VPS；目录/章节/批注按需读取，不改人类进度或自动上传全书。批注写入须选用及批准；参数/云本地区分见local_tools或guide/reading。"),
+    ManualToolCategory("local_soup", listOf("orbis_soup_current", "orbis_soup_ask", "orbis_soup_hint", "orbis_soup_submit", "orbis_soup_reveal"), "本机海龟汤，未开局为空；current只读，其余须选用及批准。ask/submit是待页面确认建议，非执行回执；开局/下一题在人类页面。参数见local_tools。"),
+    ManualToolCategory("local_garden", listOf("orbis_garden_list", "orbis_garden_read", "orbis_garden_create"), "本机共用花园，需人类为具体AI开启读写；可读人类/其他已授权AI记录，结果进入模型。list取目录、read取正文，create经批准新增、不覆盖删除。无需VPS，仅本地路线；云端工具独立，不自动迁移同步，切换不删数据。专用明文备份不含附件本体，聊天ZIP不能替代。用法/备份边界见guide/garden。"),
+    ManualToolCategory("native_sentinels", listOf("orbis_sentinel_guide", "orbis_sentinel_list", "orbis_sentinel_read", "orbis_sentinel_create", "orbis_sentinel_update", "orbis_sentinel_pause", "orbis_sentinel_resume", "orbis_sentinel_delete"), "AI 自主设置本机哨兵，一次create即可选设，无复杂定制流程或逐次确认。类别：ritual每日定点/随机窗口仪式；agreement活动静默、概率、静默时段和连续次数升级；screen_observation本机屏幕观察；night_usage夜间非聊天使用；low_battery低电量与screen_on常亮；geofence人类已设围栏；touch机器人触摸；once一次预约，另保留interval/chat_idle/chat_left/app_usage。每类参数、默认值、简单示例和权限说明可按需查orbis_sentinel_guide。仪式/约定/触摸/一次及旧自定义类由AI亲写prompt，屏幕/夜间/电量/常亮/位置只播报系统真实事实，不收AI代写正文。每条唤醒自动加宿主真实日期时间时区。长期规则一次设置持续有效，一次预约成功接收后停用。分项启停归AI，可跨自己的窗口查询；固定目标不漂移。人类在手机与陪伴→哨兵与自我唤醒查看七类折叠说明/规则/执行记录，只能操作总开关，AI不能修改。关闭新旧自动唤醒，恢复不补发；后台、权限、联网与模型影响执行，收件箱accepted不等于已回复或已出声。外部Stackchan需要已配置检测端接入，工具存在不代表旧VPS已停或迁移完成。"),
     ManualToolCategory("voice_calls", listOf("orbis_call_records", "orbis_call_read", "start_voice_call", "end_voice_call", "orbis_incoming_call_records"), "原生语音通话：开始/结束由宿主通知，CALL_MODE表示回复会朗读，输入仍是转写文字不是原始声音。支持服务且回声消除或耳机路由可靠时，可说话打断当前朗读与对应回复；不具备条件时退回半双工，本轮真机声学效果未验收。麦克风和扬声器独立开关；静音接听是关麦、保留扬声器，接听前不开麦。关麦只停用户收音，不打断AI；关喇叭只静音本次播放，生成、文字和播放时间轴继续，打开从当前进度听，不补播错过部分。start_voice_call须写来电原因；接通后交给当前AI一次自由开场，不固定话语、长度，也不直接朗读reason；重复回调或重启不补发开场。用户接听、拒接、无人接或失败均留本地日志，orbis_incoming_call_records按当前AI分页查询。拒接/无人接进入冷却；无人接只尝试一次降级通知，不自动回拨。end_voice_call只可挂断本轮绑定的当前AI/聊天/通话，不追踪新通话或控制其它App。挂断停录停播，同一AI摘要成功后主聊天保留折叠结束条，全文独立存储；records/read跨窗分页查询，不每轮自动注入全文。摘要失败保留原文；人类确认后可仅对该通原文补档，不恢复旧队列、不执行历史工具、不改结束原因；未接通不请求模型写账。后台/锁屏仍受系统权限和管理影响，不能假装听出音色情绪。"),
     ManualToolCategory("context_compaction", listOf("compact", "context_compaction_status", "context_compaction_history"), "当前对话的 AI 自主压缩。人类在顶栏圆环设提醒阈值；90%起只提醒，超阈值仍不自动压缩。AI自己写普通正文摘要，再用compact(use_last_message=true,keep_recent=N)提交；也可提供summary。默认保留最多32条原文，工具协议尾段成组保留。不规定摘要格式，不检查ST/锚点回执，无逐次人工确认；失败保留原文。状态工具可读现有条数；历史仅元信息。人类可在圆环撤销当前窗口最近一次压缩，旧事件不能逐条恢复。压缩不改ST、日记、锚点或工作区。"),
     ManualToolCategory("companion_native", emptyList(), "当前 AI 显式启用的进程内陪伴工具，无需本机 MCP。离线记忆、运行诊断和 companion_get_alarms 闹钟查询在服务关闭时也可用，其它能力按需检查服务和系统权限。查询只读本应用台账及最近触发/停止回执，不列系统时钟全部闹钟；旧记录可能不齐，系统接受调度不保证响铃或人已听到，不会因查询设闹钟或触发铃声。set_alarm是一次性，同HH:mm替换，以完整日期回执核验。send_notification成功后仅按用户开关尝试朗读本次内容；默认关闭，锁屏另授权，使用已有全局TTS与语速，不读第三方通知或旧记录。提交系统不等于已播放或已听到。read_memory/save_memory是本机离线记忆，不是ST；不要自动开启观察。", "companion_"),
@@ -74,12 +79,12 @@ private fun manualLimits(): JsonObject = buildJsonObject {
     put("multi_ai_group", "至多8成员独选身份/连接/模型，全员顺序或点名；全局单群生成，停止留半句，失败不自动重试/换助手。上下文200条/128KiB，原历史分页保留。图片/表情包/文件最多4个、单个8MiB/总20MiB，提取限32KiB、未解析明示；复制、手动朗读、打开/保存。引用本群≤400字入草稿不自动发；显式翻译用已配置模型，仅单条文本、90秒/64KiB；再生成仅最新轮同成员，保留原文/其他成员。背景/透明度随私聊，成员异色；不共享私聊/记忆/工具、不自动写ST、无多人通话。普通ZIP无群库，升级须完整本机备份。")
     put("group_history_bridge", "host_bound_assistant；只读当前成员获准群，最多50条/64KiB，单条8KiB；仅附件元信息。显式查询，不合并上下文、不自动注入或写ST。")
     put("web_live_sync", "只读断线重连/快照补齐，无需刷新；读历史保留位置，回最新后跟随。不发消息或续旧队列；真机网络效果另验。")
-    put("ai_game_install_and_match_records", "Debug本机HTML安装/游玩；游戏报结果、宿主计时(host_timed)")
+    put("ai_game_install_and_match_records", "本机HTML安装/游玩；游戏报结果、宿主计时(host_timed)")
     put("native_gomoku", "本地规则，或显式选当前AI模型，每局限量")
     put("native_game_records", "本机只读工具/界面，普通ZIP不含")
     put("shared_sticker_library", "本机共享图/标签，AI只查文字，普通ZIP不含")
     put("sticker_cloud_sync", "not_integrated")
-    put("human_manual_ui_entry", "available_read_only_in_orbis_debug")
+    put("human_manual_ui_entry", "available_read_only_in_orbis")
         put("reversible_context_compression", "ai_authored_compact_in_current_full_conversation_run; metadata_history; latest_only_rollback; no_auto_summary_or_forced_compaction")
     put("compaction_budget", "顶栏圆环设置0到1M的提醒阈值，0只关提醒；90%起通知AI，不通知人类填框。用量含估算，不保证模型实际容量。回滚限启用阈值+50K，0无额外阈值门槛；恢复不会召回更早的回滚槽。")
     put("external_st_connection", "not_checked")
@@ -102,17 +107,19 @@ private fun manualLimits(): JsonObject = buildJsonObject {
     put("notification_auto_read", "default_off; lock_screen_separate_opt_in_default_off; only_current_successfully_posted_AI_notification_or_one_missed_call_fallback; existing_global_TTS_provider_and_speed; focus_requested_once_after_synthesis; transient_loss_pauses_same_player_and_gain_rechecks_safety; cumulative_focus_wait_10s_whole_operation_45s; permanent_loss_denial_call_alarm_silent_DND_conflicts_skip_or_stop; max_1000_characters_no_truncation; played_is_not_proof_human_heard; no_old_or_third_party_notification_reading")
     put("local_ringtones", "incoming_call_and_alarm_music_selected_separately_by_human_from_local_document_picker; persistent_read_permission_required; restore_system_default_available; unreadable_custom_file_falls_back_to_available_system_sound; no_cloud_music_search_or_automatic_preview")
     put("web_appearance", "Web北斗→外观与昵称：Orbis/DeepSeek显示风格均有浅色、深色、跟随系统；配色仅存本浏览器，不改模型/工具/按钮位置。欢迎语读取昵称；昵称保存同步手机。Web不是手机全功能镜像，设备权限、哨兵和语音仍在手机管理。")
-    put("chat_import_sources", "Web导入需手机开启密码保护并登录；DeepSeek官方ZIP≤80MiB、RikkaHub含聊天数据库ZIP≤512MiB、Codex原始rollout JSONL≤64MiB。上传到当前手机→预览→人工确认→结果；仅新增所选聊天，重复来源跳过，不覆盖现有窗口，不安装模型密钥/权限/提示词，历史工具不执行；取消保留已完成会话。导入不扩大模型上下文上限。")
+    put("chat_import_sources", "Web导入无需强制开启密码；已启用密码保护仍须登录，只在可信网络使用。DeepSeek官方ZIP≤80MiB、RikkaHub含聊天数据库ZIP≤512MiB、Codex原始rollout JSONL≤64MiB、Operit聊天JSON v2≤64MiB。上传到当前手机→预览→人工确认→结果；仅新增所选聊天，重复来源跳过，不覆盖现有窗口，不安装模型密钥/权限/提示词，历史工具不执行；取消保留已完成会话。未打包的工作区文件不能恢复；导入不扩大模型上下文上限。详见guide/imports。")
     put("codex_import_limits", "只支持明确的session_meta/response_item及备用event_msg文本子集；末行必须完整换行。不是ChatGPT导出、Markdown、history.jsonl或exec事件流；不恢复执行/工具权限，不下载图片。格式不兼容、截断或超限明确拒绝；没有来源清单不能检测整行记录被提前删除。")
-    put("user_validation_notes", "日历提醒、LC 调用与通话短停顿修复已有用户实测通过反馈；本轮通话打断、主动来电、通知朗读及本地铃声尚未真机验收。说明书不读取实时状态，不保证所有设备、所有 LC 工具或本次执行都成功。")
+    put("user_validation_notes", "日历提醒、内置手机工具调用与通话短停顿等日常验收项已有用户实测通过反馈；Operit 思考内容导入仍待修复，真实发布包的端到端自更新尚未真机验收。说明书不读取实时状态，不保证所有设备、声学环境、外部服务或本次执行都成功。")
     put("legacy_cloud_mcp_deduplication", "not_automatic_without_explicit_server_id_mapping_disable_legacy_entries_manually")
     put("notes", "外部 MCP 可另行配置 ST 等服务，但工具注册数量不证明任何服务已连通。原 Orbis 主页是本地嵌入页；未连接的服务不能当作可用。")
+    put("consultation", "正在开发，暂未开放；不引导公开版配置、待命、重试或调用内部工具。")
+    put("context_message_limit", "0不限制消息数量，非零至少20、滑条20步长；阶梯截取保留本地记录但可能记忆断层及降低缓存命中，不扩大模型容量。guide/context详解。")
 }
 
 private fun manualPermissions(): JsonObject = buildJsonObject {
     put("this_tool", "只读本地说明，不修改设置、记忆、文件或系统权限，也不执行其他工具。")
     put("registration_is_not_authorization", "本轮已注册只表示可以请求；实际审批、系统权限、远程服务健康须在对应工具执行时确认。")
-    put("always_allow_current_ai", "用户可开启「始终允许当前 AI 的所有已启用工具」，覆盖本地、LC、Toy、云端、MCP 与工作区，以及之后手动启用或更新的工具；仅限当前 AI、本机安装，可撤销。它只免除逐次执行确认，不会自动启用工具、授予系统权限、配置凭证、代答用户问题或自动执行等待中的调用；目标与参数仍需核验。")
+    put("always_allow_current_ai", "用户可开启「始终允许当前 AI 的所有已启用工具」，覆盖本地、手机与陪伴、Toy、云端、MCP 与工作区，以及之后手动启用或更新的工具；仅限当前 AI、本机安装，可撤销。它只免除逐次执行确认，不会自动启用工具、授予系统权限、配置凭证、代答用户问题或自动执行等待中的调用；目标与参数仍需核验。")
     put("approval_revocation", "关闭总开关不删除单项「以后允许」；「撤销当前 AI 的全部授权」可同时取消全开与单项授权，不撤回已开始的操作。MCP/工作区原有免审批配置仍须在原设置关闭。")
     put("workspace", "工作区能力受隔离环境及审批规则约束；不能据此宣称已获整个手机、电脑或任意文件的访问权。")
     put("native_settings_write_tool", "not_available")
@@ -213,6 +220,7 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
             put("sentinel_note", "外部事件接收须显式绑定固定会话，并核验服务器切换；本说明不检查部署或收件实时状态。")
             put("not_integrated", buildJsonArray { add("群聊私人工具/记忆共享与多人语音通话"); add("群聊记录纳入普通备份 ZIP") })
             put("more", buildJsonArray { add("tools"); add("permissions"); add("limits"); add("local_tools") })
+            put("guide_lookup", "chapters: query搜索、offset/limit分页目录；guide: chapter读章节，offset/limit分页段落。涵盖用法、原因/解决和指导人类的路径，不必每轮读取。")
         },
         "tools" to buildJsonObject {
             put("categories", categories)
@@ -251,12 +259,29 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
                 put("enum", buildJsonArray { manualTopics.forEach { add(it) } })
                 put("description", "Optional section; default overview.")
             })
+            put("query", buildJsonObject { put("type", "string"); put("maxLength", 80); put("description", "Only for chapters: public manual search, not private data.") })
+            put("chapter", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { orbisManualChapters.forEach { add(it.id) } }); put("description", "Required for guide; choose ID from chapters.") })
+            put("offset", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 500); put("description", "Only for chapters/guide; default 0.") })
+            put("limit", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 10); put("description", "Only for chapters/guide; default 5 chapters or 3 guide sections.") })
         }) },
         // Tool.systemPrompt remains empty: the long manual enters context only after a call.
         needsApproval = { false },
         execute = { arguments ->
-            val (topic, error) = parseManualTopic(arguments)
-            listOf(UIMessagePart.Text(if (error == null) responses.getValue(topic!!) else manualError(error)))
+            val text = try {
+                val request = parseManualRequest(arguments)
+                when (request.topic) {
+                    "chapters", "guide" -> buildJsonObject {
+                        put("ok", true); put("manual_version", ORBIS_MANUAL_VERSION); put("topic", request.topic); put("host", host)
+                        put("scope", "generation_start_registration_snapshot"); put("read_only", true); put("network_requested", false)
+                        put("permissions_checked", false); put("remote_health_checked", false)
+                        put("content", if (request.topic == "chapters") orbisManualChapterIndex(request.query, request.offset, request.limit)
+                            else orbisManualReadChapter(request.chapter, names, request.offset, request.limit))
+                    }.toString()
+                    else -> responses.getValue(request.topic)
+                }
+            } catch (failure: IllegalArgumentException) { manualError(failure.message?.takeIf { it in manualErrorCodes } ?: "orbis_help_invalid_parameters") }
+            catch (failure: IllegalStateException) { manualError(failure.message?.takeIf { it in manualErrorCodes } ?: "orbis_help_invalid_parameters") }
+            listOf(UIMessagePart.Text(text))
         },
     )
 }
@@ -264,7 +289,9 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
 /** Uses only our pure built-in factories, never callbacks from the actual run's tools or settings. */
 private fun localToolReference(registeredNames: Set<String>): JsonObject {
     val localTools = createOrbisGardenReadingTools { error("manual_must_not_execute") } +
-        createSoupTools { _, _ -> error("manual_must_not_execute") }
+        createSoupTools { _, _ -> error("manual_must_not_execute") } +
+        me.rerere.rikkahub.data.orbis.schedule.createOrbisScheduleTools { error("manual_must_not_execute") } +
+        createOrbisKaomojiTools { error("manual_must_not_execute") }
     return buildJsonObject {
         put("tools", buildJsonArray {
             localTools.filter { it.name in registeredNames }.forEach { tool ->
@@ -281,17 +308,34 @@ private fun localToolReference(registeredNames: Set<String>): JsonObject {
         put("storage", "phone_local_only; no_automatic_cloud_sync")
         put("reading_mapping", "本地orbis_reading_*与云reading_*/cloud_reading_*是不同工具；必须使用本轮真实名称。book_id只能来自本机list；chapter/paragraph从0起。云端chunkId、quoteOffset不能直接换成章/段编号；expected_revision是本机书库版本，不是云端revision。list_annotations的offset是筛选后批注分页位置，paragraph是段序号；read_chapter的text_offset是段内UTF-16字符偏移。")
         put("soup_mapping", "本地状态入口是orbis_soup_current，不是status/haiguitang_current。session_id来自current；ask/submit保存建议后须人类在游戏页确认，再读current。start/next不提供AI工具，不会自动揭底或新开局。")
+        put("schedule_mapping", "orbis_schedule_* 是本机课表，不是系统 calendar_* 或闹铃；写入先取 revision，update完整替换一条，delete每周规则影响全部日期。")
+        put("kaomoji_mapping", "orbis_kaomoji_* 为文字库，保存不发送；orbis_stickers 是图片表情目录，两者ID不能互换。")
         put("unsupported", "本主题只列本轮已注册能力；未列出的回复批注/笔记审阅、阅读search/mark_read、卡片、AI导入导出删除等不可猜名调用。人类界面已有的能力不等于有AI工具。")
         put("permission_note", "列名和schema不检查远端健康、不执行工具、不扩大权限；批注读取只在明确指定的一本书内分页，材料进入当前模型上下文。")
     }
 }
 
-private fun parseManualTopic(arguments: JsonElement): Pair<String?, String?> {
-    val obj = arguments as? JsonObject ?: return null to "orbis_help_invalid_parameters"
-    if (obj.keys.any { it != "topic" }) return null to "orbis_help_unknown_parameter"
-    val value = obj["topic"] ?: return "overview" to null
-    val topic = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-    return if (topic != null && topic in manualTopics) topic to null else null to "orbis_help_unknown_topic"
+private val manualErrorCodes = setOf("orbis_help_invalid_parameters", "orbis_help_unknown_parameter", "orbis_help_unknown_topic", "orbis_help_unknown_chapter")
+private data class ManualRequest(val topic: String, val query: String = "", val chapter: String = "", val offset: Int = 0, val limit: Int = 5)
+private fun parseManualRequest(arguments: JsonElement): ManualRequest {
+    val obj = arguments as? JsonObject ?: error("orbis_help_invalid_parameters")
+    fun string(key: String, default: String): String = if (key !in obj) default else
+        (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error(if (key == "topic") "orbis_help_unknown_topic" else "orbis_help_invalid_parameters")
+    val topic = string("topic", "overview")
+    require(topic in manualTopics) { "orbis_help_unknown_topic" }
+    val allowed = when (topic) { "chapters" -> setOf("topic", "query", "offset", "limit"); "guide" -> setOf("topic", "chapter", "offset", "limit"); else -> setOf("topic") }
+    require(obj.keys.all { it in allowed }) { "orbis_help_unknown_parameter" }
+    fun number(key: String, default: Int): Int = if (key !in obj) default else
+        (obj[key] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
+            ?: error("orbis_help_invalid_parameters")
+    val query = string("query", "")
+    require(query.length <= 80 && query.none(Char::isISOControl)) { "orbis_help_invalid_parameters" }
+    val chapter = string("chapter", "")
+    if (topic == "guide") require(orbisManualChapters.any { it.id == chapter }) { "orbis_help_unknown_chapter" }
+    val offset = number("offset", 0)
+    val limit = number("limit", if (topic == "guide") 3 else 5)
+    require(offset in 0..500 && limit in 1..10) { "orbis_help_invalid_parameters" }
+    return ManualRequest(topic, query, chapter, offset, limit)
 }
 
 private fun manualError(code: String): String = buildJsonObject {

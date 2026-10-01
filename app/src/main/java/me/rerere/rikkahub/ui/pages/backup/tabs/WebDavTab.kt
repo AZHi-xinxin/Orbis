@@ -212,7 +212,7 @@ fun WebDavTab(
                                 Text(
                                     when (item) {
                                         WebDavConfig.BackupItem.DATABASE -> stringResource(R.string.backup_page_chat_records)
-                                        WebDavConfig.BackupItem.FILES -> stringResource(R.string.backup_page_files)
+                                        WebDavConfig.BackupItem.FILES -> "附件、字体、技能、课表与颜文字"
                                     }
                                 )
                             }

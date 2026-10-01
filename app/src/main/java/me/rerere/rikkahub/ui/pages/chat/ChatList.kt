@@ -106,6 +106,10 @@ private const val TAG = "ChatList"
 private const val LoadingIndicatorKey = "LoadingIndicator"
 private const val ScrollBottomKey = "ScrollBottomKey"
 
+/** Sharing must expose each selected source node; display folding never changes export ownership. */
+internal fun orbisChatListTimeline(nodes: List<MessageNode>, enabled: Boolean, selecting: Boolean) =
+    orbisCallTimeline(nodes, enabled && !selecting)
+
 @Composable
 fun ChatList(
     innerPadding: PaddingValues,
@@ -125,6 +129,7 @@ fun ChatList(
     onForkMessage: (UIMessage) -> Unit = {},
     onDelete: (UIMessage) -> Unit = {},
     onUpdateMessage: (MessageNode) -> Unit = {},
+    onVoiceNotePlayed: ((me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit) -> Unit)? = null,
     onDeleteToolRecord: ((Uuid, String) -> Unit)? = null,
     onRestoreToolRecord: ((Uuid, String) -> Unit)? = null,
     onEventPresentation: suspend (me.rerere.rikkahub.data.model.OrbisEventPresentationEdit) -> Unit = {
@@ -168,6 +173,7 @@ fun ChatList(
                 onForkMessage = onForkMessage,
                 onDelete = onDelete,
                 onUpdateMessage = onUpdateMessage,
+                onVoiceNotePlayed = onVoiceNotePlayed,
                 onDeleteToolRecord = onDeleteToolRecord,
                 onRestoreToolRecord = onRestoreToolRecord,
                 onEventPresentation = onEventPresentation,
@@ -226,6 +232,7 @@ private fun ChatListNormal(
     onForkMessage: (UIMessage) -> Unit,
     onDelete: (UIMessage) -> Unit,
     onUpdateMessage: (MessageNode) -> Unit,
+    onVoiceNotePlayed: ((me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit) -> Unit)?,
     onDeleteToolRecord: ((Uuid, String) -> Unit)?,
     onRestoreToolRecord: ((Uuid, String) -> Unit)?,
     onEventPresentation: suspend (me.rerere.rikkahub.data.model.OrbisEventPresentationEdit) -> Unit,
@@ -293,6 +300,56 @@ private fun ChatListNormal(
             .associateBy { it.id }
     }
     val lastMessageIndex = conversation.messageNodes.lastIndex
+    val timeline = remember(conversation.messageNodes, selecting) {
+        orbisChatListTimeline(conversation.messageNodes, BuildConfig.ORBIS_ENABLED, selecting)
+    }
+    // The same renderer is used for ordinary messages and a missing/unreadable call archive.
+    // Never replace source nodes with an archive-only UI that cannot show imported chat history.
+    val renderSourceMessage: @Composable (MessageNode, Int) -> Unit = { node, index ->
+        Column {
+            ListSelectableItem(
+                key = node.id,
+                onSelectChange = {
+                    if (!selectedItems.contains(node.id)) selectedItems.add(node.id)
+                    else selectedItems.remove(node.id)
+                },
+                selectedKeys = selectedItems,
+                enabled = selecting,
+            ) {
+                ChatMessage(
+                    node = node,
+                    model = node.currentMessage.modelId?.let(modelById::get),
+                    assistant = assistant,
+                    loading = loading && index == lastMessageIndex,
+                    onRegenerate = { onRegenerate(node.currentMessage) },
+                    onEdit = { onEdit(node.currentMessage) },
+                    onFork = { onForkMessage(node.currentMessage) },
+                    onDelete = { onDelete(node.currentMessage) },
+                    onShare = {
+                        selecting = true
+                        selectedItems.clear()
+                        selectedItems.addAll(conversation.messageNodes.take(index + 1).map { it.id })
+                    },
+                    onUpdate = onUpdateMessage,
+                    onVoiceNotePlayed = onVoiceNotePlayed,
+                    onEventPresentation = onEventPresentation,
+                    onDeleteToolRecord = onDeleteToolRecord?.let { action ->
+                        { toolCallId -> action(node.currentMessage.id, toolCallId) }
+                    },
+                    onRestoreToolRecord = onRestoreToolRecord?.let { action ->
+                        { toolCallId -> action(node.currentMessage.id, toolCallId) }
+                    },
+                    isFavorite = node.isFavorite,
+                    onToggleFavorite = { onToggleFavorite?.invoke(node) },
+                    onTranslate = onTranslate,
+                    onClearTranslation = onClearTranslation,
+                    onToolApproval = onToolApproval,
+                    onToolAnswer = onToolAnswer,
+                    lastMessage = index == lastMessageIndex,
+                )
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -334,66 +391,22 @@ private fun ChatListNormal(
                     .padding(top = innerPadding.calculateTopPadding()),
             ) {
             itemsIndexed(
-                items = conversation.messageNodes,
-                key = { index, item -> item.id },
-            ) { index, node ->
-                Column {
-                    ListSelectableItem(
-                        key = node.id,
-                        onSelectChange = {
-                            if (!selectedItems.contains(node.id)) {
-                                selectedItems.add(node.id)
-                            } else {
-                                selectedItems.remove(node.id)
+                items = timeline,
+                key = { _, item -> item.key },
+            ) { _, entry ->
+                if (entry.callId != null) {
+                    me.rerere.rikkahub.ui.pages.orbis.OrbisCallTimelineCard(entry.callId,
+                        conversation.id.toString(), sourceFallback = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                entry.nodes.forEachIndexed { offset, node ->
+                                    androidx.compose.runtime.key(node.id) {
+                                        renderSourceMessage(node, entry.firstSourceIndex + offset)
+                                    }
+                                }
                             }
-                        },
-                        selectedKeys = selectedItems,
-                        enabled = selecting,
-                    ) {
-                        ChatMessage(
-                            node = node,
-                            model = node.currentMessage.modelId?.let(modelById::get),
-                            assistant = assistant,
-                            loading = loading && index == lastMessageIndex,
-                            onRegenerate = {
-                                onRegenerate(node.currentMessage)
-                            },
-                            onEdit = {
-                                onEdit(node.currentMessage)
-                            },
-                            onFork = {
-                                onForkMessage(node.currentMessage)
-                            },
-                            onDelete = {
-                                onDelete(node.currentMessage)
-                            },
-                            onShare = {
-                                selecting = true  // 使用 CoroutineScope 延迟状态更新
-                                selectedItems.clear()
-                                selectedItems.addAll(conversation.messageNodes.map { it.id }
-                                    .subList(0, conversation.messageNodes.indexOf(node) + 1))
-                            },
-                            onUpdate = {
-                                onUpdateMessage(it)
-                            },
-                            onEventPresentation = onEventPresentation,
-                            onDeleteToolRecord = onDeleteToolRecord?.let { action ->
-                                { toolCallId -> action(node.currentMessage.id, toolCallId) }
-                            },
-                            onRestoreToolRecord = onRestoreToolRecord?.let { action ->
-                                { toolCallId -> action(node.currentMessage.id, toolCallId) }
-                            },
-                            isFavorite = node.isFavorite,
-                            onToggleFavorite = {
-                                onToggleFavorite?.invoke(node)
-                            },
-                            onTranslate = onTranslate,
-                            onClearTranslation = onClearTranslation,
-                            onToolApproval = onToolApproval,
-                            onToolAnswer = onToolAnswer,
-                            lastMessage = index == lastMessageIndex,
-                        )
-                    }
+                        })
+                } else {
+                    renderSourceMessage(entry.nodes.first(), entry.firstSourceIndex)
                 }
             }
 

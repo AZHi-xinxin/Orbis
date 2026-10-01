@@ -18,7 +18,7 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
-/** Register only below authenticate("auth-jwt"); every operation also enforces live auth + same origin. */
+/** Both optional-password modes share the importer; password-enabled mode still enforces login. */
 internal fun Route.deepSeekImportRoutes(imports: WebDeepSeekImports, settings: SettingsStore) {
     chatArchiveImportRoutes(imports, settings, "deepseek", "application/zip")
 }
@@ -27,14 +27,14 @@ internal fun Route.chatArchiveImportRoutes(imports: WebDeepSeekImports, settings
     source: String, contentType: String) {
     route("/imports/$source") {
         post {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             val request = call.receiveBoundedWebJson<WebImportCreateRequest>(4096)
             val assistant = request.assistantId.toUuid("assistantId")
             if (settings.settingsFlow.value.assistants.none { it.id == assistant }) throw NotFoundException("assistant_not_found")
             call.respond(HttpStatusCode.Created, imports.create(owner, assistant, source))
         }
         put("/{id}/archive") {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             val limit = imports.requireSource(owner, call.importId(), source)
             if (call.request.headers[HttpHeaders.ContentType]?.substringBefore(';') != contentType) {
                 throw BadRequestException("archive_content_type_required")
@@ -55,24 +55,24 @@ internal fun Route.chatArchiveImportRoutes(imports: WebDeepSeekImports, settings
             call.respond(status, result)
         }
         get("/{id}") {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             imports.requireSource(owner, call.importId(), source)
             call.respond(imports.status(owner, call.importId()))
         }
         get("/{id}/conversations") {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             imports.requireSource(owner, call.importId(), source)
             call.respond(imports.conversations(owner, call.importId(), call.pageOffset(), call.pageLimit()))
         }
         get("/{id}/branches") {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             imports.requireSource(owner, call.importId(), source)
             val index = call.request.queryParameters["conversation"]?.toIntOrNull()?.takeIf { it >= 0 }
                 ?: throw BadRequestException("invalid_conversation_selection")
             call.respond(imports.branches(owner, call.importId(), index, call.pageOffset(), call.pageLimit()))
         }
         post("/{id}/commit") {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             imports.requireSource(owner, call.importId(), source)
             val request = call.receiveBoundedWebJson<WebImportCommitRequest>(128 * 1024)
             val current = imports.status(owner, call.importId())
@@ -82,7 +82,7 @@ internal fun Route.chatArchiveImportRoutes(imports: WebDeepSeekImports, settings
             call.respond(HttpStatusCode.Accepted, imports.commit(owner, call.importId(), request))
         }
         delete("/{id}") {
-            val owner = call.requireSensitiveWebAccess(settings)
+            val owner = call.requireSensitiveWebAccess(settings, allowPasswordFreeImport = true)
             imports.requireSource(owner, call.importId(), source)
             call.respond(imports.cancel(owner, call.importId()))
         }

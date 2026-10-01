@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.datastore.*
 import me.rerere.rikkahub.data.orbis.contact.IncomingCallAttempt
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.ui.pages.chat.createVoiceAsr
+import me.rerere.asr.correctDeviceAsrTranscript
 import me.rerere.rikkahub.utils.stripMarkdown
 import me.rerere.tts.controller.TtsController
 import me.rerere.tts.provider.TTSManager
@@ -64,6 +65,11 @@ internal suspend fun startIncomingVoice(context: Context, lifecycle: Lifecycle, 
         check(runtime.start(callId = call.id, conversationId = conversationId, title = assistant.name,
             createAsr = { createVoiceAsr(app, koin.get<OkHttpClient>(), provider) },
             enqueueMessage = { chat.enqueueVoiceCallUtterance(conversationId, call.id, it) },
+            correctTranscript = { correctDeviceAsrTranscript(it, settings.asrCorrections) },
+            enqueueRecognizedMessage = { transcript ->
+                chat.enqueueVoiceCallUtterance(conversationId, call.id, transcript.corrected,
+                    originalTranscript = transcript.original.takeIf { transcript.changed })
+            },
             cancelPendingReply = { chat.cancelVoiceCallReply(conversationId, call.id, it) },
             speak = { text ->
                 val spoken = text.stripMarkdown()

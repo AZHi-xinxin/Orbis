@@ -388,6 +388,9 @@ class RouteActivity : ComponentActivity() {
         }
 
         ShareHandler(backStack)
+        if (BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.ui.pages.orbis.OrbisUpdateReminder(
+            enabled = !settings.init && incoming == null,
+        )
 
         SharedTransitionLayout {
             CompositionLocalProvider(
@@ -536,6 +539,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.OrbisTools> {
                                 OrbisToolsPage()
+                            }
+                            entry<Screen.OrbisSchedule> {
+                                val navController = LocalNavController.current
+                                me.rerere.rikkahub.ui.pages.orbis.OrbisSchedulePage(onBack = { navController.popBackStack() })
                             }
                             entry<Screen.OrbisToy> {
                                 val navController = LocalNavController.current
@@ -827,6 +834,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object OrbisTools : Screen
+
+    @Serializable
+    data object OrbisSchedule : Screen
 
     @Serializable
     data object OrbisToy : Screen

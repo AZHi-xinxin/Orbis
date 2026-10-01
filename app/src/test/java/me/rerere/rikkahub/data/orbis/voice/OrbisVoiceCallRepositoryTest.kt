@@ -11,6 +11,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisVoiceCallRepositoryTest {
+    @Test fun `archive intent is durable and process interruption never retries or loses raw source`() = runTest {
+        val storage = MemoryStorage()
+        val repo = OrbisVoiceCallRepository(storage)
+        val original = call().copy(status = OrbisVoiceCallStatus.INTERRUPTED, transcript = listOf(entry()),
+            archiveStatus = OrbisVoiceArchiveStatus.GENERATING, archiveRequestCount = 1, archiveLastModelId = "explicit-model")
+        repo.create(original)
+        val recovered = OrbisVoiceCallRepository(storage).recoverInterrupted().single()
+        assertEquals(OrbisVoiceArchiveStatus.FAILED, recovered.archiveStatus)
+        assertEquals("process_interrupted_no_auto_retry", recovered.archiveFailureCode)
+        assertEquals(1, recovered.archiveRequestCount)
+        assertEquals(original.transcript, recovered.transcript)
+        fails { repo.update(original.id) { it.copy(archiveRequestCount = 0) } }
+        fails { repo.update(original.id) { it.copy(archiveFailureCode = "PRIVATE_EXCEPTION_BODY") } }
+        assertTrue(repo.recoverInterrupted().isEmpty())
+    }
     private class MemoryStorage : OrbisVoiceCallStorage {
         override val lockKey = UUID.randomUUID().toString()
         val records = mutableMapOf<String, String>()

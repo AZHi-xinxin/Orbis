@@ -52,7 +52,7 @@ fun BridgeLegacyAutomationReadOnlyCard(
     onStopCollection: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("旧小L行为配置 · 只读", style = MaterialTheme.typography.titleMedium)
+        Text("旧版内置观察配置 · 只读", style = MaterialTheme.typography.titleMedium)
         Text("旧链路迁移中：人格、提醒门槛和周期暂不可由此修改，也不能在这里重新开启旧自动规则。新的本机哨兵由 AI 管理。",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("旧自动采集设置：${if (collectionEnabled) "已开启" else "已关闭"}（不代表当前服务正在运行）",
@@ -69,9 +69,9 @@ fun BridgeLegacyAutomationReadOnlyCard(
         }
         OutlinedButton(enabled = collectionEnabled, onClick = onStopCollection,
             modifier = Modifier.fillMaxWidth().testTag("legacy-stop-collection")) {
-            Text("停止旧小L自动采集")
+            Text("停止旧版自动采集")
         }
-        Text("这是隐私停止：只停止旧小L自动采集与连续使用监测，不撤销系统权限，也不改写本地哨兵规则。截屏授权、无障碍和其他隐私选项仍由你控制。",
+        Text("这是隐私停止：只停止旧版自动采集与连续使用监测，不撤销系统权限，也不改写本地哨兵规则。截屏授权、无障碍和其他隐私选项仍由你控制。",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

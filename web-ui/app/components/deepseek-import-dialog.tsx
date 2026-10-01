@@ -166,7 +166,7 @@ function SourceImportDialog({ open, onOpenChange, onImported, source, onSourceCh
       } catch {
         await refresh(created.id).catch(() => setError("上传结果暂时未知。请查看任务状态，未确认前不会导入任何聊天。"));
       } finally { upload.current = null; }
-    } catch { setError("无法开始导入。请确认手机 Web 已启用密码保护、连接正常且没有其他导入任务。"); }
+    } catch { setError("无法开始导入。请确认手机 Web 连接正常且没有其他导入任务；如果你已开启密码保护，请先登录。不开启密码也可以导入。"); }
     finally { setBusy(false); }
   };
 
@@ -221,7 +221,7 @@ function SourceImportDialog({ open, onOpenChange, onImported, source, onSourceCh
           <p className="text-xs leading-relaxed text-muted-foreground">{info.description}</p>
           {status?.state === "ready" && <p className="text-xs text-muted-foreground">切换来源会清理当前未导入的预览，不会删除已有聊天。</p>}
         </div>
-        {!canImport && <p className="rounded-lg bg-muted p-3 text-sm">请先在手机的 Web 设置中开启密码保护，再重新连接。未开启认证时不能上传或导入。</p>}
+        {!canImport && <p className="rounded-lg bg-muted p-3 text-sm">正在等待手机连接。若已开启 Web 密码保护，请完成登录；不开启密码也可上传导入。</p>}
         <input ref={input} type="file" accept={info.accept} aria-label={`选择 ${info.label} 导入文件`} className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void choose(file); event.target.value = ""; }} />
         <Button variant="outline" disabled={!canImport || busy || recovering || Boolean(status && BUSY.has(status.state))} onClick={() => input.current?.click()}>
           <Upload className="size-4" />{recovering ? "正在恢复导入任务…" : info.fileLabel}</Button>
@@ -233,8 +233,10 @@ function SourceImportDialog({ open, onOpenChange, onImported, source, onSourceCh
           {status.state === "importing" && <p>已处理 {status.completed} / {status.total} 个会话</p>}
           {status.error && <p className="text-sm text-destructive">{status.error === "insufficient_storage" ? "手机剩余存储空间不足，未满足导入安全预留。请先腾出空间再重试，不要删除尚未备份的聊天。" : status.error === "archive_too_large" ? "文件超过大小限制。" : status.error === "invalid_archive" ? "文件格式不兼容或已损坏，没有覆盖现有聊天。" : "任务未全部完成。已完成会话保留，可重新选择原文件，已有内容会跳过。"}</p>}
           {status.state === "ready" && <p className="text-sm">发现 {status.conversationCount} 个窗口。{info.preview}</p>}
+          {status.warnings?.map((warning, index) => <p key={index} className="text-xs text-muted-foreground">{warning}</p>)}
           {["complete", "failed", "cancelled"].includes(status.state) && <p className="text-sm">导入 {status.imported} · 已有内容跳过 {status.skipped} · 未导入 {status.failed} · 消息 {status.messages}</p>}
           {status.attachmentReferences > 0 && <p className="text-xs text-muted-foreground">有 {status.attachmentReferences} 个未还原附件 / 媒体引用，消息中保留说明；不会自动下载外部内容。</p>}
+          {(status.skippedSummaries ?? 0) > 0 && <p className="text-xs text-muted-foreground">本次新增会话跳过 {status.skippedSummaries} 条内部摘要；未作为聊天或系统提示导入，原件不变。</p>}
           {status.rows.map((row) => <p key={row.conversation} className="text-xs">窗口 {row.conversation + 1}：{row.state === "imported" ? "已导入" : row.state === "skipped" ? "已有路径，已跳过" : "单条消息过大，该窗口未导入，原文未截断"}</p>)}
         </section>}
         {status?.state === "ready" && <>
@@ -243,6 +245,7 @@ function SourceImportDialog({ open, onOpenChange, onImported, source, onSourceCh
               onChange={(event) => { setConfirmed(false); setSelection((old) => { const value = { ...old }; if (event.target.checked) value[row.index] = row.defaultBranch; else delete value[row.index]; return value; }); }} />
               <span className="min-w-0 break-words font-medium">{row.title || `窗口 ${row.index + 1}`}</span></label>
             <p className="mt-1 text-xs text-muted-foreground">{source === "deepseek" ? `${row.totalNodes} 个源节点 · ${row.branchPointCount} 处分叉 · ${row.branchCount} 条可选路径` : `${row.messageCount} 条消息 · ${defaultImportPathLabel(row.defaultSelectionReason)}`}</p>
+            {(row.omittedSummaryCount ?? 0) > 0 && <p className="text-xs text-muted-foreground">跳过 {row.omittedSummaryCount} 条内部摘要，不作为聊天或系统提示导入。</p>}
             {selection[row.index] != null && source === "deepseek" && <BranchPicker key={`${status.id}:${row.index}`} source={source} jobId={status.id} row={row} value={selection[row.index]} onChange={(branch) => { setConfirmed(false); setSelection((old) => ({ ...old, [row.index]: branch })); }} />}
           </section>)}</div>
           {next != null && <Button variant="outline" onClick={() => { setConfirmed(false); void loadRows(status.id, next, false).catch(() => setError("读取更多窗口失败，请重试。")); }}>显示更多窗口（仅已显示且勾选的窗口会导入）</Button>}

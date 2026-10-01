@@ -93,7 +93,7 @@ fun MainScreen(
                 screenCaptureMessage = "屏幕捕获服务启动失败：${error.javaClass.simpleName}"
             }
         } else {
-            screenCaptureMessage = "未授权屏幕捕获，小L不会读取屏幕像素"
+            screenCaptureMessage = "未授权屏幕捕获，内置观察模块不会读取屏幕像素"
         }
     }
 
@@ -340,16 +340,16 @@ fun MainScreen(
                     McpService.refreshEyesTimer()
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                         ScreenCaptureService.stop(context)
-                        screenCaptureMessage = "旧小L自动采集已停止，屏幕捕获会话已结束"
+                        screenCaptureMessage = "旧版自动采集已停止，屏幕捕获会话已结束"
                     }
                 },
             )
         } else {
-        Text("小L · 视觉与休息提醒引擎", fontSize = 18.sp)
-        Text("视觉和连续使用提醒共用小L启用状态，实际运行还需启动本机服务；停止服务不会自动关闭所保存的开关。", fontSize = 12.sp)
+        Text("Orbis 内置视觉与休息提醒", fontSize = 18.sp)
+        Text("视觉和连续使用提醒共用内置观察模块启用状态，实际运行还需启动本机服务；停止服务不会自动关闭所保存的开关。无需另装配套应用。", fontSize = 12.sp)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("启用小L", fontSize = 14.sp)
+            Text("启用内置观察模块", fontSize = 14.sp)
             Spacer(modifier = Modifier.width(8.dp))
             Switch(
                 checked = eyesEnabled,
@@ -359,7 +359,7 @@ fun MainScreen(
                     McpService.refreshEyesTimer()
                     if (!it && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                         ScreenCaptureService.stop(context)
-                        screenCaptureMessage = "小L已关闭，屏幕捕获会话已停止"
+                        screenCaptureMessage = "内置观察模块已关闭，屏幕捕获会话已停止"
                     }
                 }
             )
@@ -393,7 +393,7 @@ fun MainScreen(
         OutlinedTextField(
             value = eyesPersonality,
             onValueChange = { eyesPersonality = it },
-            label = { Text("小L人格描述（自由填写）") },
+            label = { Text("观察模块角色描述（自由填写）") },
             modifier = Modifier.fillMaxWidth(),
             minLines = 3,
             maxLines = 5
@@ -437,7 +437,7 @@ fun MainScreen(
                 .apply()
             McpService.refreshEyesTimer()
         }, enabled = restThreshold.toIntOrNull() in 60..1440) {
-            Text("保存小L配置")
+            Text("保存观察配置")
         }
         }
         }
@@ -469,7 +469,7 @@ fun MainScreen(
             val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
             context.startActivity(intent)
         }, modifier = Modifier.fillMaxWidth()) {
-            Text("开启无障碍服务（小L截屏必需）")
+            Text("开启无障碍服务（内置截屏所需）")
         }
 
 
@@ -477,7 +477,7 @@ fun MainScreen(
 
 // ===== 视觉API配置 =====
         Text("视觉API配置", fontSize = 18.sp)
-        Text("小L需要视觉模型来分析截图", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("旧版自动观察使用单独配置的视觉模型分析截图；不是额外应用。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         OutlinedTextField(
             value = visionApiUrl,

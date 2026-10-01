@@ -145,7 +145,8 @@ internal class WebDeepSeekImports(
         val preview = readyLocked(ownedLocked(owner, id))
         val items = preview.conversations.drop(offset).take(limit).mapIndexed { index, c ->
             WebImportConversationDto(offset + index, c.title, c.totalNodes, c.messageCount, c.branchPointCount,
-                c.branches.size, c.branches.indexOfFirst { it.leafId == c.defaultLeafId }, c.defaultSelectionReason)
+                c.branches.size, c.branches.indexOfFirst { it.leafId == c.defaultLeafId }, c.defaultSelectionReason,
+                c.omittedSummaryCount)
         }
         PagedResult(items, (offset + items.size).takeIf { it < preview.conversations.size })
     }
@@ -344,6 +345,7 @@ internal class WebDeepSeekImports(
         job.format.maxArchiveBytes, job.preview?.conversations?.size ?: 0, job.reviewToken,
         job.total, job.completed, job.result.imported, job.result.skipped, job.result.failed,
         job.result.messages, job.result.attachmentReferences, job.rows, job.error,
+        job.preview?.warnings ?: emptyList(), job.result.skippedSummaries,
     )
 
     private class ImportTooLarge : IllegalArgumentException()

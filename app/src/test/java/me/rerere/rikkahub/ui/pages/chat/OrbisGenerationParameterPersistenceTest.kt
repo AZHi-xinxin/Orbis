@@ -24,6 +24,22 @@ class OrbisGenerationParameterPersistenceTest {
     private val before = OrbisGenerationParameters.from(assistant)
     private val edit = OrbisGenerationParameterEdit(assistant.id, before, before.copy(temperature = 1f))
 
+    @Test fun `finite context limit then zero is saved in current assistant without replacing identity`() = runBlocking {
+        var state = Settings(assistants = listOf(assistant), assistantId = assistant.id)
+        val finite = before.copy(contextMessageLimit = 80)
+        val first = persistOrbisGenerationParameters(OrbisGenerationParameterEdit(assistant.id, before, finite)) {
+            state = it(state)
+        }
+        assertEquals(80, state.assistants.single().contextMessageLimit)
+        val restored = persistOrbisGenerationParameters(OrbisGenerationParameterEdit(assistant.id, first, first.copy(contextMessageLimit = 0))) {
+            state = it(state)
+        }
+        assertEquals(0, restored.contextMessageLimit)
+        assertEquals(0, state.assistants.single().contextMessageLimit)
+        assertEquals(assistant.id, state.assistants.single().id)
+        assertEquals(assistant.id, state.assistantId)
+    }
+
     @Test fun `write merges against callback latest state and preserves other assistants and settings`() = runBlocking {
         val other = Assistant(name = "other")
         var state = Settings(assistants = listOf(assistant.copy(name = "concurrent"), other), enableSuggestion = false)

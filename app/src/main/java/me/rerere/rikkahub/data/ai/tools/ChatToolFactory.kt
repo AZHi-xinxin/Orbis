@@ -136,6 +136,13 @@ class ChatToolFactory(
             )
         }
         if (BuildConfig.ORBIS_ENABLED) {
+            addAll(createOrbisKaomojiTools { me.rerere.rikkahub.data.orbis.OrbisKaomojis.open(context.applicationContext) })
+            addAll(me.rerere.rikkahub.data.orbis.schedule.buildOrbisScheduleTools(context))
+            add(createOrbisVoiceNoteTool(
+                me.rerere.rikkahub.data.orbis.voice.OrbisVoiceNotes(context,
+                    org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.files.FilesManager>()),
+                settings = { settingsStore?.settingsFlow?.value ?: settings },
+            ))
             addAll(me.rerere.rikkahub.data.orbis.consultation.createOrbisConsultationMainTools(
                 context, assistant.id, conversationId, conversationRepository,
             ))

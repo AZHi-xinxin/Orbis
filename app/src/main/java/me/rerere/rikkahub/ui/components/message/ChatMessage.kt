@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.rikkahub.data.model.isOrbisVoiceNote
+import me.rerere.rikkahub.data.model.voiceNotePlaybackKey
+import me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit
+
 import me.rerere.rikkahub.data.model.appearanceForStyle
 import me.rerere.rikkahub.ui.components.richtext.LocalImportedHistory
 import me.rerere.rikkahub.ui.components.richtext.isDeepSeekHistory
@@ -121,6 +125,7 @@ fun ChatMessage(
     onShare: () -> Unit,
     onDelete: () -> Unit,
     onUpdate: (MessageNode) -> Unit,
+    onVoiceNotePlayed: ((OrbisVoiceNotePlayedEdit) -> Unit)? = null,
     onDeleteToolRecord: ((String) -> Unit)? = null,
     onRestoreToolRecord: ((String) -> Unit)? = null,
     onEventPresentation: suspend (me.rerere.rikkahub.data.model.OrbisEventPresentationEdit) -> Unit = {
@@ -134,6 +139,7 @@ fun ChatMessage(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
+    val currentOnVoiceNotePlayed by rememberUpdatedState(onVoiceNotePlayed)
     if (message.orbisVoiceCallKind in setOf("begin", "archive", "summary", "ended_notice")) {
         me.rerere.rikkahub.ui.pages.orbis.OrbisVoiceCallMessageCard(message, modifier)
         return
@@ -204,13 +210,13 @@ fun ChatMessage(
                 )
             }
         }
-        val messageContent = @Composable {
+        val renderParts: @Composable (List<UIMessagePart>) -> Unit = { displayedParts ->
             CompositionLocalProvider(LocalImportedHistory provides message.parts.isDeepSeekHistory()) {
             ProvideTextStyle(textStyle) {
                 MessagePartsBlock(
                     assistant = assistant,
                     role = message.role,
-                    parts = message.parts,
+                    parts = displayedParts,
                     annotations = message.annotations,
                     loading = loading,
                     model = model,
@@ -220,9 +226,15 @@ fun ChatMessage(
                     segmentedReply = segmentedReply,
                     messageKey = message.id.toString(),
                     onDeleteToolRecord = if (BuildConfig.ORBIS_ENABLED) onDeleteToolRecord else null,
-                    deletedCitationTools = message.deletedToolRecords.map { it.tool },
+                    // Split display rows still resolve citations against the original turn.
+                    deletedCitationTools = message.parts.filterIsInstance<UIMessagePart.Tool>() +
+                        message.deletedToolRecords.map { it.tool },
                 )
-
+            }
+            }
+        }
+        val messageExtras = @Composable {
+            ProvideTextStyle(textStyle) {
                 if (BuildConfig.ORBIS_ENABLED && message.deletedToolRecords.isNotEmpty()) {
                     OrbisDeletedToolRecords(
                         records = message.deletedToolRecords.map { it.tool.toolCallId to it.tool.toolName },
@@ -237,12 +249,24 @@ fun ChatMessage(
                     )
                 }
             }
-            }
         }
-        if (BuildConfig.ORBIS_ENABLED && !message.parts.isEmptyUIMessage()) {
-            OrbisChatMessageLayout(message, model, assistant, loading, segmentedReply, messageContent)
+        val voiceRows = remember(message.parts, message.role) {
+            if (message.role == MessageRole.ASSISTANT) message.parts.orbisVoiceNoteDisplay() else null
+        }
+        if (voiceRows != null) {
+            OrbisVoiceNoteRows(message, voiceRows, model, assistant, loading, segmentedReply,
+                onPlayed = { row -> currentOnVoiceNotePlayed?.invoke(OrbisVoiceNotePlayedEdit(node.id, message.id,
+                    row.partIndex, row.outputIndex, row.audio.voiceNotePlaybackKey(message.id.toString(), row.occurrenceKey))) },
+                renderParts = renderParts)
+            messageExtras()
+        } else if (BuildConfig.ORBIS_ENABLED && !message.parts.isEmptyUIMessage()) {
+            OrbisChatMessageLayout(message, model, assistant, loading, segmentedReply) {
+                renderParts(message.parts)
+                messageExtras()
+            }
         } else {
-            messageContent()
+            renderParts(message.parts)
+            messageExtras()
         }
 
         val showActions = if (lastMessage) {
@@ -574,6 +598,9 @@ internal fun MessagePartsBlock(
                     }
 
                     is UIMessagePart.Audio -> {
+                        if (part.isOrbisVoiceNote()) {
+                            OrbisVoiceNoteBubble(part, messageKey)
+                        } else {
                         Surface(
                             tonalElevation = 2.dp,
                             onClick = {
@@ -607,6 +634,7 @@ internal fun MessagePartsBlock(
                         }
                     }
 
+                        }
                     is UIMessagePart.Image -> {
                         val isImageLoading =
                             part.url.isBlank() || part.url.matches(Regex("^data:image/[^;]*;base64,\\s*$"))

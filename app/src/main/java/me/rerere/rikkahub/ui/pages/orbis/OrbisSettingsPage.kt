@@ -64,6 +64,7 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
     var dmOpen by remember { mutableStateOf(false) }
+    var updateOpen by remember { mutableStateOf(false) }
     var connectionExpanded by rememberSaveable { mutableStateOf(true) }
     var mcpExpanded by rememberSaveable { mutableStateOf(startAtMcp) }
     var displayExpanded by rememberSaveable { mutableStateOf(false) }
@@ -262,6 +263,7 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
                     }
                 }
                 item("advanced") {
+                    OrbisSettingsLink("版本更新与回退", "查看更新说明、备份提示与官方安装包", { updateOpen = true })
                     OrbisSettingsSection("高级连接与通知", "更多模型、网络与通知选项", "⋯",
                         advancedExpanded, { advancedExpanded = !advancedExpanded }) {
                         OrbisSettingsLink("默认模型与提示词", "各项功能使用的模型与提示词",
@@ -277,4 +279,5 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
         }
     }
     if (dmOpen) OrbisSoupDmSettingsDialog(onDismiss = { dmOpen = false })
+    if (updateOpen) OrbisUpdateDialog(onDismiss = { updateOpen = false })
 }

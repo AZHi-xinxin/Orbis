@@ -44,7 +44,8 @@ internal fun MessageQueuePanel(
     onResume: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<QueuedMessage?>(null) }
-    if (state.messages.isNotEmpty()) {
+    var confirmResume by remember { mutableStateOf(false) }
+    if (state.messages.isNotEmpty() || state.paused) {
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -67,9 +68,11 @@ internal fun MessageQueuePanel(
                             .padding(vertical = 8.dp),
                     )
                     if (state.paused) {
-                        TextButton(onClick = onResume) { Text(stringResource(R.string.chat_page_queue_resume)) }
+                        TextButton(onClick = { confirmResume = true }) { Text("检查并恢复") }
                     }
                 }
+                if (state.paused) Text("消息队列已暂停。通话原文独立保存，可在通话卡片中重新归档，无需先恢复队列。",
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
                 LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
                     itemsIndexed(
                         state.messages,
@@ -114,6 +117,12 @@ internal fun MessageQueuePanel(
             }
         }
     }
+
+    if (confirmResume) AlertDialog(onDismissRequest = { confirmResume = false },
+        title = { Text("恢复后续排队消息？") },
+        text = { Text("将继续处理尚未发送的排队消息，可能调用模型。不会自动重做上一条失败或结果未知的工具；若仍有未解决的执行状态，会保留暂停并给出提示。通话重新归档请使用通话卡片中的入口。") },
+        confirmButton = { TextButton(onClick = { confirmResume = false; onResume() }) { Text("恢复后续消息") } },
+        dismissButton = { TextButton(onClick = { confirmResume = false }) { Text("取消") } })
 
     editing?.let { message ->
         val input = remember(message.id) {

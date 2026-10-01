@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import me.rerere.asr.ASRController
+import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
@@ -49,6 +50,8 @@ class OpenAIRealtimeASRController(
     private val provider: ASRProviderSetting.OpenAIRealtime,
     private val enableEchoCancellation: Boolean = false,
 ) : ASRController {
+    private val pcmObserver = ASRPcmObserver()
+    override fun setPcmObserver(observer: ((ByteArray, Int) -> Unit)?) = pcmObserver.set(observer)
     override val supportsConcurrentPlayback: Boolean = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -128,11 +131,13 @@ class OpenAIRealtimeASRController(
     }
 
     override fun pauseCapture() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         releaseRecorder()
     }
 
     override fun stop() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         releaseRecorder()
         val socket = webSocket
@@ -152,6 +157,7 @@ class OpenAIRealtimeASRController(
     }
 
     override fun dispose() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         val socket = webSocket
         webSocket = null
@@ -167,6 +173,7 @@ class OpenAIRealtimeASRController(
     ) {
         recorderJob?.cancel()
         releaseRecorder()
+        val pcmEpoch = pcmObserver.captureEpoch()
         recorderJob = scope.launch(Dispatchers.IO) {
             val minBufferSize = AudioRecord.getMinBufferSize(
                 provider.sampleRate,
@@ -202,6 +209,7 @@ class OpenAIRealtimeASRController(
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        pcmObserver.emit(pcmEpoch, buffer, read, provider.sampleRate)
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
                         if (socket.queueSize() < MAX_WEBSOCKET_QUEUE_BYTES) {
@@ -293,6 +301,7 @@ class OpenAIRealtimeASRController(
     }
 
     private fun setError(message: String) {
+        pcmObserver.set(null)
         _state.update {
             it.copy(
                 status = ASRStatus.Error,

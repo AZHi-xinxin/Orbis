@@ -26,6 +26,7 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRProviderSetting
+import me.rerere.asr.correctDeviceAsrTranscript
 import me.rerere.asr.providers.DashScopeASRController
 import me.rerere.asr.providers.VolcengineASRController
 import me.rerere.asr.providers.OpenAIRealtimeASRController
@@ -133,6 +134,12 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
                             title = assistant?.name?.ifBlank { "语音通话" } ?: "语音通话",
                             createAsr = { createVoiceAsr(context, client, checkNotNull(provider)) },
                             enqueueMessage = { chatService.enqueueVoiceCallUtterance(conversation.id, call.id, it) },
+                            // One immutable settings snapshot for live display, accepted text and audit.
+                            correctTranscript = { correctDeviceAsrTranscript(it, settings.asrCorrections) },
+                            enqueueRecognizedMessage = { transcript ->
+                                chatService.enqueueVoiceCallUtterance(conversation.id, call.id, transcript.corrected,
+                                    originalTranscript = transcript.original.takeIf { transcript.changed })
+                            },
                             cancelPendingReply = { chatService.cancelVoiceCallReply(conversation.id, call.id, it) },
                             speak = { reply ->
                                 var spoken = reply

@@ -32,6 +32,7 @@ data class DeepSeekImportResult(
     val imported: Int = 0, val skipped: Int = 0, val failed: Int = 0,
     val messages: Int = 0, val attachmentReferences: Int = 0,
     val failures: List<DeepSeekImportFailure> = emptyList(),
+    val skippedSummaries: Int = 0,
 )
 data class DeepSeekImportProgress(val total: Int, val completed: Int, val result: DeepSeekImportResult)
 class DeepSeekImportCancelledException(val partialResult: DeepSeekImportResult) : CancellationException("聊天导入已取消；已完成的会话保留")

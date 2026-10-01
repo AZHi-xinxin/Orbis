@@ -18,12 +18,110 @@ import me.rerere.asr.ASRController
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.ASRVoiceTurn
+import me.rerere.asr.ASRCorrectionResult
+import me.rerere.asr.ASRTermCorrectionRule
+import me.rerere.asr.ASRTermCorrectionSettings
+import me.rerere.asr.correctAsrTranscript
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.MessageQueue
 import org.junit.Assert.*
 import org.junit.Test
 
 class VoiceSessionControllerTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `call live and final ASR use one correction snapshot while preserving original`() = runTest {
+        val recorders = mutableListOf<FakeAsr>()
+        val accepted = mutableListOf<ASRCorrectionResult>()
+        var currentRules = ASRTermCorrectionSettings(true, listOf(ASRTermCorrectionRule("阿止", listOf("阿直"))))
+        val callRules = currentRules
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) { error("legacy callback must not lose ASR audit") }
+        try {
+            voice.start(createAsr = { FakeAsr().also { recorders.add(it) } }, speak = null, stopSpeaking = {},
+                correctTranscript = { correctAsrTranscript(it, callRules) },
+                enqueueRecognizedMessage = { result ->
+                    assertEquals(result.corrected, voice.state.value.transcript)
+                    assertEquals(result.original, voice.state.value.originalTranscript)
+                    accepted.add(result)
+                    CompletableDeferred<String?>()
+                })
+            advanceTimeBy(201); runCurrent()
+            val recorder = recorders.single()
+            recorder.state.value = recorder.state.value.copy(transcript = "阿直，你在吗", voiceTurn = ASRVoiceTurn("a"))
+            runCurrent()
+            assertEquals("阿止，你在吗", voice.state.value.transcript)
+            assertEquals("阿直，你在吗", voice.state.value.originalTranscript)
+            currentRules = ASRTermCorrectionSettings() // Mid-call changes are not retroactive.
+            assertFalse(currentRules.enabled)
+            recorder.end("阿直，你在吗？")
+            runCurrent()
+            assertEquals(listOf(ASRCorrectionResult("阿直，你在吗？", "阿止，你在吗？")), accepted)
+            assertTrue(recorder.disposed)
+        } finally { voice.stopAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `call correction notice acknowledgement survives final and identical next capture is new`() = runTest {
+        val recorders = mutableListOf<FakeAsr>()
+        val rules = ASRTermCorrectionSettings(true, listOf(ASRTermCorrectionRule("合成目标", listOf("合成别名"))))
+        var accepted = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) {
+            accepted++; CompletableDeferred<String?>()
+        }
+        try {
+            voice.start(createAsr = { FakeAsr().also { recorders.add(it) } }, speak = null, stopSpeaking = {},
+                correctTranscript = { correctAsrTranscript(it, rules) },
+                enqueueRecognizedMessage = { result ->
+                    assertFalse(voice.state.value.correctionNotice.visible)
+                    assertEquals("合成别名", result.original)
+                    assertEquals("合成目标", result.corrected)
+                    accepted++; CompletableDeferred<String?>()
+                })
+            advanceTimeBy(201); runCurrent()
+            val recorder = recorders.single()
+            recorder.state.value = recorder.state.value.copy(transcript = "合成别名", voiceTurn = ASRVoiceTurn("a"))
+            runCurrent()
+            val firstId = voice.state.value.correctionNotice.eventId
+            assertTrue(voice.state.value.correctionNotice.visible)
+            voice.dismissCorrectionNotice(firstId)
+            assertFalse(voice.state.value.correctionNotice.visible)
+            assertEquals("合成别名", voice.state.value.originalTranscript)
+            assertEquals("合成目标", voice.state.value.transcript)
+            assertEquals(0, accepted)
+            recorder.end("合成别名"); runCurrent()
+            assertEquals(1, accepted)
+            val next = recorders.last()
+            assertNotSame(recorder, next)
+            next.state.value = next.state.value.copy(transcript = "合成别名", voiceTurn = ASRVoiceTurn("b"))
+            runCurrent()
+            assertTrue(voice.state.value.correctionNotice.eventId != firstId)
+            assertTrue(voice.state.value.correctionNotice.visible)
+            voice.dismissCorrectionNotice(firstId) // A late old dialog cannot dismiss the next.
+            assertTrue(voice.state.value.correctionNotice.visible)
+            assertEquals(1, accepted)
+        } finally { voice.stopAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `disabled call correction sends original once and never invents an audit difference`() = runTest {
+        val recorders = mutableListOf<FakeAsr>()
+        val accepted = mutableListOf<String>()
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) {
+            accepted.add(it); CompletableDeferred<String?>()
+        }
+        try {
+            voice.start(createAsr = { FakeAsr().also { recorders.add(it) } }, speak = null, stopSpeaking = {},
+                correctTranscript = { correctAsrTranscript(it, ASRTermCorrectionSettings()) })
+            advanceTimeBy(201); runCurrent()
+            val recorder = recorders.single()
+            recorder.state.value = recorder.state.value.copy(transcript = "阿直", voiceTurn = ASRVoiceTurn("a"))
+            runCurrent()
+            assertEquals("阿直", voice.state.value.transcript)
+            assertNull(voice.state.value.originalTranscript)
+            recorder.end("阿直"); runCurrent()
+            assertEquals(listOf("阿直"), accepted)
+        } finally { voice.stopAndJoin() }
+    }
+
     private class FakeAsr(
         override val supportsConcurrentPlayback: Boolean = false,
         private val echoActive: Boolean = false,

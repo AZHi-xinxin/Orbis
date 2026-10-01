@@ -297,6 +297,17 @@ class ChatVM(
 
     fun resumeMessageQueue() = chatService.resumeMessageQueue(_conversationId)
 
+    fun saveVoiceNotePlayed(edit: me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit) {
+        viewModelScope.launch {
+            try { chatService.saveVoiceNotePlayed(_conversationId, edit) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                chatService.addError(IllegalStateException("语音已播放，但已听标记未确认保存。"),
+                    _conversationId, title = "语音条状态")
+            }
+        }
+    }
+
     // 生成完成
     val generationDoneFlow: SharedFlow<Uuid> = chatService.generationDoneFlow
 

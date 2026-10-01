@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import me.rerere.asr.ASRController
+import me.rerere.asr.ASRCorrectionResult
 import me.rerere.rikkahub.ui.pages.chat.VoiceSessionController
 import kotlin.uuid.Uuid
 
@@ -126,6 +127,8 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
         onEnded: suspend (OrbisVoiceCallEnd) -> Unit,
         setOutputMuted: (Boolean) -> Unit = {},
         requestOpening: (suspend () -> Deferred<String?>?)? = null,
+        correctTranscript: (String) -> ASRCorrectionResult = { ASRCorrectionResult(it, it) },
+        enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)? = null,
     ): Boolean {
         if (current != null) return false
         val session = Session(callId, conversationId, enqueueMessage, onEnded)
@@ -172,6 +175,13 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                         }
                         opening()
                     } },
+                    correctTranscript = correctTranscript,
+                    enqueueRecognizedMessage = { transcript ->
+                        check(current === session && !session.ending && session.connectedAtMillis != null) {
+                            "Voice call has ended"
+                        }
+                        enqueueRecognizedMessage?.invoke(transcript) ?: session.enqueueMessage(transcript.corrected)
+                    },
                     isHeadsetConnected = { confirmedHeadsetRoute(audio) },
                     onConnected = {
                         check(current === session && !session.ending) { "Voice call has ended" }

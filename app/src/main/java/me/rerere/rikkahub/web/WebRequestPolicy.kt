@@ -14,6 +14,12 @@ internal fun sensitiveWebBearer(authorization: String?): String? = authorization
     ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
     ?.substring(7)?.trim()?.takeIf { it.isNotEmpty() }
 
+/** Authentication is optional only for the explicit archive-import route family. */
+internal fun canAccessSensitiveWebRoute(jwtEnabled: Boolean, passwordConfigured: Boolean,
+    authenticated: Boolean, bearer: String?, allowPasswordFreeImport: Boolean): Boolean =
+    if (jwtEnabled) passwordConfigured && authenticated && !bearer.isNullOrBlank()
+    else allowPasswordFreeImport
+
 /** Browser sends its own origin explicitly even for same-origin GETs without an Origin header. */
 internal fun isSameOriginWebRequest(host: String?, declaredOrigin: String?, origin: String?, fetchSite: String?): Boolean {
     if (host.isNullOrBlank() || declaredOrigin.isNullOrBlank()) return false
@@ -28,12 +34,14 @@ internal fun isSameOriginWebRequest(host: String?, declaredOrigin: String?, orig
     }.getOrDefault(false)
 }
 
-/** Called only inside auth-jwt routes. Query-token authentication is never enough for imports. */
-internal fun ApplicationCall.requireSensitiveWebAccess(settingsStore: SettingsStore): String {
+/** Password protection is optional. When enabled, imports still require the normal bearer login. */
+internal fun ApplicationCall.requireSensitiveWebAccess(settingsStore: SettingsStore, allowPasswordFreeImport: Boolean = false): String {
     val settings = settingsStore.settingsFlow.value
     val bearer = sensitiveWebBearer(request.headers[HttpHeaders.Authorization])
-    if (!settings.webServerJwtEnabled || settings.webServerAccessPassword.isBlank() ||
-        principal<JWTPrincipal>() == null || bearer == null) {
+    if (!canAccessSensitiveWebRoute(settings.webServerJwtEnabled,
+        settings.webServerAccessPassword.isNotBlank(),
+        !settings.webServerJwtEnabled || principal<JWTPrincipal>() != null,
+        bearer, allowPasswordFreeImport)) {
         throw UnauthorizedException("web_auth_required")
     }
     if (!isSameOriginWebRequest(request.headers[HttpHeaders.Host], request.headers[WEB_ORIGIN_HEADER],
@@ -41,7 +49,9 @@ internal fun ApplicationCall.requireSensitiveWebAccess(settingsStore: SettingsSt
         throw ForbiddenException("same_origin_required")
     }
     response.headers.append(HttpHeaders.CacheControl, "no-store")
-    // Bind transient jobs to the authenticated browser token without storing or echoing that token.
-    return MessageDigest.getInstance("SHA-256").digest(bearer.toByteArray())
+    // Password-free mode intentionally shares this local Web workspace. Enabling password
+    // protection later changes the owner key, so unauthenticated jobs do not cross modes.
+    val owner = if (settings.webServerJwtEnabled) "authenticated:$bearer" else "local-password-free"
+    return MessageDigest.getInstance("SHA-256").digest(owner.toByteArray())
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }

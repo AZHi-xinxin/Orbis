@@ -24,7 +24,7 @@ class BridgeLegacyAutomationHostPolicyTest {
         val main = source(bridgeRoot + "MainActivity.kt")
         assertTrue(dashboard.contains("legacyAutomationReadOnly: Boolean = false"))
         assertTrue(main.contains("legacyAutomationReadOnly: Boolean = false"))
-        assertTrue(main.contains("Text(\"保存小L配置\")"))
+        assertTrue(main.contains("Text(\"保存观察配置\")"))
     }
 
     @Test fun `Orbis page and notification shortcut both forward the host mode`() {
@@ -53,7 +53,7 @@ class BridgeLegacyAutomationHostPolicyTest {
     @Test fun `host legacy automation branch can only stop collection not enable or edit behavior`() {
         val source = source(bridgeRoot + "MainActivity.kt")
         val start = source.indexOf("if (legacyAutomationReadOnly) {")
-        val end = source.indexOf("        } else {\n        Text(\"小L", start)
+        val end = source.indexOf("        } else {\n        Text(\"Orbis 内置视觉", start)
         assertTrue(start >= 0 && end > start)
         val branch = source.substring(start, end)
         assertTrue(branch.contains("BridgeLegacyAutomationReadOnlyCard("))

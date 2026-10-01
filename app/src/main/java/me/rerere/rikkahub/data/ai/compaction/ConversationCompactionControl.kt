@@ -18,6 +18,7 @@ import me.rerere.ai.ui.withoutDeletedToolRecordData
 import me.rerere.rikkahub.data.ai.copyGenerationMessage
 import me.rerere.rikkahub.data.ai.transformers.transformThinkTags
 import me.rerere.rikkahub.data.model.orbisCompactionSummaryHash
+import me.rerere.rikkahub.data.model.withVoiceNoteTranscripts
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
@@ -33,7 +34,10 @@ private val compactionEstimateJson = Json { encodeDefaults = true }
 
 /** Conservative text reference, not a tokenizer: ASCII ~4 chars/token, other codepoints ~1/token. */
 fun estimateCompactionTokens(messages: List<UIMessage>): Long = messages.sumOf { message ->
-    val encoded = compactionEstimateJson.encodeToString(UIMessage.serializer(), message.withoutDeletedToolRecordData())
+    // Use the same reversible voice-note projection as the provider request, including nested
+    // tool results. Audio paths, original ASR and playback metadata are not model context.
+    val encoded = compactionEstimateJson.encodeToString(UIMessage.serializer(),
+        message.withoutDeletedToolRecordData().withVoiceNoteTranscripts())
     estimateCompactionTextTokens(encoded) + 8L
 }
 

@@ -66,8 +66,8 @@ class OrbisLegacySentinelReadOnlyTest {
         assertNoEditorsOrSwitches()
         compose.onNodeWithText(prompt).assertExists()
         compose.onNodeWithText("37 分钟").assertExists()
-        compose.onNodeWithText("保存小L配置").assertDoesNotExist()
-        compose.onNodeWithText("启用小L").assertDoesNotExist()
+        compose.onNodeWithText("保存观察配置").assertDoesNotExist()
+        compose.onNodeWithText("启用内置观察模块").assertDoesNotExist()
         compose.onNodeWithTag("legacy-stop-collection").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, stops) }
     }

@@ -33,7 +33,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.model.orbisQuickEmotions
 import me.rerere.rikkahub.data.model.OrbisStickerSendNotice
 import me.rerere.rikkahub.data.orbis.AndroidStickerRepository
 import me.rerere.rikkahub.data.orbis.OrbisSticker
@@ -125,6 +124,16 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
     val selected = snapshot.stickers.firstOrNull { it.id == selectedId }
     val editing = snapshot.stickers.firstOrNull { it.id == editingId }
 
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OrbisComposerTab("图片表情", selected = !textMode) { textMode = false }
+            OrbisComposerTab("颜文字", selected = textMode) { textMode = true }
+        }
+        if (textMode) {
+            OrbisKaomojiPanel(enabled = sendEnabled && !busy, onSendText = onSendTextAsync ?: onSendText?.let { callback ->
+                { text -> callback(text) }
+            })
+        } else {
     // One bounded lazy scroll surface: 1000 local stickers do not compose 1000 thumbnails at once.
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
@@ -133,41 +142,9 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
         verticalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(bottom = 8.dp),
     ) {
-        item(key = "tabs", span = { GridItemSpan(maxLineSpan) }) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OrbisComposerTab("图片表情", selected = !textMode) { textMode = false }
-                OrbisComposerTab("文字表情", selected = textMode) { textMode = true }
-            }
-        }
         notice?.let { message ->
             item(key = "notice", span = { GridItemSpan(maxLineSpan) }) { StickerNote(message) }
         }
-        if (textMode) {
-            item(key = "text-note", span = { GridItemSpan(maxLineSpan) }) {
-                StickerNote(if (onSendText == null && onSendTextAsync == null) "这是管理入口；回聊天中点表情可发送。" else "点选立即发送一条文字表情；输入框草稿保持不变。")
-            }
-            items(orbisQuickEmotions, key = { "text-${it.id}" }) { item ->
-                StickerTile(enabled = (onSendText != null || onSendTextAsync != null) && sendEnabled && !busy, onClick = {
-                    if (onSendTextAsync == null) {
-                        notice = if (onSendText?.invoke(item.draftText) == true) "文字表情已发送，原草稿保持不变。"
-                            else "当前不能发送，请在回复或编辑结束后重新点选。不会自动补发。"
-                    } else if (!busy && sendEnabled) {
-                        busy = true
-                        scope.launch {
-                            try { notice = if (onSendTextAsync(item.draftText)) "文字表情已发送，原草稿保持不变。"
-                                else "未确认发送成功，请先核对群记录；不会自动补发。" }
-                            catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { notice = "未确认发送成功，请先核对记录；不会自动重试。" }
-                            finally { busy = false }
-                        }
-                    }
-                }) {
-                    Text(item.glyph, fontSize = 25.sp, lineHeight = 30.sp)
-                    Text(item.label, fontSize = 10.sp, lineHeight = 14.sp,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        } else {
             item(key = "privacy", span = { GridItemSpan(maxLineSpan) }) {
                 Column {
                     StickerNote(if (onSendImage != null) "点图片立即发送真实图片，草稿保留。模型需支持图片；管理不上传。"
@@ -244,6 +221,7 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
                 StickerNote("原表情库与标签尚未纳入备份 ZIP，也未接通换机同步；请保留原图与标签，暂勿卸载或清数据。点发送后的独立聊天图片可随包含聊天附件的备份恢复，但不会还原完整表情库。")
             }
         }
+    }
     }
 
     selected?.let { sticker ->

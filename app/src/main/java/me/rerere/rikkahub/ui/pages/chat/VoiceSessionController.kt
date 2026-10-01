@@ -22,6 +22,8 @@ import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import me.rerere.asr.ASRController
+import me.rerere.asr.ASRCorrectionResult
+import me.rerere.asr.ASRCorrectionNotice
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.rikkahub.R
@@ -39,9 +41,16 @@ data class VoiceSessionState(
     val lastReplyText: String = "",
     // Capability only: quiet-voice/AEC quality still requires device acceptance testing.
     val canInterruptPlayback: Boolean = false,
+    /** Original ASR only when changed; UI/audit only, never a second model message. */
+    val originalTranscript: String? = null,
+    val correctionNotice: ASRCorrectionNotice = ASRCorrectionNotice(),
 ) {
     val isActive: Boolean get() = phase != VoicePhase.Off && phase != VoicePhase.Error
 }
+
+private fun VoiceSessionState.withTranscript(value: ASRCorrectionResult, eventId: Long): VoiceSessionState =
+    copy(transcript = value.corrected, originalTranscript = value.original.takeIf { value.changed },
+        correctionNotice = correctionNotice.accept(eventId, value))
 
 /** One event owner fences capture, generation and playback; a late old turn cannot regain audio. */
 class VoiceSessionController(
@@ -93,6 +102,8 @@ class VoiceSessionController(
         isHeadsetConnected: () -> Boolean = { false },
         setOutputMuted: (Boolean) -> Unit = {},
         requestOpening: (suspend () -> Deferred<String?>?)? = null,
+        correctTranscript: (String) -> ASRCorrectionResult = { ASRCorrectionResult(it, it) },
+        enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)? = null,
     ) {
         if (job?.isCompleted == false) return
         val events = Channel<Event>(Channel.UNLIMITED)
@@ -113,7 +124,8 @@ class VoiceSessionController(
                 setOutputMuted(!mutableState.value.speakerEnabled)
                 delay(200)
                 runSession(events, createAsr, speak, stopSpeaking, onConnected,
-                    initialAssistantText, cancelPendingReply, isHeadsetConnected, requestOpening)
+                    initialAssistantText, cancelPendingReply, isHeadsetConnected, requestOpening,
+                    correctTranscript, enqueueRecognizedMessage)
             } catch (e: Exception) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) throw e
                 terminalError = when (e) {
@@ -142,6 +154,8 @@ class VoiceSessionController(
         onConnected: suspend () -> Unit, initialAssistantText: String?,
         cancelPendingReply: (Deferred<String?>) -> Unit, isHeadsetConnected: () -> Boolean,
         requestOpening: (suspend () -> Deferred<String?>?)?,
+        correctTranscript: (String) -> ASRCorrectionResult,
+        enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)?,
     ) = coroutineScope {
         val pending = linkedMapOf<Long, Pending>()
         val ready = ArrayDeque<Playback>()
@@ -306,7 +320,8 @@ class VoiceSessionController(
                         asr = recorder
                         activeAsr = recorder
                         speechStartedId = null
-                        mutableState.update { it.copy(transcript = "") }
+                        mutableState.update { it.copy(transcript = "", originalTranscript = null,
+                            correctionNotice = it.correctionNotice.begin(epoch)) }
                         capture = launch {
                             try {
                                 events.send(Event.Utterance(epoch, listen(recorder, ::markConnected, { ended ->
@@ -343,7 +358,8 @@ class VoiceSessionController(
                         checkAcoustics()
                         if (event.epoch == captureEpoch) {
                             transcribing = event.transcribing
-                            mutableState.update { it.copy(transcript = event.state.transcript) }
+                            val transcript = correctTranscript(event.state.transcript)
+                            mutableState.update { it.withTranscript(transcript, event.epoch) }
                             val turn = event.state.voiceTurn
                             if (turn.itemId != null && !turn.speechEnded && speechStartedId != turn.itemId) {
                                 speechStartedId = turn.itemId
@@ -363,7 +379,8 @@ class VoiceSessionController(
                             // like a recording-time effect failure and destroy its waiting final text.
                             interruptForHumanCapture(event.epoch)
                             transcribing = true
-                            mutableState.update { it.copy(transcript = event.state.transcript) }
+                            val transcript = correctTranscript(event.state.transcript)
+                            mutableState.update { it.withTranscript(transcript, event.epoch) }
                             event.acknowledged.complete(Unit)
                         } else event.acknowledged.cancel()
                     }
@@ -375,8 +392,9 @@ class VoiceSessionController(
                         transcribing = false
                         if (event.text.isNotBlank()) {
                             interruptForHumanCapture(event.epoch)
-                            observeReply(enqueueMessage(event.text))
-                            mutableState.update { it.copy(transcript = event.text) }
+                            val transcript = correctTranscript(event.text)
+                            mutableState.update { it.withTranscript(transcript, event.epoch) }
+                            observeReply(enqueueRecognizedMessage?.invoke(transcript) ?: enqueueMessage(transcript.corrected))
                         }
                     }
                     is Event.CaptureFailed -> if (event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
@@ -399,7 +417,7 @@ class VoiceSessionController(
                         if (capture != null && (!mutableState.value.microphoneEnabled ||
                                 captureMicrophoneRevision != microphoneRevision.get())) closeCapture()
                         if (!mutableState.value.microphoneEnabled) {
-                            mutableState.update { it.copy(transcript = "") }
+                            mutableState.update { it.copy(transcript = "", originalTranscript = null) }
                             if (!connected) markConnected()
                         }
                     }
@@ -469,6 +487,11 @@ class VoiceSessionController(
         catch (error: Exception) { controls?.trySend(Event.OutputFailed(error)); return }
         mutableState.update { it.copy(speakerEnabled = enabled) }
         controls?.trySend(Event.SpeakerChanged)
+    }
+
+    /** UI acknowledgement only; keeps this utterance's raw/corrected audit intact. */
+    fun dismissCorrectionNotice(eventId: Long) {
+        mutableState.update { it.copy(correctionNotice = it.correctionNotice.dismiss(eventId)) }
     }
 
     fun stop() {

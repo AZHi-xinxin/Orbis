@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { IMPORT_SOURCES, IMPORT_SOURCE_INFO, defaultImportPathLabel, importEndpoint, importStorageKeys, readImportSource, validateImportFile } from "../app/lib/import-source";
 
 test("import source selection is an allowlist with a compatible DeepSeek default", () => {
-  assert.deepEqual(IMPORT_SOURCES, ["deepseek", "rikkahub", "codex"]);
+  assert.deepEqual(IMPORT_SOURCES, ["deepseek", "rikkahub", "codex", "operit", "kelivo"]);
   for (const value of [null, "unknown", "https://example.invalid", "../codex"]) assert.equal(readImportSource(value), "deepseek");
   for (const source of IMPORT_SOURCES) assert.equal(readImportSource(source), source);
 });
@@ -22,11 +22,11 @@ test("all import endpoints bind their source and escape opaque job IDs", () => {
 test("pending job and once-only confirmation receipts are isolated by source", () => {
   assert.deepEqual(importStorageKeys("deepseek"), { job: "orbis:web-deepseek-job", attempted: "orbis:web-deepseek-confirmed-job" });
   const keys = IMPORT_SOURCES.flatMap((source) => Object.values(importStorageKeys(source)));
-  assert.equal(new Set(keys).size, 6);
+  assert.equal(new Set(keys).size, IMPORT_SOURCES.length * 2);
 });
 
 test("archive sources use ZIP and Codex uses raw NDJSON with independent size limits", () => {
-  const expected = { deepseek: [80, ".zip", "application/zip"], rikkahub: [512, ".zip", "application/zip"], codex: [64, ".jsonl", "application/x-ndjson"] } as const;
+  const expected = { deepseek: [80, ".zip", "application/zip"], rikkahub: [512, ".zip", "application/zip"], codex: [64, ".jsonl", "application/x-ndjson"], operit: [64, ".json", "application/json"], kelivo: [512, ".zip", "application/zip"] } as const;
   for (const source of IMPORT_SOURCES) {
     const [limit, extension, contentType] = expected[source];
     const info = IMPORT_SOURCE_INFO[source];
@@ -52,4 +52,6 @@ test("preview labels distinguish all-branch preservation from visible-text-only 
   assert.match(defaultImportPathLabel("codex_text_only"), /不含推理、工具或媒体/);
   assert.match(defaultImportPathLabel("source_current_node"), /导出时选中/);
   assert.match(defaultImportPathLabel("newest_leaf"), /最新分支/);
+  assert.match(defaultImportPathLabel("operit_selected_variants_local_timezone"), /导出时选中/);
+  assert.match(defaultImportPathLabel("kelivo_selected_variants"), /导出时选中/);
 });

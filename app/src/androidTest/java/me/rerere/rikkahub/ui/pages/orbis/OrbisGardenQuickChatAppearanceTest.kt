@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
@@ -86,6 +87,14 @@ class OrbisGardenQuickChatAppearanceTest {
     }
 
     private fun textStyle(text: String): TextStyle {
+        // Markdown initially renders a placeholder while parsing on Dispatchers.Default.
+        // Compose being idle does not mean that external work has published its text yet.
+        // Wait only for the exact node, never for a desired style: the assertions below
+        // must still fail if the drawer renders the wrong color, font or layout.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNodes().size == 1
+        }
         val results = mutableListOf<TextLayoutResult>()
         compose.onNodeWithText(text, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action -> action(results) }

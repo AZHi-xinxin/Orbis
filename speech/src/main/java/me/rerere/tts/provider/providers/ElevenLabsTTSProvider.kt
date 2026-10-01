@@ -1,7 +1,6 @@
 package me.rerere.tts.provider.providers
 
 import android.content.Context
-import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import me.rerere.tts.model.AudioChunk
@@ -10,17 +9,13 @@ import me.rerere.tts.model.TTSRequest
 import me.rerere.tts.provider.TTSProvider
 import me.rerere.tts.provider.TTSProviderException
 import me.rerere.tts.provider.TTSProviderSetting
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-
-private const val TAG = "ElevenLabsTTSProvider"
 
 class ElevenLabsTTSProvider : TTSProvider<TTSProviderSetting.ElevenLabs> {
     private val httpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
@@ -29,37 +24,14 @@ class ElevenLabsTTSProvider : TTSProvider<TTSProviderSetting.ElevenLabs> {
         providerSetting: TTSProviderSetting.ElevenLabs,
         request: TTSRequest
     ): Flow<AudioChunk> = flow {
-        val requestBody = JSONObject().apply {
-            put("text", request.text)
-            put("model_id", providerSetting.model)
-            put("voice_settings", JSONObject().apply {
-                put("stability", providerSetting.stability.toDouble())
-                put("similarity_boost", providerSetting.similarityBoost.toDouble())
-            })
-        }
-
-        Log.i(TAG, "generateSpeech: model=${providerSetting.model}, voiceId=${providerSetting.voiceId}")
-
-        val httpRequest = Request.Builder()
-            .url("${providerSetting.baseUrl}/v1/text-to-speech/${providerSetting.voiceId}?output_format=mp3_44100_128")
-            .addHeader("xi-api-key", providerSetting.apiKey)
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-
-        val response = httpClient.newCall(httpRequest).execute()
-
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string()
-            Log.e(TAG, "generateSpeech: ${response.code} ${response.message}")
-            Log.e(TAG, "generateSpeech: $errorBody")
-            throw TTSProviderException(
-                message = "ElevenLabs TTS request failed: ${response.code} ${response.message}",
-                statusCode = response.code
+        val httpRequest = elevenLabsSpeechRequest(providerSetting, request.text)
+        val audioData = httpClient.newCall(httpRequest).execute().use { response ->
+            if (!response.isSuccessful) throw TTSProviderException(
+                message = "ElevenLabs 朗读失败：HTTP ${response.code}。请检查模型、Voice ID、API Key 权限和账户额度。",
+                statusCode = response.code,
             )
+            response.body.bytes()
         }
-
-        val audioData = response.body.bytes()
 
         emit(
             AudioChunk(

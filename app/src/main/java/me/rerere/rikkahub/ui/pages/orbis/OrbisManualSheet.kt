@@ -2,6 +2,7 @@ package me.rerere.rikkahub.ui.pages.orbis
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,8 +25,11 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +53,8 @@ import me.rerere.hugeicons.stroke.Book03
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.ai.tools.orbisPublicStaticManual
+import me.rerere.rikkahub.data.ai.tools.orbisManualChapters
+import me.rerere.rikkahub.data.ai.tools.orbisManualChapterMatches
 
 /** Static help only: no ViewModel, settings, registry construction or tool execution. */
 @Composable
@@ -80,8 +86,12 @@ fun OrbisManualEntry(modifier: Modifier = Modifier) {
 @Composable
 private fun OrbisManualSheet(onDismiss: () -> Unit) {
     val manual = remember { orbisPublicStaticManual() }
-    val sections = listOf("overview" to "概览", "tools" to "工具", "permissions" to "权限", "limits" to "状态")
+    val sections = listOf("overview" to "概览", "tools" to "工具", "permissions" to "权限", "limits" to "状态", "guide" to "手册")
     var selected by rememberSaveable { mutableStateOf("overview") }
+    var chapterId by rememberSaveable { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val scroll = rememberScrollState()
+    LaunchedEffect(selected, chapterId) { scroll.scrollTo(0) }
     OrbisVisualTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(
@@ -115,6 +125,7 @@ private fun OrbisManualSheet(onDismiss: () -> Unit) {
                 }
                 OrbisScrollablePanel(
                     modifier = Modifier.weight(1f),
+                    scrollState = scroll,
                     windowInsets = WindowInsets(0, 0, 0, 0),
                     contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 18.dp),
                 ) {
@@ -134,6 +145,28 @@ private fun OrbisManualSheet(onDismiss: () -> Unit) {
                         }
                         "permissions" -> ManualFields(manual.getValue("permissions").jsonObject)
                         "limits" -> ManualFields(manual.getValue("limits").jsonObject)
+                        "guide" -> {
+                            val chapter = orbisManualChapters.firstOrNull { it.id == chapterId }
+                            if (chapter == null) {
+                                OutlinedTextField(value = query, onValueChange = { if (it.length <= 80) query = it },
+                                    label = { Text("搜索用法、错误或工具名") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                val matches = remember(query) { orbisManualChapters.filter { orbisManualChapterMatches(it, query.trim()) } }
+                                if (matches.isEmpty()) Text("没有匹配章节，可换一个词，如‘课表’‘导入’‘语音’。")
+                                matches.forEach { item ->
+                                    Surface(shape = RoundedCornerShape(16.dp), color = colors.raisedPanel,
+                                        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { chapterId = item.id }) {
+                                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(item.title, fontWeight = FontWeight.SemiBold)
+                                            Text(item.uiPath, style = MaterialTheme.typography.bodySmall, color = colors.mutedInk)
+                                        }
+                                    }
+                                }
+                            } else {
+                                TextButton(onClick = { chapterId = null }) { Text("‹ 返回章节目录") }
+                                ManualCard(chapter.title, chapter.uiPath, "静态使用说明；没有检查此刻的权限、联网或工具注册。")
+                                chapter.sections.forEach { section -> ManualCard(section.title, section.text) }
+                            }
+                        }
                     }
                     Text("说明版本：" + manual.getValue("manual_version").jsonPrimitive.content,
                         fontSize = 10.sp, lineHeight = 14.sp, color = colors.mutedInk,
@@ -151,7 +184,7 @@ private fun ManualFields(fields: JsonObject) {
             "not_integrated" -> "尚未接通，不能按已可用处理。"
             "not_checked" -> "本页未检查连接与服务健康。"
             "not_available" -> "当前没有提供该宿主工具。"
-            "available_read_only_in_orbis_debug" -> "Orbis 开发版已提供本地只读入口，不检查或执行其他工具。"
+            "available_read_only_in_orbis", "available_read_only_in_orbis_debug" -> "Orbis 已提供本地只读入口，不检查或执行其他工具。"
             "available_local_synthetic_demo_only" -> "已提供本地动态星图演示。"
             "ai_authored_compact_in_current_full_conversation_run; metadata_history; latest_only_rollback; no_auto_summary_or_forced_compaction" -> "当前完整会话支持 AI 自写摘要并直接整理，前端只提醒；可查压缩记录，只能撤销本窗口最近一次，不自动代写或强行压缩。"
             "available_local_rule_bot_in_debug" -> "开发版内置九路五子棋，对手是本地规则程序，不调用聊天模型。"
@@ -180,6 +213,12 @@ private fun ManualCard(title: String, body: String, footnote: String? = null) {
 
 /** Presentation labels only. Capability definitions come exclusively from OrbisHelpTool. */
 private fun manualLabel(key: String): String = when (key) {
+    "local_schedule" -> "本地课表与日程"
+    "local_kaomoji" -> "文字颜文字库"
+    "voice_notes" -> "可点击语音条"
+    "device_facts" -> "设备事实与本地观察"
+    "context_message_limit" -> "消息截取与记忆断层"
+    "consultation" -> "咨询室开发状态"
     "native_memory" -> "内置本地记忆（不是 ST）"
     "conversation_reference" -> "会话参考"
     "workspace" -> "工作区边界"

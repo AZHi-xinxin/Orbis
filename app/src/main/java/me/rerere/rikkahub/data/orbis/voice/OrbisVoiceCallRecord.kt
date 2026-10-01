@@ -1,11 +1,13 @@
 package me.rerere.rikkahub.data.orbis.voice
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 @Serializable
 enum class OrbisVoiceCallStatus { CONNECTING, ACTIVE, ENDED, INTERRUPTED }
 
-/** Hanging up and completing the same assistant's written archive are separate transactions. */
+/** Saving raw source and optionally completing a separately configured model summary are independent. */
 @Serializable
 enum class OrbisVoiceArchiveStatus { PENDING, GENERATING, READY, FAILED }
 
@@ -20,6 +22,10 @@ data class OrbisVoiceTranscriptEntry(
     val content: String,
     val timestampMs: Long,
     val messageId: String? = null,
+    /** Exact accepted ASR before name correction. Never recomputed using later settings. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val originalTranscript: String? = null,
 )
 
 @Serializable
@@ -35,13 +41,13 @@ data class OrbisVoiceCallRecord(
     val status: OrbisVoiceCallStatus = OrbisVoiceCallStatus.CONNECTING,
     val archiveStatus: OrbisVoiceArchiveStatus = OrbisVoiceArchiveStatus.PENDING,
     val summary: String? = null,
-    /** The assistant's written account, never substituted for the captured source below. */
+    /** An independent model's written account, never substituted for the captured source below. */
     val modelTranscript: String? = null,
     val transcript: List<OrbisVoiceTranscriptEntry> = emptyList(),
     val sourceMessageIds: List<String> = emptyList(),
     /** Exact serialized message nodes, including tools and alternatives, owned by ChatService. */
     val sourceNodesJson: String? = null,
-    /** Durable archive and chat-page commit are separate; recovery never regenerates a READY archive. */
+    /** Legacy storage replacement flag. New UI cards/independent archives do not need it. */
     val chatCommitted: Boolean = false,
     /** Legacy combined error, retained when reading old records; new writes use separate fields. */
     val error: String? = null,
@@ -49,6 +55,11 @@ data class OrbisVoiceCallRecord(
     val endReasonText: String? = null,
     val endError: String? = null,
     val archiveError: String? = null,
+    /** Count only explicitly dispatched independent archive requests, not chat/tool retries. */
+    val archiveRequestCount: Int = 0,
+    val archiveLastModelId: String? = null,
+    /** Closed host code; provider response bodies and private error details do not belong here. */
+    val archiveFailureCode: String? = null,
     val aiEndRequestedAtMs: Long? = null,
     val aiEndReasonText: String? = null,
     val openingRequestId: String? = null,
@@ -60,7 +71,7 @@ data class OrbisVoiceCallRecord(
 
 /** Old records have no typed error; do not retrospectively claim a known end cause. */
 fun OrbisVoiceCallRecord.archiveErrorForDisplay(): String? = archiveError ?: error?.takeIf {
-    archiveStatus == OrbisVoiceArchiveStatus.FAILED || (archiveStatus == OrbisVoiceArchiveStatus.READY && !chatCommitted)
+    archiveStatus == OrbisVoiceArchiveStatus.FAILED
 }
 
 @Serializable

@@ -184,6 +184,7 @@ fun ChatInput(
     ) else if (settings.displaySetting.enableBlurEffect) Color.Transparent else hazeTintColor
     val navController = LocalNavController.current
     var composerPanel by remember { mutableStateOf<OrbisComposerPanel?>(null) }
+    var voiceNoteOpen by remember { mutableStateOf(false) }
     var composerExpanded by rememberSharedPreferenceBoolean("orbis_composer_expanded", false)
     val tts = LocalTTSState.current
     val ttsAvailable by tts.isAvailable.collectAsState()
@@ -215,6 +216,7 @@ fun ChatInput(
 
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
+    val asrCorrectionNotice by asr.correctionNotice.collectAsState()
     val hapticFeedback = LocalHapticFeedback.current
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     LaunchedEffect(Unit) {
@@ -289,6 +291,12 @@ fun ChatInput(
                 .padding(bottom = if (orbis) 2.dp else 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (orbis) AsrCorrectionReview(
+                review = asrCorrectionNotice.review,
+                eventId = asrCorrectionNotice.eventId,
+                dismissed = asrCorrectionNotice.dismissed,
+                onDismiss = { asr.dismissCorrectionNotice(asrCorrectionNotice.eventId) },
+            )
             MessageQueuePanel(
                 state = messageQueue,
                 onRemove = onRemoveQueuedMessage,
@@ -529,6 +537,12 @@ fun ChatInput(
                                     closeManualDictation()
                                     navController.navigate(Screen.SettingSpeech) { launchSingleTop = true }
                                 },
+                                onVoiceNote = {
+                                    closeManualDictation()
+                                    if (!asrPermission.allRequiredPermissionsGranted) asrPermission.requestPermissions()
+                                    else voiceNoteOpen = true
+                                },
+                                canRecordNote = !loading && !voiceState.isActive && !asrState.isRecording && !state.isEditing(),
                             )
                             null -> Unit
                         }
@@ -539,6 +553,8 @@ fun ChatInput(
         }
     }
 
+    if (voiceNoteOpen) OrbisVoiceNoteRecorder(asr, onDismiss = { voiceNoteOpen = false },
+        onDraft = { state.messageContent = state.messageContent + it })
     ModelListSheet(
         state = modelListState,
         onSelect = onUpdateChatModel,

@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import me.rerere.asr.ASRController
+import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
@@ -50,6 +51,8 @@ class DashScopeASRController(
     private val provider: ASRProviderSetting.DashScope,
     private val enableEchoCancellation: Boolean = false,
 ) : ASRController {
+    private val pcmObserver = ASRPcmObserver()
+    override fun setPcmObserver(observer: ((ByteArray, Int) -> Unit)?) = pcmObserver.set(observer)
     override val supportsConcurrentPlayback: Boolean = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -142,11 +145,13 @@ class DashScopeASRController(
     }
 
     override fun pauseCapture() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         releaseRecorder()
     }
 
     override fun stop() {
+        pcmObserver.set(null)
         val wasListening = state.value.status == ASRStatus.Listening
         val activeRecorderJob = recorderJob
         val socket = webSocket
@@ -200,6 +205,7 @@ class DashScopeASRController(
     }
 
     override fun dispose() {
+        pcmObserver.set(null)
         recorderJob?.cancel()
         releaseRecorder()
         finishTimeoutJob?.cancel()
@@ -211,6 +217,7 @@ class DashScopeASRController(
 
     @SuppressLint("MissingPermission")
     private fun startRecorder(socket: WebSocket) {
+        val pcmEpoch = pcmObserver.captureEpoch()
         recorderJob?.cancel()
         releaseRecorder()
         recorderJob = scope.launch(Dispatchers.IO) {
@@ -248,6 +255,7 @@ class DashScopeASRController(
                 while (isActive) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        pcmObserver.emit(pcmEpoch, buffer, read, provider.sampleRate)
                         val amplitude = calculateRmsAmplitude(buffer, read)
                         _state.update { it.copy(amplitudes = it.amplitudes.appendAmplitude(amplitude)) }
                         if (socket.queueSize() < MAX_WEBSOCKET_QUEUE_BYTES) {
@@ -363,6 +371,7 @@ class DashScopeASRController(
     }
 
     private fun setError(message: String) {
+        pcmObserver.set(null)
         _state.update {
             it.copy(
                 status = ASRStatus.Error,
