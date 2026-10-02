@@ -29,6 +29,12 @@ import java.util.concurrent.TimeUnit
 
 data class OrbisPreparedUpdate internal constructor(val file: File, val sha256: String, val versionCode: Long)
 
+/** Android 9/10 collect archive certificates only when the legacy bit is also set. */
+@Suppress("DEPRECATION")
+internal fun orbisArchiveIdentityFlags(deviceSdk: Int): Int =
+    if (deviceSdk >= 28) PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_SIGNATURES
+    else PackageManager.GET_SIGNATURES
+
 /** Public GitHub metadata only. No model client, account token, chat data, background download or silent install. */
 class OrbisUpdateService(context: Context) {
     private val app = context.applicationContext
@@ -127,7 +133,8 @@ class OrbisUpdateService(context: Context) {
     private fun verifyApkIdentity(file: File): OrbisApkIdentity {
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
         val installed = app.packageManager.getPackageInfo(app.packageName, flags)
-        val candidate = app.packageManager.getPackageArchiveInfo(file.absolutePath, flags) ?: error("无法解析签名安装包")
+        val candidate = app.packageManager.getPackageArchiveInfo(file.absolutePath,
+            orbisArchiveIdentityFlags(Build.VERSION.SDK_INT)) ?: error("无法解析签名安装包")
         val identity = packageIdentity(candidate)
         requireOrbisSafeUpgrade(packageIdentity(installed), identity, Build.VERSION.SDK_INT)
         return identity

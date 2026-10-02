@@ -107,7 +107,13 @@ internal fun requireOrbisSafeUpgrade(installed: OrbisApkIdentity, candidate: Orb
     require(candidate.versionCode > installed.versionCode) {
         "Android 不允许把低版本代码当作普通覆盖升级；此包未满足更高版本代码，未安装、未卸载或清除数据"
     }
-    require(installed.signerSha256.isNotEmpty() && candidate.signerSha256 == installed.signerSha256) {
+    require(installed.signerSha256.isNotEmpty()) {
+        "无法读取当前应用签名，已阻止安装；请稍后重试或到正式发布页核对"
+    }
+    require(candidate.signerSha256.isNotEmpty()) {
+        "无法读取安装包签名，已阻止安装；请重新下载或到正式发布页核对"
+    }
+    require(candidate.signerSha256 == installed.signerSha256) {
         "安装包签名与当前应用不一致，已阻止安装"
     }
     require(candidate.minSdk <= deviceSdk) { "安装包要求更高 Android 版本，已阻止安装" }
