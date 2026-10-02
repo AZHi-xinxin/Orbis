@@ -8,8 +8,8 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 
 ## 从这里开始
 
-- [下载 Orbis 2.6.1 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.1)：普通用户直接下载 APK，不需要自行编译。
-- [本版说明](docs/RELEASE-2.6.1.md)：本次更新、安装选择、验收范围及当前限制。
+- [下载 Orbis 2.6.2 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.2)：普通用户直接下载 APK，不需要自行编译。
+- [本版说明](docs/RELEASE-2.6.2.md)：本次更新、安装选择、验收范围及当前限制。
 - [上手指南](docs/GETTING_STARTED.md)：配置模型、选择本地或自建云端、导书和开始游戏。
 - [隐私与权限](docs/PRIVACY.md)：什么保存在手机，什么可能发给外部服务，以及备份的范围。
 - [更新记录](docs/CHANGELOG.md)：当前功能与仍未开放的部分。
@@ -57,11 +57,11 @@ Orbis 不附送模型账号、API Key 或调用额度。请自行配置可信的
 
 ## 安装与备份
 
-请从 [GitHub 发布页](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.1) 下载签名 APK。最低需要 Android 8.0；通常选择 `arm64-v8a`，不确定设备架构时选择 `universal`。通用包包含 `arm64-v8a` 和 `x86_64`，不包含 32 位 ARM；`x86_64` 主要用于对应架构设备或模拟器。发布页中的源码压缩包不是安装包。上游 RikkaHub 的安装包也不是 Orbis。
+请从 [GitHub 发布页](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.2) 下载签名 APK。最低需要 Android 8.0；通常选择 `arm64-v8a`，不确定设备架构时选择 `universal`。通用包包含 `arm64-v8a` 和 `x86_64`，不包含 32 位 ARM；`x86_64` 主要用于对应架构设备或模拟器。发布页中的源码压缩包不是安装包。上游 RikkaHub 的安装包也不是 Orbis。
 
 正式版包名为 `org.orbis.agent`。`Orbis Dev` 使用 `org.orbis.agent.dev`，与正式版是两个独立应用，不会自动共享或迁移聊天、书库及设置。不要为安装正式版先卸载仍需保留数据的开发版。
 
-**2.6.0 用户需先从发布页手动下载并覆盖升级到 2.6.1。** 2.6.1 的正式版提供“系统设置 → 版本更新与回退”：检查官方新版本、阅读说明、确认备份后下载校验 APK，再交给 Android 确认安装；不会静默下载或安装。自动检查最多每 24 小时一次，不是持续后台推送。该更新流程尚待真实发布包的端到端升级验收，手动下载入口仍保留，详见[更新与回退说明](docs/UPDATES-AND-ROLLBACK.md)。
+**2.6.0 用户请从发布页手动下载并覆盖升级到 2.6.2，无需先安装 2.6.1。** 已安装 2.6.1 正式版的用户可以使用“系统设置 → 版本更新与回退”：检查官方新版本、阅读说明、确认备份后下载校验 APK，再交给 Android 确认安装；不会静默下载或安装。自动检查最多每 24 小时一次，不是持续后台推送。2.6.1 → 2.6.2 的正式包应用内升级仍待 OPPO 实机端到端验收，不能将主手机开发包验收视为该流程已通过；手动下载入口仍保留，详见[更新与回退说明](docs/UPDATES-AND-ROLLBACK.md)。
 
 同包名、相同签名且版本允许时可覆盖升级；若安装器提示冲突，请先核对来源，不要直接卸载或清除数据。Dev 版不会把正式 APK 当作自身覆盖更新。
 

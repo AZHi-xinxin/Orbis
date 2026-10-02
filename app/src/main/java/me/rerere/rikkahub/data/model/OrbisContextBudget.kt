@@ -8,7 +8,7 @@ import kotlin.uuid.Uuid
 
 internal enum class OrbisBudgetReason {
     READY_REFERENCE, GENERATING, NO_ASSISTANT, MODEL_UNKNOWN, MODEL_CHANGED,
-    INCOMPLETE, TOOL_CONTINUATION, USAGE_MISSING, USAGE_INVALID, LIMIT_UNKNOWN,
+    INCOMPLETE, TOOL_CONTINUATION, USAGE_MISSING, USAGE_INVALID, HISTORY_EDITED, LIMIT_UNKNOWN,
     REMINDERS_DISABLED, CURRENT_ESTIMATE, ESTIMATE_PENDING,
 }
 
@@ -71,6 +71,7 @@ internal fun deriveOrbisContextBudget(
         !modelMatches -> OrbisBudgetReason.MODEL_CHANGED
         last.finishedAt == null -> OrbisBudgetReason.INCOMPLETE
         toolAmbiguity -> OrbisBudgetReason.TOOL_CONTINUATION
+        last.usageContextInvalidated -> OrbisBudgetReason.HISTORY_EDITED
         usage == null || usage.promptTokens == 0 -> OrbisBudgetReason.USAGE_MISSING
         usage.promptTokens < 0 || usage.completionTokens < 0 || usage.cachedTokens < 0 ||
             usage.cachedTokens > usage.promptTokens -> OrbisBudgetReason.USAGE_INVALID

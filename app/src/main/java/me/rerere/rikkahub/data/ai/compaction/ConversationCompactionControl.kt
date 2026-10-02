@@ -68,7 +68,7 @@ fun estimateCurrentContext(
     val newEnough = summary == null || latest?.finishedAt?.let { it >= summary.createdAt } == true
     val lastToolEdit = messages.mapNotNull { it.toolRecordsUpdatedAt }.maxOrNull()
     val afterToolEdits = lastToolEdit == null || latest?.finishedAt?.let { it >= lastToolEdit } == true
-    if (latest != null && latest.finishedAt != null && latest.modelId != null &&
+    if (latest != null && !latest.usageContextInvalidated && latest.finishedAt != null && latest.modelId != null &&
         (modelId == null || modelId == latest.modelId) && newEnough && afterToolEdits && usage != null &&
         usage.promptTokens > 0 && usage.completionTokens >= 0 && usage.cachedTokens in 0..usage.promptTokens) {
         val generated = usage.completionTokens.takeIf { it > 0 }?.toLong() ?: estimateCompactionTokens(listOf(latest))

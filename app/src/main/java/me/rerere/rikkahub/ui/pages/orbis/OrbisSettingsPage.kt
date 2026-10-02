@@ -257,6 +257,8 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
                         dataExpanded, { dataExpanded = !dataExpanded }) {
                         OrbisSettingsLink("备份与恢复", "导出或恢复本机数据",
                             { navigator.navigate(Screen.Backup) })
+                        OrbisSettingsLink("收藏夹", "查看已收藏的正文与思考快照",
+                            { navigator.navigate(Screen.Favorite) })
                         OrbisSettingsNote("当前备份 ZIP 不包含图片表情库和工作区，卸载前请另行备份。")
                         OrbisSettingsLink("请求日志", "查看已有请求记录", { navigator.navigate(Screen.Log) })
                         OrbisSettingsNote("原始日志可能含聊天内容和连接信息，请勿直接公开分享。")

@@ -46,7 +46,9 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                     val coroutine = currentCoroutineContext()
                     val checkCancelled = { coroutine.ensureActive() }
                     require(expectedFingerprint.matches(Regex("[0-9a-f]{64}"))) { "请先预览 Operit 聊天文件" }
-                    require(selections.isNotEmpty() && selections.values.all { it == OperitChatArchive.SELECTED_PATH })
+                    require(selections.isNotEmpty() && selections.values.all {
+                        it == OperitChatArchive.SELECTED_PATH || it == OperitChatArchive.CORRECTED_COPY_PATH
+                    })
                     // Freeze the explicitly previewed bytes before validating/committing; a source file changed
                     // during or after preview cannot alter a partly committed import. Only this private temp is deleted.
                     val snapshot = File.createTempFile("orbis-operit-", ".json")
@@ -67,10 +69,12 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                             for (source in archive.conversations()) {
                                 if (source.sourceId !in selections) continue
                                 checkCancelled()
-                                val id = operitImportId("conversation", source.sourceId)
+                                val correctedCopy = selections[source.sourceId] == OperitChatArchive.CORRECTED_COPY_PATH
+                                val namespace = if (correctedCopy) "${source.sourceId}/corrected-v1/$expectedFingerprint" else source.sourceId
+                                val id = operitImportId(if (correctedCopy) "conversation-corrected-v1" else "conversation", namespace)
                                 if (sink.exists(id)) result = result.copy(skipped = result.skipped + 1)
                                 else {
-                                    val converted = try { convert(source, assistantId, checkCancelled) }
+                                    val converted = try { convert(source, assistantId, checkCancelled, namespace, correctedCopy) }
                                     catch (_: OperitMessageTooLarge) {
                                         result = result.copy(failed = result.failed + 1, failures = result.failures +
                                             DeepSeekImportFailure(source.sourceId, "单条消息超过安全读取大小；该会话未导入，原文未截断"))
@@ -121,9 +125,13 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
         }
 
         internal fun convert(source: OperitConversation, assistantId: Uuid,
-            checkCancelled: () -> Unit = {}): Conversation {
+            checkCancelled: () -> Unit = {}, idNamespace: String = source.sourceId,
+            correctedCopy: Boolean = false): Conversation {
+            fun importedId(kind: String, index: String = "") = operitImportId(
+                if (correctedCopy) "$kind-corrected-v1" else kind, idNamespace, index)
             val nodes = source.messages.map { message ->
                 checkCancelled()
+                val split = splitOperitReasoningContent(message.text, message.sender, checkCancelled)
                 val metadata = buildJsonObject {
                     put("import_source", "operit_json_v2")
                     put("source_conversation_id", source.sourceId)
@@ -137,20 +145,29 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                     put("source_updated_at_local", source.sourceUpdatedAt)
                     put("source_timezone_assumption", source.assumedTimeZone)
                     put("omitted_attachment_references", message.attachmentReferences)
+                    if (split.slices.any { it.reasoning }) put("import_reasoning_format", "operit_think_v1")
+                    if (split.ambiguous) put("import_reasoning_unparsed", true)
+                    if (correctedCopy) put("import_corrected_copy", true)
                 }
                 val time = kotlin.time.Instant.parse(message.timestamp.toString()).toLocalDateTime(TimeZone.currentSystemDefault())
-                val parts = listOf(UIMessagePart.Text(message.text, metadata = metadata)) +
+                val parts = split.slices.map { slice ->
+                    if (slice.reasoning) UIMessagePart.Reasoning(slice.text,
+                        kotlin.time.Instant.parse(message.timestamp.toString()),
+                        kotlin.time.Instant.parse(message.timestamp.toString()), metadata)
+                    else UIMessagePart.Text(slice.text, metadata = metadata)
+                } +
                     if (message.attachmentReferences > 0) listOf(UIMessagePart.Text(
                         "[Operit 历史附件引用；本次仅导入文字，未读取或下载附件]", metadata = metadata)) else emptyList()
-                val ui = UIMessage(id = operitImportId("message", source.sourceId, message.sourceIndex.toString()),
+                val ui = UIMessage(id = importedId("message", message.sourceIndex.toString()),
                     role = if (message.sender == "user") MessageRole.USER else MessageRole.ASSISTANT,
                     parts = parts, createdAt = time, finishedAt = time)
                 if (JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size > DeepSeekChatImporter.MAX_NODE_JSON_BYTES)
                     throw OperitMessageTooLarge()
-                MessageNode(id = operitImportId("node", source.sourceId, message.sourceIndex.toString()), messages = listOf(ui))
+                MessageNode(id = importedId("node", message.sourceIndex.toString()), messages = listOf(ui))
             }
-            return Conversation(id = operitImportId("conversation", source.sourceId), assistantId = assistantId,
-                title = source.title, messageNodes = nodes, createAt = source.createdAt, updateAt = source.updatedAt)
+            return Conversation(id = importedId("conversation"), assistantId = assistantId,
+                title = source.title + if (correctedCopy) "（整理副本）" else "",
+                messageNodes = nodes, createAt = source.createdAt, updateAt = source.updatedAt)
         }
     }
 

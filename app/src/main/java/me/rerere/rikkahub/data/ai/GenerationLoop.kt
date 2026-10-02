@@ -62,6 +62,7 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.OrbisConversationPrompt
 import me.rerere.rikkahub.data.model.appendOrbisConversationPrompt
+import me.rerere.rikkahub.utils.takeAtCodePointBoundary
 import java.io.File
 import java.io.IOException
 import java.net.ConnectException
@@ -146,7 +147,7 @@ class GenerationLoop(
 
         // One snapshot per collected generation, not per conversation. A new human wake (or the
         // existing approval-resume path) reevaluates current settings, memory and input transforms.
-        val inputSnapshot = GenerationInputSnapshot()
+        val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime)
         val tools = snapshotGenerationTools(tools)
         val schemaText = tools.joinToString("\n") { it.name + it.description + it.parameters().toString() }
 
@@ -848,7 +849,7 @@ class GenerationLoop(
         Log.i(TAG, "maybeTruncateToolOutput: truncating tool $toolCallId output ($totalChars chars)")
 
         val fullText = textParts.joinToString("\n") { it.text }
-        val preview = fullText.take(TOOL_OUTPUT_PREVIEW_CHARS)
+        val preview = fullText.takeAtCodePointBoundary(TOOL_OUTPUT_PREVIEW_CHARS)
 
         val fileName = "${toolCallId}.txt"
         val outputDir = File(context.filesDir, FileFolders.TOOL_OUTPUTS).apply { mkdirs() }

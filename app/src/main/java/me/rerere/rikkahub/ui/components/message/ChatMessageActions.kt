@@ -293,6 +293,7 @@ fun ChatMessageActionsSheet(
     onSelectAndCopy: () -> Unit,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    onQuote: (() -> Unit)? = null,
     onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
@@ -363,6 +364,13 @@ fun ChatMessageActionsSheet(
                             style = MaterialTheme.typography.titleMedium,
                         )
                     }
+                }
+            }
+
+            if (onQuote != null) {
+                Card(onClick = { onDismissRequest(); onQuote() }, shape = MaterialTheme.shapes.medium) {
+                    Text("引用回复", modifier = Modifier.fillMaxWidth().padding(20.dp),
+                        style = MaterialTheme.typography.titleMedium)
                 }
             }
 

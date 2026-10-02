@@ -32,6 +32,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -59,6 +62,20 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
     val favorites = vm.nodeFavorites.collectAsStateWithLifecycle().value
     val favoriteRemovedText = stringResource(R.string.favorite_page_removed)
     val undoText = stringResource(R.string.history_page_undo)
+    var detail by remember { mutableStateOf<Pair<NodeFavoriteListItem, OrbisFavoriteDetail>?>(null) }
+    var detailRequest by remember { mutableStateOf<String?>(null) }
+    detail?.let { (item, snapshot) ->
+        OrbisFavoriteDetailDialog(snapshot,
+            onDismiss = { detail = null; detailRequest = null },
+            onJump = { scope.launch {
+                if (vm.sourceExists(item)) {
+                    detail = null
+                    detailRequest = null
+                    navigateToChatPage(navController, item.conversationId, nodeId = item.nodeId)
+                } else snackbarHostState.showSnackbar("原消息已删除或不可用，收藏快照仍保留。")
+            } },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -102,7 +119,13 @@ fun FavoritePage(vm: FavoriteVM = koinViewModel()) {
             items(favorites, key = { it.id }) { item ->
                 SwipeableFavoriteCard(
                     item = item,
-                    onClick = { navigateToChatPage(navController, item.conversationId, nodeId = item.nodeId) },
+                    onClick = {
+                        detailRequest = item.refKey
+                        scope.launch {
+                            val snapshot = vm.snapshotDetail(item.refKey)
+                            if (detailRequest == item.refKey && snapshot != null) detail = item to snapshot
+                        }
+                    },
                     onDelete = {
                         scope.launch {
                             val entity = vm.getEntityByRefKey(item.refKey) ?: return@launch

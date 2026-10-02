@@ -11,14 +11,18 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.SQLiteConfiguration
+import me.rerere.rikkahub.data.db.encodeMessageNodeMessages
 import me.rerere.rikkahub.data.db.dao.MessageNodeDAO
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,10 +56,12 @@ class ConversationLoadSafetyTest {
         }
     }
     private class Fixture(
+        productionSqlite: Boolean = false,
         decorate: (MessageNodeDAO) -> MessageNodeDAO = { it },
     ) : AutoCloseable {
         private val context = InstrumentationRegistry.getInstrumentation().targetContext
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .apply { if (productionSqlite) openHelperFactory(SQLiteConfiguration.openHelperFactory(context)) }
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     db.execSQL("CREATE TABLE message_fts (text TEXT, node_id TEXT, message_id TEXT, conversation_id TEXT, title TEXT, update_at TEXT)")
@@ -72,6 +78,39 @@ class ConversationLoadSafetyTest {
         assistantId = Uuid.random(), title = "synthetic-load-safety",
         messageNodes = List(count) { UIMessage.user("synthetic message $it").toMessageNode() },
     )
+
+    @Test fun malformedUnicodeInCompletedToolCannotCorruptJsonWithEitherSqliteBackend() = runBlocking {
+        for (production in listOf(false, true)) Fixture(productionSqlite = production).use { fixture ->
+            val base = conversation(65)
+            val tail = base.messageNodes.last()
+            val original = base.copy(messageNodes = base.messageNodes.dropLast(1) + tail.copy(messages = listOf(
+                tail.currentMessage.copy(parts = listOf(UIMessagePart.Tool(
+                    toolCallId = "synthetic-pulse", toolName = "synthetic-pulse", input = "{}",
+                    output = listOf(UIMessagePart.Text("kept Chinese 中文 and emoji 🙂 then lone\uD83D")),
+                ))),
+            )))
+            fixture.repository.insertConversation(original)
+            val rows = fixture.db.messageNodeDao().getNodesOfConversation(original.id.toString())
+            assertEquals(65, rows.size)
+            assertEquals(original.messageNodes.map { it.id.toString() }, rows.map { it.id })
+            assertEquals(encodeMessageNodeMessages(original.messageNodes.last().messages), rows.last().messages)
+            fixture.db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM message_node WHERE json_valid(messages) = 0").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+            val loaded = checkNotNull(fixture.repository.getConversationById(original.id))
+            assertEquals(original.messageNodes.dropLast(1), loaded.messageNodes.dropLast(1))
+            val tool = loaded.currentMessages.last().parts.single() as UIMessagePart.Tool
+            assertEquals("kept Chinese 中文 and emoji 🙂 then lone?", (tool.output.single() as UIMessagePart.Text).text)
+            assertTrue(tool.isExecuted)
+            assertEquals(JsonInstant.decodeFromString<List<UIMessage>>(rows.last().messages), loaded.messageNodes.last().messages)
+            // A later save of the still-live UTF-16 snapshot must remain safe, and the raw JSON
+            // comparison for suggestions must use the same encoding rather than reject forever.
+            fixture.repository.updateConversation(original, original.assistantId)
+            assertTrue(fixture.repository.applyGeneratedSuggestionsIfUnchanged(original, listOf("synthetic suggestion")))
+            assertEquals(loaded.messageNodes, fixture.repository.getConversationById(original.id)?.messageNodes)
+        }
+    }
 
     @Test fun completeMultiplePagesRetainEveryNodeInOrder() = runBlocking {
         Fixture().use { fixture ->

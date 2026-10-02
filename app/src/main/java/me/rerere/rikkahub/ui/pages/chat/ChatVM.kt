@@ -19,6 +19,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +54,7 @@ import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.NodeFavoriteTarget
+import me.rerere.rikkahub.data.model.quoteMessage
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterEdit
 import me.rerere.rikkahub.data.model.OrbisGenerationParameters
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -90,6 +92,7 @@ class ChatVM(
     // 聊天输入状态 - 保存在 ViewModel 中避免 TransactionTooLargeException
     val inputState = ChatInputState()
     private val stickerSendMutex = Mutex()
+    private val favoriteEditMutex = Mutex()
     private var lastStickerAcceptedAt: Long? = null
 
     internal var compactionUiState by mutableStateOf(OrbisCompactionUiState())
@@ -170,6 +173,20 @@ class ChatVM(
         if (manualContextBusy) return
         invalidateManualContextPreview()
         manualContextArchiveId = null
+    }
+
+    /** The immutable VM window ID, not whichever conversation the UI later navigates to. */
+    suspend fun previewMessageBatch(
+        nodeIds: Set<Uuid>,
+        operation: me.rerere.rikkahub.data.model.OrbisMessageBatchOperation,
+    ): me.rerere.rikkahub.data.model.OrbisMessageBatchPreview =
+        chatService.previewMessageBatch(_conversationId, nodeIds, operation)
+
+    suspend fun applyMessageBatch(
+        preview: me.rerere.rikkahub.data.model.OrbisMessageBatchPreview,
+    ): me.rerere.rikkahub.data.model.OrbisMessageBatchResult {
+        require(preview.conversationId == _conversationId) { "批量预览不属于当前窗口，请重新选择。" }
+        return chatService.applyMessageBatch(_conversationId, preview)
     }
 
     fun invalidateManualContextPreview() {
@@ -374,10 +391,20 @@ class ChatVM(
      * @param content 消息内容
      * @param answer 是否触发消息生成，如果为false，则仅添加消息到消息列表中
      */
-    fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
-        if (content.isEmptyInputMessage()) return
+    fun handleMessageSend(content: List<UIMessagePart>, answer: Boolean = true,
+        orbisQuote: me.rerere.ai.ui.OrbisMessageQuote? = null): Boolean {
+        if (content.isEmptyInputMessage()) return false
+        return try {
+            chatService.sendMessage(_conversationId, content, answer, orbisQuote)
+        } catch (error: Exception) {
+            chatService.addError(error, _conversationId, title = "引用未发送，草稿保留")
+            false
+        }
+    }
 
-        chatService.sendMessage(_conversationId, content, answer)
+    fun prepareQuotedReply(node: MessageNode): me.rerere.ai.ui.OrbisMessageQuote {
+        check(!inputState.isEditing()) { "请先完成或取消当前编辑，再引用回复。" }
+        return conversation.value.quoteMessage(node.id, node.currentMessage.id)
     }
 
     /** Returns false when busy. The existing draft (including edits and attachments) is untouched. */
@@ -624,6 +651,13 @@ class ChatVM(
 
     fun toggleMessageFavorite(node: MessageNode) {
         viewModelScope.launch {
+            favoriteEditMutex.withLock {
+            try {
+            val current = conversation.value
+            check(!current.isConsultation && conversationJob.value == null) { "请等待当前回复结束再收藏。" }
+            val selected = current.messageNodes.singleOrNull { it.id == node.id }
+                ?: error("原消息已不存在。")
+            check(selected.currentMessage.id == node.currentMessage.id) { "选中回答已改变，请重新收藏。" }
             val currentlyFavorited = favoriteRepository.isNodeFavorited(_conversationId, node.id)
             if (currentlyFavorited) {
                 favoriteRepository.removeNodeFavorite(_conversationId, node.id)
@@ -631,9 +665,9 @@ class ChatVM(
                 favoriteRepository.addNodeFavorite(
                     NodeFavoriteTarget(
                         conversationId = _conversationId,
-                        conversationTitle = conversation.value.title,
+                        conversationTitle = current.title,
                         nodeId = node.id,
-                        node = node
+                        node = selected
                     )
                 )
             }
@@ -648,6 +682,12 @@ class ChatVM(
                         }
                     }
                 )
+            }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                chatService.addError(error, _conversationId, title = "收藏未改变")
+            }
             }
         }
     }

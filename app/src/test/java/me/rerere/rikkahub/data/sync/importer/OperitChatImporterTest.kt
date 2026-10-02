@@ -84,6 +84,42 @@ class OperitChatImporterTest {
         assertTrue(preview.conversations.all { it.defaultSelectionReason.contains("local_timezone") })
     }
 
+    @Test fun selectedReasoningIsFoldableAndNoHistoricalToolsBecomeExecutable() {
+        val raw = "<think>first</think>answer\n<tool_result_1>inert data</tool_result_1>\n<think>second</think>final"
+        val file = archive(chat(messages = listOf(message("ai", "unselected", selected = 1, variants = listOf(1 to raw)))))
+        val before = file.readBytes()
+        val preview = OperitChatArchive.inspect(file)
+        assertTrue(preview.warnings.any { it.contains("可折叠") })
+        val message = OperitChatImporter.convert(source(file).single(), assistant).currentMessages.single()
+        assertEquals(listOf("first", "second"), message.parts.filterIsInstance<UIMessagePart.Reasoning>().map { it.reasoning })
+        assertFalse(message.toText().contains("<think>")); assertTrue(message.toText().contains("final"))
+        assertTrue(message.getTools().isEmpty())
+        assertTrue(message.parts.all { it.metadata?.get("source_selected_variant")?.jsonPrimitive?.content == "1" })
+        assertEquals(message, JsonInstant.decodeFromString<me.rerere.ai.ui.UIMessage>(JsonInstant.encodeToString(message)))
+        assertArrayEquals(before, file.readBytes())
+    }
+
+    @Test fun explicitCorrectedCopyNeverOverwritesEarlierImportAndIsIdempotent() = runBlocking {
+        val file = archive(chat(messages = listOf(message("ai", "<think>reason</think>body"))))
+        val hash = OperitChatImporter.archiveFingerprint(file)
+        val sink = Sink()
+        val oldId = operitImportId("conversation", "fixture-chat")
+        val old = OperitChatImporter.convert(source(file).single().let { original ->
+            original.copy(messages = original.messages.map { it.copy(text = "legacy raw original") })
+        }, assistant)
+        sink.saved[oldId] = old
+        val importer = OperitChatImporter(sink)
+        assertEquals(1, importer.import(file, assistant, select("fixture-chat"), hash).skipped)
+        val copyChoice = mapOf("fixture-chat" to OperitChatArchive.CORRECTED_COPY_PATH)
+        assertEquals(1, importer.import(file, assistant, copyChoice, hash).imported)
+        assertEquals(old, sink.saved[oldId]); assertEquals(2, sink.saved.size)
+        val copy = sink.saved.values.single { it.id != oldId }
+        assertTrue(copy.title.endsWith("（整理副本）"))
+        assertTrue(copy.currentMessages.single().parts.any { it is UIMessagePart.Reasoning })
+        assertNotEquals(old.currentMessages.single().id, copy.currentMessages.single().id)
+        assertEquals(1, importer.import(file, assistant, copyChoice, hash).skipped)
+    }
+
     @Test fun selectedRegenerationNotBaseAnswerIsImportedWithoutCreatingExecutableBranches() {
         val parsed = source(archive(chat(messages = listOf(message("ai", "原始", selected = 2,
             variants = listOf(1 to "旧回答", 2 to "选中回答")))))).single()
@@ -424,6 +460,7 @@ class OperitChatImporterTest {
         val file = archive()
         assertThrows(CancellationException::class.java) { OperitChatArchive.inspect(file) { throw CancellationException() } }
         assertThrows(CancellationException::class.java) { OperitChatImporter.archiveFingerprint(file) { throw CancellationException() } }
-        assertThrows(CancellationException::class.java) { OperitChatImporter.convert(source(file).single(), assistant) { throw CancellationException() } }
+        assertThrows(CancellationException::class.java) { OperitChatImporter.convert(source(file).single(), assistant,
+            checkCancelled = { throw CancellationException() }) }
     }
 }

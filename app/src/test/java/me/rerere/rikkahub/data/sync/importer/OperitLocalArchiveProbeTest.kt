@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.sync.importer
 
 import me.rerere.ai.ui.UIMessagePart
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
@@ -22,6 +23,8 @@ class OperitLocalArchiveProbeTest {
         val expectedConversations = expectedCount("ORBIS_OPERIT_PROBE_EXPECT_CONVERSATIONS", 1, OperitChatArchive.MAX_CONVERSATIONS)
         val expectedMessages = expectedCount("ORBIS_OPERIT_PROBE_EXPECT_MESSAGES", 0, OperitChatArchive.MAX_MESSAGES)
         val expectedSummaries = expectedCount("ORBIS_OPERIT_PROBE_EXPECT_SKIPPED_SUMMARIES", 0, OperitChatArchive.MAX_MESSAGES)
+        val expectedReasoningMessages = optionalCount("ORBIS_OPERIT_PROBE_EXPECT_REASONING_MESSAGES")
+        val expectedReasoningBlocks = optionalCount("ORBIS_OPERIT_PROBE_EXPECT_REASONING_BLOCKS")
         val file = File(path!!)
         checkSafe(file.isFile && file.length() in 1..OperitChatArchive.MAX_ARCHIVE_BYTES, "probe_file_bounds")
         val before = fingerprint(file)
@@ -40,6 +43,8 @@ class OperitLocalArchiveProbeTest {
         var convertedConversations = 0
         var previewFailureType = "none"
         var parserFailureType = "none"
+        var reasoningMessages = 0
+        var reasoningBlocks = 0
         try {
             try {
                 val preview = OperitChatArchive.inspect(file)
@@ -80,13 +85,25 @@ class OperitLocalArchiveProbeTest {
                     checkSafe(converted.assistantId == syntheticAssistant &&
                         converted.messageNodes.size == source.messages.size, "probe_conversion_structure")
                     checkSafe(converted.currentMessages.all { message ->
-                        message.parts.all { it is UIMessagePart.Text } && message.getTools().isEmpty()
+                        message.parts.all { it is UIMessagePart.Text || it is UIMessagePart.Reasoning } && message.getTools().isEmpty()
                     }, "probe_imported_history_not_inert")
                     checkSafe(converted.currentMessages.indices.all { index ->
                         val imported = converted.currentMessages[index]
                         val original = source.messages[index]
+                        val sourceParts = if (original.attachmentReferences > 0) imported.parts.dropLast(1) else imported.parts
+                        val reconstructed = sourceParts.joinToString("") { part -> when (part) {
+                            is UIMessagePart.Text -> part.text
+                            is UIMessagePart.Reasoning -> "<think>${part.reasoning}</think>"
+                            else -> error("probe_nontext_part")
+                        } }
+                        val blocks = sourceParts.count { it is UIMessagePart.Reasoning }
+                        reasoningBlocks += blocks
+                        if (blocks > 0) reasoningMessages++
                         imported.id == operitImportId("message", source.sourceId, original.sourceIndex.toString()) &&
-                            (imported.parts.first() as? UIMessagePart.Text)?.text == original.text
+                            reconstructed == original.text && sourceParts.all {
+                                it.metadata?.get("source_timestamp_ms")?.jsonPrimitive?.content == original.timestamp.toEpochMilli().toString() &&
+                                    it.metadata?.get("source_message_index")?.jsonPrimitive?.content == original.sourceIndex.toString()
+                            }
                     }, "probe_selected_text_or_original_index_changed")
                     convertedConversations++
                     messages += source.messages.size
@@ -103,12 +120,18 @@ class OperitLocalArchiveProbeTest {
             "parser_code=$parserCode preview_failure_type=$previewFailureType parser_failure_type=$parserFailureType " +
             "conversations=$parsedConversations messages=$messages converted_in_memory=$convertedConversations " +
             "skipped_summaries=$skippedSummaries source_rows=${messages + skippedSummaries} " +
+            "reasoning_messages=$reasoningMessages reasoning_blocks=$reasoningBlocks " +
             "source_sha256_unchanged=true database_opened=false network_called=false files_written=false")
         checkSafe(previewAccepted && parserAccepted, "probe_expected_acceptance")
         checkSafe(parsedConversations == expectedConversations, "probe_expected_conversation_count")
         checkSafe(messages == expectedMessages, "probe_expected_normal_message_count")
         checkSafe(skippedSummaries == expectedSummaries, "probe_expected_skipped_summary_count")
+        expectedReasoningMessages?.let { checkSafe(reasoningMessages == it, "probe_expected_reasoning_message_count") }
+        expectedReasoningBlocks?.let { checkSafe(reasoningBlocks == it, "probe_expected_reasoning_block_count") }
     }
+
+    private fun optionalCount(name: String): Int? =
+        if (System.getenv(name).isNullOrBlank()) null else expectedCount(name, 0, 100_000)
 
     private fun expectedCount(name: String, minimum: Int, maximum: Int): Int {
         val value = System.getenv(name)?.takeIf { it.matches(Regex("[0-9]{1,6}")) }?.toIntOrNull()

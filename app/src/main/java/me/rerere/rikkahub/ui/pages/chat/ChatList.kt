@@ -26,6 +26,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -44,6 +47,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +66,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -70,6 +78,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalScrollCaptureInProgress
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -82,15 +91,21 @@ import androidx.compose.ui.zIndex
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.OrbisMessageQuote
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.OrbisMessageBatchOperation
+import me.rerere.rikkahub.data.model.OrbisMessageBatchPreview
+import me.rerere.rikkahub.data.model.OrbisMessageBatchResult
+import me.rerere.rikkahub.data.model.selectAllMessagePreviewRows
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.message.ChatMessage
 import me.rerere.rikkahub.ui.components.ui.ErrorCardsDisplay
@@ -143,6 +158,11 @@ fun ChatList(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
+    onQuote: ((MessageNode) -> Unit)? = null,
+    onQuoteJump: ((OrbisMessageQuote) -> Unit)? = null,
+    historyMutationDisabledReason: String? = null,
+    onPreviewMessageBatch: (suspend (Set<Uuid>, OrbisMessageBatchOperation) -> OrbisMessageBatchPreview)? = null,
+    onApplyMessageBatch: (suspend (OrbisMessageBatchPreview) -> OrbisMessageBatchResult)? = null,
 ) {
     val effectiveBottomFollow = bottomFollowState ?: remember(state, conversation.id) { ChatBottomFollowState() }
     ChatListModeContent(previewMode) { target ->
@@ -153,7 +173,9 @@ fun ChatList(
                 settings = settings,
                 hazeState = hazeState,
                 onJumpToMessage = onJumpToMessage,
-                animatedVisibilityScope = this@ChatListModeContent,
+                historyMutationDisabledReason = historyMutationDisabledReason,
+                onPreviewMessageBatch = onPreviewMessageBatch,
+                onApplyMessageBatch = onApplyMessageBatch,
             )
         } else {
             ChatListNormal(
@@ -185,6 +207,8 @@ fun ChatList(
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
+                onQuote = onQuote,
+                onQuoteJump = onQuoteJump,
             )
         }
     }
@@ -244,6 +268,8 @@ private fun ChatListNormal(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
+    onQuote: ((MessageNode) -> Unit)? = null,
+    onQuoteJump: ((OrbisMessageQuote) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var isRecentScroll by remember { mutableStateOf(false) }
@@ -341,6 +367,8 @@ private fun ChatListNormal(
                     },
                     isFavorite = node.isFavorite,
                     onToggleFavorite = { onToggleFavorite?.invoke(node) },
+                    onQuote = onQuote,
+                    onQuoteJump = onQuoteJump,
                     onTranslate = onTranslate,
                     onClearTranslation = onClearTranslation,
                     onToolApproval = onToolApproval,
@@ -659,15 +687,74 @@ private fun buildHighlightedText(
 }
 
 @Composable
-private fun ChatListPreview(
+internal fun ChatListPreview(
     innerPadding: PaddingValues,
     conversation: Conversation,
     settings: Settings,
     hazeState: HazeState,
-    animatedVisibilityScope: AnimatedVisibilityScope,
-    onJumpToMessage: (Int) -> Unit
+    onJumpToMessage: (Int) -> Unit,
+    historyMutationDisabledReason: String? = null,
+    onPreviewMessageBatch: (suspend (Set<Uuid>, OrbisMessageBatchOperation) -> OrbisMessageBatchPreview)? = null,
+    onApplyMessageBatch: (suspend (OrbisMessageBatchPreview) -> OrbisMessageBatchResult)? = null,
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by remember(conversation.id, conversation.assistantId) { mutableStateOf("") }
+    var selectingBatch by remember(conversation.id, conversation.assistantId) { mutableStateOf(false) }
+    var selectedIds by remember(conversation.id, conversation.assistantId) { mutableStateOf(emptySet<Uuid>()) }
+    var batchPreview by remember(conversation.id, conversation.assistantId) { mutableStateOf<OrbisMessageBatchPreview?>(null) }
+    var previewSource by remember(conversation.id, conversation.assistantId) { mutableStateOf<Conversation?>(null) }
+    var batchBusy by remember(conversation.id, conversation.assistantId) { mutableStateOf(false) }
+    var feedback by remember(conversation.id, conversation.assistantId) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val latestConversation by rememberUpdatedState(conversation)
+    val latestDisabledReason by rememberUpdatedState(historyMutationDisabledReason)
+    val latestPreviewAction by rememberUpdatedState(onPreviewMessageBatch)
+    val latestApplyAction by rememberUpdatedState(onApplyMessageBatch)
+    val batchAvailable = onPreviewMessageBatch != null && onApplyMessageBatch != null
+    val mutationEnabled = batchAvailable && historyMutationDisabledReason == null && !batchBusy
+
+    fun changeSearch(value: String) {
+        searchQuery = value
+        // A hidden selection must never be accidentally included in a later confirmation.
+        selectedIds = emptySet()
+        batchPreview = null
+        previewSource = null
+    }
+
+    fun toggle(id: Uuid) {
+        if (!mutationEnabled) return
+        selectingBatch = true
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+        feedback = null
+    }
+
+    fun prepare(operation: OrbisMessageBatchOperation) {
+        if (!mutationEnabled || selectedIds.isEmpty()) return
+        val source = conversation
+        val ids = selectedIds.toSet()
+        batchBusy = true
+        feedback = null
+        scope.launch {
+            try {
+                val action = latestPreviewAction ?: return@launch
+                val prepared = action(ids, operation)
+                // Avoid hashing a very long conversation on every UI frame. The service also
+                // verifies the complete durable fingerprint under its history-edit mutex.
+                if (latestConversation !== source || latestDisabledReason != null ||
+                    prepared.conversationId != source.id || prepared.assistantId != source.assistantId) {
+                    feedback = "记录或运行状态已变化，请重新选择并预览。"
+                } else {
+                    previewSource = source
+                    batchPreview = prepared
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                feedback = error.message ?: "无法预览，原记录未改变。"
+            } finally {
+                batchBusy = false
+            }
+        }
+    }
 
     // 过滤消息，同时保留原始 index 避免后续 O(n) indexOf 查找
     val filteredMessages = remember(conversation.messageNodes, searchQuery) {
@@ -688,8 +775,10 @@ private fun ChatListPreview(
         // 搜索框
         OutlinedTextField(
             value = searchQuery,
-            onValueChange = { searchQuery = it },
+            onValueChange = ::changeSearch,
+            enabled = !batchBusy,
             modifier = Modifier
+                .testTag("orbis-preview-search")
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             placeholder = { Text(stringResource(R.string.history_page_search)) },
@@ -702,7 +791,7 @@ private fun ChatListPreview(
             },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
+                    IconButton(onClick = { changeSearch("") }, enabled = !batchBusy) {
                         Icon(
                             imageVector = HugeIcons.Cancel01,
                             contentDescription = "Clear",
@@ -715,6 +804,48 @@ private fun ChatListPreview(
             shape = CircleShape,
             maxLines = 1,
         )
+
+        if (batchAvailable) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                if (!selectingBatch) {
+                    TextButton(
+                        onClick = { selectingBatch = true; feedback = null },
+                        enabled = mutationEnabled,
+                        modifier = Modifier.testTag("orbis-preview-select"),
+                    ) { Text("多选消息（也可长按）") }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("已选 ${selectedIds.size} 条", modifier = Modifier.weight(1f))
+                        TextButton(
+                            onClick = { selectedIds = selectAllMessagePreviewRows(filteredMessages.map { it.second.id }) },
+                            enabled = mutationEnabled,
+                            modifier = Modifier.testTag("orbis-preview-select-all"),
+                        ) { Text("全选当前筛选") }
+                        TextButton(
+                            onClick = { selectingBatch = false; selectedIds = emptySet(); batchPreview = null; previewSource = null },
+                            enabled = !batchBusy,
+                            modifier = Modifier.testTag("orbis-preview-cancel"),
+                        ) { Text("取消") }
+                    }
+                    Row {
+                        TextButton(
+                            onClick = { prepare(OrbisMessageBatchOperation.ARCHIVE) },
+                            enabled = mutationEnabled && selectedIds.isNotEmpty(),
+                            modifier = Modifier.testTag("orbis-preview-archive"),
+                        ) { Text("归档所选") }
+                        TextButton(
+                            onClick = { prepare(OrbisMessageBatchOperation.DELETE) },
+                            enabled = mutationEnabled && selectedIds.isNotEmpty(),
+                            modifier = Modifier.testTag("orbis-preview-delete"),
+                        ) { Text("删除所选", color = MaterialTheme.colorScheme.error) }
+                    }
+                    Text("整条消息及其所有分支一起处理；关联的工具记录或通话会在确认时列入范围。", style = MaterialTheme.typography.bodySmall)
+                }
+                historyMutationDisabledReason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                feedback?.let { Text(it, modifier = Modifier.testTag("orbis-preview-feedback"), style = MaterialTheme.typography.bodySmall) }
+                if (batchBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+        }
 
         // 消息预览
         LazyColumn(
@@ -744,13 +875,24 @@ private fun ChatListPreview(
                     ) {
                         Row(
                             modifier = Modifier
-                                .clickable {
-                                    onJumpToMessage(originalIndex)
-                                }
+                                .testTag("orbis-preview-row-${node.id}")
+                                .combinedClickable(
+                                    enabled = !batchBusy,
+                                    onClick = { if (selectingBatch) toggle(node.id) else onJumpToMessage(originalIndex) },
+                                    onLongClick = if (mutationEnabled) ({ toggle(node.id) }) else null,
+                                )
                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            if (selectingBatch) {
+                                Checkbox(
+                                    checked = node.id in selectedIds,
+                                    onCheckedChange = { toggle(node.id) },
+                                    enabled = mutationEnabled,
+                                    modifier = Modifier.testTag("orbis-preview-check-${node.id}"),
+                                )
+                            }
                             val highlightColor = MaterialTheme.colorScheme.tertiaryContainer
                             val highlightedText = remember(searchQuery, message) {
                                 val fullText = message.toText().trim().ifBlank { "[...]" }
@@ -766,6 +908,7 @@ private fun ChatListPreview(
                             }
                             Text(
                                 text = highlightedText,
+                                modifier = Modifier.weight(1f, fill = false),
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -775,6 +918,69 @@ private fun ChatListPreview(
                 }
             }
         }
+    }
+
+    batchPreview?.let { preview ->
+        val isArchive = preview.operation == OrbisMessageBatchOperation.ARCHIVE
+        val stale = previewSource !== conversation
+        AlertDialog(
+            onDismissRequest = { if (!batchBusy) { batchPreview = null; previewSource = null } },
+            title = { Text(if (isArchive) "确认归档所选记录" else "确认删除所选记录") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("选中 ${preview.requestedNodeIds.size} 条；本次处理 ${preview.affectedCount} 条消息节点。")
+                    if (preview.additionalCount > 0) Text("为保持工具调用与结果、完整通话的关联，额外纳入 ${preview.additionalCount} 条。")
+                    if (preview.alternativeCount > 0) Text("包括 ${preview.alternativeCount} 个其他回答分支，不会改成显示另一个分支。")
+                    if (preview.voiceCallCount > 0) Text("涉及 ${preview.voiceCallCount} 次通话的完整消息组。")
+                    if (isArchive) {
+                        Text("完整原窗口另存为“原文存档”，可从聊天列表查看。所选记录移出当前上下文，不再随此窗口发送；只添加人工操作说明，不联网、不生成摘要。")
+                        Text("可用“上下文整理 → 撤销上次整理”恢复最近一次；即使后来再次整理，独立原文存档仍保留。")
+                    } else {
+                        Text("从当前窗口删除这些消息及其所有分支，不能用本次操作直接撤销。已有独立存档和文件不会因此被一并清除。请先备份重要内容。")
+                        if (preview.replacementNodes.isEmpty()) Text("本次会清空当前窗口的全部消息；窗口本身保留。")
+                    }
+                    if (stale) Text("记录已变化，请取消后重新预览。", color = MaterialTheme.colorScheme.error)
+                    historyMutationDisabledReason?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (batchBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { batchPreview = null; previewSource = null },
+                    enabled = !batchBusy,
+                    modifier = Modifier.testTag("orbis-preview-cancel-confirm"),
+                ) { Text("取消") }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = mutationEnabled && !stale,
+                    modifier = Modifier.testTag("orbis-preview-confirm"),
+                    onClick = {
+                        if (batchBusy || latestDisabledReason != null || latestConversation !== previewSource) return@TextButton
+                        batchBusy = true
+                        scope.launch {
+                            try {
+                                val apply = latestApplyAction ?: return@launch
+                                val result = apply(preview)
+                                selectedIds = emptySet()
+                                selectingBatch = false
+                                feedback = if (result.operation == OrbisMessageBatchOperation.ARCHIVE)
+                                    "已归档 ${result.affectedCount} 条；完整原文保存在聊天列表的“原文存档”窗口。"
+                                else "已从当前窗口删除 ${result.affectedCount} 条消息。"
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                feedback = error.message ?: "操作未完成，请核对当前记录后重试。"
+                            } finally {
+                                batchPreview = null
+                                previewSource = null
+                                batchBusy = false
+                            }
+                        }
+                    },
+                ) { Text(if (isArchive) "确认归档" else "确认删除") }
+            },
+        )
     }
 }
 

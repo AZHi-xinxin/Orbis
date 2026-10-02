@@ -65,7 +65,14 @@ class BackupVM(
         settings.value.assistantId
     }
 
+    val polarisImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        source = ChatArchiveSource.POLARIS, assistantName = ::importAssistantName) {
+        check(!settings.value.init)
+        settings.value.assistantId
+    }
+
     override fun onCleared() {
+        polarisImport.close()
         kelivoImport.close()
         operitImport.close()
         deepSeekImport.close()

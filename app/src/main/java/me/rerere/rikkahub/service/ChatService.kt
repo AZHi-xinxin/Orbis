@@ -119,6 +119,7 @@ import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.withManualTitle
 import me.rerere.rikkahub.data.model.withGeneratedTitleIfUnchanged
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.requireCurrentQuote
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.OrbisConversationPrompt
@@ -305,7 +306,8 @@ class ChatService(
 
     fun enqueueCallMessage(conversationId: Uuid, callId: String, text: String,
         kind: String = "turn", answer: Boolean = true, messageId: Uuid = Uuid.random(),
-        shouldEnqueue: () -> Boolean = { true }): Deferred<String?> {
+        shouldEnqueue: () -> Boolean = { true },
+        orbisUserMessageTime: me.rerere.ai.ui.OrbisUserMessageTime? = null): Deferred<String?> {
         require(kind !in setOf("archive", "restore")) { "归档只能使用独立记录整理入口，不能进入聊天队列。" }
         val session = getOrCreateSession(conversationId)
         val reply = CompletableDeferred<String?>()
@@ -315,7 +317,8 @@ class ChatService(
                 "聊天队列已暂停，通话原文仍保留；恢复队列后可重试。"
             }
             session.messageQueue.enqueue(listOf(UIMessagePart.Text(if (kind == "turn") voiceTurnForModel(callId, text) else text)),
-                answer = answer, reply = reply, id = messageId, voiceCallId = callId, voiceCallKind = kind)
+                answer = answer, reply = reply, id = messageId, voiceCallId = callId, voiceCallKind = kind,
+                orbisUserMessageTime = if (kind == "turn") orbisUserMessageTime else null)
             dispatchNextQueuedMessage(conversationId)
         }
         return reply
@@ -325,14 +328,16 @@ class ChatService(
     fun enqueueVoiceCallUtterance(conversationId: Uuid, callId: String, text: String,
         originalTranscript: String? = null): Deferred<String?> {
         val binding = VoiceReplyBinding(conversationId, callId, Uuid.random())
+        val acceptedAt = System.currentTimeMillis()
+        val capturedTime = captureHumanMessageTime(getOrCreateSession(conversationId), acceptedAt)
         val observer = appScope.async(start = CoroutineStart.LAZY) {
             val queued = voiceIngressMutex.withLock {
                 voiceCalls.update(callId) { it.copy(transcript = it.transcript +
-                    OrbisVoiceTranscriptEntry(binding.messageId.toString(), "USER", text, System.currentTimeMillis(), binding.messageId.toString(),
+                    OrbisVoiceTranscriptEntry(binding.messageId.toString(), "USER", text, acceptedAt, binding.messageId.toString(),
                         originalTranscript = originalTranscript?.takeIf { it != text })) }
                 if (binding.cancelled) return@async null
                 enqueueCallMessage(conversationId, callId, text, messageId = binding.messageId,
-                    shouldEnqueue = { !binding.cancelled })
+                    shouldEnqueue = { !binding.cancelled }, orbisUserMessageTime = capturedTime)
             }
             queued.await()
         }
@@ -1400,14 +1405,29 @@ class ChatService(
         return outcome
     }
 
-    fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true) {
-        if (content.isEmptyInputMessage()) return
+    private fun captureHumanMessageTime(session: ConversationSession,
+        epochMillis: Long = System.currentTimeMillis()): me.rerere.ai.ui.OrbisUserMessageTime? {
+        val settings = settingsStore.settingsFlow.value
+        val assistant = settings.getAssistantById(session.state.value.assistantId) ?: return null
+        return me.rerere.rikkahub.data.ai.transformers.captureOrbisUserMessageTime(assistant.enableUserMessageTime, epochMillis)
+    }
+
+    fun sendMessage(conversationId: Uuid, content: List<UIMessagePart>, answer: Boolean = true,
+        orbisQuote: me.rerere.ai.ui.OrbisMessageQuote? = null): Boolean {
+        if (content.isEmptyInputMessage()) return false
         val session = getOrCreateSession(conversationId)
         synchronized(session) {
+            if (session.manualContextWriteInProgress) return false
+            if (orbisQuote != null) {
+                check(session.isInitialized) { "聊天尚未读完，请稍后发送引用。" }
+                session.state.value.requireCurrentQuote(orbisQuote)
+            }
             if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
-            session.messageQueue.enqueue(content, answer)
+            session.messageQueue.enqueue(content, answer, orbisQuote = orbisQuote,
+                orbisUserMessageTime = captureHumanMessageTime(session))
             dispatchNextQueuedMessage(conversationId)
         }
+        return true
     }
 
     /** Native garden drawer only. No page text, solution, bridge payload or auto-send path. */
@@ -1443,7 +1463,8 @@ class ChatService(
                 voiceActive = OrbisVoiceCallRuntime.get(context).callState.value.isActive,
             )
             if (!me.rerere.rikkahub.data.orbis.canSendGardenQuickChat(state, text)) return@synchronized false
-            val message = QueuedMessage(parts = listOf(UIMessagePart.Text(text)))
+            val message = QueuedMessage(parts = listOf(UIMessagePart.Text(text)),
+                orbisUserMessageTime = captureHumanMessageTime(session))
             session.messageQueue.resume() // Explicit new send only; a nonempty old queue was refused above.
             session.submittingMessage = message
             try {
@@ -1486,7 +1507,7 @@ class ChatService(
             // Like an ordinary explicit send, a NEW tap can leave an empty failed-queue
             // state. No old item is replayed, and a nonempty (even paused) queue is refused.
             session.messageQueue.resume()
-            val message = QueuedMessage(parts = content.toList())
+            val message = QueuedMessage(parts = content.toList(), orbisUserMessageTime = captureHumanMessageTime(session))
             session.submittingMessage = message
             try {
                 sendQueuedMessage(session, message, requireImageInput = content.any { it is UIMessagePart.Image })
@@ -1512,7 +1533,8 @@ class ChatService(
                 message.parts.any { it is UIMessagePart.Tool && it.isPending }
             }) { context.getString(R.string.chat_page_voice_tools_before_resume) }
             if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
-            session.messageQueue.enqueue(listOf(UIMessagePart.Text(text)), reply = reply)
+            session.messageQueue.enqueue(listOf(UIMessagePart.Text(text)), reply = reply,
+                orbisUserMessageTime = captureHumanMessageTime(session))
             dispatchNextQueuedMessage(conversationId)
         }
         return reply
@@ -1605,6 +1627,13 @@ class ChatService(
                 }
 
                 val currentConversation = session.state.value
+                queued.orbisQuote?.let {
+                    // Already frozen at acceptance. Deleting its source while queued does not lose the reply.
+                    check(it.isValid() && it.sourceConversationId == conversationId &&
+                        queued.orbisEventId == null && queued.voiceCallId == null && !currentConversation.isConsultation) {
+                        "引用窗口不匹配，原待发输入保留。"
+                    }
+                }
                 val callRecord = queued.voiceCallId?.let { checkNotNull(voiceCalls.get(it)) }
                 if (callRecord != null) check(currentConversation.assistantId.toString() == callRecord.assistantId) {
                     "通话所属 AI 已变更，原文保留，未交给其他 AI。"
@@ -1669,6 +1698,9 @@ class ChatService(
                         orbisEvent = event?.let { OrbisEventMetadata(it.id, it.source, it.eventId, it.receivedAt, occurredAt = it.occurredAt) },
                         orbisVoiceCallId = queued.voiceCallId,
                         orbisVoiceCallKind = queued.voiceCallKind,
+                        orbisQuote = queued.orbisQuote,
+                        orbisUserMessageTime = if (event == null && queued.voiceCallKind in setOf(null, "turn"))
+                            queued.orbisUserMessageTime else null,
                     ).toMessageNode(),
                 )
                 inputSaveAttempted = true
@@ -2242,6 +2274,8 @@ class ChatService(
                     addAll(inputTransformers)
                     add(templateTransformer)
                     add(workspaceReminderTransformer)
+                    add(me.rerere.rikkahub.data.ai.transformers.OrbisQuotedReplyTransformer)
+                    add(me.rerere.rikkahub.data.ai.transformers.OrbisUserMessageTimeTransformer)
                 },
                 outputTransformers = outputTransformers,
                 tools = scopedTools,
@@ -2625,6 +2659,77 @@ class ChatService(
         }.onFailure {
             if (it is CancellationException) throw it
             // Suggestions are optional. Failure must not pause a queue or expose private text.
+        }
+    }
+
+    // ---- Human-confirmed whole-node batch edits; no generation or queue dispatch ----
+
+    private suspend fun requireMessageBatchReadyLocked(session: ConversationSession) {
+        requireWritableHistoryLocked(session)
+        val call = OrbisVoiceCallRuntime.get(context).callState.value
+        check(call.conversationId != session.id || (!call.isActive && !call.ending)) {
+            "请结束当前通话并等记录保存完成，再批量整理消息。"
+        }
+        // Independent archivers preserve their own immutable source. Do not edit while one is
+        // taking that source snapshot; no archive job is cancelled or retried by this action.
+        check(voiceArchiveJobs.values.none { !it.isCompleted }) {
+            "通话记录正在归档，请等归档结束后再批量整理消息。"
+        }
+    }
+
+    suspend fun previewMessageBatch(
+        conversationId: Uuid,
+        nodeIds: Set<Uuid>,
+        operation: me.rerere.rikkahub.data.model.OrbisMessageBatchOperation,
+    ): me.rerere.rikkahub.data.model.OrbisMessageBatchPreview = withContext(Dispatchers.Main.immediate) {
+        val session = getOrCreateSession(conversationId)
+        session.withRefSuspend {
+            initializeConversation(conversationId, selectAssistant = false)
+            session.orbisPromptEditMutex.withLock {
+                requireMessageBatchReadyLocked(session)
+                val snapshot = session.state.value
+                val selected = nodeIds.toSet()
+                withContext(Dispatchers.Default) {
+                    me.rerere.rikkahub.data.model.prepareOrbisMessageBatch(snapshot, selected, operation)
+                }
+            }
+        }
+    }
+
+    suspend fun applyMessageBatch(
+        conversationId: Uuid,
+        preview: me.rerere.rikkahub.data.model.OrbisMessageBatchPreview,
+    ): me.rerere.rikkahub.data.model.OrbisMessageBatchResult = withContext(Dispatchers.Main.immediate) {
+        folderMutationMutex.withLock {
+            require(preview.conversationId == conversationId) { "预览不属于当前窗口，请重新选择。" }
+            val session = getOrCreateSession(conversationId)
+            session.withRefSuspend {
+                initializeConversation(conversationId, selectAssistant = false)
+                session.orbisPromptEditMutex.withLock {
+                    requireMessageBatchReadyLocked(session)
+                    val current = synchronized(session) {
+                        check(session.getJob() == null && session.submittingMessage == null &&
+                            !session.manualContextWriteInProgress) { "对话忙碌，请稍后重新选择并确认。" }
+                        requireCompactionEpoch(preview.compactionEpoch, session.state.value.compactionEpoch)
+                        session.manualContextWriteInProgress = true
+                        session.state.value
+                    }
+                    try {
+                        withContext(kotlinx.coroutines.NonCancellable) {
+                            val committed = withContext(Dispatchers.IO) {
+                                compactionRepository.commitMessageBatch(current, preview)
+                            }
+                            // Room and FTS are durable before publishing. No generic save path:
+                            // it could resume a paused queue, or make stale history visible first.
+                            session.state.value = committed.conversation
+                            session.isInitialized = true
+                            committed.result
+                        }
+                    } finally {
+                        synchronized(session) { session.manualContextWriteInProgress = false }
+                    }
+                }
+            }
         }
     }
 
@@ -3230,6 +3335,8 @@ class ChatService(
                     messages = node.messages + UIMessage(
                         role = node.role,
                         parts = processedParts,
+                        orbisQuote = node.messages.first { it.id == messageId }.orbisQuote,
+                        orbisUserMessageTime = node.messages.first { it.id == messageId }.orbisUserMessageTime,
                     ),
                     selectIndex = node.messages.size
                 )

@@ -19,7 +19,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
@@ -128,6 +131,7 @@ private fun AssistantLocalToolContent(
             .imePadding(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        AssistantMessageTimeCard(assistant = assistant, onUpdate = onUpdate)
         CardGroup {
             item(
                 headlineContent = {
@@ -229,5 +233,30 @@ private fun AssistantLocalToolContent(
             )
         }
         RememberedToolApprovals(assistant.id.toString())
+    }
+}
+
+/** Visible independently of the legacy memory page and the time-query tool. */
+@Composable
+internal fun AssistantMessageTimeCard(
+    assistant: Assistant,
+    onUpdate: (Assistant) -> Unit,
+) {
+    CardGroup {
+        item(
+            headlineContent = { Text("每条消息的发送时间") },
+            supportingContent = {
+                Text("仅对当前 AI 生效。开启后，新的人类消息会附带发送时的日期、时间和时区给 AI，聊天正文不变。旧消息不补时间；关闭后不再附带。无需开启下方时间查询工具，也不会启用记忆功能。第三方网关自行添加的时间不受此开关控制。")
+            },
+            trailingContent = {
+                Switch(
+                    checked = assistant.enableUserMessageTime,
+                    onCheckedChange = { onUpdate(assistant.copy(enableUserMessageTime = it)) },
+                    modifier = Modifier.testTag("assistant-user-message-time-toggle").semantics {
+                        contentDescription = "每条消息的发送时间"
+                    },
+                )
+            },
+        )
     }
 }

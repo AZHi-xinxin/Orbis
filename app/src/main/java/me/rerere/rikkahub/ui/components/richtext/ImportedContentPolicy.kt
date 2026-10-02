@@ -13,5 +13,6 @@ fun List<UIMessagePart>.isDeepSeekHistory(): Boolean = any { part ->
         is UIMessagePart.Reasoning -> part.metadata
         else -> null
     }
-    (metadata?.get("import_source") as? JsonPrimitive)?.content in setOf("deepseek", "operit_json_v2", "kelivo_sqlite_v2")
+    (metadata?.get("import_source") as? JsonPrimitive)?.content in setOf(
+        "deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1")
 }

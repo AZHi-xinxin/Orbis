@@ -65,6 +65,13 @@ interface ToolUIRenderer {
     fun title(context: ToolUIContext): String =
         stringResource(R.string.chat_message_tool_call_generic, context.tool.toolName)
 
+    /** Explicit actions that remain reachable while the step's summary is collapsed. */
+    fun hasHeaderActions(context: ToolUIContext): Boolean = false
+
+    @Composable
+    fun HeaderActions(context: ToolUIContext) {
+    }
+
     /** 步骤展开时是否显示内联摘要 */
     fun hasSummary(context: ToolUIContext): Boolean = false
 

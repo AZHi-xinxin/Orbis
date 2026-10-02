@@ -289,7 +289,7 @@ class StreamChunkHandler(private val model: Model? = null) {
 
             is StreamChunk.ImageEnd -> this.also { imagePartIndexes.remove(chunk.id) }
             is StreamChunk.Annotations -> copy(annotations = (annotations + chunk.annotations).distinct())
-            is StreamChunk.Usage -> copy(usage = usage.merge(chunk.usage))
+            is StreamChunk.Usage -> withFreshProviderUsage(chunk.usage)
             is StreamChunk.Finish -> copy(
                 finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
             ).finishReasoning().also {
@@ -320,6 +320,17 @@ private fun mergeMetadata(old: JsonObject?, new: JsonObject?): JsonObject? = whe
     else -> JsonObject(old + new)
 }
 
+/** Never merge an edited-context historical prompt/cache counter into a fresh provider segment.
+ * Output-only or missing usage cannot certify a new prompt anchor; keep the historical record
+ * marked until a complete, valid input counter actually arrives.
+ */
+private fun UIMessage.withFreshProviderUsage(incoming: TokenUsage?): UIMessage {
+    if (!usageContextInvalidated) return copy(usage = usage.merge(incoming ?: TokenUsage()))
+    if (incoming == null || incoming.promptTokens <= 0 || incoming.completionTokens < 0 ||
+        incoming.cachedTokens !in 0..incoming.promptTokens) return this
+    return copy(usage = incoming, usageContextInvalidated = false)
+}
+
 fun List<UIMessage>.handleTextGenerationResult(
     result: TextGenerationResult,
     model: Model? = null,
@@ -335,9 +346,8 @@ fun List<UIMessage>.handleTextGenerationResult(
     } else {
         dropLast(1) + last().appendMessage(incoming).copy(
             modelId = model?.id ?: last().modelId,
-            usage = last().usage.merge(result.usage ?: TokenUsage()),
             finishedAt = incoming.finishedAt,
-        ).finishReasoning()
+        ).withFreshProviderUsage(result.usage).finishReasoning()
     }
 }
 

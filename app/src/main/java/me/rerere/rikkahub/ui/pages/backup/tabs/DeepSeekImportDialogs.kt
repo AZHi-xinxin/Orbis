@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.ui.pages.backup.DeepSeekImportController
 import me.rerere.rikkahub.ui.pages.backup.DeepSeekImportUiState
+import me.rerere.rikkahub.ui.pages.backup.ChatArchiveSource
 import me.rerere.rikkahub.ui.pages.backup.importPreviewCounts
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -47,6 +48,7 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
             }
         }
         var branchFor by remember(preview) { mutableStateOf<String?>(null) }
+        var correctedOperitCopy by remember(preview) { mutableStateOf(false) }
         val date = remember { DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault()) }
         AlertDialog(onDismissRequest = controller::discard, title = { Text("选择要带入的对话") },
             text = {
@@ -54,9 +56,20 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
                     item {
                         state.destinationName?.let { Text("导入到：$it（以本次预览选定的助手为准）") }
                         Text("发现 ${preview.conversations.size} 个窗口。建议先导入一个长会话试用，再导入其他窗口。")
-                        Text(if (controller.selectedAnswersOnly) "仅追加所选会话的当前回答，不合并备用回答、不运行历史工具。附件只保留文字引用，请保管原文件。" else "仅追加所选完整路径，不覆盖聊天。其他分支保留在原 ZIP，可再次选择导入；请保管好原文件。历史图片不会自动联网加载。",
+                        Text(when (controller.source) {
+                            ChatArchiveSource.POLARIS -> "按原顺序追加所选窗口的聊天与独立思考；历史图片只保留引用说明。不导入账号、密钥、人格、设置或工具授权。请保管原文件。"
+                            ChatArchiveSource.DEEPSEEK -> "仅追加所选完整路径，不覆盖聊天。其他分支保留在原 ZIP，可再次选择导入；请保管好原文件。历史图片不会自动联网加载。"
+                            else -> "仅追加所选会话的当前回答，不合并备用回答、不运行历史工具。附件只保留文字引用，请保管原文件。"
+                        },
                             style = MaterialTheme.typography.bodySmall)
                         preview.warnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        if (controller.source == me.rerere.rikkahub.ui.pages.backup.ChatArchiveSource.OPERIT) {
+                            Row {
+                                Checkbox(checked = correctedOperitCopy, onCheckedChange = { correctedOperitCopy = it })
+                                Text("另建思考整理副本（保留原聊天）。仅在之前已导入但思考混在正文时选择；同一文件的整理副本再次导入会跳过。",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                         Text("导入、打开记录不会请求模型。之后发消息仍按当前上下文设置发送历史；长会话可能超出所选模型容量或产生较高费用，不会自动截断或压缩。",
                             style = MaterialTheme.typography.bodySmall)
                         Row {
@@ -75,8 +88,10 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
                                 Text(conversation.title.ifBlank { "未命名对话" }, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(importPreviewCounts(conversation, branch),
                                     style = MaterialTheme.typography.bodySmall)
-                                Text(if (controller.selectedAnswersOnly) "默认：导出时选中的回答" else if (conversation.defaultSelectionReason == "source_current_node")
-                                    "默认：导出时的活动路径" else "默认：最后更新的末端路径",
+                                Text(if (controller.source == ChatArchiveSource.POLARIS) "默认：原窗口中的聊天顺序"
+                                    else if (controller.selectedAnswersOnly) "默认：导出时选中的回答"
+                                    else if (conversation.defaultSelectionReason == "source_current_node")
+                                        "默认：导出时的活动路径" else "默认：最后更新的末端路径",
                                     style = MaterialTheme.typography.bodySmall)
                                 if (conversation.omittedSummaryCount > 0) Text(
                                     "跳过 ${conversation.omittedSummaryCount} 条内部摘要（不作为聊天或系统提示导入）",
@@ -87,7 +102,11 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
                     }
                 }
             }, confirmButton = {
-                TextButton(enabled = selected.isNotEmpty(), onClick = { controller.import(selected.toMap()) }) {
+                TextButton(enabled = selected.isNotEmpty(), onClick = {
+                    controller.import(if (correctedOperitCopy) selected.keys.associateWith {
+                        me.rerere.rikkahub.data.sync.importer.OperitChatArchive.CORRECTED_COPY_PATH
+                    } else selected.toMap())
+                }) {
                     Text("导入 ${selected.size} 个所选路径")
                 }
             }, dismissButton = { TextButton(onClick = controller::discard) { Text("取消") } })

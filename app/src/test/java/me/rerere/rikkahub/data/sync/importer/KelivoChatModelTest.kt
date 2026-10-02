@@ -49,11 +49,30 @@ class KelivoChatModelTest {
         assertEquals(2, preview.conversations.single().messageCount)
         assertEquals(1, preview.conversations.single().branchPointCount)
     }
-    @Test fun rejectsMissingDuplicateAndUnknownVersionSelections() {
+    @Test fun rejectsMissingDuplicateAndMalformedVersionSelections() {
         val rows = listOf(message("old", "g"), message("new", "g", 1, 1))
-        listOf("{}", "{\"g\":9}", "{\"unknown\":1}", "{\"g\":0,\"g\":1}", "{\"g\":\"1\"}").forEach {
+        listOf("{}", "{\"g\":9}", "{\"unknown\":\"1\",\"g\":1}", "{\"g\":0,\"g\":1}", "{\"g\":\"1\"}").forEach {
             assertThrows(Exception::class.java) { selectedKelivoMessages(chat(selections = it), rows) }
         }
+    }
+    @Test fun staleSelectionsAreReportedWithoutChangingChosenVersionsOrBlockingImport() = runBlocking {
+        val c = chat(selections = "{\"absent-one\":2,\"g\":1,\"absent-two\":0}")
+        val rows = listOf(message("old", "g", order = 0), message("user", order = 1, role = "user"),
+            message("chosen", "g", version = 1, order = 2))
+        val source = Source(listOf(c), rows)
+        assertEquals(listOf("chosen", "user"), selectedKelivoMessages(c, rows).map { it.id })
+        val preview = inspectKelivoSource(source, "f")
+        assertEquals(2, preview.conversations.single().messageCount)
+        assertTrue(preview.warnings.any { it.contains("已忽略 2 条") })
+        val sink = Sink()
+        val result = importSelectedKelivoChats(source, preview, setOf(c.id), assistant, sink)
+        assertEquals(1, result.imported)
+        assertEquals(2, result.messages)
+        assertEquals(listOf("body:chosen", "body:user"), sink.saved.values.single().currentMessages.map { it.toText() })
+        assertThrows(Exception::class.java) {
+            selectedKelivoMessages(c.copy(selectionsJson = "{\"absent-one\":2,\"g\":9}"), rows)
+        }
+        assertEquals(1, sink.saved.size)
     }
     @Test fun rejectsIdentityGroupAndOrderingCollisions() {
         listOf(listOf(message(), message()), listOf(message("a", "g"), message("b", "g")),

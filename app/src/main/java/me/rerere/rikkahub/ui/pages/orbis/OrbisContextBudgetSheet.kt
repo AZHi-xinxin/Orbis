@@ -351,5 +351,6 @@ private fun budgetReason(reason: OrbisBudgetReason): String = when (reason) {
     OrbisBudgetReason.TOOL_CONTINUATION -> "这条回复包含工具调用；旧用量有续轮合并歧义，不能据此计算占比。"
     OrbisBudgetReason.USAGE_MISSING -> "最后一条 AI 回复没有可用输入用量，不冒用更早回复的数据。"
     OrbisBudgetReason.USAGE_INVALID -> "保存的用量字段无效，不能计算占比。"
+    OrbisBudgetReason.HISTORY_EDITED -> "历史记录已整理；该回复用量仍保留作历史记录，不再用于估算当前上下文。"
     OrbisBudgetReason.LIMIT_UNKNOWN -> "模型参考上限未知；可自行设置提醒阈值，它不会扩大真实模型容量。"
 }

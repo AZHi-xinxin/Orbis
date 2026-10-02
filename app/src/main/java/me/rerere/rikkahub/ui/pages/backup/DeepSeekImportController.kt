@@ -30,6 +30,7 @@ enum class ChatArchiveSource(val label: String, val maxBytes: Long) {
     DEEPSEEK("DeepSeek 官方 ZIP", DeepSeekArchive.MAX_ARCHIVE_BYTES),
     OPERIT("Operit v2 JSON", OperitChatArchive.MAX_ARCHIVE_BYTES),
     KELIVO("Kelivo 安卓 ZIP", KelivoChatArchive.MAX_ARCHIVE_BYTES),
+    POLARIS("北极星 ZIP", PolarisChatArchive.MAX_ARCHIVE_BYTES),
 }
 
 /** Owned by BackupVM, not a lazy-list item; scrolling/rotation cannot restart an import. */
@@ -83,6 +84,11 @@ class DeepSeekImportController(
                             fingerprint = result.fingerprint
                             DeepSeekArchivePreview(result.conversations, result.warnings)
                         }
+                        ChatArchiveSource.POLARIS -> {
+                            val result = PolarisChatImporter(repository).inspect(file)
+                            fingerprint = result.fingerprint
+                            DeepSeekArchivePreview(result.conversations, result.warnings)
+                        }
                         ChatArchiveSource.DEEPSEEK -> DeepSeekArchive.inspect(file) { coroutine.ensureActive() }
                     }
                 }
@@ -127,7 +133,8 @@ class DeepSeekImportController(
             try {
                 // Recheck after dispatch as the destination may have been removed while queued.
                 requireImportTargetName(target, assistantName)
-                require(source != ChatArchiveSource.KELIVO || selected.values.all { it == "selected" })
+                require(source !in setOf(ChatArchiveSource.KELIVO, ChatArchiveSource.POLARIS) ||
+                    selected.values.all { it == "selected" })
                 val progress: (DeepSeekImportProgress) -> Unit = { progress ->
                     mutableState.update { it.copy(phase = "已处理 ${progress.completed} / ${progress.total} 个会话…") }
                 }
@@ -135,6 +142,8 @@ class DeepSeekImportController(
                     ChatArchiveSource.OPERIT -> OperitChatImporter(repository).import(file, target, selected,
                         requireNotNull(fingerprint), progress)
                     ChatArchiveSource.KELIVO -> KelivoChatImporter(context, repository).importSelected(file, target,
+                        selected.keys, requireNotNull(fingerprint), progress)
+                    ChatArchiveSource.POLARIS -> PolarisChatImporter(repository).importSelected(file, target,
                         selected.keys, requireNotNull(fingerprint), progress)
                     ChatArchiveSource.DEEPSEEK -> DeepSeekChatImporter(repository).import(file, target, selected, progress)
                 }
@@ -194,4 +203,6 @@ internal fun requireImportTargetName(id: Uuid, lookup: (Uuid) -> String?): Strin
 internal fun importPreviewCounts(conversation: DeepSeekConversationPreview, branch: DeepSeekBranchPreview): String =
     if (conversation.defaultSelectionReason.startsWith("kelivo_selected"))
         "导入当前回答 ${branch.messageCount} 条 · 源消息（含备用版本）${conversation.totalNodes} 条"
+    else if (conversation.defaultSelectionReason == "polaris_original_order")
+        "导入 ${branch.messageCount} 条 · 原窗口 ${conversation.totalNodes} 条（只读聊天，不导入配置）"
     else "所选路径 ${branch.messageCount} 条 · 原窗口 ${conversation.messageCount} 条 · ${conversation.branches.size} 条可选路径"

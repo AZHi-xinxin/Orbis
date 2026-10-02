@@ -34,6 +34,8 @@ internal data class OperitConversation(
 object OperitChatArchive {
     const val MAX_ARCHIVE_BYTES = 64L * 1024 * 1024
     const val SELECTED_PATH = "selected"
+    /** Explicit human choice; never silently replaces an earlier plain-text import. */
+    const val CORRECTED_COPY_PATH = "selected-corrected-copy-v1"
     internal const val MAX_CONVERSATIONS = 2_000
     internal const val MAX_MESSAGES = 100_000
     private val attachments = Regex("<attachment\\b|<image\\b|!\\[", RegexOption.IGNORE_CASE)
@@ -42,7 +44,14 @@ object OperitChatArchive {
         open(file, checkCancelled).use { archive ->
             var omittedSummaries = 0
             var summaryOnlyConversations = 0
+            var reasoningMessages = 0
+            var ambiguousReasoning = 0
             val conversations = archive.conversations().mapNotNull { source ->
+                source.messages.forEach { message ->
+                    val split = splitOperitReasoningContent(message.text, message.sender, checkCancelled)
+                    if (split.slices.any { it.reasoning }) reasoningMessages++
+                    if (split.ambiguous) ambiguousReasoning++
+                }
                 omittedSummaries += source.omittedSummaryCount
                 if (source.messages.isEmpty() && source.omittedSummaryCount > 0) {
                     summaryOnlyConversations++
@@ -58,6 +67,8 @@ object OperitChatArchive {
             DeepSeekArchivePreview(conversations, warnings = buildList {
                 if (omittedSummaries > 0) add("将跳过 $omittedSummaries 条 Operit 内部摘要，不作为聊天、系统提示或工具导入；原始文件不变。")
                 if (summaryOnlyConversations > 0) add("已排除 $summaryOnlyConversations 个只有内部摘要、没有普通消息的会话。")
+                if (reasoningMessages > 0) add("$reasoningMessages 条 AI 消息包含明确的思考标签，将分离为可折叠思考；正文与原文件保留，不执行历史工具。")
+                if (ambiguousReasoning > 0) add("$ambiguousReasoning 条消息的思考标签无法安全分离，将完整保留原文；不会猜测或删去正文。")
             })
         }
     }.also { preview ->

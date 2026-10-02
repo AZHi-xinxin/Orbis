@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.encodeMessageNodeMessages
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.entity.OrbisCompactionBackupNodeEntity
 import me.rerere.rikkahub.data.db.entity.OrbisCompactionEventEntity
@@ -22,6 +23,46 @@ class OrbisCompactionRepository(
     private val messageFtsManager: MessageFtsManager,
 ) {
     private val dao get() = database.orbisCompactionDao()
+
+    /** One confirmed whole-node edit. Durable state and FTS commit before the caller publishes RAM.
+     * Archive keeps an independent complete source plus the existing reversible context slot;
+     * delete can make an empty page and never dispatches, executes tools, or deletes attachment files.
+     */
+    suspend fun commitMessageBatch(expected: Conversation, preview: OrbisMessageBatchPreview): OrbisMessageBatchCommit =
+        database.withTransaction {
+            validateOrbisMessageBatch(expected, preview)
+            val stored = database.conversationDao().getConversationById(expected.id.toString())
+                ?: error("原窗口已不存在，未修改消息。")
+            val baseline = decodeConversationEntity(stored, readCurrent(stored.id))
+            if (manualContextFingerprint(baseline) != preview.expectedFingerprint) throw OrbisCompactionConflictException()
+            validateCompactionNodes(preview.replacementNodes)
+            if (preview.operation == OrbisMessageBatchOperation.ARCHIVE) {
+                val metadata = checkNotNull(preview.archiveMetadata)
+                val archive = createManualContextArchive(expected, Instant.ofEpochMilli(metadata.createdAtEpochMillis))
+                database.conversationDao().insert(encodeConversationEntity(archive))
+                database.messageNodeDao().insertAll(archive.messageNodes.mapIndexed { index, node ->
+                    MessageNodeEntity(node.id.toString(), archive.id.toString(), index,
+                        encodeMessageNodeMessages(node.messages), node.selectIndex)
+                })
+                messageFtsManager.indexConversationInTransaction(archive)
+                val committed = commit(expected, preview.replacementNodes, metadata, persistedBaseline = baseline)
+                OrbisMessageBatchCommit(committed.conversation,
+                    OrbisMessageBatchResult(preview.operation, preview.affectedCount, archive.id))
+            } else {
+                val nextEpoch = Math.addExact(stored.compactionEpoch, 1L)
+                val slot = dao.getRollback(stored.id)
+                if (slot != null) {
+                    requireCompactionEpoch(stored.compactionEpoch, slot.compactionEpoch)
+                    check(dao.updateRollbackEpoch(stored.id, stored.compactionEpoch, nextEpoch) == 1) {
+                        "批量删除的撤销点已变化，未修改消息。"
+                    }
+                }
+                val updated = baseline.copy(messageNodes = preview.replacementNodes,
+                    compactionEpoch = nextEpoch, chatSuggestions = emptyList(), updateAt = Instant.now())
+                replacePage(updated)
+                OrbisMessageBatchCommit(updated, OrbisMessageBatchResult(preview.operation, preview.affectedCount))
+            }
+        }
 
     /** Manual rescue has a strict persisted snapshot and a durable independent original window.
      * Both the archive and normal compaction commit share this outer transaction. No delivery,
@@ -44,7 +85,7 @@ class OrbisCompactionRepository(
         database.conversationDao().insert(encodeConversationEntity(archive))
         database.messageNodeDao().insertAll(archive.messageNodes.mapIndexed { index, node ->
             MessageNodeEntity(node.id.toString(), archive.id.toString(), index,
-                JsonInstant.encodeToString(node.messages), node.selectIndex)
+                encodeMessageNodeMessages(node.messages), node.selectIndex)
         })
         messageFtsManager.indexConversationInTransaction(archive)
         val committed = commit(expected, replacementNodes, metadata, persistedBaseline = baseline)
@@ -94,7 +135,7 @@ class OrbisCompactionRepository(
         ))
         dao.insertBackupNodes(expected.messageNodes.mapIndexed { index, node ->
             OrbisCompactionBackupNodeEntity(stored.id, node.id.toString(), index,
-                JsonInstant.encodeToString(node.messages), node.selectIndex)
+                encodeMessageNodeMessages(node.messages), node.selectIndex)
         })
         dao.insertEvent(event)
         replacePage(updated)
@@ -222,7 +263,7 @@ class OrbisCompactionRepository(
         database.messageNodeDao().deleteByConversation(conversation.id.toString())
         database.messageNodeDao().insertAll(conversation.messageNodes.mapIndexed { index, node ->
             MessageNodeEntity(node.id.toString(), conversation.id.toString(), index,
-                JsonInstant.encodeToString(node.messages), node.selectIndex)
+                encodeMessageNodeMessages(node.messages), node.selectIndex)
         })
         messageFtsManager.indexConversationInTransaction(conversation)
     }

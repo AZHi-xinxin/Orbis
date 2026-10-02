@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +49,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.highlight.CodeHighlightText
 import me.rerere.hugeicons.HugeIcons
@@ -66,6 +68,7 @@ import me.rerere.hugeicons.stroke.SmartPhone01
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.hostToolFailure
 import me.rerere.rikkahub.data.ai.tools.local.calendarCreatePreview
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
@@ -290,7 +293,7 @@ object ClipboardToolUI : ToolUIRenderer {
 }
 
 /**
- * 文本转语音: 摘要显示朗读文本与重播按钮
+ * 文本转语音: 摘要显示朗读文本，标题行保留显式重播入口。
  */
 object TextToSpeechToolUI : ToolUIRenderer {
     override val toolName: String = "text_to_speech"
@@ -306,37 +309,47 @@ object TextToSpeechToolUI : ToolUIRenderer {
     }
 
     override fun hasSummary(context: ToolUIContext): Boolean =
-        context.arguments.getStringContent("text") != null
+        !context.arguments.getStringContent("text").isNullOrBlank()
+
+    private fun replayText(context: ToolUIContext): String? {
+        val tool = context.tool
+        // Replaying is an explicit playback action, never a way to approve or retry a tool.
+        // isExecuted alone is insufficient: a denied historical tool may also have output.
+        if (!tool.isExecuted || context.loading || tool.approvalState is ToolApprovalState.Pending ||
+            tool.approvalState is ToolApprovalState.Denied || tool.hostToolFailure() != null) return null
+        return context.arguments.getStringContent("text")?.takeIf { it.isNotBlank() }
+    }
+
+    override fun hasHeaderActions(context: ToolUIContext): Boolean = replayText(context) != null
+
+    @Composable
+    override fun HeaderActions(context: ToolUIContext) {
+        val text = replayText(context) ?: return
+        val eventBus: AppEventBus = koinInject()
+        val scope = rememberCoroutineScope()
+        FilledTonalIconButton(
+            onClick = { scope.launch { eventBus.emit(AppEvent.Speak(text)) } },
+            modifier = Modifier.size(40.dp).testTag("orbis-tts-replay"),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Refresh01,
+                contentDescription = stringResource(R.string.tool_ui_replay),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
 
     @Composable
     override fun Summary(context: ToolUIContext) {
-        val eventBus: AppEventBus = koinInject()
-        val scope = rememberCoroutineScope()
-        val text = context.arguments.getStringContent("text") ?: ""
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            FilledTonalIconButton(
-                onClick = { scope.launch { eventBus.emit(AppEvent.Speak(text)) } },
-                modifier = Modifier.size(28.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Refresh01,
-                    contentDescription = stringResource(R.string.tool_ui_replay),
-                    modifier = Modifier.size(14.dp),
-                )
-            }
-        }
+        val text = context.arguments.getStringContent("text")?.takeIf { it.isNotBlank() } ?: return
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().testTag("orbis-tts-summary"),
+        )
     }
 }
 

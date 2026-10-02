@@ -22,6 +22,10 @@ interface OrbisCompactionDAO {
     @Query("SELECT * FROM orbis_compaction_rollback WHERE conversation_id = :conversationId")
     suspend fun getRollback(conversationId: String): OrbisCompactionRollbackEntity?
 
+    /** A manual deletion changes the active page epoch, but not the retained rollback contents. */
+    @Query("UPDATE orbis_compaction_rollback SET compaction_epoch = :nextEpoch WHERE conversation_id = :conversationId AND compaction_epoch = :expectedEpoch")
+    suspend fun updateRollbackEpoch(conversationId: String, expectedEpoch: Long, nextEpoch: Long): Int
+
     @Query("SELECT * FROM orbis_compaction_backup_node WHERE conversation_id = :conversationId ORDER BY node_index ASC LIMIT :limit OFFSET :offset")
     suspend fun getBackupNodes(conversationId: String, limit: Int, offset: Int): List<OrbisCompactionBackupNodeEntity>
 

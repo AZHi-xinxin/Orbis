@@ -141,6 +141,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
     val hasExtraContent = isPending || hostFailure != null || renderer.hasSummary(context) || isDenied || images.isNotEmpty()
+    val hasHeaderActions = renderer.hasHeaderActions(context)
 
     ControlledChainOfThoughtStep(
         expanded = expanded,
@@ -186,8 +187,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     }
                 }
             }
-        } else if (tool.isExecuted && onDeleteRecord != null) {
-            { ToolRecordDeleteButton(onDeleteRecord) }
+        } else if (hasHeaderActions || (tool.isExecuted && onDeleteRecord != null)) {
+            {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (hasHeaderActions) renderer.HeaderActions(context)
+                    if (tool.isExecuted && onDeleteRecord != null) ToolRecordDeleteButton(onDeleteRecord)
+                }
+            }
         } else {
             null
         },

@@ -133,6 +133,8 @@ fun ChatMessage(
     },
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    onQuote: ((MessageNode) -> Unit)? = null,
+    onQuoteJump: ((me.rerere.ai.ui.OrbisMessageQuote) -> Unit)? = null,
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, remember: Boolean) -> Unit)? = null,
@@ -269,6 +271,19 @@ fun ChatMessage(
             messageExtras()
         }
 
+        // A quote belongs below its reply, outside the body bubble and above the actions.
+        // Match the bubble's role alignment without occupying the side-avatar column.
+        message.orbisQuote?.takeIf { it.isValid() }?.let { quote ->
+            OrbisQuoteCard(
+                quote = quote,
+                modifier = if (BuildConfig.ORBIS_ENABLED && hasSideAvatar) Modifier.padding(
+                    start = if (message.role == MessageRole.USER) 0.dp else 36.dp,
+                    end = if (message.role == MessageRole.USER) 36.dp else 0.dp,
+                ) else Modifier,
+                onJump = onQuoteJump?.let { callback -> { callback(quote) } },
+            )
+        }
+
         val showActions = if (lastMessage) {
             !loading
         } else {
@@ -325,6 +340,9 @@ fun ChatMessage(
             },
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
+            onQuote = if (!loading && message.role in setOf(MessageRole.USER, MessageRole.ASSISTANT) &&
+                message.parts.filterIsInstance<UIMessagePart.Text>().any { it.text.isNotBlank() })
+                onQuote?.let { callback -> { callback(node) } } else null,
             onWebViewPreview = {
                 val textContent = message.parts
                     .filterIsInstance<UIMessagePart.Text>()

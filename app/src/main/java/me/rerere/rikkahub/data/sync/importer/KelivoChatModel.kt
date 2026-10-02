@@ -58,7 +58,12 @@ internal fun requireKelivoId(id: String) {
 }
 
 /** Explicit group -> version selection; ambiguous or missing selections never silently choose another answer. */
-internal fun selectedKelivoMessages(chat: KelivoChat, rows: List<KelivoMessage>): List<KelivoMessage> {
+internal fun selectedKelivoMessages(chat: KelivoChat, rows: List<KelivoMessage>): List<KelivoMessage> =
+    resolveKelivoMessages(chat, rows).messages
+
+private data class KelivoSelection(val messages: List<KelivoMessage>, val ignoredMissingGroups: Int)
+
+private fun resolveKelivoMessages(chat: KelivoChat, rows: List<KelivoMessage>): KelivoSelection {
     requireKelivoId(chat.id)
     kelivoTimestamp(chat.createdMicros); kelivoTimestamp(chat.updatedMicros)
     require(rows.size <= KelivoChatLimits.MAX_WINDOW_MESSAGES && rows.map { it.id }.distinct().size == rows.size) {
@@ -77,7 +82,9 @@ internal fun selectedKelivoMessages(chat: KelivoChat, rows: List<KelivoMessage>)
         kelivoTimestamp(it.timestampMicros)
     }
     val groups = rows.groupBy { it.group ?: it.id }
-    require(versions.keys.all { it in groups }) { "kelivo_unknown_selected_group" }
+    // Kelivo can retain a version choice after the corresponding message group disappears.
+    // Never substitute a version for a group that is still present.
+    val ignoredMissingGroups = versions.keys.count { it !in groups }
     val selected = groups.map { (group, messages) ->
         require(messages.map { it.version }.distinct().size == messages.size && messages.map { it.role }.distinct().size == 1) {
             "kelivo_ambiguous_group"
@@ -88,7 +95,7 @@ internal fun selectedKelivoMessages(chat: KelivoChat, rows: List<KelivoMessage>)
         messages.minOf { it.order } to chosen
     }.sortedBy { it.first }
     require(selected.map { it.first }.distinct().size == selected.size) { "kelivo_message_order" }
-    return selected.map { it.second }
+    return KelivoSelection(selected.map { it.second }, ignoredMissingGroups)
 }
 
 internal data class ConvertedKelivo(val conversation: Conversation, val omittedAttachments: Int)
@@ -165,11 +172,14 @@ internal fun inspectKelivoSource(source: KelivoChatSource, fingerprint: String,
     val chats = source.conversations()
     require(chats.size in 1..10000 && chats.map { it.id }.distinct().size == chats.size) { "kelivo_chats" }
     var omitted = 0
+    var ignoredMissingGroups = 0
     val neutralAssistant = Uuid.parse("00000000-0000-0000-0000-000000000000")
     val previews = chats.map { chat ->
         checkCancelled()
         val messages = source.messages(chat.id)
-        val selected = selectedKelivoMessages(chat, messages)
+        val selection = resolveKelivoMessages(chat, messages)
+        val selected = selection.messages
+        ignoredMissingGroups += selection.ignoredMissingGroups
         // Preflight every chosen message's eventual storage size before any conversation is committed.
         val converted = convertKelivoChat(source, chat, neutralAssistant, checkCancelled)
         omitted += converted.omittedAttachments
@@ -178,11 +188,12 @@ internal fun inspectKelivoSource(source: KelivoChatSource, fingerprint: String,
             messages.size, selected.size, messages.groupBy { it.group ?: it.id }.count { it.value.size > 1 },
             listOf(DeepSeekBranchPreview("selected", selected.size, updated, true)), "selected", "kelivo_selected_versions")
     }
-    return KelivoChatPreview(fingerprint, previews, listOf(
-        "只追加当前选中的回答；未选中的版本仍在原 ZIP。重复导入同一会话会跳过，不覆盖现有窗口。",
-        "不导入设置、密钥、人格、系统提示、记忆、技能、工作区或权限；工具记录仅为文字。",
-        "附件实体不导入、不自动下载；明确引用显示占位。此全量备份可能含凭据，请勿公开分享。"
-    ), omitted)
+    return KelivoChatPreview(fingerprint, previews, buildList {
+        if (ignoredMissingGroups > 0) add("已忽略 $ignoredMissingGroups 条找不到对应消息的历史版本选择；现存消息组仍严格按所选版本导入。")
+        add("只追加当前选中的回答；未选中的版本仍在原 ZIP。重复导入同一会话会跳过，不覆盖现有窗口。")
+        add("不导入设置、密钥、人格、系统提示、记忆、技能、工作区或权限；工具记录仅为文字。")
+        add("附件实体不导入、不自动下载；明确引用显示占位。此全量备份可能含凭据，请勿公开分享。")
+    }, omitted)
 }
 
 internal suspend fun importSelectedKelivoChats(source: KelivoChatSource, preview: KelivoChatPreview,

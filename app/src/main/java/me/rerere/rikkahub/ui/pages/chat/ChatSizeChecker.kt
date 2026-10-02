@@ -45,6 +45,7 @@ internal fun conversationSizeInfo(conversation: Conversation): ConversationSizeI
     val lastAssistantInputTokens = conversation.messageNodes.asReversed()
         .firstOrNull { it.currentMessage.role == MessageRole.ASSISTANT }
         ?.currentMessage
+        ?.takeUnless { it.usageContextInvalidated }
         ?.usage
         ?.promptTokens
         ?: 0

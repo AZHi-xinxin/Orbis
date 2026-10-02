@@ -246,6 +246,9 @@ fun ChatPage(
         }.toSet())
 
     val inputState = vm.inputState
+    DisposableEffect(vm) {
+        onDispose { inputState.orbisQuote = null }
+    }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {
@@ -411,6 +414,7 @@ private fun ChatPageContent(
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
+    val batchVoiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
     val assistant = setting.getCurrentAssistant()
     val startupAppearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val startupInheritBackground = !startupAppearance.backgroundEnabled &&
@@ -578,7 +582,7 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            vm.handleMessageSend(inputState.getContents())
+                            if (!vm.handleMessageSend(inputState.getContents(), orbisQuote = inputState.orbisQuote)) return@ChatInput
                             bottomFollowState.followForSend(chatListState.isScrollInProgress)
                         }
                         inputState.clearInput()
@@ -590,7 +594,8 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            vm.handleMessageSend(content = inputState.getContents(), answer = false)
+                            if (!vm.handleMessageSend(content = inputState.getContents(), answer = false,
+                                orbisQuote = inputState.orbisQuote)) return@ChatInput
                             bottomFollowState.followForSend(chatListState.isScrollInProgress)
                         }
                         inputState.clearInput()
@@ -667,6 +672,7 @@ private fun ChatPageContent(
                     vm.regenerateAtMessage(it)
                 },
                 onEdit = {
+                    inputState.orbisQuote = null // Editing keeps the original message's quote, not a new draft quote.
                     inputState.editingMessage = it.id
                     inputState.setContents(it.parts)
                 },
@@ -713,6 +719,7 @@ private fun ChatPageContent(
                 },
                 onVoiceNotePlayed = vm::saveVoiceNotePlayed,
                 onClickSuggestion = { suggestion ->
+                    inputState.orbisQuote = null
                     inputState.editingMessage = null
                     inputState.setMessageText(suggestion)
                 },
@@ -737,6 +744,34 @@ private fun ChatPageContent(
                 },
                 onToggleFavorite = { node ->
                     vm.toggleMessageFavorite(node)
+                },
+                historyMutationDisabledReason = when {
+                    loadingJob != null -> "正在生成，请等待当前回复结束。"
+                    batchVoiceState.isActive -> "正在通话，请结束通话后再整理消息。"
+                    else -> null
+                },
+                onPreviewMessageBatch = vm::previewMessageBatch,
+                onApplyMessageBatch = vm::applyMessageBatch,
+                onQuote = { node ->
+                    try {
+                        inputState.orbisQuote = vm.prepareQuotedReply(node)
+                    } catch (error: Exception) {
+                        toaster.show(error.message ?: "无法引用这条消息", type = ToastType.Error)
+                    }
+                },
+                onQuoteJump = { quote ->
+                    val index = if (quote.sourceConversationId == conversation.id)
+                        conversation.messageNodes.indexOfFirst { it.id == quote.sourceNodeId &&
+                            it.messages.any { message -> message.id == quote.sourceMessageId } } else -1
+                    if (index < 0) {
+                        toaster.show("原消息不在当前窗口或已删除，引用正文快照仍保留。")
+                    } else {
+                        bottomFollowState.stopForNavigation()
+                        previewMode = false
+                        chatListState.requestScrollToItem(orbisTimelineIndex(conversation.messageNodes, index, BuildConfig.ORBIS_ENABLED))
+                        if (conversation.messageNodes[index].currentMessage.id != quote.sourceMessageId)
+                            toaster.show("已定位消息；当前显示另一个回答，引用仍是当时选中的正文。")
+                    }
                 },
                 onConversationSystemPromptChange = { newPrompt ->
                     vm.updateConversation(conversation.copy(customSystemPrompt = newPrompt))

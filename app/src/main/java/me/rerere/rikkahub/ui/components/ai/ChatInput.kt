@@ -326,6 +326,11 @@ fun ChatInput(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    state.orbisQuote?.let { quote ->
+                        me.rerere.rikkahub.ui.components.message.OrbisQuotePreview(
+                            quote = quote, onCancel = { state.orbisQuote = null },
+                        )
+                    }
                     if (voiceState.phase != VoicePhase.Off) {
                         VoiceModeRow(
                             state = voiceState,

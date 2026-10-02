@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.db.encodeMessageNodeMessages
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
@@ -429,7 +430,7 @@ class ConversationRepository(
             val target = messages.singleOrNull { it.id == edit.messageId }
                 ?: error("event_message_missing_or_changed")
             val updated = target.withEventPresentation(edit)
-            val serialized = JsonInstant.encodeToString(messages.map { if (it.id == target.id) updated else it })
+            val serialized = encodeMessageNodeMessages(messages.map { if (it.id == target.id) updated else it })
             check(messageNodeDAO.updateMessages(conversationId.toString(), node.id, serialized) == 1) {
                 "event_message_missing_or_changed"
             }
@@ -459,7 +460,7 @@ class ConversationRepository(
             "回复或工具记录已变更，请刷新后再操作。"
         }
         val edited = target.withToolRecordEdit(edit, now)
-        check(messageNodeDAO.updateMessages(stored.id, row.id, JsonInstant.encodeToString(messages.map {
+        check(messageNodeDAO.updateMessages(stored.id, row.id, encodeMessageNodeMessages(messages.map {
             if (it.id == edit.messageId) edited else it
         })) == 1) { "工具记录所属回复不存在。" }
         // Normal FTS sees prose only; still commit its refresh with the edited page, never later.
@@ -611,7 +612,7 @@ class ConversationRepository(
                     val node = expected.messageNodes.getOrNull(offset + index) ?: return@withTransaction false
                     if (row.conversationId != id || row.nodeIndex != offset + index ||
                         row.id != node.id.toString() || row.selectIndex != node.selectIndex ||
-                        row.messages != JsonInstant.encodeToString(node.messages)) return@withTransaction false
+                        row.messages != encodeMessageNodeMessages(node.messages)) return@withTransaction false
                 }
                 offset += rows.size
             }
@@ -690,7 +691,7 @@ class ConversationRepository(
                 id = node.id.toString(),
                 conversationId = conversationId,
                 nodeIndex = index,
-                messages = JsonInstant.encodeToString(node.messages),
+                messages = encodeMessageNodeMessages(node.messages),
                 selectIndex = node.selectIndex
             )
         }

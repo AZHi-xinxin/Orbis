@@ -24,8 +24,12 @@ data class UIMessage(
     val finishedAt: LocalDateTime? = null,
     val modelId: Uuid? = null,
     val usage: TokenUsage? = null,
+    /** Historical usage remains visible after a manual history edit, but is not a current budget anchor. */
+    val usageContextInvalidated: Boolean = false,
     val translation: String? = null,
     val orbisEvent: OrbisEventMetadata? = null,
+    val orbisUserMessageTime: OrbisUserMessageTime? = null,
+    val orbisQuote: OrbisMessageQuote? = null,
     // Stable ownership; presentation folding never controls model-visible call content.
     val orbisVoiceCallId: String? = null,
     val orbisVoiceCallKind: String? = null,

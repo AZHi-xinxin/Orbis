@@ -37,7 +37,7 @@ object NodeFavoriteAdapter : FavoriteAdapter<NodeFavoriteTarget> {
             type = type.value,
             refKey = buildRefKey(target),
             refJson = JsonInstant.encodeToString(ref),
-            snapshotJson = "",
+            snapshotJson = JsonInstant.encodeToString(target.favoriteSnapshot()),
             metaJson = JsonInstant.encodeToString(meta),
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
@@ -58,4 +58,12 @@ object NodeFavoriteAdapter : FavoriteAdapter<NodeFavoriteTarget> {
             JsonInstant.decodeFromString<FavoriteMeta>(rawMeta)
         }.getOrNull()
     }
+
+    fun decodeSnapshot(entity: FavoriteEntity): OrbisFavoriteSnapshot? = runCatching {
+        val ref = decodeRef(entity) ?: return null
+        if (entity.snapshotJson.isBlank()) return null
+        JsonInstant.decodeFromString<OrbisFavoriteSnapshot>(entity.snapshotJson).takeIf {
+            it.isValid() && it.conversationId == ref.conversationId && it.nodeId == ref.nodeId
+        }
+    }.getOrNull()
 }

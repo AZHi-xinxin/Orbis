@@ -50,6 +50,10 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     val deepSeekState by vm.deepSeekImport.state.collectAsStateWithLifecycle()
     val operitState by vm.operitImport.state.collectAsStateWithLifecycle()
     val kelivoState by vm.kelivoImport.state.collectAsStateWithLifecycle()
+    val polarisState by vm.polarisImport.state.collectAsStateWithLifecycle()
+    val openPolaris = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.polarisImport.preview(uri)
+    }
     val openKelivo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.kelivoImport.preview(uri)
     }
@@ -116,6 +120,9 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         item { BackupCard("Kelivo 聊天记录", "支持 Kelivo 安卓 v2 ZIP 备份。先预览再追加当前选中的回答，重复导入会跳过。只导聊天，附件保留引用说明；不导入配置、密钥、人格或技能。原备份可能包含密钥，请私密保管。", !busy && !kelivoState.busy, "选择 Kelivo 备份") {
             openKelivo.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         } }
+        item { BackupCard("北极星聊天记录", "支持北极星导出 ZIP。先预览并选择窗口，再按原顺序追加聊天；思考过程单独保留。图片只显示历史引用说明，不导入附件或配置、密钥、人格与工具授权。重复导入自动跳过。", !busy && !polarisState.busy, "选择北极星备份") {
+            openPolaris.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+        } }
         item { BackupCard("RikkaHub 聊天记录", "在 RikkaHub 导出含“聊天记录”的本地 ZIP，建议同时勾选附件。合并到当前身份下，不覆盖现有窗口，不导入账号或模型配置。重复导入自动跳过。", !busy, "选择 RikkaHub 备份") { confirm = "rikka" } }
         item { BackupCard("DeepSeek 官方聊天记录", "选择官方导出 ZIP，先预览窗口和分支路径。支持长记录逐会话导入；保留正文、思考和时间，不执行历史工具或下载附件。不会改变现有聊天或连接设置。", !busy && !deepSeekState.busy, "选择 DeepSeek 导出包") {
             openDeepSeek.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
@@ -153,6 +160,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     DeepSeekImportDialogs(vm.deepSeekImport, deepSeekState)
     DeepSeekImportDialogs(vm.operitImport, operitState)
     DeepSeekImportDialogs(vm.kelivoImport, kelivoState)
+    DeepSeekImportDialogs(vm.polarisImport, polarisState)
     result?.let { message -> AlertDialog(onDismissRequest = { result = null }, title = { Text("处理结果") }, text = { Text(message) }, confirmButton = { TextButton(onClick = { result = null }) { Text("知道了") } }) }
 }
 

@@ -6,10 +6,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.db.entity.FavoriteEntity
 import me.rerere.rikkahub.data.favorite.NodeFavoriteAdapter
 import me.rerere.rikkahub.data.model.FavoriteType
 import me.rerere.rikkahub.data.repository.FavoriteRepository
+import me.rerere.rikkahub.data.repository.ConversationRepository
 import kotlin.uuid.Uuid
 
 data class NodeFavoriteListItem(
@@ -24,6 +27,7 @@ data class NodeFavoriteListItem(
 
 class FavoriteVM(
     private val favoriteRepository: FavoriteRepository,
+    private val conversationRepository: ConversationRepository,
 ) : ViewModel() {
     val nodeFavorites = favoriteRepository
         .listByType(FavoriteType.NODE)
@@ -53,6 +57,21 @@ class FavoriteVM(
 
     suspend fun getEntityByRefKey(refKey: String): FavoriteEntity? {
         return favoriteRepository.getByRefKey(refKey)
+    }
+
+    suspend fun snapshotDetail(refKey: String): OrbisFavoriteDetail? = withContext(Dispatchers.Default) {
+        val entity = favoriteRepository.getByRefKey(refKey) ?: return@withContext null
+        OrbisFavoriteDetail(
+            snapshot = NodeFavoriteAdapter.decodeSnapshot(entity),
+            legacy = entity.snapshotJson.isBlank(),
+            preview = NodeFavoriteAdapter.decodeMeta(entity)?.previewText.orEmpty(),
+        )
+    }
+
+    /** Only an explicit source-jump tap reads that conversation; opening the favorite does not. */
+    suspend fun sourceExists(item: NodeFavoriteListItem): Boolean = withContext(Dispatchers.IO) {
+        val source = conversationRepository.getConversationById(item.conversationId) ?: return@withContext false
+        !source.isConsultation && source.messageNodes.any { it.id == item.nodeId }
     }
 
     fun restoreFavorite(entity: FavoriteEntity) {

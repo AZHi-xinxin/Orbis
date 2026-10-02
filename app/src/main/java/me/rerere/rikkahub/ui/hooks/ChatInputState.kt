@@ -10,6 +10,7 @@ import me.rerere.ai.ui.UIMessagePart
 import kotlin.uuid.Uuid
 
 class ChatInputState {
+    var orbisQuote by mutableStateOf<me.rerere.ai.ui.OrbisMessageQuote?>(null)
     val textContent = TextFieldState()
     var messageContent by mutableStateOf(listOf<UIMessagePart>())
     var editingMessage by mutableStateOf<Uuid?>(null)
@@ -22,6 +23,7 @@ class ChatInputState {
         editingMessage = null
         editingParts = null
         editingAttachmentUrls = emptySet()
+        orbisQuote = null
     }
 
     fun isEditing() = editingMessage != null

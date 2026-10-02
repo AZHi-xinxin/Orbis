@@ -293,7 +293,9 @@ fun Route.conversationRoutes(
                 modeInjectionIds = request.modeInjectionIds,
                 lorebookIds = request.lorebookIds,
             )
-            chatService.sendMessage(uuid, request.parts, answer = true)
+            if (!chatService.sendMessage(uuid, request.parts, answer = true)) {
+                throw me.rerere.rikkahub.web.ConflictException("消息尚未接受：内容为空或聊天正在整理，请稍后重试。")
+            }
 
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }

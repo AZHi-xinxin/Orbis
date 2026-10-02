@@ -28,7 +28,7 @@ import kotlin.uuid.Uuid
  * This is not an approval-resume/after-restart compatibility claim. Such a new invocation starts
  * a fresh snapshot using the existing approval path. No model-compatibility header is emitted.
  */
-internal class GenerationInputSnapshot {
+internal class GenerationInputSnapshot(private val enableUserMessageTime: Boolean = false) {
     private var accepted: List<UIMessage>? = null
     private val continuationToolIds = mutableSetOf<String>()
     private val segmentOwners = mutableMapOf<Uuid, Uuid>()
@@ -125,7 +125,7 @@ internal class GenerationInputSnapshot {
         // This response is an independent provider segment, never the UI bubble's merged usage.
         // Prompt + completion already includes the authored tool call, but not its new result.
         val usage = response.usage?.takeIf {
-            it.promptTokens > 0 && it.completionTokens >= 0 && it.cachedTokens in 0..it.promptTokens
+            !response.usageContextInvalidated && it.promptTokens > 0 && it.completionTokens >= 0 && it.cachedTokens in 0..it.promptTokens
         }
         requestEstimateFloor = if (usage != null) {
             usage.promptTokens.toLong() +
@@ -179,7 +179,10 @@ internal class GenerationInputSnapshot {
                     // A retained message can predate the old contextMessageLimit. It was not part
                     // of the frozen request; retain authored parts without rerunning templates or
                     // dynamic injectors. External events still receive their non-human provenance.
-                    addAll(markOrbisEvents(listOf(original)))
+                    addAll(me.rerere.rikkahub.data.ai.transformers.applyOrbisUserMessageTimes(
+                        me.rerere.rikkahub.data.ai.transformers.applyOrbisQuotes(markOrbisEvents(listOf(original))),
+                        enabled = enableUserMessageTime,
+                    ))
                 }
             }
         }
