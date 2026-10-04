@@ -20,7 +20,6 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.uuid.Uuid
 
 private const val TAG = "McpOAuthCoordinator"
-private const val TOKEN_REFRESH_LEEWAY_MS = 60_000L
 internal const val MCP_OAUTH_CALLBACK_PORT = 52_134
 internal const val MCP_OAUTH_CALLBACK_PATH = "/oauth/callback"
 internal const val MCP_OAUTH_REDIRECT_URI =
@@ -81,16 +80,17 @@ internal class McpOAuthCoordinator(
      * 按 serverId 串行刷新。获得锁后重新读取配置，避免并发工具调用重复使用同一个 refresh token。
      */
     suspend fun ensureFreshToken(configInput: McpServerConfig): McpServerConfig {
+        val latest = settingsStore.settingsFlow.value.mcpServers.find { it.id == configInput.id } ?: configInput
+        // Do not wait behind an already running OAuth refresh after a human switches to manual auth.
+        if (latest.hasManualAuthorization()) return latest
         val lock = refreshLocks.computeIfAbsent(configInput.id) { Mutex() }
         return lock.withLock {
             val config = settingsStore.settingsFlow.value.mcpServers.find { it.id == configInput.id }
                 ?: configInput
+            // Use the same precedence as the transport. Old OAuth state must not cause
+            // a network refresh (or an unrelated wait) for an explicitly supplied header.
+            if (!config.shouldRefreshOAuth(System.currentTimeMillis())) return@withLock config
             val oauth = config.commonOptions.oauth ?: return@withLock config
-            if (!oauth.enabled || oauth.refreshToken.isNullOrBlank()) return@withLock config
-
-            val expired = oauth.expiresAt > 0 &&
-                System.currentTimeMillis() >= oauth.expiresAt - TOKEN_REFRESH_LEEWAY_MS
-            if (!oauth.accessToken.isNullOrBlank() && !expired) return@withLock config
 
             val tokenEndpoint = oauth.tokenEndpoint ?: return@withLock config
             val clientId = oauth.clientId ?: return@withLock config
@@ -100,7 +100,7 @@ internal class McpOAuthCoordinator(
                         tokenEndpoint = tokenEndpoint,
                         clientId = clientId,
                         clientSecret = oauth.clientSecret,
-                        refreshToken = oauth.refreshToken,
+                        refreshToken = checkNotNull(oauth.refreshToken),
                         resources = listOf(McpOAuthDiscoveryClient.canonicalResource(config.serverUrl)),
                         scope = oauth.scope,
                     )
@@ -112,24 +112,25 @@ internal class McpOAuthCoordinator(
                     scope = token.scope ?: oauth.scope,
                 )
                 persistOAuthState(config.id, updated)
-                config.clone(commonOptions = config.commonOptions.copy(oauth = updated))
+                // A human may have saved a manual header while the refresh was in flight.
+                settingsStore.settingsFlow.value.mcpServers.find { it.id == config.id }
+                    ?: config.clone(commonOptions = config.commonOptions.copy(oauth = updated))
             }.getOrElse {
+                if (it is CancellationException) throw it
                 Log.w(TAG, "Token refresh failed for ${config.commonOptions.name}: ${it.message}")
-                config
+                settingsStore.settingsFlow.value.mcpServers.find { current -> current.id == config.id } ?: config
             }
         }
     }
 
     suspend fun needsAuthorization(config: McpServerConfig, error: Throwable): Boolean {
-        if (looksUnauthorized(error) && config.commonOptions.oauth?.enabled == true) return true
-        if (config.commonOptions.headers.any { it.first.equals("Authorization", ignoreCase = true) }) {
-            return false
+        // An old connection can fail after a manual header was saved. Do not let its late
+        // OAuth error initiate discovery or relabel the newly configured manual connection.
+        val latest = settingsStore.settingsFlow.value.mcpServers.find { it.id == config.id }
+        if (latest?.hasManualAuthorization() == true) return false
+        return needsMcpOAuthAuthorization(config, error) {
+            discoveryClient.discoverProtectedResource(config.serverUrl)
         }
-        return runCatching { discoveryClient.discoverProtectedResource(config.serverUrl) }
-            .onFailure {
-                Log.i(TAG, "OAuth probe failed for ${config.commonOptions.name}: ${it.message}")
-            }
-            .isSuccess
     }
 
     private suspend fun authorize(config: McpServerConfig, context: Context) = withContext(Dispatchers.IO) {
@@ -265,15 +266,4 @@ internal class McpOAuthCoordinator(
             0L
         }
 
-    private fun looksUnauthorized(error: Throwable): Boolean {
-        val message = generateSequence(error) { it.cause }
-            .mapNotNull { it.message }
-            .joinToString(" ")
-            .lowercase()
-        return message.contains("401") ||
-            message.contains("unauthorized") ||
-            message.contains("invalid_token") ||
-            message.contains("invalid access token") ||
-            message.contains("missing or invalid")
-    }
 }

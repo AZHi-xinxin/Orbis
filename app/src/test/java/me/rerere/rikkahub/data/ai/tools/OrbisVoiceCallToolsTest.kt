@@ -19,10 +19,83 @@ import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStorage
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceTranscriptEntry
+import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceArchiveAuthor
+import me.rerere.rikkahub.data.orbis.voice.voiceArchiveSourceDigest
+import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.utils.JsonInstant
 import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisVoiceCallToolsTest {
+    @Test fun `source read includes durable assistant nodes even when legacy transcript omitted them`() = runTest {
+        val repo = OrbisVoiceCallRepository(MemoryStorage())
+        val raw = record().copy(archiveStatus = OrbisVoiceArchiveStatus.PENDING, summary = null, modelTranscript = null,
+            transcript = record().transcript.take(1), sourceNodesJson = JsonInstant.encodeToString(listOf(
+                UIMessage.assistant("原始助手回复已保存🙂").copy(orbisVoiceCallId = "own-call", orbisVoiceCallKind = "turn").toMessageNode())))
+        repo.create(raw)
+        val tool = createOrbisVoiceCallTools(repo, "assistant-a").single { it.name == "orbis_call_read" }
+        val result = execute(tool, buildJsonObject { put("call_id", raw.id); put("section", "source") })
+        assertTrue(result.getValue("content").jsonPrimitive.content.contains("原始助手回复已保存🙂"))
+        assertEquals(voiceArchiveSourceDigest(raw), result.getValue("source_digest").jsonPrimitive.content)
+    }
+
+    @Test fun `assistant submit uses approval scoped ownership durable provenance and idempotent receipt`() = runTest {
+        val storage = MemoryStorage(); val repo = OrbisVoiceCallRepository(storage)
+        val raw = record().copy(archiveStatus = OrbisVoiceArchiveStatus.FAILED, summary = null, modelTranscript = null)
+        repo.create(raw)
+        val tool = createOrbisVoiceCallTools(repo, "assistant-a").single { it.name == "orbis_call_archive_submit" }
+        val args = buildJsonObject {
+            put("call_id", raw.id); put("source_digest", voiceArchiveSourceDigest(raw)); put("request_id", "stable-request")
+            put("summary", "约好周末出发前确认天气。"); put("transcript", "用户约好去公园，助手说出门前确认天气。")
+        }
+        assertTrue(tool.needsApproval(args))
+        assertNotNull(tool.hostApproval)
+        val result = execute(tool, args)
+        assertTrue(result.getValue("ok").jsonPrimitive.boolean)
+        assertFalse(result.getValue("network_request_sent").jsonPrimitive.boolean)
+        assertEquals("stable-request", result.getValue("receipt_id").jsonPrimitive.content)
+        val writes = storage.writes
+        assertEquals(result, execute(tool, args))
+        assertEquals(writes, storage.writes)
+        assertEquals(OrbisVoiceArchiveAuthor.ASSISTANT_TOOL, repo.get(raw.id)!!.archiveAuthor)
+        assertEquals(raw.transcript, repo.get(raw.id)!!.transcript)
+        failure { execute(tool, JsonObject(args + ("assistant_id" to kotlinx.serialization.json.JsonPrimitive("assistant-b")))) }
+        assertEquals(writes, storage.writes)
+    }
+
+    @Test fun `assistant submit refuses foreign records and stale source without overwriting anything`() = runTest {
+        val storage = MemoryStorage(); val repo = OrbisVoiceCallRepository(storage)
+        val raw = record(assistant = "assistant-b").copy(archiveStatus = OrbisVoiceArchiveStatus.PENDING, summary = null, modelTranscript = null)
+        repo.create(raw)
+        val tools = createOrbisVoiceCallTools(repo, "assistant-a")
+        val tool = tools.single { it.name == "orbis_call_archive_submit" }
+        val args = buildJsonObject {
+            put("call_id", raw.id); put("source_digest", voiceArchiveSourceDigest(raw)); put("request_id", "receipt")
+            put("summary", "不能跨助手补写。"); put("transcript", "不能跨助手读取或归档。")
+        }
+        failure { execute(tool, args) }
+        assertEquals(1, storage.writes)
+        assertEquals(raw, repo.get(raw.id))
+    }
+
+    @Test fun `source pagination keeps astral symbols intact even at minimum page length`() = runTest {
+        val repo = OrbisVoiceCallRepository(MemoryStorage())
+        val source = record().copy(summary = "🙂🙂结束")
+        repo.create(source)
+        val tool = createOrbisVoiceCallTools(repo, "assistant-a").single { it.name == "orbis_call_read" }
+        var offset = 0
+        val text = StringBuilder()
+        while (offset < source.summary!!.length) {
+            val page = execute(tool, buildJsonObject { put("call_id", source.id); put("limit", 1); put("offset", offset) })
+            text.append(page.getValue("content").jsonPrimitive.content)
+            val next = page.getValue("next_offset").jsonPrimitive.int
+            assertTrue(next > offset); offset = next
+        }
+        assertEquals(source.summary, text.toString())
+        failure { execute(tool, buildJsonObject { put("call_id", source.id); put("offset", 1) }) }
+    }
+
     private class MemoryStorage : OrbisVoiceCallStorage {
         override val lockKey = UUID.randomUUID().toString()
         private val records = mutableMapOf<String, String>()

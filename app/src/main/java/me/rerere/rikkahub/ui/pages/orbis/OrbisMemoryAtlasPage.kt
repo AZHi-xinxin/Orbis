@@ -42,6 +42,7 @@ import kotlinx.coroutines.isActive
 import me.rerere.rikkahub.data.orbis.integration.*
 import org.koin.compose.koinInject
 import me.rerere.rikkahub.data.orbis.OrbisMemoryAtlas as Atlas
+import me.rerere.rikkahub.data.orbis.OrbisAtlasGalaxy as Galaxy
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalSettings
 import java.time.Instant
@@ -50,7 +51,6 @@ import java.time.format.DateTimeFormatter
 
 internal val AtlasInk = Color(0xFFEDDFC8)
 internal val AtlasGold = Color(0xFFD4B77C)
-internal val AtlasColors = listOf(Color(0xFFCDB7ED), Color(0xFFF0CE92), Color(0xFFECACC5), Color(0xFFA6D2D3))
 
 /** Explicit demo or authenticated ST metadata, never private memory prose or a write endpoint. */
 @Composable
@@ -69,6 +69,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
     var loading by remember { mutableStateOf(false) }
     val example = remember { Atlas.demo() }
     val graph: Atlas.Graph? = if (showDemo) example else snapshot.takeIf { canRead }
+    val composition = remember(graph) { graph?.let(Galaxy::profile) }
     var yaw by rememberSaveable { mutableDoubleStateOf(-.3) }
     var pitch by rememberSaveable { mutableDoubleStateOf(-.62) }
     var zoom by rememberSaveable { mutableDoubleStateOf(1.0) }
@@ -127,7 +128,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
         reducedMotion -> "减小动效已开启 · 可手动旋转"
         selected != null -> "已聚焦星点 · 关闭卡片继续漫游"
         paused -> "自转已暂停 · 可手动旋转"
-        else -> "拖动旋转 · 双指缩放 · 轻触星点"
+        else -> "轻牵星云 · 松手归位 · 双指缩放 · 轻触星点"
     }
     OrbisVisualTheme {
         Scaffold(containerColor = Color(0xFF080A17),
@@ -145,7 +146,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                 val constrained = maxHeight < 440.dp || LocalDensity.current.fontScale > 1.4f
                 if (graph != null) OrbisMemoryAtlasCanvas(
                     demo = graph, camera = { camera() }, clock = { clock }, selected = selected,
-                    motionLabel = motionLabel,
+                    motionLabel = motionLabel, motionAllowed = hostVisible && resumed && !paused && !reducedMotion,
                     onCamera = ::updateCamera, onSelected = { selected = it },
                     onDragging = { dragging = it }, onReset = ::reset,
                     onToggleMotion = { paused = !paused }, modifier = Modifier.fillMaxSize(),
@@ -191,12 +192,18 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                         if (!constrained) AtlasMetadata(star, showDemo, onClose = { selected = null }, modifier = Modifier
                             .padding(start = 18.dp, end = 18.dp, bottom = 10.dp))
                     } }
+                    composition?.takeIf { it.hasMemories }?.let { profile ->
+                        Text(if (showDemo) "演示配色 · 星云微光为装饰" else
+                            if (profile.sampled) "按已显示记忆配色 · 非全库占比 · 星云微光为装饰" else "按当前快照的记忆类别配色 · 星云微光为装饰",
+                            color = Color(0xFFB6ACB2), fontSize = 10.sp, lineHeight = 15.sp,
+                            modifier = Modifier.padding(horizontal = 18.dp))
+                    }
                     FlowRow(Modifier.padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
                         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Atlas.TYPES.forEachIndexed { index, name ->
+                        Atlas.SUPPORTED_TYPES.filter { (composition?.counts?.get(it) ?: 0) > 0 }.forEach { name ->
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Box(Modifier.size(5.dp).background(AtlasColors[index], CircleShape))
-                                Text(name, color = Color(0xFFCFBEC4), fontSize = 11.sp, lineHeight = 16.sp)
+                                Box(Modifier.size(5.dp).background(Galaxy.tintForType(name).color(), CircleShape))
+                                Text("$name ${composition?.counts?.get(name) ?: 0}", color = Color(0xFFCFBEC4), fontSize = 11.sp, lineHeight = 16.sp)
                             }
                         }
                     }

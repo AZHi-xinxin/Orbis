@@ -5,7 +5,7 @@ import { useCurrentAssistant } from "~/hooks/use-current-assistant";
 import { Button } from "~/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "~/components/ui/dialog";
 import type { ImportBranch, ImportConversation, ImportPage, ImportStatus } from "~/types/orbis-import";
-import { mayConfirmImport, newerImportStatus } from "~/lib/import-policy";
+import { importErrorMessage, mayConfirmImport, newerImportStatus } from "~/lib/import-policy";
 import { IMPORT_SOURCES, IMPORT_SOURCE_INFO, defaultImportPathLabel, importEndpoint, importStorageKeys, readImportSource, validateImportFile, type ImportSource } from "~/lib/import-source";
 
 const SOURCE_KEY = "orbis:web-import-source";
@@ -231,7 +231,7 @@ function SourceImportDialog({ open, onOpenChange, onImported, source, onSourceCh
           <p className="flex items-center gap-2 font-medium">{BUSY.has(status.state) && <LoaderCircle className="size-4 animate-spin" />}{PHASE[status.state] ?? status.state}</p>
           {["created", "uploading", "checking"].includes(status.state) && <p className="text-sm text-muted-foreground">已接收 {(status.uploadedBytes / 1024 / 1024).toFixed(1)} MiB · 上传和检查不会写入聊天。</p>}
           {status.state === "importing" && <p>已处理 {status.completed} / {status.total} 个会话</p>}
-          {status.error && <p className="text-sm text-destructive">{status.error === "insufficient_storage" ? "手机剩余存储空间不足，未满足导入安全预留。请先腾出空间再重试，不要删除尚未备份的聊天。" : status.error === "archive_too_large" ? "文件超过大小限制。" : status.error === "invalid_archive" ? "文件格式不兼容或已损坏，没有覆盖现有聊天。" : "任务未全部完成。已完成会话保留，可重新选择原文件，已有内容会跳过。"}</p>}
+          {status.error && <p className="text-sm text-destructive">{importErrorMessage(status.error)}</p>}
           {status.state === "ready" && <p className="text-sm">发现 {status.conversationCount} 个窗口。{info.preview}</p>}
           {status.warnings?.map((warning, index) => <p key={index} className="text-xs text-muted-foreground">{warning}</p>)}
           {["complete", "failed", "cancelled"].includes(status.state) && <p className="text-sm">导入 {status.imported} · 已有内容跳过 {status.skipped} · 未导入 {status.failed} · 消息 {status.messages}</p>}

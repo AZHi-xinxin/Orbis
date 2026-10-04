@@ -9,6 +9,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.orbis.contact.IncomingCallAttempt
 import me.rerere.rikkahub.service.OrbisIncomingCallRuntime
+import me.rerere.rikkahub.service.OrbisCallFailure
 import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
@@ -73,6 +74,7 @@ internal fun IncomingCallAttempt.incomingResult() = buildJsonObject {
     put("max_ring_seconds", ringSeconds); put("microphone_muted_on_answer", mutedAnswer)
     put("call_id", connectedCallId?.let(::JsonPrimitive) ?: JsonNull)
     put("failure_code", failureCode?.let(::JsonPrimitive) ?: JsonNull)
+    put("failure_message", failureCode?.let { JsonPrimitive(OrbisCallFailure.fromCode(it).explanation) } ?: JsonNull)
     put("fallback_attempted", fallbackAttempted); put("fallback_posted", fallbackPosted)
     put("fallback_speech", fallbackSpeech?.let(::JsonPrimitive) ?: JsonNull)
     put("redial_scheduled", false); put("instruction_authority", "none")

@@ -3,6 +3,8 @@ package me.rerere.ai.provider.providers.openai
 import me.rerere.ai.core.validateToolSchemaReferences
 
 import me.rerere.ai.util.orbisSourceHeaders
+import me.rerere.ai.util.observeOrbisGatewayRequest
+import me.rerere.ai.util.observeOrbisGatewayResponse
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +60,7 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.toHeaders
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -96,12 +98,13 @@ class ResponseAPI(
             )
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+            .build().observeOrbisGatewayRequest(params, requestBody["model"]?.jsonPrimitive?.contentOrNull)
 
         Log.i(TAG, "generateText: request prepared, messages=${messages.size}")
 
-        // await() waits for the response headers; reading the body can still block.
-        client.newCall(request).await().use { response ->
+        // Cancellation owns both the request and its body read, not only the header wait.
+        client.newCall(request).awaitAndUse { response ->
+            request.observeOrbisGatewayResponse(response)
             if (!response.isSuccessful) {
                 throw openAIStreamFailure(null, response)
             }
@@ -133,7 +136,7 @@ class ResponseAPI(
                 "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}"
             )
             .configureReferHeaders(providerSetting.baseUrl)
-            .build()
+            .build().observeOrbisGatewayRequest(params, requestBody["model"]?.jsonPrimitive?.contentOrNull)
 
         Log.i(TAG, "streamText: request prepared, messages=${messages.size}")
 
@@ -147,7 +150,7 @@ class ResponseAPI(
             }
         }
 
-        val listener = OpenAIStreamListener(decoder, ::sendChunks) { error -> close(error) }
+        val listener = OpenAIStreamListener(decoder, ::sendChunks, request::observeOrbisGatewayResponse) { error -> close(error) }
 
         val eventSource = EventSources.createFactory(client)
             .newEventSource(request, listener)

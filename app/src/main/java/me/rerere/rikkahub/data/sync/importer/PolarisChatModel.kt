@@ -36,8 +36,8 @@ internal data class PolarisConversation(
 internal data class ConvertedPolaris(val conversation: Conversation, val attachmentReferences: Int)
 
 internal object PolarisChatLimits {
-    const val MAX_CONVERSATIONS = 2000
-    const val MAX_TOTAL_MESSAGES = 100000
+    const val MAX_CONVERSATIONS = 10000
+    const val MAX_TOTAL_MESSAGES = 1000000
     const val MAX_WINDOW_MESSAGES = 50000
     const val MAX_TEXT_BYTES = 512 * 1024
     const val MAX_WINDOW_BYTES = 32L * 1024 * 1024

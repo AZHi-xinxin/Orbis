@@ -61,6 +61,16 @@ class OrbisGardenToolsTest {
         val output = call(private[0]).toString()
         assertFalse(output.contains("secret")); assertFalse(output.contains("token")); assertFalse(output.contains("synthetic"))
     }
+    @Test fun unreadSettingsDoNotTellUserToSwitchRoutesOrPretendToolExecuted() {
+        val tools = createOrbisGardenTools { _, _ -> error("garden_configuration_unavailable") }
+        val result = call(tools[0])
+        assertFalse(result["ok"]!!.jsonPrimitive.boolean)
+        assertEquals("garden_configuration_unavailable", result["error"]!!.jsonPrimitive.content)
+        val note = result["note"]!!.jsonPrimitive.content
+        assertTrue(note.contains("本次未执行"))
+        assertTrue(note.contains("重试读取"))
+        assertFalse(note.contains("选择本地路线"))
+    }
     @Test fun readIdCannotBeAPathAndCreateUsesUtf8ByteLimit() {
         var count = 0
         val tools = createOrbisGardenTools { _, _ -> count++; JsonObject(emptyMap()) }

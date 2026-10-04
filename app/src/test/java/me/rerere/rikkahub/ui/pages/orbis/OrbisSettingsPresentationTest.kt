@@ -128,7 +128,16 @@ class OrbisSettingsPresentationTest {
         listOf("MCP", "TTS", "快捷消息", "天气", "未接入").forEach {
             assertFalse("Unexpected duplicated or unavailable tool: $it", labels.contains(it))
         }
-        assertEquals(3, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
+        assertEquals(6, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
         assertEquals(1, orbisToolEntries.count { it.destination == OrbisToolDestination.BLUETOOTH_TOY })
+    }
+
+    @Test fun scheduleAndPrivateRoomOccupyTheRequestedGridPositions() {
+        val rows = orbisToolEntries.filter { it.group == OrbisToolGroup.PLAY }
+            .map { it.destination }.chunked(3)
+        assertEquals(listOf(OrbisToolDestination.GAMES, OrbisToolDestination.STICKERS,
+            OrbisToolDestination.BLUETOOTH_TOY), rows[0])
+        assertEquals(listOf(OrbisToolDestination.GALLERY, OrbisToolDestination.SCHEDULE,
+            OrbisToolDestination.PRIVATE_ROOM), rows[1])
     }
 }

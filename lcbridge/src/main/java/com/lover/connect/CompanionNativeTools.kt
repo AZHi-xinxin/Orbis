@@ -41,7 +41,7 @@ data class CompanionToolResult(
         if (!ok) put("message", when {
             outcome == "unknown" -> "结果不确定，请核对状态，不要自动重试。"
             errorCode == "service_disabled" -> "陪伴服务已关闭；未自动开启。可在手机与陪伴中启动服务。"
-            errorCode == "service_unavailable" -> "已尝试恢复原先启用的陪伴服务，但尚未就绪，本次操作未执行。可调用 companion_get_l_service_status 检查状态，或在手机与陪伴中点恢复运行。"
+            errorCode == "service_unavailable" -> "已尝试恢复原先启用的陪伴服务，但尚未就绪，本次操作未执行。可调用 companion_get_runtime_status 检查状态，或在手机与陪伴中点恢复运行。"
             else -> "本次未完成。请检查系统权限和工具参数；不会自动授权或开启原先关闭的观察。"
         })
     }.toString()
@@ -76,7 +76,8 @@ class CompanionNativeTools internal constructor(
     fun authorizationRevision(name: String): String = runtime.authorizationRevision(name)
 
     suspend fun execute(name: String, argumentsJson: String, expectedAuthorizationRevision: String? = null): CompanionToolResult {
-        val descriptor = catalog().firstOrNull { it.name == name }
+        // A read-only compatibility alias is executable but is never advertised to new model turns.
+        val descriptor = catalog().firstOrNull { it.name == (if (name == "get_l_service_status") "get_runtime_status" else name) }
             ?: return failure("unknown_tool")
         val args = try {
             require(argumentsJson.toByteArray(Charsets.UTF_8).size <= 256 * 1024)
@@ -125,7 +126,7 @@ class CompanionNativeTools internal constructor(
                 val name = item.getString("name")
                 val description = if (name == "take_screenshot") COMPANION_SCREEN_DESCRIPTION else item.getString("description")
                 CompanionToolDescriptor(name, description, item.getJSONObject("inputSchema").toString(),
-                    if (name in writes) "write" else "read", name !in setOf("save_memory", "read_memory", "get_l_service_status", "get_alarms"))
+                    if (name in writes) "write" else "read", name !in setOf("save_memory", "read_memory", "get_runtime_status", "get_alarms"))
             }
         }
     }

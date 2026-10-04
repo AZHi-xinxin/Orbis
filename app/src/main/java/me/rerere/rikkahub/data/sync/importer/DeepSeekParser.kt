@@ -152,6 +152,8 @@ object DeepSeekParser {
             return DeepSeekExport(conversations)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
+        } catch (failure: ArchiveReadException) {
+            throw failure
         } catch (_: RuntimeException) {
             throw IllegalArgumentException("DeepSeek 聊天结构不兼容或已损坏；现有聊天未更改")
         }

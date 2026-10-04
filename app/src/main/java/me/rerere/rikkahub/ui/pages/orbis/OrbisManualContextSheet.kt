@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.orbis
 
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -283,7 +285,7 @@ private fun ManualMessageBoundary(label: String, node: MessageNode, modifier: Mo
 
 /** Bound both inspected parts and characters before any whitespace processing or layout. */
 internal fun manualContextMessageSnippet(node: MessageNode): String {
-    val message = node.messages.getOrNull(node.selectIndex) ?: return "[无有效的所选分支]"
+    val message = node.messages.getOrNull(node.selectIndex)?.privateRoomSafePresentation() ?: return "[无有效的所选分支]"
     val short = buildString {
         for (part in message.parts.take(8)) {
             if (part is UIMessagePart.Text) {

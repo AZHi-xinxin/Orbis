@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.data.orbis.contact.IncomingCallOutcome
 import me.rerere.rikkahub.service.OrbisIncomingCallRuntime
+import me.rerere.rikkahub.service.OrbisCallFailure
 import me.rerere.rikkahub.service.startIncomingVoice
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 
@@ -43,9 +44,14 @@ class OrbisIncomingCallActivity : ComponentActivity() {
             RikkahubTheme {
                 val call by runtime.state.collectAsStateWithLifecycle()
                 val visible = call?.takeIf { it.attempt.id == attemptId }
-                LaunchedEffect(visible?.attempt?.outcome) {
+                // The runtime clears its active invitation immediately after finishing. Retain a
+                // presentation-only failure here; it can never ring, retry, or reopen the mic.
+                var failed by remember(attemptId) { mutableStateOf<OrbisCallFailure?>(null) }
+                var title by remember(attemptId) { mutableStateOf("语音来电") }
+                LaunchedEffect(attemptId, visible?.attempt?.outcome) {
+                    visible?.title?.let { title = it }
                     val attempt = visible?.attempt ?: runCatching { runtime.ledger.get(attemptId) }.getOrNull()
-                    if (attempt == null) { finish(); return@LaunchedEffect }
+                    if (attempt == null) { failed = OrbisCallFailure.UNKNOWN; return@LaunchedEffect }
                     when (attempt.outcome) {
                         IncomingCallOutcome.CONNECTED -> {
                             startActivity(Intent(this@OrbisIncomingCallActivity, RouteActivity::class.java).apply {
@@ -53,8 +59,9 @@ class OrbisIncomingCallActivity : ComponentActivity() {
                                 putExtra("conversationId", attempt.conversationId)
                             }); finish()
                         }
-                        IncomingCallOutcome.REJECTED, IncomingCallOutcome.NO_RESPONSE, IncomingCallOutcome.FAILED -> finish()
-                        else -> Unit
+                        IncomingCallOutcome.FAILED -> failed = OrbisCallFailure.fromCode(attempt.failureCode)
+                        IncomingCallOutcome.REJECTED, IncomingCallOutcome.NO_RESPONSE -> finish()
+                        else -> failed = null
                     }
                 }
                 LaunchedEffect(requestedAction, attemptId) {
@@ -69,20 +76,33 @@ class OrbisIncomingCallActivity : ComponentActivity() {
                             Surface(Modifier.size(116.dp), shape = CircleShape, color = Color(0xFF405E93)) {
                                 Box(contentAlignment = Alignment.Center) { Text("★", fontSize = 54.sp, color = Color.White) }
                             }
-                            Text(visible?.title ?: "来电已结束", color = Color.White, fontSize = 28.sp)
-                            Text(visible?.attempt?.reason.orEmpty(), color = Color.White.copy(alpha = .8f),
-                                modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()))
-                            Text(if (visible?.attempt?.outcome == IncomingCallOutcome.CONNECTING) "正在接通…" else "等待你接听 · 接听前不开麦",
-                                color = Color.White.copy(alpha = .6f))
-                            permissionMessage?.let { Text(it, color = Color.White) }
+                            Text(title, color = Color.White, fontSize = 28.sp)
+                            val failure = failed
+                            if (failure != null) {
+                                Text("本次来电未接通", color = Color.White, fontSize = 20.sp)
+                                Text(failure.explanation, color = Color.White.copy(alpha = .85f))
+                                Text("诊断代码：${failure.code}", color = Color.White.copy(alpha = .6f))
+                                Text("请在设置中检查语音服务；也可在通知设置查看全部主动来电日志。不会自动重拨。",
+                                    color = Color.White.copy(alpha = .6f))
+                            } else {
+                                Text(visible?.attempt?.reason.orEmpty(), color = Color.White.copy(alpha = .8f),
+                                    modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()))
+                                Text(if (visible?.attempt?.outcome == IncomingCallOutcome.CONNECTING) "正在接通…" else "等待你接听 · 接听前不开麦",
+                                    color = Color.White.copy(alpha = .6f))
+                                permissionMessage?.let { Text(it, color = Color.White) }
+                            }
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             val enabled = visible?.attempt?.outcome == IncomingCallOutcome.RINGING
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Button(onClick = { runtime.reject(attemptId) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA4D59))) { Text("拒接") }
-                                Button(enabled = enabled, onClick = { answer(false) }) { Text("接听") }
+                            if (failed != null) {
+                                Button(onClick = { finish() }) { Text("知道了 · 关闭") }
+                            } else {
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Button(onClick = { runtime.reject(attemptId) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBA4D59))) { Text("拒接") }
+                                    Button(enabled = enabled, onClick = { answer(false) }) { Text("接听") }
+                                }
+                                TextButton(enabled = enabled, onClick = { answer(true) }) { Text("静音接听 · 关麦，仍听对方", color = Color.White) }
                             }
-                            TextButton(enabled = enabled, onClick = { answer(true) }) { Text("静音接听 · 关麦，仍听对方", color = Color.White) }
                         }
                     }
                 }
@@ -90,7 +110,11 @@ class OrbisIncomingCallActivity : ComponentActivity() {
         }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); readIntent(intent) }
-    private fun readIntent(intent: Intent) { attemptId = intent.getStringExtra("attemptId").orEmpty(); requestedAction = intent.getStringExtra("callAction") ?: "view" }
+    private fun readIntent(intent: Intent) {
+        attemptId = intent.getStringExtra("attemptId").orEmpty()
+        requestedAction = intent.getStringExtra("callAction") ?: "view"
+        permissionMessage = null
+    }
     private fun answer(muted: Boolean) {
         if (!muted && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             microphone.launch(Manifest.permission.RECORD_AUDIO); return

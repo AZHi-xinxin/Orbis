@@ -3,6 +3,8 @@ package me.rerere.asr
 import kotlinx.coroutines.flow.StateFlow
 
 interface ASRController {
+    /** Only the final transcript wait, never the microphone/listening lifetime. */
+    val finalTranscriptTimeoutMs: Long get() = 15_000L
     val state: StateFlow<ASRState>
     /** Streaming capture can remain open; this is NOT proof that echo cancellation is active. */
     val supportsConcurrentPlayback: Boolean get() = false

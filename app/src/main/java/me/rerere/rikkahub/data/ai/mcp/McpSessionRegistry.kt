@@ -233,7 +233,7 @@ internal class McpSessionRegistry(
             oldClient?.let { closeClient(it, config.commonOptions.name) }
 
             val sdkClient = createSdkClient(config)
-            val transport = createTransport(config)
+            val transport = createMcpTransport(config, httpClient)
             installTransportCallbacks(config, sdkClient, transport)
 
             try {
@@ -263,7 +263,7 @@ internal class McpSessionRegistry(
                     statusStore.update(config.id, McpStatus.NeedsAuthorization)
                     ConnectResult.NeedsAuthorization
                 } else {
-                    statusStore.update(config.id, McpStatus.Error.from(e))
+                    statusStore.update(config.id, mcpConnectionError(config, e))
                     ConnectResult.Failed
                 }
             }
@@ -298,7 +298,7 @@ internal class McpSessionRegistry(
                     if (oauthCoordinator.needsAuthorization(config, e)) {
                         statusStore.update(config.id, McpStatus.NeedsAuthorization)
                     } else {
-                        statusStore.update(config.id, McpStatus.Error.from(e))
+                        statusStore.update(config.id, mcpConnectionError(config, e))
                     }
                 }
             }
@@ -429,26 +429,6 @@ internal class McpSessionRegistry(
         clientInfo = Implementation(name = config.commonOptions.name, version = "1.0")
     )
 
-    private fun createTransport(config: McpServerConfig): AbstractTransport = when (config) {
-        is McpServerConfig.SseTransportServer -> SseClientTransport(
-            urlString = config.url,
-            client = httpClient,
-            requestBuilder = { appendResolvedHeaders(config) },
-        )
-
-        is McpServerConfig.StreamableHTTPServer -> StreamableHttpClientTransport(
-            url = config.url,
-            client = httpClient,
-            requestBuilder = { appendResolvedHeaders(config) },
-        )
-    }
-
-    private fun HttpRequestBuilder.appendResolvedHeaders(config: McpServerConfig) {
-        headers.appendAll(StringValues.build {
-            config.resolvedHeaders().forEach { (name, value) -> append(name, value) }
-        })
-    }
-
     private fun calculateBackoffDelay(attempt: Int): Long {
         val exponentialDelay = BASE_RECONNECT_DELAY_MS * (1L shl (attempt - 1).coerceAtMost(10))
         return exponentialDelay.coerceAtMost(MAX_RECONNECT_DELAY_MS)
@@ -485,15 +465,24 @@ private fun hasSameConnectionParameters(
     right: McpServerConfig?,
 ): Boolean = left != null && right != null && left.connectionKey() == right.connectionKey()
 
-private fun McpServerConfig.resolvedHeaders(): List<Pair<String, String>> {
-    val base = commonOptions.headers
-    val token = commonOptions.oauth?.takeIf { it.enabled }?.accessToken
-    val hasAuthorization = base.any { it.first.equals("Authorization", ignoreCase = true) }
-    return if (!token.isNullOrBlank() && !hasAuthorization) {
-        base + ("Authorization" to "Bearer $token")
-    } else {
-        base
-    }
+/** Production and isolated wire tests share the actual SDK transport and header builder. */
+internal fun createMcpTransport(config: McpServerConfig, httpClient: HttpClient): AbstractTransport = when (config) {
+    is McpServerConfig.SseTransportServer -> SseClientTransport(
+        urlString = config.url,
+        client = httpClient,
+        requestBuilder = { appendMcpHeaders(config) },
+    )
+    is McpServerConfig.StreamableHTTPServer -> StreamableHttpClientTransport(
+        url = config.url,
+        client = httpClient,
+        requestBuilder = { appendMcpHeaders(config) },
+    )
+}
+
+private fun HttpRequestBuilder.appendMcpHeaders(config: McpServerConfig) {
+    headers.appendAll(StringValues.build {
+        config.resolvedHeaders().forEach { (name, value) -> append(name, value) }
+    })
 }
 
 internal fun mergeTools(storedTools: List<McpTool>, serverTools: List<Tool>): List<McpTool> {

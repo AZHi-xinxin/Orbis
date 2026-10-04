@@ -17,6 +17,7 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.OrbisManualContextPreview
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.web.BadRequestException
@@ -130,10 +131,10 @@ fun Route.orbisContextRoutes(chatService: ChatService, settingsStore: SettingsSt
     }
 }
 
-private fun contextBoundaries(conversation: Conversation, end: Int): List<WebManualContextRow> =
+internal fun contextBoundaries(conversation: Conversation, end: Int): List<WebManualContextRow> =
     listOf(0, end - 1, end).distinct().mapNotNull { index ->
         conversation.messageNodes.getOrNull(index)?.let { node ->
-            val message = node.currentMessage
+            val message = node.currentMessage.privateRoomSafePresentation()
             val text = message.parts.asSequence().filterIsInstance<UIMessagePart.Text>()
                 .map { it.text.take(160) }.firstOrNull { it.isNotBlank() } ?: "[附件、思考或工具记录]"
             WebManualContextRow(index + 1, message.role.name, message.createdAt.toString(), text, node.messages.size)

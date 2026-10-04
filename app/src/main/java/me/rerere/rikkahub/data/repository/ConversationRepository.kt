@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.encodeMessageNodeMessages
+import me.rerere.rikkahub.data.db.MAX_LEGACY_NODE_COMPARISON_BYTES
+import me.rerere.rikkahub.data.db.MessageNodeBudget
+import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.db.fts.MessageSearchSort
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
@@ -368,8 +371,19 @@ class ConversationRepository(
             // A streaming/full-state snapshot can predate a committed card read/fold edit.
             // Merge only its flags, for the exact event identity AND unchanged payload.
             val nodes = conversation.messageNodes.map { node ->
-                if (stored?.assistantId == conversation.assistantId.toString()) {
-                    val previous = messageNodeDAO.getNodeOfConversation(conversation.id.toString(), node.id.toString())
+                val metadata = messageNodeDAO.getNodeStorageMetadata(node.id.toString())
+                check(metadata == null || metadata.conversationId == conversation.id.toString()) { "message_node_owner_changed" }
+                if (metadata != null && metadata.messagesBytes > MessageNodeBudget.MAX_NODE_BYTES) {
+                    // An old oversized cell must not enter a CursorWindow merely to prove it is
+                    // unchanged. Bound the candidate encoding too; SQL compares the raw bytes.
+                    if (metadata.messagesBytes > MAX_LEGACY_NODE_COMPARISON_BYTES)
+                        throw MessageNodeCapacityException("legacy_message_node_comparison_limit")
+                    val candidate = MessageNodeBudget.encodeNode(node.messages, MAX_LEGACY_NODE_COMPARISON_BYTES)
+                    if (!messageNodeDAO.hasExactMessages(conversation.id.toString(), node.id.toString(), candidate))
+                        throw MessageNodeCapacityException("legacy_message_node_changed")
+                    node
+                } else if (stored?.assistantId == conversation.assistantId.toString()) {
+                    val previous = messageNodeDAO.getBoundedNodeOfConversation(conversation.id.toString(), node.id.toString())
                     if (previous != null) {
                         val committedNode = MessageNode(
                         id = Uuid.parse(previous.id),
@@ -385,8 +399,7 @@ class ConversationRepository(
                     if (stored != null) incoming.copy(orbisPrompt = stored.orbisPrompt) else incoming
                 }
             )
-            // 删除旧的节点，插入新的节点
-            messageNodeDAO.deleteByConversation(conversation.id.toString())
+            // Preserve byte-identical historical rows instead of deleting and rebinding them.
             saveMessageNodes(conversation.id.toString(), nodes)
             // The search index shares the page transaction: a delayed pre-compaction index update
             // must never re-expose the old page after the compacted page has committed.
@@ -409,7 +422,6 @@ class ConversationRepository(
         val next = current.copy(messageNodes = nodes, compactionEpoch = current.compactionEpoch + 1,
             chatSuggestions = emptyList(), updateAt = Instant.now())
         conversationDAO.update(conversationToConversationEntity(next))
-        messageNodeDAO.deleteByConversation(stored.id)
         saveMessageNodes(stored.id, nodes)
         messageFtsManager.indexConversationInTransaction(next)
         next
@@ -424,7 +436,7 @@ class ConversationRepository(
         database.withTransaction {
             val stored = conversationDAO.getConversationById(conversationId.toString())
             check(stored != null && stored.assistantId == expectedOwner.toString()) { "event_target_missing_or_changed" }
-            val node = messageNodeDAO.getNodeOfConversation(conversationId.toString(), edit.nodeId.toString())
+            val node = boundedNodeForEdit(conversationId.toString(), edit.nodeId.toString())
                 ?: error("event_message_missing_or_changed")
             val messages = JsonInstant.decodeFromString<List<UIMessage>>(node.messages)
             val target = messages.singleOrNull { it.id == edit.messageId }
@@ -450,7 +462,7 @@ class ConversationRepository(
         me.rerere.rikkahub.data.model.requireCompactionEpoch(expected.compactionEpoch, stored.compactionEpoch)
         val expectedNode = expected.messageNodes.singleOrNull { it.currentMessage.id == edit.messageId }
             ?: error("这条回复已切换或不存在，请刷新后再操作。")
-        val row = messageNodeDAO.getNodeOfConversation(stored.id, expectedNode.id.toString())
+        val row = boundedNodeForEdit(stored.id, expectedNode.id.toString())
             ?: error("工具记录所属回复不存在。")
         val messages = JsonInstant.decodeFromString<List<UIMessage>>(row.messages)
         val target = messages.getOrNull(row.selectIndex)
@@ -604,19 +616,19 @@ class ConversationRepository(
                 stored.compactionEpoch != expected.compactionEpoch ||
                 stored.updateAt != expected.updateAt.toEpochMilli()) return@withTransaction false
 
-            var offset = 0
-            while (true) {
-                val rows = messageNodeDAO.getNodesOfConversationPaged(id, 64, offset)
-                if (rows.isEmpty()) break
-                rows.forEachIndexed { index, row ->
-                    val node = expected.messageNodes.getOrNull(offset + index) ?: return@withTransaction false
-                    if (row.conversationId != id || row.nodeIndex != offset + index ||
-                        row.id != node.id.toString() || row.selectIndex != node.selectIndex ||
-                        row.messages != encodeMessageNodeMessages(node.messages)) return@withTransaction false
-                }
-                offset += rows.size
+            val rows = messageNodeDAO.getNodeStorageMetadataOfConversation(id)
+            if (rows.size != expected.messageNodes.size) return@withTransaction false
+            rows.forEachIndexed { index, row ->
+                val node = expected.messageNodes[index]
+                if (row.conversationId != id || row.nodeIndex != index ||
+                    row.id != node.id.toString() || row.selectIndex != node.selectIndex) return@withTransaction false
+                if (row.messagesBytes > MAX_LEGACY_NODE_COMPARISON_BYTES) return@withTransaction false
+                val candidate = try {
+                    MessageNodeBudget.encodeNode(node.messages, if (row.messagesBytes > MessageNodeBudget.MAX_NODE_BYTES)
+                        MAX_LEGACY_NODE_COMPARISON_BYTES else MessageNodeBudget.MAX_NODE_BYTES)
+                } catch (_: MessageNodeCapacityException) { return@withTransaction false }
+                if (!messageNodeDAO.hasExactMessages(id, row.id, candidate)) return@withTransaction false
             }
-            if (offset != expected.messageNodes.size) return@withTransaction false
             conversationDAO.updateSuggestionsIfUnchanged(id, expected.assistantId.toString(),
                 expected.compactionEpoch, expected.updateAt.toEpochMilli(),
                 JsonInstant.encodeToString(suggestions.take(10))) == 1
@@ -682,20 +694,45 @@ class ConversationRepository(
     } catch (_: Exception) {
         // Serializer/SQLite exception text can contain private message data. Do not retain the
         // cause, print it, return an empty history, or publish already-decoded pages.
-        throw IllegalStateException("对话加载失败，原记录未改动。请返回后重试。")
+        throw IllegalStateException("对话加载失败，原记录未改动。请返回，到「数据与本地备份 → 会话自助恢复」检查；不要清除数据或卸载。")
     }
 
     private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>) {
-        val entities = nodes.mapIndexed { index, node ->
-            MessageNodeEntity(
+        val ids = nodes.map { it.id.toString() }.toSet()
+        check(ids.size == nodes.size) { "duplicate_message_node" }
+        val previous = messageNodeDAO.getNodeStorageMetadataOfConversation(conversationId).associateBy { it.id }
+        // Encode and persist one bounded cell at a time, not an additional copy of the full page.
+        nodes.forEachIndexed { index, node ->
+            val old = previous[node.id.toString()]
+            if (old != null && old.messagesBytes > MAX_LEGACY_NODE_COMPARISON_BYTES)
+                throw MessageNodeCapacityException("legacy_message_node_comparison_limit")
+            val encoded = MessageNodeBudget.encodeNode(node.messages, if (old != null && old.messagesBytes > MessageNodeBudget.MAX_NODE_BYTES)
+                MAX_LEGACY_NODE_COMPARISON_BYTES else MessageNodeBudget.MAX_NODE_BYTES)
+            if (old != null && messageNodeDAO.hasExactMessages(conversationId, old.id, encoded)) {
+                if (old.nodeIndex != index || old.selectIndex != node.selectIndex) {
+                    check(messageNodeDAO.updatePlacementIfExact(conversationId, old.id, encoded, index, node.selectIndex) == 1)
+                }
+                return@forEachIndexed
+            }
+            if (old != null && old.messagesBytes > MessageNodeBudget.MAX_NODE_BYTES)
+                throw MessageNodeCapacityException("legacy_message_node_changed")
+            messageNodeDAO.insert(MessageNodeEntity(
                 id = node.id.toString(),
                 conversationId = conversationId,
                 nodeIndex = index,
-                messages = encodeMessageNodeMessages(node.messages),
+                messages = encoded,
                 selectIndex = node.selectIndex
-            )
+            ))
         }
-        messageNodeDAO.insertAll(entities)
+        previous.keys.filterNot { it in ids }.forEach { messageNodeDAO.deleteById(it) }
+    }
+
+    private suspend fun boundedNodeForEdit(conversationId: String, nodeId: String): MessageNodeEntity? {
+        val metadata = messageNodeDAO.getNodeStorageMetadata(nodeId) ?: return null
+        if (metadata.conversationId != conversationId) return null
+        if (metadata.messagesBytes > MessageNodeBudget.MAX_NODE_BYTES)
+            throw MessageNodeCapacityException("legacy_message_node_edit_limit")
+        return messageNodeDAO.getBoundedNodeOfConversation(conversationId, nodeId)
     }
 }
 

@@ -18,6 +18,7 @@ internal class WebDeepSeekImports(
     parentScope: CoroutineScope,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     additionalFormats: Map<String, WebChatArchiveFormat> = emptyMap(),
+    private val uploadBudgetBytes: Long = ArchiveCapacity.MAX_ZIP_BYTES,
 ) {
     private val formats = additionalFormats + ("deepseek" to WebDeepSeekArchiveFormat(repository))
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) + dispatcher)
@@ -28,7 +29,7 @@ internal class WebDeepSeekImports(
     private val active = setOf("uploading", "checking", "importing", "cancelling")
 
     private class ImportJob(val id: String, val owner: String, val assistantId: Uuid, val file: File, val expiresAt: Long,
-        val formatKey: String, val format: WebChatArchiveFormat) {
+        val formatKey: String, val format: WebChatArchiveFormat, val maxArchiveBytes: Long) {
         var state = "created"
         var uploadedBytes = 0L
         var preview: DeepSeekArchivePreview? = null
@@ -44,6 +45,7 @@ internal class WebDeepSeekImports(
     }
 
     init {
+        require(uploadBudgetBytes in 1..ArchiveCapacity.MAX_ZIP_BYTES) // May lower, never disable the hard cap.
         check(directory.mkdirs() || directory.isDirectory)
         check(directory.canonicalFile == directory.absoluteFile) { "invalid_import_cache" }
         // One owner directory per server instance; delete only the exact files this instance creates.
@@ -64,7 +66,7 @@ internal class WebDeepSeekImports(
         val id = UUID.randomUUID().toString()
         val format = formats[source] ?: throw BadRequestException("unsupported_import_source")
         val job = ImportJob(id, owner, assistantId, File(directory, "$id.zip"), System.currentTimeMillis() + lifetimeMillis,
-            source, format)
+            source, format, minOf(format.maxArchiveBytes, uploadBudgetBytes))
         jobs[id] = job
         statusLocked(job)
     }
@@ -72,7 +74,7 @@ internal class WebDeepSeekImports(
     fun requireSource(owner: String, id: String, source: String): Long = synchronized(lock) {
         val job = ownedLocked(owner, id)
         if (job.formatKey != source) throw NotFoundException("import_not_found")
-        job.format.maxArchiveBytes
+        job.maxArchiveBytes
     }
 
     suspend fun upload(owner: String, id: String, channel: ByteReadChannel): WebImportStatusDto {
@@ -101,7 +103,7 @@ internal class WebDeepSeekImports(
                             if (count < 0) break
                             if (count == 0) continue
                             size += count
-                            if (size > job.format.maxArchiveBytes) throw ImportTooLarge()
+                            if (size > job.maxArchiveBytes) throw ImportTooLarge()
                             if (directory.usableSpace < 64L * 1024 * 1024 + count) throw ImportStorageLow()
                             output.write(buffer, 0, count)
                             digest.update(buffer, 0, count)
@@ -129,8 +131,8 @@ internal class WebDeepSeekImports(
         } catch (cancel: CancellationException) {
             finish(job, "cancelled", DeepSeekImportResult(), null)
             throw cancel
-        } catch (_: Exception) {
-            finish(job, "failed", DeepSeekImportResult(), "invalid_archive")
+        } catch (failure: Exception) {
+            finish(job, "failed", DeepSeekImportResult(), webArchiveError(ArchiveCapacity.reasonOf(failure)))
         } finally {
             synchronized(lock) { job.work = null }
         }
@@ -186,7 +188,7 @@ internal class WebDeepSeekImports(
         val work = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
-                check(job.file.length() == job.uploadedBytes && job.uploadedBytes in 1..job.format.maxArchiveBytes)
+                check(job.file.length() == job.uploadedBytes && job.uploadedBytes in 1..job.maxArchiveBytes)
                 job.file.inputStream().use { input ->
                     val buffer = ByteArray(32 * 1024)
                     var total = 0L
@@ -194,7 +196,7 @@ internal class WebDeepSeekImports(
                     while (count >= 0) {
                         ensureActive()
                         total += count
-                        check(total <= job.format.maxArchiveBytes)
+                        check(total <= job.maxArchiveBytes)
                         digest.update(buffer, 0, count)
                         count = input.read(buffer)
                     }
@@ -221,11 +223,11 @@ internal class WebDeepSeekImports(
             } catch (cancelled: DeepSeekImportCancelledException) {
                 finish(job, "cancelled", cancelled.partialResult, null)
             } catch (failure: DeepSeekImportException) {
-                finish(job, "failed", failure.partialResult, "import_incomplete")
+                finish(job, "failed", failure.partialResult, webArchiveError(failure.failureReason, "import_incomplete"))
             } catch (_: CancellationException) {
                 finish(job, "cancelled", job.result, null)
-            } catch (_: Exception) {
-                finish(job, "failed", job.result, "import_incomplete")
+            } catch (failure: Exception) {
+                finish(job, "failed", job.result, webArchiveError(ArchiveCapacity.reasonOf(failure), "import_incomplete"))
             }
         }
         job.work = work
@@ -342,7 +344,7 @@ internal class WebDeepSeekImports(
 
     private fun statusLocked(job: ImportJob) = WebImportStatusDto(
         job.id, job.state, job.assistantId.toString(), job.expiresAt, job.uploadedBytes,
-        job.format.maxArchiveBytes, job.preview?.conversations?.size ?: 0, job.reviewToken,
+        job.maxArchiveBytes, job.preview?.conversations?.size ?: 0, job.reviewToken,
         job.total, job.completed, job.result.imported, job.result.skipped, job.result.failed,
         job.result.messages, job.result.attachmentReferences, job.rows, job.error,
         job.preview?.warnings ?: emptyList(), job.result.skippedSummaries,
@@ -350,4 +352,17 @@ internal class WebDeepSeekImports(
 
     private class ImportTooLarge : IllegalArgumentException()
     private class ImportStorageLow : IllegalStateException()
+}
+
+/** Finite inert transport codes only, never source text, filenames, tokens or exception excerpts. */
+internal fun webArchiveError(reason: ArchiveFailure?, fallback: String = "invalid_archive"): String = when (reason) {
+    ArchiveFailure.SIZE_LIMIT -> "archive_too_large"
+    ArchiveFailure.WINDOW_LIMIT -> "conversation_too_large"
+    ArchiveFailure.NODE_LIMIT -> "message_too_large"
+    ArchiveFailure.INSUFFICIENT_SPACE -> "insufficient_storage"
+    ArchiveFailure.INVALID_UTF8 -> "archive_encoding_invalid"
+    ArchiveFailure.CHECKSUM -> "archive_checksum_failed"
+    ArchiveFailure.UNSAFE_PATH -> "archive_unsafe_path"
+    ArchiveFailure.READ_WRITE -> "file_access_failed"
+    ArchiveFailure.FORMAT, null -> fallback
 }

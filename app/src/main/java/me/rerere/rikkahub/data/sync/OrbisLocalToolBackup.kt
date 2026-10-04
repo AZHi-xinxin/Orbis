@@ -4,6 +4,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
+import me.rerere.rikkahub.data.orbis.gallery.GalleryBackup
+import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -24,7 +26,7 @@ internal object OrbisLocalToolBackup {
     fun maxBytes(path: String): Int? = when (path) {
         SCHEDULE -> ORBIS_SCHEDULE_MAX_BYTES
         KAOMOJI -> OrbisKaomojiRepository.MAX_STORAGE_CHARS * 4
-        else -> null
+        else -> GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path)
     }
 
     fun encodeSchedule(value: OrbisScheduleSnapshot): ByteArray = json.encodeToString(value).toByteArray(Charsets.UTF_8).also { validate(SCHEDULE, it) }
@@ -34,7 +36,8 @@ internal object OrbisLocalToolBackup {
         when (path) {
             SCHEDULE -> schedule(bytes)
             KAOMOJI -> kaomoji(bytes)
-            else -> error("local_tool_backup_unknown_path")
+            else -> if (ContextPruningBackup.maxBytes(path) != null) ContextPruningBackup.validate(path, bytes)
+                else error("local_tool_backup_unknown_path")
         }
     }
 
@@ -102,6 +105,8 @@ internal object OrbisLocalToolBackup {
 
     /** Used on private staging before publication. Bad local-tool data cannot stage a partial restore. */
     fun validateStaged(payload: File) {
+        GalleryBackup.validateStaged(payload)
+        ContextPruningBackup.validateStaged(payload)
         paths.forEach { path ->
             val source = exactFile(File(payload, "files"), path)
             if (source.exists()) validate(path, readBounded(path, source))
@@ -110,6 +115,8 @@ internal object OrbisLocalToolBackup {
 
     /** Startup only, before any repository opens; prepare all merges before changing any payload file. */
     fun prepareBeforeJournal(payload: File, liveFiles: File) {
+        GalleryBackup.prepareBeforeJournal(payload, liveFiles)
+        ContextPruningBackup.prepareBeforeJournal(payload, liveFiles)
         val prepared = paths.mapNotNull { path ->
             val source = exactFile(File(payload, "files"), path)
             if (!source.exists()) null else {
@@ -127,7 +134,7 @@ internal object OrbisLocalToolBackup {
 
     /** Sidecars are journalled with originals, not blindly deleted or restored from an archive. */
     fun sidecarPaths(installedPaths: Set<String>): List<String> = paths.filter { "files/$it" in installedPaths }
-        .flatMap { listOf("files/$it.bak", "files/$it.new") }
+        .flatMap { listOf("files/$it.bak", "files/$it.new") } + GalleryBackup.sidecarPaths(installedPaths)
 
     private fun exactFile(root: File, path: String): File {
         val canonicalRoot = root.canonicalFile
@@ -156,6 +163,11 @@ internal object OrbisLocalToolBackup {
     private fun conflict(path: String) = if (path == SCHEDULE) "local_tool_backup_conflict_schedule" else "local_tool_backup_conflict_kaomoji"
 
     fun publicError(code: String?): String? = when (code) {
+        "context_pruning_backup_conflict" -> "上下文清理标记存在编号冲突或合并后超出安全上限，整次恢复已停止；本机原文和清理状态保留。"
+        "context_pruning_backup_owner" -> "上下文清理标记与将恢复的助手或聊天窗口不匹配，整次恢复已停止；请同时选择对应的聊天数据库与文件。"
+        "context_pruning_backup_invalid", "context_pruning_backup_path", "context_pruning_unreadable" -> "上下文清理标记的格式、大小或路径校验失败，整次恢复已停止；本机聊天原文未被删除。"
+        "gallery_backup_conflict" -> "格子中存在同一编号但内容不同的作品或答案，整次恢复已停止；已有内容保留，请先核对来源。"
+        "gallery_backup_invalid", "gallery_backup_path", "gallery_backup_unreferenced", "gallery_body_invalid" -> "格子备份内容或路径校验未通过，整次恢复已停止；请保留原文件并核对。"
         "local_tool_backup_invalid_schedule" -> "课表与日程备份格式、大小或本机原文件有问题；未覆盖本机数据，请保留原备份并核对。"
         "local_tool_backup_invalid_kaomoji" -> "颜文字备份格式、大小或本机原文件有问题；未覆盖本机数据，请保留原备份并核对。"
         "local_tool_backup_conflict_schedule" -> "课表与日程存在同一编号但内容不同的记录，整次恢复已停止并保留原数据；请先在原设备核对并重新备份。"

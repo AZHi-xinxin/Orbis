@@ -13,6 +13,12 @@ sealed class ASRProviderSetting {
     val supportsServerVadVoiceMode: Boolean
         get() = this is OpenAIRealtime || this is DashScope || this is Volcengine
 
+    /** MiMo/Step use local speech endpointing plus HTTP transcription, not server VAD. */
+    val supportsVoiceCall: Boolean
+        get() = when (this) {
+            is OpenAIRealtime, is DashScope, is Volcengine, is MiMo, is Step -> true
+        }
+
     abstract fun copyProvider(
         id: Uuid = this.id,
         name: String = this.name,

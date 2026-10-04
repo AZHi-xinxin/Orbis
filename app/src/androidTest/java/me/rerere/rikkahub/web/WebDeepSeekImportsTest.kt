@@ -65,7 +65,8 @@ class WebDeepSeekImportsTest {
         const val DEADLINE_MS = 10_000L
     }
 
-    private class Fixture(dispatcher: CoroutineDispatcher = Dispatchers.IO) {
+    private class Fixture(dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        uploadBudgetBytes: Long = DeepSeekArchive.MAX_ARCHIVE_BYTES) {
         private val instrumentation = InstrumentationRegistry.getInstrumentation().also {
             check(it is IsolatedGenerationLoopRunner) { "Isolated runner required" }
             check(it.targetContext.applicationContext.javaClass == Application::class.java) { "Plain Application required" }
@@ -110,7 +111,8 @@ class WebDeepSeekImportsTest {
         private val importScope = CoroutineScope(importParentJob + Dispatchers.IO)
         // The parent is our random fixture, never the production orbis-web-imports directory.
         val staging = File(directory, "isolated-staging")
-        val imports = WebDeepSeekImports(staging, repository, importScope, dispatcher)
+        val imports = WebDeepSeekImports(staging, repository, importScope, dispatcher,
+            uploadBudgetBytes = uploadBudgetBytes)
         val assistantId = Uuid.random()
         fun stagedFile(id: String) = File(staging, "$id.zip")
 
@@ -132,8 +134,9 @@ class WebDeepSeekImportsTest {
         }
     }
 
-    private suspend fun withFixture(dispatcher: CoroutineDispatcher = Dispatchers.IO, block: suspend (Fixture) -> Unit) {
-        val fixture = Fixture(dispatcher)
+    private suspend fun withFixture(dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        uploadBudgetBytes: Long = DeepSeekArchive.MAX_ARCHIVE_BYTES, block: suspend (Fixture) -> Unit) {
+        val fixture = Fixture(dispatcher, uploadBudgetBytes)
         try {
             withTimeout(DEADLINE_MS) { block(fixture) }
         } finally {
@@ -352,7 +355,7 @@ class WebDeepSeekImportsTest {
             val before = hash(source)
             val created = fixture.imports.create(OWNER, fixture.assistantId)
             val failed = fixture.imports.upload(OWNER, created.id, ByteReadChannel("synthetic-not-a-zip".toByteArray()))
-            assertEquals("failed", failed.state); assertEquals("invalid_archive", failed.error)
+            assertEquals("failed", failed.state); assertEquals("archive_checksum_failed", failed.error)
             assertNull(failed.reviewToken); assertEquals(0, failed.imported)
             assertEquals(0, fixture.repository.countConversations())
             assertFalse(fixture.stagedFile(created.id).exists())
@@ -362,21 +365,23 @@ class WebDeepSeekImportsTest {
     }
 
     @Test fun streamingOversizeUploadIsBoundedAndLeavesNoRowsOrStagedBytes() = runBlocking {
-        withFixture { fixture ->
+        val syntheticLimit = 64L * 1024
+        withFixture(uploadBudgetBytes = syntheticLimit) { fixture ->
             val created = fixture.imports.create(OWNER, fixture.assistantId)
+            assertEquals(syntheticLimit, created.maxArchiveBytes)
             val channel = ByteChannel(autoFlush = true)
             coroutineScope {
-                // One reusable block: no 80 MiB array or real source archive is ever allocated.
+                // The same production admission path, with a lower test budget. Never write GiB fixtures.
                 val producer = launch(Dispatchers.IO) {
                     try {
                         val block = ByteArray(32 * 1024)
-                        repeat((DeepSeekArchive.MAX_ARCHIVE_BYTES / block.size).toInt() + 1) { channel.writeFully(block) }
+                        repeat((syntheticLimit / block.size).toInt() + 1) { channel.writeFully(block) }
                     } finally { channel.close() }
                 }
                 try {
                     val failed = fixture.imports.upload(OWNER, created.id, channel)
                     assertEquals("failed", failed.state); assertEquals("archive_too_large", failed.error)
-                    assertTrue(failed.uploadedBytes in 1..DeepSeekArchive.MAX_ARCHIVE_BYTES)
+                    assertTrue(failed.uploadedBytes in 1..syntheticLimit)
                     assertNull(failed.reviewToken)
                     assertFalse(fixture.stagedFile(created.id).exists())
                     assertEquals(0, fixture.repository.countConversations())

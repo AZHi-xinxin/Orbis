@@ -16,6 +16,8 @@ import me.rerere.rikkahub.data.db.AppDatabaseFactory
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.SQLiteConfiguration
 import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
+import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -40,19 +42,33 @@ class BackupManager(
         val staging = Files.createTempDirectory(context.cacheDir.toPath(), "backup-").toFile()
         try {
             val settings = settingsStore.settingsFlowRaw.first()
+            require(!settings.init) { "请先完成应用初始化，再导出可恢复的备份" }
             val settingsJson = json.encodeToString(settings)
             // Even a files-only export needs the same committed reference snapshot for exclusions.
             val snapshot = File(staging, SQLiteConfiguration.DATABASE_NAME)
             val excludedUploads = if (includeDatabase || includeFiles) {
+                val live = context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME)
+                ArchiveCapacity.requireSpace(staging.usableSpace, 2 * (live.length() + File(live.path + "-wal").length()))
                 DatabaseBackup.createSnapshot(database.openHelper.writableDatabase, snapshot)
                 DatabaseBackup.excludeConsultations(context, snapshot, settingsJson)
             } else emptySet()
-            ZipOutputStream(FileOutputStream(archive)).use { zip ->
-                zip.putNextEntry(ZipEntry("settings.json"))
-                zip.write(settingsJson.toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
+            var expanded = 0L
+            var entries = 0
+            val coroutine = currentCoroutineContext()
+            fun reserve(name: String, size: Long) {
+                ArchiveCapacity.requireSafePath(name)
+                ArchiveCapacity.requireSize(size, NativeBackupBudget.entryLimit(name), allowEmpty = true)
+                expanded += size
+                ArchiveCapacity.requireSize(expanded, ArchiveCapacity.MAX_EXPANDED_BYTES, allowEmpty = true)
+                require(++entries <= ArchiveCapacity.MAX_ENTRIES) { "备份文件数量超过安全上限" }
+            }
+            ZipOutputStream(NativeBackupBudget.Output(FileOutputStream(archive)) { archive.parentFile!!.usableSpace }).use { zip ->
+                val settingsBytes = settingsJson.toByteArray(Charsets.UTF_8)
+                reserve("settings.json", settingsBytes.size.toLong())
+                zip.putNextEntry(ZipEntry("settings.json")); zip.write(settingsBytes); zip.closeEntry()
                 if (includeDatabase) {
-                    addFile(zip, snapshot, DatabaseBackup.ARCHIVE_DATABASE)
+                    reserve(DatabaseBackup.ARCHIVE_DATABASE, snapshot.length())
+                    addFile(zip, snapshot, DatabaseBackup.ARCHIVE_DATABASE) { coroutine.ensureActive() }
                 }
                 if (includeFiles) {
                     for (folder in listOf(FileFolders.UPLOAD, FileFolders.SKILLS, FileFolders.FONTS)) {
@@ -64,7 +80,8 @@ class BackupManager(
                             val relative = file.relativeTo(directory).invariantSeparatorsPath
                             PendingRestore.resolveInside(directory, relative)
                             if (folder == FileFolders.UPLOAD && "$folder/$relative" in excludedUploads) continue
-                            addFile(zip, file, "$folder/$relative")
+                            reserve("$folder/$relative", file.length())
+                            addFile(zip, file, "$folder/$relative") { coroutine.ensureActive() }
                         }
                     }
                     // Semantic, locked snapshots only. Do not scan these directories or include credentials/sidecars.
@@ -75,12 +92,31 @@ class BackupManager(
                         OrbisLocalToolBackup.KAOMOJI to OrbisLocalToolBackup.encodeKaomoji(kaomoji),
                     )) {
                         currentCoroutineContext().ensureActive()
+                        reserve(name, bytes.size.toLong())
                         zip.putNextEntry(ZipEntry(name))
                         zip.write(bytes)
                         zip.closeEntry()
                     }
+                    val gallery = me.rerere.rikkahub.data.orbis.gallery.GalleryBackup.stageSnapshot(
+                        context.filesDir, File(staging, "gallery-snapshot"),
+                        checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    for ((name, file) in gallery) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
+                    val policies = ContextPruningBackup.stageSnapshot(
+                        context.filesDir, File(staging, "context-pruning-snapshot"),
+                        DatabaseBackup.conversationOwners(context, snapshot),
+                        checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    for ((name, file) in policies) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
                 }
             }
+            // Exactly the restore metadata policy, after ZIP footer has been written. No false success
+            // for an oversized settings file/database/attachment, entry count or aggregate expansion.
+            ZipFile(archive).use { NativeBackupBudget.inspect(archive.length(), it.entries().asSequence()) }
             archive
         } catch (e: Throwable) {
             archive.delete()
@@ -92,7 +128,7 @@ class BackupManager(
 
     suspend fun stageRestore(archive: File, includeDatabase: Boolean, includeFiles: Boolean) =
         withContext(Dispatchers.IO) {
-            require(archive.length() in 1..me.rerere.rikkahub.data.sync.importer.RikkaChatArchive.MAX_ARCHIVE_BYTES) { "备份为空或超过 512 MB" }
+            ArchiveCapacity.requireSize(archive.length(), ArchiveCapacity.MAX_ZIP_BYTES)
             restoreMutex.withLock {
                 val restore = pendingRestore(context)
                 val staging = restore.createStagingDirectory()
@@ -105,9 +141,13 @@ class BackupManager(
                     var archiveEntries = 0
                     var expandedBytes = 0L
                     ZipFile(archive).use { zip ->
+                        val budget = NativeBackupBudget.inspect(archive.length(), zip.entries().asSequence())
+                        // Reserve extraction plus possible WAL normalization/migration copies before writing.
+                        ArchiveCapacity.requireSpace(staging.usableSpace, budget.expandedBytes +
+                            if (includeDatabase) 2 * budget.databaseBytes else 0)
                         for (entry in zip.entries()) {
                             currentCoroutineContext().ensureActive()
-                            require(++archiveEntries <= 20000) { "备份文件数量过多" }
+                            require(++archiveEntries <= ArchiveCapacity.MAX_ENTRIES) { "备份文件数量过多" }
                             if (entry.isDirectory) continue
                             val target = when (entry.name) {
                                 "settings.json" -> File(staging, "settings.json")
@@ -122,15 +162,12 @@ class BackupManager(
                             check(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs()) {
                                 "Cannot create backup staging directory"
                             }
-                            zip.getInputStream(entry).use { input ->
-                                FileOutputStream(target).use { output ->
-                                    val limit = OrbisLocalToolBackup.maxBytes(entry.name)?.toLong()
-                                        ?: if (entry.name == "settings.json") 8L * 1024 * 1024 else 256L * 1024 * 1024
-                                    expandedBytes += me.rerere.rikkahub.data.sync.importer.RikkaChatArchive.copyLimited(
-                                        input, output, minOf(limit, 1024L * 1024 * 1024 - expandedBytes),
-                                    )
-                                    output.fd.sync()
-                                }
+                            FileOutputStream(target).use { output ->
+                                val coroutine = currentCoroutineContext()
+                                expandedBytes += ArchiveCapacity.copyZipEntry(zip, entry, output,
+                                    minOf(NativeBackupBudget.entryLimit(entry.name), ArchiveCapacity.MAX_EXPANDED_BYTES - expandedBytes),
+                                    { coroutine.ensureActive() }, { ArchiveCapacity.requireSpace(staging.usableSpace, it.toLong()) })
+                                output.fd.sync()
                             }
                             restoredEntries++
                         }
@@ -152,13 +189,28 @@ class BackupManager(
                         }
                         DatabaseBackup.removeSidecars(stagedDatabase)
                     }
+                    if (ContextPruningBackup.hasStagedPolicies(payload)) {
+                        try {
+                            val owners = if (stagedDatabase.exists()) DatabaseBackup.conversationOwners(context, stagedDatabase)
+                                else DatabaseBackup.conversationOwners(database.openHelper.readableDatabase)
+                            ContextPruningBackup.validateOwnership(payload, owners)
+                        } catch (failure: Exception) {
+                            throw IllegalArgumentException(OrbisLocalToolBackup.publicError(failure.message)
+                                ?: "上下文清理标记归属校验失败；原数据未更改")
+                        }
+                    }
 
                     val settingsFile = File(staging, "settings.json")
                     if (settingsFile.exists()) {
-                        val settings = json.decodeFromString<Settings>(SettingsJsonMigrator.migrate(settingsFile.readText()))
+                        val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                        val text = java.io.InputStreamReader(settingsFile.inputStream(), decoder).use { it.readText() }
+                        val settings = json.decodeFromString<Settings>(SettingsJsonMigrator.migrate(text))
                         require(!settings.init) { "Backup contains uninitialized settings" }
                         // Persist the migrated value once, including generated IDs, for restart/retry consistency.
-                        PendingRestore.writeDurably(settingsFile, json.encodeToString(settings))
+                        val migrated = json.encodeToString(settings)
+                        ArchiveCapacity.requireSize(migrated.toByteArray(Charsets.UTF_8).size.toLong(), NativeBackupBudget.MAX_SETTINGS_BYTES)
+                        PendingRestore.writeDurably(settingsFile, migrated)
                     }
                     currentCoroutineContext().ensureActive()
                     restore.publish(staging)
@@ -177,9 +229,14 @@ class BackupManager(
         return true
     }
 
-    private fun addFile(zip: ZipOutputStream, file: File, name: String) {
+    private fun addFile(zip: ZipOutputStream, file: File, name: String, checkCancelled: () -> Unit) {
+        val expected = file.length()
         zip.putNextEntry(ZipEntry(name))
-        file.inputStream().use { it.copyTo(zip) }
+        val copied = file.inputStream().use {
+            me.rerere.rikkahub.data.sync.importer.RikkaChatArchive.copyLimited(it, zip,
+                minOf(expected, NativeBackupBudget.entryLimit(name)), checkCancelled)
+        }
+        require(copied == expected) { "备份期间源文件发生变化；请停止编辑后重新导出" }
         zip.closeEntry()
     }
 
@@ -188,6 +245,13 @@ class BackupManager(
             root = File(context.noBackupFilesDir, "backup-restore"),
             databaseFile = context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME),
             filesDir = context.filesDir,
+            validateBeforeJournal = { payload ->
+                if (ContextPruningBackup.hasStagedPolicies(payload)) {
+                    val staged = File(payload, "database/${SQLiteConfiguration.DATABASE_NAME}")
+                    val selected = if (staged.exists()) staged else context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME)
+                    ContextPruningBackup.validateOwnership(payload, DatabaseBackup.conversationOwners(context, selected))
+                }
+            },
         )
 
         /** Must finish before Koin, Room, SettingsStore or any background consumers are initialized. */

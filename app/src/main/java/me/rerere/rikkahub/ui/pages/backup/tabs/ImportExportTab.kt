@@ -32,10 +32,15 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.sync.importer.RikkaChatArchive
+import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
+import me.rerere.rikkahub.data.sync.importer.RikkaPartialImportException
+import me.rerere.rikkahub.data.sync.importer.ChatboxPartialImportException
 import me.rerere.rikkahub.ui.pages.backup.BackupVM
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 import java.io.File
@@ -75,7 +80,10 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
                     val temp = File.createTempFile("orbis-import-", ".zip", context.cacheDir)
                     try {
                         requireNotNull(context.contentResolver.openInputStream(uri)).use { input ->
-                            temp.outputStream().use { output -> RikkaChatArchive.copyLimited(input, output, RikkaChatArchive.MAX_ARCHIVE_BYTES) }
+                            val coroutine = currentCoroutineContext()
+                            temp.outputStream().use { output -> RikkaChatArchive.copyLimited(input, output,
+                                RikkaChatArchive.MAX_ARCHIVE_BYTES, { coroutine.ensureActive() },
+                                { count -> ArchiveCapacity.requireSpace(context.cacheDir.usableSpace, count.toLong()) }) }
                         }
                         when (action) {
                             "rikka" -> vm.importRikkaChats(temp).let {
@@ -88,7 +96,8 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
                 }
                 if (action == "local") onShowRestartDialog() else result = summary
             } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { result = "导入未完成：${e.message ?: "请检查备份格式"}" }
+            } catch (e: Exception) { result = if (e is RikkaPartialImportException || e is ChatboxPartialImportException) e.message
+                else "导入未完成：${ArchiveCapacity.publicError(e)}" }
             finally { busy = false }
         }
     }
@@ -114,6 +123,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
             Text("导入聊天是追加；恢复 Orbis 备份是替换。两件事分开做。", color = OrbisTheme.colors.mutedInk, fontSize = 12.sp)
         }
         if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在处理，请稍候…") }
+        item { ConversationRescueEntry(!busy && !deepSeekState.busy && !operitState.busy && !kelivoState.busy && !polarisState.busy) }
         item { BackupCard("Operit 聊天记录", "支持 Operit v2 JSON 导出。先预览再选择会话，只追加当前选中的回答，内部摘要会跳过并提示；不导入模型设置、人格、权限、工作区或附件实体。", !busy && !operitState.busy, "选择 Operit JSON") {
             openOperit.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }

@@ -36,7 +36,9 @@ data class DeepSeekImportResult(
 )
 data class DeepSeekImportProgress(val total: Int, val completed: Int, val result: DeepSeekImportResult)
 class DeepSeekImportCancelledException(val partialResult: DeepSeekImportResult) : CancellationException("聊天导入已取消；已完成的会话保留")
-class DeepSeekImportException(val partialResult: DeepSeekImportResult) : IllegalArgumentException("聊天导入未完成；已完成的会话保留，现有聊天未覆盖")
+class DeepSeekImportException(val partialResult: DeepSeekImportResult, val publicDetail: String? = null,
+    val failureReason: ArchiveFailure? = null) :
+    IllegalArgumentException("聊天导入未完成；已完成的会话保留，现有聊天未覆盖")
 
 internal interface DeepSeekImportSink {
     suspend fun exists(id: Uuid): Boolean
@@ -84,6 +86,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                             val id = deepSeekImportId("conversation", source.sourceId, leaf)
                             if (sink.exists(id)) result = result.copy(skipped = result.skipped + 1)
                             else {
+                                ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, ArchiveCapacity.MAX_WINDOW_CHARS.toLong())
                                 val converted = try { convert(source, leaf, assistantId, checkCancelled) }
                                 catch (_: DeepSeekMessageTooLarge) {
                                     result = result.copy(failed = result.failed + 1, failures = result.failures +
@@ -92,6 +95,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                                 }
                                 if (converted != null) {
                                     checkCancelled()
+                                    ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, converted.serializedBytes * 2)
                                     // Once a single-chat commit starts, finish it and account for it together.
                                     // Cancellation before/after this boundary never reports a committed chat as absent.
                                     withContext(NonCancellable) {
@@ -112,7 +116,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                 }
             }
         } catch (_: CancellationException) { throw DeepSeekImportCancelledException(result) }
-        catch (_: Exception) { throw DeepSeekImportException(result) }
+        catch (failure: Exception) { throw DeepSeekImportException(result, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure)) }
     }
 
     companion object {
@@ -138,10 +142,11 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
             return digest.digest().joinToString("") { "%02x".format(it) }
         }
 
-        internal data class Converted(val conversation: Conversation, val attachmentReferences: Int)
+        internal data class Converted(val conversation: Conversation, val attachmentReferences: Int, val serializedBytes: Long = 0)
         internal fun convert(source: DeepSeekConversation, leaf: String, assistantId: Uuid,
             checkCancelled: () -> Unit = {}): Converted {
             var attachments = 0
+            var serializedBytes = 0L
             val nodes = source.pathTo(leaf, checkCancelled).map { node ->
                 checkCancelled()
                 val message = checkNotNull(node.message)
@@ -182,13 +187,16 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                 val ui = UIMessage(id = deepSeekImportId("message", source.sourceId, leaf, node.sourceId),
                     role = message.role, parts = parts, createdAt = time.toLocalDateTime(TimeZone.currentSystemDefault()),
                     finishedAt = time.toLocalDateTime(TimeZone.currentSystemDefault()))
-                if (JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size > MAX_NODE_JSON_BYTES)
+                val encodedBytes = JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size
+                if (encodedBytes > MAX_NODE_JSON_BYTES)
                     throw DeepSeekMessageTooLarge()
+                serializedBytes += encodedBytes
+                if (serializedBytes > ArchiveCapacity.MAX_WINDOW_CHARS) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
                 MessageNode(id = deepSeekImportId("node", source.sourceId, leaf, node.sourceId), messages = listOf(ui))
             }
             return Converted(Conversation(id = deepSeekImportId("conversation", source.sourceId, leaf),
                 assistantId = assistantId, title = source.title, createAt = source.createdAt, updateAt = source.updatedAt,
-                messageNodes = nodes), attachments)
+                messageNodes = nodes), attachments, serializedBytes)
         }
     }
     private class DeepSeekMessageTooLarge : IllegalArgumentException()

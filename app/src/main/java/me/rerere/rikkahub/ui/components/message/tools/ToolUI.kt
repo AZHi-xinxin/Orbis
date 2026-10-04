@@ -27,6 +27,8 @@ import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName
+import me.rerere.rikkahub.data.orbis.privateroom.PRIVATE_ROOM_CONTENT_HIDDEN
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.FormItem
@@ -132,6 +134,10 @@ fun DefaultToolPreview(
     context: ToolUIContext,
     headerActions: (@Composable () -> Unit)? = null,
 ) {
+    if (isPrivateRoomToolName(context.tool.toolName)) {
+        Text(PRIVATE_ROOM_CONTENT_HIDDEN, modifier = Modifier.padding(16.dp))
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxHeight(0.8f)

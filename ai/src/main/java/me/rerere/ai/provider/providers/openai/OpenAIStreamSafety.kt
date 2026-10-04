@@ -72,10 +72,15 @@ private fun hasRecognizedProviderErrorText(root: JsonElement): Boolean {
 internal class OpenAIStreamListener(
     private val decoder: StreamChunkDecoder,
     private val sendChunks: (List<StreamChunk>) -> Unit,
+    private val observeResponse: (Response) -> Unit = {},
     private val closeStream: (Throwable?) -> Unit,
 ) : EventSourceListener() {
     private var hasOutput = false
     private var closed = false
+
+    override fun onOpen(eventSource: EventSource, response: Response) {
+        if (!closed) observeResponse(response)
+    }
 
     override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
         if (closed) return

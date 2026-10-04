@@ -238,7 +238,8 @@ class OrbisSentinels private constructor(private val context: Context) {
                     if (!state.enabled || !rule.enabled || rule.pendingBlocked || rule.pendingEventId != eventId ||
                         rule.pendingMasterGeneration != state.masterGeneration) return@withLock
                     if (!observation.ok || observation.content.isNullOrBlank()) {
-                        rules.abandonPending(rule.id, eventId, System.currentTimeMillis(), "screen_observation_unavailable")
+                        rules.abandonPending(rule.id, eventId, System.currentTimeMillis(),
+                            screenObservationFailureReason(observation.errorCode, observation.ok))
                         return@withLock
                     }
                     val facts = "[实际屏幕观察时间：${java.time.Instant.ofEpochMilli(observation.observedAtMs)}]\n${observation.content}"

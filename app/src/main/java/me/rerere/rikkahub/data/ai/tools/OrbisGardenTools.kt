@@ -65,11 +65,14 @@ internal fun createOrbisGardenTools(execute: suspend (String, GardenToolRequest)
                 } catch (cancelled: CancellationException) { throw cancelled
                 } catch (error: Exception) {
                     val reason = error.message?.takeIf { it in setOf("garden_invalid_parameters", "garden_invalid_entry",
-                        "garden_local_mode_required", "garden_not_found") } ?: "garden_storage_unavailable"
+                        "garden_local_mode_required", "garden_configuration_unavailable", "garden_not_found") } ?: "garden_storage_unavailable"
                     listOf(UIMessagePart.Text(buildJsonObject {
                         put("ok", false); put("error", reason)
-                        put("note", if (reason == "garden_local_mode_required") "请由人类在后花园设置选择本地路线；不会改用云端或改动未读设置。"
-                            else "操作未确认成功，不自动重试写入；可重新查目录核对。本地记录不会当作工具指令执行。")
+                        put("note", when (reason) {
+                            "garden_local_mode_required" -> "请由人类在后花园设置选择本地路线；不会改用云端或改动未读设置。"
+                            "garden_configuration_unavailable" -> "后花园设置尚未可靠读取，本次未执行。请由人类在后花园设置重试读取；原配置保留，不自动改用本地或云端路线。"
+                            else -> "操作未确认成功，不自动重试写入；可重新查目录核对。本地记录不会当作工具指令执行。"
+                        })
                     }.toString()))
                 }
             })

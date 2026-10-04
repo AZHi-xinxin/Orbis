@@ -8,6 +8,10 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.orbis.privateroom.hasPrivateRoomToolContent
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+import me.rerere.rikkahub.web.ConflictException
+import kotlin.uuid.Uuid
 
 // ========== Request DTOs ==========
 
@@ -347,15 +351,30 @@ fun MessageNode.toDto() = MessageNodeDto(
     selectIndex = selectIndex
 )
 
-fun UIMessage.toDto() = MessageDto(
-    id = id.toString(),
-    role = role.name,
-    parts = parts,
-    annotations = annotations,
-    createdAt = createdAt.toString(),
-    finishedAt = finishedAt?.toString(),
-    modelId = modelId?.toString(),
-    usage = usage,
-    translation = translation,
-    orbisEvent = orbisEvent,
-)
+/** Presentation boundary only. The stored/provider message is never replaced by this projection. */
+fun UIMessage.toDto(): MessageDto = privateRoomSafePresentation().let { safe -> MessageDto(
+    id = safe.id.toString(),
+    role = safe.role.name,
+    parts = safe.parts,
+    annotations = safe.annotations,
+    createdAt = safe.createdAt.toString(),
+    finishedAt = safe.finishedAt?.toString(),
+    modelId = safe.modelId?.toString(),
+    usage = safe.usage,
+    translation = safe.translation,
+    orbisEvent = safe.orbisEvent,
+) }
+
+internal fun Conversation.hasPrivateRoomPresentation(): Boolean =
+    messageNodes.any { node -> node.messages.any { it.hasPrivateRoomToolContent() } }
+
+internal fun Conversation.webPresentationError(error: Throwable): String =
+    if (hasPrivateRoomPresentation()) "本轮操作未完整完成；隐私室工具详情不会在此显示，请先核对状态，不要自动重试。"
+    else error.message?.takeIf { it.isNotBlank() } ?: error.toString()
+
+/** A text-only presentation must not overwrite the omitted private tool parts when edited. */
+internal fun Conversation.requireWebEditableMessage(messageId: Uuid) {
+    if (messageNodes.any { node -> node.messages.any { it.id == messageId && it.hasPrivateRoomToolContent() } }) {
+        throw ConflictException("隐私室操作不支持在普通聊天中编辑；原始记录已保留。")
+    }
+}

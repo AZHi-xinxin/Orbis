@@ -12,6 +12,15 @@ import org.junit.Test
 
 /** In-memory synthetic storage only; never starts observation, delivery, or Android services. */
 class OrbisSentinelRuleStoreTest {
+    @Test fun `observation failure reason remains valid and survives storage restart`() {
+        val disk = Storage(); val store = disk.open()
+        store.create(rule())
+        store.reserveFire("rule-1", "observation-test", 200)
+        val reason = screenObservationFailureReason("accessibility_permission_required")
+        store.abandonPending("rule-1", "observation-test", 300, reason)
+        assertEquals(reason, disk.open().get("rule-1")!!.lastError)
+    }
+
     @Test fun `pending reservation keeps its original generation across pause resume and restart`() {
         val disk = Storage(); val store = disk.open()
         store.create(rule())

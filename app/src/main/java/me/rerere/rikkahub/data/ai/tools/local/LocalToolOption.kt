@@ -56,4 +56,12 @@ sealed class LocalToolOption {
     @Serializable
     @SerialName("orbis_local_soup")
     data object LocalSoup : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_local_gallery")
+    data object LocalGallery : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_context_pruning")
+    data object ContextPruning : LocalToolOption()
 }

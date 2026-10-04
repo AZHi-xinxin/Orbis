@@ -34,16 +34,13 @@ class S3Sync(
         val client = getS3Client(config)
         val key = "rikkahub_backups/${file.name}"
 
-        client.putObject(
-            key = key,
-            file = file,
-            contentType = "application/zip"
-        ).getOrThrow()
-
-        Log.i(TAG, "backupToS3: Uploaded ${file.name} (${file.length().fileSizeToString()})")
-
-        // Clean up temp file
-        file.delete()
+        try {
+            client.putObject(key = key, file = file, contentType = "application/zip").getOrThrow()
+            Log.i(TAG, "backupToS3: Uploaded ${file.name} (${file.length().fileSizeToString()})")
+        } finally {
+            // Failed/cancelled uploads must not accumulate multi-gigabyte private snapshots.
+            file.delete()
+        }
     }
 
     suspend fun listBackupFiles(config: S3Config): List<S3BackupItem> = withContext(Dispatchers.IO) {
@@ -71,6 +68,9 @@ class S3Sync(
         val backupFile = File.createTempFile("restore-", ".zip", context.cacheDir)
 
         try {
+            me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.requireSize(item.size,
+                me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.MAX_ZIP_BYTES, allowEmpty = true)
+            me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.requireSpace(backupFile.parentFile!!.usableSpace, item.size)
             // Download backup file directly to file to avoid OOM
             Log.i(TAG, "restoreFromS3: Downloading ${item.displayName}")
             client.downloadObjectToFile(item.key, backupFile).getOrThrow()

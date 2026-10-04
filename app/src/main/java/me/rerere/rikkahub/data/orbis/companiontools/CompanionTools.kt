@@ -50,7 +50,8 @@ internal fun buildCompanionTools(
     readNotification: (suspend (String) -> OrbisNotificationSpeechReceipt)? = null,
     imagePart: suspend (CompanionToolImage) -> UIMessagePart.Image = { error("Image attachment writer is unavailable") },
     execute: suspend (String, String, String?) -> CompanionToolResult,
-): List<Tool> = catalog.filter { enabledNames == null || it.name in enabledNames }.map { descriptor ->
+): List<Tool> = catalog.filter { enabledNames == null || it.name in enabledNames ||
+    (it.name == "get_runtime_status" && "get_l_service_status" in enabledNames) }.map { descriptor ->
     val schema = Json.parseToJsonElement(descriptor.inputSchemaJson).jsonObject
     val nativeName = "companion_${descriptor.name}"
     val authorization = authorizationRevision(descriptor.name)
@@ -61,7 +62,7 @@ internal fun buildCompanionTools(
         name = nativeName,
         description = descriptor.description + "\nOrbis 进程内原生陪伴工具，无需 MCP 地址。" +
             (when {
-                descriptor.name == "get_l_service_status" -> "只读运行诊断，服务停止也可用；不会因此启动服务。"
+                descriptor.name == "get_runtime_status" -> "只读运行诊断，服务停止也可用；不会因此启动服务。"
                 descriptor.name == "get_alarms" -> "只读本应用闹钟台账与回执，服务停止也可用；无需执行确认，不会启动服务或触发铃声。"
                 descriptor.requiresService -> "需要陪伴服务及对应系统权限；会有限恢复原先已启用的服务，不会打开用户关闭的服务或自动授权。"
                 else -> "复用当前 Orbis 的离线记忆库，不依赖陪伴服务或网络，不是 ST 长期记忆。"

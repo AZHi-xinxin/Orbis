@@ -2,11 +2,13 @@ package me.rerere.workspace
 
 import com.sun.net.httpserver.HttpServer
 import org.junit.Assert.*
+import org.junit.Assume.assumeNoException
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.InetSocketAddress
 import java.nio.file.Files
+import java.nio.file.FileSystemException
 import java.util.zip.GZIPOutputStream
 
 class ExampleUnitTest {
@@ -59,6 +61,7 @@ class ExampleUnitTest {
 
     @Test
     fun rootfsInstallerDownloadsAndExtractsTarGz() {
+        requireHostSymbolicLinks()
         val baseDir = Files.createTempDirectory("workspace-manager-test").toFile()
         val manager = WorkspaceManager(baseDir)
         val installer = RootfsInstaller(manager)
@@ -89,7 +92,7 @@ class ExampleUnitTest {
     @Test
     fun commandRunsInsideWorkspaceFilesDirectory() {
         val baseDir = Files.createTempDirectory("workspace-command-test").toFile()
-        val manager = WorkspaceManager(baseDir)
+        val manager = WorkspaceManager(baseDir, shellRunner = workspaceTestHostShell())
         val root = "test-workspace"
         manager.ensureWorkspace(root)
 
@@ -103,7 +106,7 @@ class ExampleUnitTest {
     @Test
     fun commandReceivesStdin() {
         val baseDir = Files.createTempDirectory("workspace-stdin-test").toFile()
-        val manager = WorkspaceManager(baseDir)
+        val manager = WorkspaceManager(baseDir, shellRunner = workspaceTestHostShell())
         val root = "test-workspace"
         manager.ensureWorkspace(root)
 
@@ -120,7 +123,7 @@ class ExampleUnitTest {
     @Test
     fun commandWithoutStdinGetsImmediateEof() {
         val baseDir = Files.createTempDirectory("workspace-stdin-eof-test").toFile()
-        val manager = WorkspaceManager(baseDir)
+        val manager = WorkspaceManager(baseDir, shellRunner = workspaceTestHostShell())
         val root = "test-workspace"
         manager.ensureWorkspace(root)
 
@@ -155,7 +158,7 @@ class ExampleUnitTest {
     @Test
     fun commandOutputIsTruncatedAtLimit() {
         val baseDir = Files.createTempDirectory("workspace-truncate-test").toFile()
-        val manager = WorkspaceManager(baseDir)
+        val manager = WorkspaceManager(baseDir, shellRunner = workspaceTestHostShell())
         val root = "test-workspace"
         manager.ensureWorkspace(root)
 
@@ -164,9 +167,12 @@ class ExampleUnitTest {
             "awk 'BEGIN { for (i = 0; i < 300000; i++) printf \"a\" }'",
         )
 
+        println("Synthetic workspace output: exit=${result.exitCode}, stdoutChars=${result.stdout.length}, " +
+            "truncated=${result.truncated}, stderrChars=${result.stderr.length}")
         assertEquals(0, result.exitCode)
         assertTrue(result.truncated)
         assertEquals(MAX_OUTPUT_CHARS, result.stdout.length)
+        assertTrue(result.stdout.all { it == 'a' })
     }
 
     @Test
@@ -218,6 +224,32 @@ class ExampleUnitTest {
             gzip.write(ByteArray(1024))
         }
         return output.toByteArray()
+    }
+
+    private fun requireHostSymbolicLinks() {
+        if (File.separatorChar != '\\') return
+        // Probe host capability separately. Never catch a failure from the real
+        // installer/assertions below or turn a production regression into a skip.
+        val directory = Files.createTempDirectory("workspace-symlink-capability")
+        val target = directory.resolve("target.txt")
+        val link = directory.resolve("link.txt")
+        try {
+            Files.write(target, byteArrayOf(1))
+            try {
+                Files.createSymbolicLink(link, target.fileName)
+            } catch (unavailable: FileSystemException) {
+                assumeNoException(
+                    "Windows host lacks real symlink capability; requires RootfsInstallerDeviceTest PASS, not a host PASS",
+                    unavailable,
+                )
+            }
+            assertTrue(Files.isSymbolicLink(link))
+            assertEquals(target.fileName, Files.readSymbolicLink(link))
+        } finally {
+            Files.deleteIfExists(link)
+            Files.deleteIfExists(target)
+            Files.deleteIfExists(directory)
+        }
     }
 
     private fun tarHeader(entry: TarTestEntry): ByteArray {

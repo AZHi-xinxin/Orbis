@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.rikkahub.data.orbis.privateroom.hasPrivateRoomToolContent
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -81,6 +84,8 @@ fun ColumnScope.ChatMessageActionButtons(
     onTranslate: ((UIMessage, Locale) -> Unit)? = null,
     onClearTranslation: (UIMessage) -> Unit = {},
 ) {
+    val privateOperation = message.hasPrivateRoomToolContent()
+    val message = message.privateRoomSafePresentation()
     val context = LocalContext.current
     val settings = LocalSettings.current
     var isPendingDelete by remember { mutableStateOf(false) }
@@ -164,7 +169,7 @@ fun ColumnScope.ChatMessageActionButtons(
             )
 
             // Translation button
-            if (onTranslate != null) {
+            if (onTranslate != null && !privateOperation) {
                 Icon(
                     imageVector = HugeIcons.Translate,
                     contentDescription = stringResource(R.string.translate),
@@ -221,7 +226,7 @@ fun ColumnScope.ChatMessageActionButtons(
     }
 
     // Translation dialog
-    if (showTranslateDialog && onTranslate != null) {
+    if (showTranslateDialog && onTranslate != null && !privateOperation) {
         LanguageSelectionDialog(
             onLanguageSelected = { language ->
                 showTranslateDialog = false
@@ -297,6 +302,8 @@ fun ChatMessageActionsSheet(
     onWebViewPreview: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
+    val privateOperation = message.hasPrivateRoomToolContent()
+    val message = message.privateRoomSafePresentation()
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden, enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
@@ -374,8 +381,8 @@ fun ChatMessageActionsSheet(
                 }
             }
 
-            // Edit
-            Card(
+            // Never write a public projection back over the original private tool records.
+            if (!privateOperation) Card(
                 onClick = {
                     onDismissRequest()
                     onEdit()

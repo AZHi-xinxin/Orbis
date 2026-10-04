@@ -3,8 +3,10 @@ package me.rerere.rikkahub.ui.pages.orbis
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,12 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceArchiveStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.voiceCallTranscriptView
+import me.rerere.rikkahub.data.orbis.voice.archiveAuthorLabel
 import me.rerere.rikkahub.service.ChatService
 import org.koin.compose.koinInject
 
@@ -38,6 +43,7 @@ import org.koin.compose.koinInject
 internal fun OrbisCallTimelineCard(
     callId: String, conversationId: String, modifier: Modifier = Modifier,
     sourceFallback: (@Composable () -> Unit)? = null,
+    sourceDetails: (@Composable () -> Unit)? = null,
 ) {
     val service = koinInject<ChatService>()
     val repository = service.voiceCalls
@@ -47,6 +53,7 @@ internal fun OrbisCallTimelineCard(
     var showHistory by rememberSaveable(callId) { mutableStateOf(false) }
     var confirmRetry by rememberSaveable(callId) { mutableStateOf(false) }
     var retryRequested by remember(callId) { mutableStateOf(false) }
+    var showSourceDetails by rememberSaveable(callId) { mutableStateOf(false) }
     LaunchedEffect(callId, conversationId, revision) {
         try {
             record = repository.get(callId)?.takeIf { it.conversationId == conversationId }
@@ -56,13 +63,29 @@ internal fun OrbisCallTimelineCard(
         catch (_: Exception) { record = null; readFailed = true }
     }
     OrbisCallTimelineCardContent(record, readFailed, retryRequested, modifier,
-        onDetails = { showHistory = true }, onRetry = { confirmRetry = true }, sourceFallback = sourceFallback)
+        onDetails = { showHistory = true }, onRetry = { confirmRetry = true }, sourceFallback = sourceFallback,
+        onSourceDetails = sourceDetails?.let { { showSourceDetails = true } })
+    if (showSourceDetails && sourceDetails != null) Dialog(
+        onDismissRequest = { showSourceDetails = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(Modifier.fillMaxSize(.95f), shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("本次通话的原始消息与工具", style = MaterialTheme.typography.titleSmall)
+                    TextButton(onClick = { showSourceDetails = false }) { Text("关闭") }
+                }
+                Text("保留原消息与工具结果；打开这里不会重新执行工具。", style = MaterialTheme.typography.bodySmall)
+                Box(Modifier.weight(1f)) { sourceDetails() }
+            }
+        }
+    }
     if (showHistory && record != null) OrbisVoiceCallHistorySheet(repository,
         assistantId = record?.assistantId, initialCallId = callId,
         onRetry = service::retryVoiceCallArchiveIsolated, onDismiss = { showHistory = false })
     if (confirmRetry) AlertDialog(onDismissRequest = { confirmRetry = false },
         title = { Text("重新归档这一次通话？") },
-        text = { Text("仅把本次已保存的通话文字交给设置中的归档模型；可能产生模型费用。不会恢复旧队列、执行工具或打开麦克风。没有配置模型时，原文继续保留。") },
+        text = { Text("优先请当前助手本人总结本次已保存的原文；失败时才用已配置的外部兜底。异常结束时，本助手10秒没有开始有效总结才转兜底。可能产生模型费用，但不会恢复旧队列、执行工具或打开麦克风；未完成的原文始终保留，也可请本助手之后补写。") },
         confirmButton = { TextButton(enabled = !retryRequested, onClick = {
             confirmRetry = false; retryRequested = true; service.retryVoiceCallArchiveIsolated(callId)
         }) { Text("确认归档") } },
@@ -75,16 +98,19 @@ internal fun OrbisCallTimelineCardContent(
     record: OrbisVoiceCallRecord?, readFailed: Boolean = false, retryRequested: Boolean = false,
     modifier: Modifier = Modifier, onDetails: () -> Unit = {}, onRetry: () -> Unit = {},
     sourceFallback: (@Composable () -> Unit)? = null,
+    onSourceDetails: (() -> Unit)? = null,
 ) {
     val transcriptView = remember(record) { record?.let(::voiceCallTranscriptView) }
     if ((readFailed || transcriptView?.sourceUnavailable == true) && sourceFallback != null) {
         Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Surface(Modifier.fillMaxWidth().testTag("orbis-call-timeline-source-fallback"),
                 shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-                Text("独立通话记录暂不可读取，以下显示聊天中保留的逐条原文；不会自动归档或恢复队列。",
+                Text("独立通话记录暂不可读取，聊天中的原始消息仍保留；可查看原始消息与工具，不会自动归档或恢复队列。",
                     modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
             }
             sourceFallback()
+            if (onSourceDetails != null) TextButton(onClick = onSourceDetails,
+                modifier = Modifier.testTag("orbis-call-source-details")) { Text("原始消息与工具") }
         }
         return
     }
@@ -119,6 +145,7 @@ internal fun OrbisCallTimelineCardContent(
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (expanded && record != null) {
+                if (record.summary != null) Text(record.archiveAuthorLabel(), style = MaterialTheme.typography.labelSmall)
                 val excerpt = record.summary?.takeIf { it.isNotBlank() } ?: transcriptView?.entries.orEmpty()
                     .filter { it.role.equals("user", true) || it.role.equals("assistant", true) }
                     .let { if (it.size <= 2) it else listOf(it.first(), it.last()) }
@@ -134,6 +161,8 @@ internal fun OrbisCallTimelineCardContent(
                     TextButton(enabled = !retryRequested, onClick = onRetry) { Text(if (retryRequested) "已请求归档…" else "重新归档") }
                 }
             }
+            if (onSourceDetails != null) TextButton(onClick = onSourceDetails,
+                modifier = Modifier.testTag("orbis-call-source-details")) { Text("原始消息与工具") }
         }
     }
 }

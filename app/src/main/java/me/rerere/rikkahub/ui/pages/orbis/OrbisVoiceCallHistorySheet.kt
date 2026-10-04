@@ -53,6 +53,7 @@ import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.archiveErrorForDisplay
+import me.rerere.rikkahub.data.orbis.voice.archiveAuthorLabel
 import me.rerere.rikkahub.data.orbis.voice.voiceCallTranscriptView
 
 /** Local archive browsing only. Opening text never sends it to a conversation or model. */
@@ -234,7 +235,7 @@ private fun VoiceCallHistoryDetail(
         item {
             HorizontalDivider(color = colors.border)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !showActual, onClick = { showActual = false }, label = { Text("归档模型整理") })
+                FilterChip(selected = !showActual, onClick = { showActual = false }, label = { Text("整理后的记录") })
                 FilterChip(selected = showActual, onClick = { showActual = true }, label = { Text("实际逐条记录") })
             }
         }
@@ -257,8 +258,9 @@ private fun VoiceCallHistoryDetail(
                 }
             }
         } else item {
+            if (record.summary != null) Text(record.archiveAuthorLabel(), color = colors.mutedInk, fontSize = 11.sp)
             SelectionContainer {
-                Text(record.modelTranscript?.takeIf { it.isNotBlank() } ?: "归档模型尚未完成整理，可切换查看实际逐条记录。",
+                Text(record.modelTranscript?.takeIf { it.isNotBlank() } ?: "本助手尚未完成整理，可切换查看实际逐条记录；之后也可请本助手通过通话工具补写。",
                     color = colors.ink, fontSize = 13.sp, lineHeight = 21.sp)
             }
         }
@@ -266,7 +268,7 @@ private fun VoiceCallHistoryDetail(
     if (confirmArchive) AlertDialog(
         onDismissRequest = { confirmArchive = false },
         title = { Text("仅整理这一次通话？") },
-        text = { Text("只发送已保存的本次通话文字，由设置中的归档模型生成摘要；主归档模型失败时可使用你配置的备用模型，可能产生模型费用。不会继续旧队列、调用工具或重开麦克风；都失败时保留原文与重试入口。可在系统设置 → 模型设置中配置。") },
+        text = { Text("优先请当前助手本人整理本次已保存的通话文字，保持其身份且不提供工具。异常结束时若10秒内没有开始有效总结，或本人整理失败，才使用你明确配置的外部兜底模型；一旦开始有效内容，不以10秒强行截断总结。可能产生模型费用。不会继续旧队列、执行历史工具或开麦；都未完成时保留原文，可稍后让本助手补写。") },
         confirmButton = { TextButton(onClick = { confirmArchive = false; onRetry() }) { Text("确认整理") } },
         dismissButton = { TextButton(onClick = { confirmArchive = false }) { Text("取消") } },
     )

@@ -5,6 +5,8 @@
         android:label="Orbis Dev"
         android:allowBackup="false"
         tools:replace="android:label,android:allowBackup">
+        <activity android:name=".ui.activity.EmergencyBackupActivity"
+            android:label="Orbis Dev 紧急备份" tools:replace="android:label" />
         <!-- Do not compete with the installed RikkaHub's public deep-link scheme. -->
         <activity android:name=".ui.activity.ShortcutHandlerActivity"
             android:exported="false" tools:replace="android:exported">

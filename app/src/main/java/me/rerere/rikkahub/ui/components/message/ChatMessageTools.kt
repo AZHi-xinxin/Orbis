@@ -52,6 +52,8 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.hostToolFailure
+import me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName
+import me.rerere.rikkahub.data.orbis.privateroom.PRIVATE_ROOM_CONTENT_HIDDEN
 import me.rerere.rikkahub.data.ai.approval.redactApprovalJson
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
@@ -102,6 +104,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     initiallyExpanded: Boolean = true,
     onDeleteRecord: (() -> Unit)? = null,
 ) {
+    // Do not parse partial JSON or inspect failure text before this privacy boundary.
+    if (isPrivateRoomToolName(tool.toolName)) {
+        Text(PRIVATE_ROOM_CONTENT_HIDDEN, style = MaterialTheme.typography.bodySmall)
+        return
+    }
     val hostFailure = tool.hostToolFailure()
     // Host failures must remain visible even for an interrupted ask_user.
     if (tool.toolName == ASK_USER_TOOL_NAME && hostFailure == null) {

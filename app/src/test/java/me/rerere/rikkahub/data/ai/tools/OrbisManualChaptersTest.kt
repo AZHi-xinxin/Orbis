@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -110,9 +111,34 @@ class OrbisManualChaptersTest {
         assertTrue(limits.getValue("chat_import_sources").jsonPrimitive.content.contains("无需强制开启密码"))
     }
 
+    @Test fun `import guide documents current disk and stream limits without promising unlimited migration`() {
+        val text = guide("imports")
+        val zipLimit = "ZIP≤${ArchiveCapacity.MAX_ZIP_BYTES / ArchiveCapacity.GIB}GiB"
+        listOf("DeepSeek 官方 $zipLimit", "RikkaHub $zipLimit", "Kelivo 安卓 v2 $zipLimit",
+            "北极星 Polaris 备份 $zipLimit",
+            "JSON v2≤${ArchiveCapacity.MAX_STREAM_JSON_BYTES / ArchiveCapacity.GIB}GiB",
+            "展开总量上限为${ArchiveCapacity.MAX_EXPANDED_BYTES / ArchiveCapacity.GIB}GiB",
+            "Codex 原始 rollout JSONL≤64MiB", "单条消息", "单窗口", "设备可用空间检查",
+            "不靠截断原文", "没有无限容量", "不导入群聊、附件实体或应用配置").forEach {
+            assertTrue(it, text.contains(it))
+        }
+        listOf("ZIP≤80MiB", "ZIP≤512MiB", "JSON v2≤64MiB").forEach {
+            assertFalse(it, text.contains(it))
+        }
+    }
+
+    @Test fun `import guide records Operit reasoning fix and protects earlier imported originals`() {
+        val text = guide("imports")
+        listOf("2.6.2 起已修复受支持的 Operit 思考内容导入", "另存修正版副本",
+            "不覆盖已有聊天", "不凭空找回原包没有的内容", "务必保管原件").forEach {
+            assertTrue(it, text.contains(it))
+        }
+        assertFalse(text.contains("Operit 思考内容导入仍待修复"))
+    }
+
     @Test fun `updates and consultation preserve honest unfinished boundaries`() {
         val updates = guide("updates")
-        listOf("versionCode", "不自动卸载", "签名", "先只读核实", "真机功能通过是四回事").forEach { assertTrue(it, updates.contains(it)) }
+        listOf("versionCode", "不自动卸载", "签名", "先只读核实", "真机功能通过是四回事", "真实发布包端到端自更新仍待验收").forEach { assertTrue(it, updates.contains(it)) }
         val consultation = guide("consultation")
         listOf("正在开发，暂未开放", "不自动恢复生成", "不公开内部正文", "不宣称已修好").forEach { assertTrue(it, consultation.contains(it)) }
     }

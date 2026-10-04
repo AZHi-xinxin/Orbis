@@ -27,6 +27,10 @@ data class UIMessage(
     /** Historical usage remains visible after a manual history edit, but is not a current budget anchor. */
     val usageContextInvalidated: Boolean = false,
     val translation: String? = null,
+    /** Hide private tool details and subsequent reasoning, not earlier reasoning, public Text or model input. */
+    val privateRoomContentHidden: Boolean = false,
+    /** Provisional masking of an actual incomplete private tool, never normal streaming reasoning. */
+    val privateRoomPendingPresentation: Boolean = false,
     val orbisEvent: OrbisEventMetadata? = null,
     val orbisUserMessageTime: OrbisUserMessageTime? = null,
     val orbisQuote: OrbisMessageQuote? = null,

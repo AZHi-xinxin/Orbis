@@ -19,6 +19,9 @@ internal object ChatImportStaging {
     private const val MARKER = "orbis-chat-import-v1"
     private val uuid = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
     private val payloadNames = setOf("archive.bin", "kelivo-chat-snapshot.db")
+    // Operit's immutable preview copy lives beside archive.bin. Recognize only our exact
+    // createTempFile naming pattern, never arbitrary JSON files from an unowned directory.
+    private val operitSnapshot = Regex("orbis-operit-[0-9]+\\.json")
 
     class Lease internal constructor(val directory: File, val payload: File,
         private val channel: FileChannel, private val lock: FileLock) : Closeable {
@@ -108,7 +111,8 @@ internal object ChatImportStaging {
         if (payload.exists()) {
             if (!regularDirectory(payload)) return false
             val files = payload.listFiles() ?: return false
-            if (files.any { it.name !in payloadNames || !Files.isRegularFile(it.toPath(), NOFOLLOW_LINKS) }) return false
+            if (files.any { (it.name !in payloadNames && !operitSnapshot.matches(it.name)) ||
+                    !Files.isRegularFile(it.toPath(), NOFOLLOW_LINKS) }) return false
             if (files.any { !it.delete() } || !payload.delete()) return false
         }
         return true

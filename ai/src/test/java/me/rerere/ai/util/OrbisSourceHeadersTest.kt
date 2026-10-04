@@ -27,4 +27,14 @@ class OrbisSourceHeadersTest {
         assertNull(p.copy(orbisConversationId = "a\nb").orbisSourceHeaders()["X-ST-Thread-ID"])
         assertNull(p.copy(model = Model(modelId = "m--auxiliary-no-memory"), orbisConversationId = "valid").orbisSourceHeaders()["X-ST-Thread-ID"])
     }
+    @Test fun eachRequestHasANewHostOwnedIdNotAUserOverride() {
+        val params = TextGenerationParams(Model(), orbisConversationId = "window", customHeaders = listOf(
+            CustomHeader("X-ST-Request-ID", "forged"), CustomHeader("x-st-request-id", "also-forged")))
+        val first = params.orbisSourceHeaders()
+        val second = params.orbisSourceHeaders()
+        assertTrue(first["X-ST-Request-ID"]!!.matches(Regex("[0-9a-f]{32}")))
+        assertEquals(1, first.values("X-ST-Request-ID").size)
+        assertNotEquals(first["X-ST-Request-ID"], second["X-ST-Request-ID"])
+        assertNull(params.copy(orbisConversationId = null).orbisSourceHeaders()["X-ST-Request-ID"])
+    }
 }

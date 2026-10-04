@@ -196,8 +196,8 @@ object CompanionToolCatalog {
             })
         })
         put(JSONObject().apply {
-            put("name", "get_l_service_status")
-            put("description", "Read Little L and accessibility lifecycle diagnostics without exposing secrets")
+            put("name", "get_runtime_status")
+            put("description", "Read Orbis companion and accessibility lifecycle diagnostics without exposing secrets; configured permissions do not prove a screen capture succeeded")
             put("inputSchema", JSONObject().apply { put("type", "object"); put("properties", JSONObject()) })
         })
         put(JSONObject().apply {

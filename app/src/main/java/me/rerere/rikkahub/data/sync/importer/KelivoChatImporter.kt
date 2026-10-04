@@ -17,7 +17,10 @@ import kotlin.uuid.Uuid
 class KelivoChatImporter internal constructor(private val context: Context, private val sink: DeepSeekImportSink) {
     constructor(context: Context, repository: ConversationRepository) : this(context, object : DeepSeekImportSink {
         override suspend fun exists(id: Uuid) = repository.existsConversationById(id)
-        override suspend fun insert(conversation: Conversation) = repository.insertImportedConversations(listOf(conversation)) == 1
+        override suspend fun insert(conversation: Conversation): Boolean {
+            ArchiveCapacity.requireSpace(context.filesDir.usableSpace, 2 * KelivoChatLimits.MAX_WINDOW_BYTES)
+            return repository.insertImportedConversations(listOf(conversation)) == 1
+        }
     })
 
     suspend fun inspect(file: File): KelivoChatPreview = withContext(Dispatchers.IO) {
@@ -27,6 +30,10 @@ class KelivoChatImporter internal constructor(private val context: Context, priv
                 inspectKelivoSource(source, fingerprint) { coroutine.ensureActive() }
             }
         } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: ArchiveReadException) { throw failure }
+        catch (_: java.nio.charset.CharacterCodingException) { throw ArchiveReadException(ArchiveFailure.INVALID_UTF8) }
+        catch (_: java.util.zip.ZipException) { throw ArchiveReadException(ArchiveFailure.CHECKSUM) }
+        catch (_: java.io.IOException) { throw ArchiveReadException(ArchiveFailure.READ_WRITE) }
         catch (_: Exception) { throw IllegalArgumentException("Kelivo 备份不兼容、损坏或超限；目前支持聊天 SQLite v3 的 v2 ZIP，原聊天未更改") }
     }
 
@@ -50,7 +57,7 @@ class KelivoChatImporter internal constructor(private val context: Context, priv
         } catch (cancelled: DeepSeekImportCancelledException) { throw cancelled }
         catch (failed: DeepSeekImportException) { throw failed }
         catch (_: CancellationException) { throw DeepSeekImportCancelledException(result) }
-        catch (_: Exception) { throw DeepSeekImportException(result) }
+        catch (failure: Exception) { throw DeepSeekImportException(result, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure)) }
     }
 
     private suspend fun <T> withSnapshot(file: File, expected: String?, checkCancelled: () -> Unit,

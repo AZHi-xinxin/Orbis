@@ -1,6 +1,7 @@
 package me.rerere.rikkahub
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -53,8 +54,43 @@ const val CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID = "chat_live_update"
 const val WEB_SERVER_NOTIFICATION_CHANNEL_ID = "web_server"
 
 class RikkaHubApp : Application() {
+    private var emergencyBusinessLease: me.rerere.rikkahub.utils.EmergencyProcessGate.Lease? = null
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isRecoveryProcess()) return
+        // This runs before providers, settings, migrations and any automatic event recovery.
+        CrashHandler.install(base)
+        var newlyDetectedCrash = false
+        try {
+            val gate = me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.gate(base)
+            emergencyBusinessLease = gate.tryAcquireBusinessLease()
+            // Even a SharedPreferences read can restore its .bak file. Never read it before the fence.
+            if (emergencyBusinessLease != null) {
+                if (!CrashHandler.hasCrashed(base)) return
+                gate.requestRecovery()
+                newlyDetectedCrash = true
+                emergencyBusinessLease?.close()
+                emergencyBusinessLease = null
+            }
+        } catch (_: Exception) {
+            // Do not initialize data writers if the recovery fence cannot be checked.
+        }
+        if (newlyDetectedCrash) runCatching {
+            base.startActivity(Intent(base, me.rerere.rikkahub.ui.activity.EmergencyBackupActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        // An existing rescue fence may be encountered when DocumentsUI enumerates our workspace
+        // provider. Re-launching singleTask rescue here would cancel its active save picker.
+        // Stay fail-closed without changing the foreground task; the native launcher is available.
+        // Background launch restrictions may hide the page; the independent launcher remains available.
+        android.os.Process.killProcess(android.os.Process.myPid())
+        kotlin.system.exitProcess(0)
+    }
+
     override fun onCreate() {
         super.onCreate()
+        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isRecoveryProcess()) return
         // Restore files and settings before eager Koin singletons or workers can access them.
         try {
             val restored = runBlocking(Dispatchers.IO) {
@@ -78,8 +114,7 @@ class RikkaHubApp : Application() {
         // set cursor window size to 32MB
         DatabaseUtil.setCursorWindowSize(32 * 1024 * 1024)
 
-        // install crash handler
-        CrashHandler.install(this)
+        // CrashHandler and the lifetime backup lease were installed before providers.
         me.rerere.rikkahub.data.orbis.companiontools.AccessibilityHealthMonitor.start(this)
 
         // Init QuickJS native library
@@ -250,6 +285,7 @@ class RikkaHubApp : Application() {
 
     override fun onTerminate() {
         super.onTerminate()
+        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isRecoveryProcess()) return
         get<AppScope>().cancel()
         stopService(Intent(this, WebServerService::class.java))
     }

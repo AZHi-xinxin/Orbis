@@ -41,6 +41,115 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
 
     suspend fun get(id: String): OrbisVoiceCallRecord? = locked { read(id) }
 
+    /** Durable intent before network dispatch. Only an exact predecessor may be superseded. */
+    internal suspend fun claimArchiveAttempt(
+        id: String, assistantId: String, sourceDigest: String, attemptId: String,
+        author: OrbisVoiceArchiveAuthor, modelId: String?, supersedeAttemptId: String? = null,
+    ): OrbisVoiceCallRecord? = locked {
+        validateVoiceCallId(attemptId)
+        require(author != OrbisVoiceArchiveAuthor.ASSISTANT_TOOL) { "voice_archive_invalid_request_author" }
+        require(!modelId.isNullOrBlank() && modelId.length <= 128) { "voice_archive_model_missing" }
+        val before = archiveOwned(id, assistantId)
+        if (before.archiveStatus == OrbisVoiceArchiveStatus.READY) return@locked null
+        requireArchiveSource(before, sourceDigest)
+        if (before.archiveAttemptId == attemptId) {
+            return@locked before.takeIf { it.archiveStatus == OrbisVoiceArchiveStatus.GENERATING &&
+                it.archiveAttemptSourceDigest == sourceDigest && it.archiveAttemptAuthor == author &&
+                it.archiveLastModelId == modelId }
+        }
+        if (supersedeAttemptId != null && (before.archiveAttemptId != supersedeAttemptId ||
+                before.archiveAttemptSourceDigest != sourceDigest)) return@locked null
+        if (before.archiveStatus == OrbisVoiceArchiveStatus.GENERATING && supersedeAttemptId == null) return@locked null
+        val after = before.copy(archiveStatus = OrbisVoiceArchiveStatus.GENERATING,
+            archiveAttemptId = attemptId, archiveAttemptSourceDigest = sourceDigest, archiveAttemptAuthor = author,
+            archiveLastModelId = modelId, archiveRequestCount = Math.addExact(before.archiveRequestCount, 1),
+            archiveError = null, archiveFailureCode = null)
+        validateUpdate(before, after)
+        commit(after)
+    }
+
+    /** Publication is compare-and-swap: neither cancellation-resistant nor late results can win twice. */
+    internal suspend fun completeArchiveAttempt(
+        id: String, assistantId: String, sourceDigest: String, attemptId: String, archive: OrbisVoiceModelArchive,
+    ): OrbisVoiceCallRecord? = locked {
+        val before = archiveOwned(id, assistantId)
+        if (before.archiveAttemptId != attemptId || before.archiveAttemptSourceDigest != sourceDigest) return@locked null
+        if (before.archiveStatus == OrbisVoiceArchiveStatus.READY) return@locked before.takeIf {
+            it.summary == archive.summary && it.modelTranscript == archive.transcript }
+        if (before.archiveStatus != OrbisVoiceArchiveStatus.GENERATING) return@locked null
+        if (voiceArchiveSourceDigest(before) != sourceDigest) return@locked null
+        validateSubmittedArchive(archive)
+        val after = before.copy(archiveStatus = OrbisVoiceArchiveStatus.READY,
+            summary = archive.summary, modelTranscript = archive.transcript,
+            archiveAuthor = checkNotNull(before.archiveAttemptAuthor), archiveReceiptId = null,
+            archiveError = null, archiveFailureCode = null)
+        validateUpdate(before, after)
+        commit(after)
+    }
+
+    /** Failure invalidates just this request; never attach an old failure to a ready/newer archive. */
+    internal suspend fun failArchiveAttempt(
+        id: String, assistantId: String, sourceDigest: String, attemptId: String, failureCode: String,
+    ): OrbisVoiceCallRecord? = locked {
+        require(failureCode in VOICE_ARCHIVE_FAILURE_CODES) { "invalid_voice_archive_failure_code" }
+        val before = archiveOwned(id, assistantId)
+        if (before.archiveStatus != OrbisVoiceArchiveStatus.GENERATING || before.archiveAttemptId != attemptId ||
+            before.archiveAttemptSourceDigest != sourceDigest) return@locked null
+        val sourceMatches = try { voiceArchiveSourceDigest(before) == sourceDigest } catch (_: VoiceArchiveFailure) { false }
+        val code = if (sourceMatches) failureCode else "archive_source_changed"
+        val after = before.copy(archiveStatus = OrbisVoiceArchiveStatus.FAILED,
+            archiveFailureCode = code, archiveError = voiceArchiveFailureMessage(code))
+        validateUpdate(before, after)
+        commit(after)
+    }
+
+    /** No network or chat writes. A trusted current-assistant tool may finish an unfinished archive. */
+    internal suspend fun submitAssistantArchive(
+        id: String, assistantId: String, sourceDigest: String, receiptId: String, archive: OrbisVoiceModelArchive,
+    ): OrbisVoiceCallRecord = locked {
+        validateVoiceCallId(receiptId)
+        validateSubmittedArchive(archive)
+        val before = archiveOwned(id, assistantId)
+        requireArchiveSource(before, sourceDigest)
+        if (before.archiveStatus == OrbisVoiceArchiveStatus.READY) {
+            require(before.archiveAuthor == OrbisVoiceArchiveAuthor.ASSISTANT_TOOL &&
+                before.archiveReceiptId == receiptId && before.archiveAttemptSourceDigest == sourceDigest &&
+                before.summary == archive.summary && before.modelTranscript == archive.transcript) {
+                "voice_call_completed_archive_is_immutable"
+            }
+            return@locked before
+        }
+        check(before.archiveStatus != OrbisVoiceArchiveStatus.GENERATING) { "voice_archive_attempt_busy" }
+        val after = before.copy(archiveStatus = OrbisVoiceArchiveStatus.READY,
+            archiveAttemptId = null, archiveAttemptSourceDigest = sourceDigest, archiveAttemptAuthor = null,
+            archiveAuthor = OrbisVoiceArchiveAuthor.ASSISTANT_TOOL, archiveReceiptId = receiptId,
+            archiveLastModelId = null, summary = archive.summary, modelTranscript = archive.transcript,
+            archiveError = null, archiveFailureCode = null)
+        validateUpdate(before, after)
+        commit(after)
+    }
+
+    private fun archiveOwned(id: String, assistantId: String): OrbisVoiceCallRecord =
+        read(id)?.takeIf { it.assistantId == assistantId } ?: error("voice_call_not_found_or_not_owned")
+
+    private fun requireArchiveSource(record: OrbisVoiceCallRecord, sourceDigest: String) {
+        require(record.status in setOf(OrbisVoiceCallStatus.ENDED, OrbisVoiceCallStatus.INTERRUPTED) &&
+            record.connectedAtMs != null) { "voice_call_not_ended" }
+        require(sourceDigest.matches(Regex("[0-9a-f]{64}")) && voiceArchiveSourceDigest(record) == sourceDigest) {
+            "voice_archive_source_changed"
+        }
+        require(strictVoiceCallReadableTranscript(record).any {
+            it.role.uppercase() in setOf("USER", "ASSISTANT") && it.content.isNotBlank()
+        }) { "voice_archive_source_empty" }
+    }
+
+    private fun validateSubmittedArchive(archive: OrbisVoiceModelArchive) {
+        require(archive.summary.length <= 64 * 1024 && archive.transcript.length <= 512 * 1024 &&
+            isUsableVoiceArchiveText(archive.summary) && isUsableVoiceArchiveText(archive.transcript) &&
+            archive.summary.toByteArray(Charsets.UTF_8).size <= 64 * 1024 &&
+            archive.transcript.toByteArray(Charsets.UTF_8).size <= 512 * 1024) { "voice_call_archive_incomplete_or_too_large" }
+    }
+
     /** Claim before dispatch. Neither a duplicate callback nor process recovery may send again. */
     suspend fun claimIncomingOpening(id: String, conversationId: String, assistantId: String,
         requestId: String, reason: String): OrbisVoiceCallRecord? = locked {
@@ -188,6 +297,9 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
                 after.archiveFailureCode == "archive_source_changed" && voiceArchiveSourceDigest(before) != voiceArchiveSourceDigest(after)
             require((after.archiveStatus == OrbisVoiceArchiveStatus.READY || lateSource) && after.summary == before.summary &&
                 after.modelTranscript == before.modelTranscript) { "voice_call_completed_archive_is_immutable" }
+            require(after.archiveAuthor == before.archiveAuthor && after.archiveReceiptId == before.archiveReceiptId) {
+                "voice_call_archive_provenance_is_immutable"
+            }
         }
         validate(after)
     }
@@ -199,6 +311,16 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
         }
         require(record.version == 1) { "unsupported_voice_call_archive" }
         require(record.archiveRequestCount >= 0) { "invalid_voice_archive_count" }
+        record.archiveAttemptId?.let(::validateVoiceCallId)
+        record.archiveReceiptId?.let(::validateVoiceCallId)
+        require(record.archiveAttemptSourceDigest == null || record.archiveAttemptSourceDigest.matches(Regex("[0-9a-f]{64}"))) {
+            "invalid_voice_archive_digest"
+        }
+        require((record.archiveAttemptId == null) == (record.archiveAttemptAuthor == null)) { "invalid_voice_archive_attempt" }
+        require(record.archiveAttemptId == null || record.archiveAttemptSourceDigest != null) { "invalid_voice_archive_attempt" }
+        require(record.archiveReceiptId == null || record.archiveAuthor == OrbisVoiceArchiveAuthor.ASSISTANT_TOOL) {
+            "invalid_voice_archive_receipt"
+        }
         require(record.archiveFailureCode == null || record.archiveFailureCode in VOICE_ARCHIVE_FAILURE_CODES) {
             "invalid_voice_archive_failure_code"
         }

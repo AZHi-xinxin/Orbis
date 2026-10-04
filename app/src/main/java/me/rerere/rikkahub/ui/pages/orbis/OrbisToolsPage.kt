@@ -20,6 +20,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Package
 import me.rerere.rikkahub.Screen
@@ -38,6 +41,15 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
     var showGames by rememberSaveable { mutableStateOf(false) }
     var showStickers by rememberSaveable { mutableStateOf(false) }
     var showCalls by rememberSaveable { mutableStateOf(false) }
+    var showGallery by rememberSaveable { mutableStateOf(false) }
+    var showPrivateRoom by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    var galleryName by remember(selected?.id) { mutableStateOf("") }
+    LaunchedEffect(selected?.id, showGallery) {
+        if (!showGallery && selected != null) galleryName = withContext(Dispatchers.IO) {
+            runCatching { me.rerere.rikkahub.data.orbis.gallery.openGallery(context, selected.id.toString()).snapshot().customName }.getOrDefault("")
+        }
+    }
     val chatService = org.koin.compose.koinInject<me.rerere.rikkahub.service.ChatService>()
 
     OrbisPageSurface {
@@ -74,8 +86,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                             orbisToolEntries.filter { it.group == group }.chunked(3).forEach { row ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     row.forEach { item ->
-                                        val enabled = item.destination != OrbisToolDestination.LOCAL_CAPABILITIES || selected != null
-                                        ToolsTile(item, enabled, Modifier.weight(1f)) {
+                                        val enabled = item.destination !in setOf(OrbisToolDestination.LOCAL_CAPABILITIES, OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM) || selected != null
+                                        val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
+                                        ToolsTile(tile, enabled, Modifier.weight(1f)) {
                                             when (item.destination) {
                                                 OrbisToolDestination.WORKSPACE -> navigator.navigate(Screen.Workspaces)
                                                 OrbisToolDestination.ATTACHMENTS -> navigator.navigate(Screen.SettingFiles)
@@ -85,6 +98,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                                                 OrbisToolDestination.GAMES -> showGames = true
                                                 OrbisToolDestination.STICKERS -> showStickers = true
                                                 OrbisToolDestination.BLUETOOTH_TOY -> navigator.navigate(Screen.OrbisToy)
+                                                OrbisToolDestination.GALLERY -> showGallery = true
+                                                OrbisToolDestination.SCHEDULE -> navigator.navigate(Screen.OrbisSchedule)
+                                                OrbisToolDestination.PRIVATE_ROOM -> showPrivateRoom = true
                                             }
                                         }
                                     }
@@ -95,9 +111,6 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                     }
                 }
                 item("permissions") {
-                    OutlinedButton(onClick = { navigator.navigate(Screen.OrbisSchedule) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("日程与课表 · 你和 AI 共用")
-                    }
                     OutlinedButton(onClick = { showCalls = true }, modifier = Modifier.fillMaxWidth()) {
                         Text("通话记录 · 摘要与完整文字记录")
                     }
@@ -109,6 +122,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
             }
         }
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
+        if (showPrivateRoom && selected != null) OrbisPrivateRoomPage(selected.id.toString(), selected.name,
+            onClose = { showPrivateRoom = false })
+        if (showGallery && selected != null) OrbisGalleryPage(selected.id.toString(), selected.name, onClose = { showGallery = false })
         if (showCalls) OrbisVoiceCallHistorySheet(chatService.voiceCalls,
             assistantId = selected?.id?.toString(), onRetry = chatService::retryVoiceCallArchiveIsolated,
             onDismiss = { showCalls = false })
@@ -131,7 +147,8 @@ private fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifier
         Column(Modifier.heightIn(min = 106.dp).padding(horizontal = 6.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(item.glyph, fontSize = 25.sp, lineHeight = 31.sp, color = colors.indigo)
-            Text(item.title, fontSize = 12.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
+            Text(item.title, fontSize = 12.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold, color = colors.ink,
+                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             Text(if (enabled) item.subtitle else "请先选择 AI 配置", fontSize = 10.sp, lineHeight = 15.sp,
                 textAlign = TextAlign.Center, color = colors.mutedInk)
         }

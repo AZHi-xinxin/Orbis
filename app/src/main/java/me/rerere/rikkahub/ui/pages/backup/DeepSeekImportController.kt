@@ -100,9 +100,9 @@ class DeepSeekImportController(
                 mutableState.value = DeepSeekImportUiState(preview = preview, destinationName = name)
             } catch (_: CancellationException) {
                 mutableState.value = DeepSeekImportUiState(result = "已取消读取，没有导入聊天。")
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
                 mutableState.value = DeepSeekImportUiState(result =
-                    "无法读取此 $sourceLabel：格式不兼容、文件损坏、超过大小限制或本机可用空间不足。现有聊天未更改。")
+                    "无法读取此 $sourceLabel：${ArchiveCapacity.publicError(failure)}\n现有聊天未更改。")
             } finally {
                 if (!retained) temporary?.close()
                 mutableState.update { it.copy(busy = false) }
@@ -151,7 +151,9 @@ class DeepSeekImportController(
             } catch (cancelled: DeepSeekImportCancelledException) {
                 mutableState.value = DeepSeekImportUiState(result = "已停止；已完成的会话保留。\n" + summary(cancelled.partialResult))
             } catch (failure: DeepSeekImportException) {
-                mutableState.value = DeepSeekImportUiState(result = "导入未全部完成；可以重新选择原文件继续，已有路径会跳过。\n" + summary(failure.partialResult))
+                mutableState.value = DeepSeekImportUiState(result =
+                    "导入未全部完成；可以重新选择原文件继续，已有路径会跳过。\n" +
+                        failure.publicDetail?.let { "$it\n" }.orEmpty() + summary(failure.partialResult))
             } catch (_: CancellationException) {
                 mutableState.value = DeepSeekImportUiState(result = "已停止。重新导入会自动跳过已完成的会话。")
             } catch (_: Exception) {

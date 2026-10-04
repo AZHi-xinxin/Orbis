@@ -24,6 +24,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisHelpToolTest {
+    @Test fun retiredMemoryCapabilityIsNotAdvertised() {
+        val help = createOrbisHelpTool(emptyList(), build)
+        val reference = content(help, "tools").toString()
+        assertFalse(reference.contains("native_memory"))
+        assertFalse(reference.contains("memory_tool"))
+    }
+
     @Test fun `local categories publish actual reading and soup names without guessing disabled writes`() {
         val names = listOf("orbis_reading_list", "orbis_reading_read_chapter", "orbis_reading_list_annotations", "orbis_soup_current")
         val tool = createOrbisHelpTool(names, build)
@@ -141,7 +148,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/20", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/21", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)
@@ -463,8 +470,12 @@ class OrbisHelpToolTest {
             assertTrue(it, appearance.contains(it))
         }
         val imports = limits.getValue("chat_import_sources").jsonPrimitive.content
-        listOf("密码保护", "DeepSeek", "RikkaHub", "Codex", "预览→人工确认", "不覆盖现有窗口",
+        listOf("密码保护", "DeepSeek官方ZIP≤8GiB", "RikkaHub含聊天数据库ZIP≤8GiB",
+            "Codex原始rollout JSONL≤64MiB", "Operit聊天JSON v2≤1GiB", "Kelivo安卓v2 ZIP≤8GiB",
+            "北极星Polaris ZIP≤8GiB", "ZIP展开总量≤16GiB", "流式聊天JSON≤1GiB",
+            "单条/单窗口容量", "不是无限容量", "预览→人工确认", "不覆盖现有窗口",
             "历史工具不执行", "取消保留已完成会话", "不扩大模型上下文上限").forEach { assertTrue(it, imports.contains(it)) }
+        listOf("ZIP≤80MiB", "ZIP≤512MiB", "JSON v2≤64MiB").forEach { assertFalse(it, imports.contains(it)) }
         val codex = limits.getValue("codex_import_limits").jsonPrimitive.content
         listOf("末行必须完整换行", "不是ChatGPT导出", "Markdown", "不恢复执行/工具权限", "明确拒绝").forEach {
             assertTrue(it, codex.contains(it))
@@ -492,7 +503,10 @@ class OrbisHelpToolTest {
         assertTrue(scope.contains("不宣称已部署或已迁移"))
         assertTrue(scope.contains("未知回执不可自动重投"))
         val tested = limits.getValue("user_validation_notes").jsonPrimitive.content
-        listOf("日历提醒", "内置手机工具调用", "通话短停顿", "不读取实时状态", "Operit 思考内容导入仍待修复", "端到端自更新尚未真机验收").forEach { assertTrue(tested.contains(it)) }
+        listOf("日历提醒", "内置手机工具调用", "通话短停顿", "不读取实时状态",
+            "2.6.2 起已修复受支持的 Operit 思考内容导入", "另存修正版副本", "不覆盖已有聊天",
+            "端到端自更新尚未真机验收").forEach { assertTrue(it, tested.contains(it)) }
+        assertFalse(tested.contains("Operit 思考内容导入仍待修复"))
         assertFalse(content(help, "overview").getValue("not_integrated").jsonArray.any { it.jsonPrimitive.content == "哨兵" })
         assertFalse(run(help, topic("limits")).getValue("remote_health_checked").jsonPrimitive.boolean)
         assertEquals(limits, orbisPublicStaticManual().getValue("limits"))

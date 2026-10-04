@@ -19,6 +19,7 @@ import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.OrbisVoiceCallEnd
 import me.rerere.rikkahub.service.OrbisVoiceCallEndReason
+import me.rerere.rikkahub.service.OrbisVoiceCallPreflight
 import me.rerere.tts.controller.TtsController
 import me.rerere.tts.provider.TTSManager
 import me.rerere.rikkahub.data.datastore.getAssistantById
@@ -28,6 +29,7 @@ import me.rerere.asr.ASRController
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.correctDeviceAsrTranscript
 import me.rerere.asr.providers.DashScopeASRController
+import me.rerere.asr.providers.BatchVoiceASRController
 import me.rerere.asr.providers.VolcengineASRController
 import me.rerere.asr.providers.OpenAIRealtimeASRController
 import me.rerere.rikkahub.data.datastore.Settings
@@ -70,13 +72,11 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
     val start: () -> Unit = {
         val conversation = vm.conversation.value
         val assistant = settings.getAssistantById(conversation.assistantId)
+        val configurationFailure = OrbisVoiceCallPreflight.firstFailure(settings, assistant)
         val blocked = when {
             voiceCallPreparing.get() -> "正在准备语音通话，请稍候。"
             runtime.callState.value.isActive || runtime.callState.value.ending -> "已有通话正在进行或收尾，请先结束当前通话。"
-            provider == null -> context.getString(R.string.chat_page_voice_configure_asr)
-            !provider.supportsServerVadVoiceMode -> context.getString(R.string.chat_page_voice_unsupported_asr)
-            settings.findModelById(assistant?.chatModelId ?: settings.chatModelId) == null -> context.getString(R.string.chat_page_voice_select_model)
-            settings.getSelectedTTSProvider() == null -> "请先在音色与语音设置中选择朗读服务。"
+            configurationFailure != null -> configurationFailure.explanation
             asr.state.value.isRecording -> context.getString(R.string.chat_page_voice_finish_dictation)
             vm.messageQueue.value.paused ->
                 context.getString(R.string.chat_page_voice_resume_queue)
@@ -141,6 +141,7 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
                                     originalTranscript = transcript.original.takeIf { transcript.changed })
                             },
                             cancelPendingReply = { chatService.cancelVoiceCallReply(conversation.id, call.id, it) },
+                            checkReplyResume = { chatService.canResumeVoiceCallReplies(conversation.id, call.id) },
                             speak = { reply ->
                                 var spoken = reply
                                 if (settings.displaySetting.ttsOnlyReadQuoted) spoken = spoken.extractQuotedContentAsText() ?: spoken
@@ -192,18 +193,15 @@ internal fun createVoiceAsr(context: Context, client: OkHttpClient, provider: AS
     val callProvider = provider.forVoiceCallSilence()
     val delegate = when (callProvider) {
         is ASRProviderSetting.OpenAIRealtime -> {
-            check(callProvider.apiKey.isNotBlank()) { context.getString(R.string.chat_page_voice_configure_key) }
             OpenAIRealtimeASRController(context, client, callProvider, enableEchoCancellation = true)
         }
         is ASRProviderSetting.DashScope -> {
-            check(callProvider.apiKey.isNotBlank()) { context.getString(R.string.chat_page_voice_configure_key) }
             DashScopeASRController(context, client, callProvider, enableEchoCancellation = true)
         }
         is ASRProviderSetting.Volcengine -> {
-            check(callProvider.apiKey.isNotBlank()) { context.getString(R.string.chat_page_voice_configure_key) }
             VolcengineASRController(context, client, callProvider, enableEchoCancellation = true)
         }
-        else -> error(context.getString(R.string.chat_page_voice_no_endpointing))
+        is ASRProviderSetting.MiMo, is ASRProviderSetting.Step -> BatchVoiceASRController(context, client, callProvider)
     }
     // Audio focus and communication mode belong to the whole call, not each ASR turn.
     return delegate

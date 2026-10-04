@@ -63,7 +63,7 @@ internal data class OrbisSpeechRules(
 internal fun orbisSettingsInitialItem(startAtMcp: Boolean): Int = if (startAtMcp) 1 else 0
 
 internal enum class OrbisToolGroup { WORK, PLAY }
-internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, GAMES, STICKERS, BLUETOOTH_TOY }
+internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM }
 internal data class OrbisToolEntry(
     val destination: OrbisToolDestination,
     val group: OrbisToolGroup,
@@ -80,4 +80,7 @@ internal val orbisToolEntries = listOf(
     OrbisToolEntry(OrbisToolDestination.GAMES, OrbisToolGroup.PLAY, "●○", "游戏机", "本地九路五子棋"),
     OrbisToolEntry(OrbisToolDestination.STICKERS, OrbisToolGroup.PLAY, "☺", "表情库", "图片与共享标签"),
     OrbisToolEntry(OrbisToolDestination.BLUETOOTH_TOY, OrbisToolGroup.PLAY, "◉", "蓝牙 Toy", "设备连接与本地控制"),
+    OrbisToolEntry(OrbisToolDestination.GALLERY, OrbisToolGroup.PLAY, "✦", "伙伴的格子", "问卷、礼物与作品"),
+    OrbisToolEntry(OrbisToolDestination.SCHEDULE, OrbisToolGroup.PLAY, "▦", "日程与课表", "你和 AI 共用"),
+    OrbisToolEntry(OrbisToolDestination.PRIVATE_ROOM, OrbisToolGroup.PLAY, "♧", "隐私室", "默认上锁，申请访问"),
 )

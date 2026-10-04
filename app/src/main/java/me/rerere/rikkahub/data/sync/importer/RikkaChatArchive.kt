@@ -8,11 +8,11 @@ import java.util.zip.ZipFile
 
 /** Only chat database + upload files. Settings, credentials, skills and other data are never extracted. */
 internal object RikkaChatArchive {
-    const val MAX_ARCHIVE_BYTES = 512L * 1024 * 1024
-    private const val MAX_EXPANDED_BYTES = 1024L * 1024 * 1024
-    private const val MAX_ENTRY_BYTES = 256L * 1024 * 1024
-    private const val MAX_ENTRIES = 20000
-    internal const val MIN_FREE_BYTES = 64L * 1024 * 1024
+    const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_ZIP_BYTES
+    private const val MAX_EXPANDED_BYTES = ArchiveCapacity.MAX_EXPANDED_BYTES
+    private const val MAX_ENTRY_BYTES = ArchiveCapacity.MAX_DISK_ENTRY_BYTES
+    private const val MAX_ENTRIES = ArchiveCapacity.MAX_ENTRIES
+    internal const val MIN_FREE_BYTES = ArchiveCapacity.MIN_FREE_BYTES
 
     fun copyLimited(input: InputStream, output: OutputStream, limit: Long, checkCancelled: () -> Unit = {},
         beforeWrite: (Int) -> Unit = {}): Long {
@@ -23,7 +23,7 @@ internal object RikkaChatArchive {
             val count = input.read(buffer)
             if (count < 0) return copied
             copied += count
-            require(copied <= limit) { "文件过大，已停止导入；原聊天不受影响" }
+            ArchiveCapacity.requireSize(copied, limit, allowEmpty = true)
             beforeWrite(count)
             output.write(buffer, 0, count)
         }
@@ -32,7 +32,7 @@ internal object RikkaChatArchive {
     fun extract(archive: File, destination: File, checkCancelled: () -> Unit = {},
         usableSpace: (File) -> Long = { it.usableSpace }): File {
         checkCancelled()
-        require(archive.length() in 1..MAX_ARCHIVE_BYTES) { "备份为空或超过 512 MB" }
+        ArchiveCapacity.requireSize(archive.length(), MAX_ARCHIVE_BYTES)
         require(destination.isDirectory) { "导入临时目录不存在" }
         val seen = mutableSetOf<String>()
         var total = 0L
@@ -42,8 +42,7 @@ internal object RikkaChatArchive {
                 checkCancelled()
                 require(++count <= MAX_ENTRIES) { "备份文件数量过多" }
                 val name = entry.name
-                require(!name.startsWith('/') && '\\' !in name && ':' !in name &&
-                    name.split('/').none { it == ".." || it == "." }) { "备份包含不安全路径" }
+                ArchiveCapacity.requireSafePath(name, entry.isDirectory)
                 require(seen.add(name)) { "备份包含重复路径" }
                 if (entry.isDirectory) continue
                 val targetName = when {
@@ -55,13 +54,13 @@ internal object RikkaChatArchive {
                 val target = File(destination, targetName)
                 requireExtractionSpace(usableSpace(destination), 0)
                 require(!target.exists()) { "备份数据库边车文件冲突" }
-                require(entry.size <= MAX_ENTRY_BYTES) { "备份单文件超过 256 MB" }
+                ArchiveCapacity.requireSize(entry.size, MAX_ENTRY_BYTES, allowEmpty = true)
+                ArchiveCapacity.requireSize(total + entry.size, MAX_EXPANDED_BYTES, allowEmpty = true)
+                ArchiveCapacity.requireSpace(usableSpace(destination), entry.size)
                 check(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs())
-                zip.getInputStream(entry).use { input ->
-                    target.outputStream().use { output ->
-                        total += copyLimited(input, output, minOf(MAX_ENTRY_BYTES, MAX_EXPANDED_BYTES - total),
-                            checkCancelled, beforeWrite = { count -> requireExtractionSpace(usableSpace(destination), count) })
-                    }
+                target.outputStream().use { output ->
+                    total += ArchiveCapacity.copyZipEntry(zip, entry, output, minOf(MAX_ENTRY_BYTES, MAX_EXPANDED_BYTES - total),
+                        checkCancelled, beforeWrite = { count -> requireExtractionSpace(usableSpace(destination), count) })
                 }
             }
         }
@@ -71,9 +70,7 @@ internal object RikkaChatArchive {
     }
 
     internal fun requireExtractionSpace(available: Long, nextWrite: Int) {
-        require(nextWrite >= 0 && available >= MIN_FREE_BYTES + nextWrite.toLong()) {
-            "手机可用空间不足，导入已停止并预留 64 MB；原聊天未更改"
-        }
+        ArchiveCapacity.requireSpace(available, nextWrite.toLong())
     }
 
     /** Old app paths are untrusted: only a single filename under its upload directory can be remapped. */

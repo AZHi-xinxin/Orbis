@@ -132,6 +132,30 @@ internal object DatabaseBackup {
         removeSidecars(databaseFile)
     }
 
+    /** Metadata only; no Room initialization, migration, tool execution or conversation decoding. */
+    fun conversationOwners(database: SupportSQLiteDatabase): Map<String, String> = buildMap {
+        database.query("SELECT id, assistant_id FROM conversationentity WHERE consultation_binding = ''").use { rows ->
+            while (rows.moveToNext()) {
+                val conversation = rows.getString(0)
+                val owner = rows.getString(1)
+                check(put(conversation, owner) == null) { "context_pruning_backup_owner" }
+            }
+        }
+    }
+
+    /** Startup revalidation opens only the chosen database in read-only mode, before repositories. */
+    fun conversationOwners(context: Context, databaseFile: File): Map<String, String> {
+        if (!databaseFile.exists()) return emptyMap()
+        require(databaseFile.isFile && !java.nio.file.Files.isSymbolicLink(databaseFile.toPath())) {
+            "context_pruning_backup_owner"
+        }
+        val configuration = SQLiteConfiguration.configure(context,
+            SQLiteDatabaseConfiguration(databaseFile.absolutePath, SQLiteDatabase.OPEN_READONLY))
+        return SQLiteDatabase.openDatabase(configuration, null) {
+            error("context_pruning_backup_owner")
+        }.use { conversationOwners(it) }
+    }
+
     fun checkpoint(database: SupportSQLiteDatabase) {
         database.query("PRAGMA wal_checkpoint(TRUNCATE)").use { cursor ->
             check(cursor.moveToFirst() && cursor.getInt(0) == 0) {

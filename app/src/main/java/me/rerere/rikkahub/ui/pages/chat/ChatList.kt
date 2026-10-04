@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+
 import me.rerere.rikkahub.data.model.appearanceForStyle
 import me.rerere.rikkahub.ui.pages.orbis.LocalOrbisDeepSeekStyle
 
@@ -325,6 +327,21 @@ private fun ChatListNormal(
             .flatMap { it.models }
             .associateBy { it.id }
     }
+    val pruningContext = LocalContext.current
+    val pruningRepository = remember(conversation.id, conversation.assistantId) {
+        me.rerere.rikkahub.data.ai.contextpruning.AndroidContextPruning.open(
+            pruningContext, conversation.assistantId, conversation.id)
+    }
+    var pruningState by remember(pruningRepository) {
+        mutableStateOf<me.rerere.rikkahub.data.ai.contextpruning.ContextPruningState?>(null)
+    }
+    LaunchedEffect(pruningRepository) {
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pruningRepository.snapshot() }
+            pruningRepository.states.collect { pruningState = it }
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { pruningState = null }
+    }
     val lastMessageIndex = conversation.messageNodes.lastIndex
     val timeline = remember(conversation.messageNodes, selecting) {
         orbisChatListTimeline(conversation.messageNodes, BuildConfig.ORBIS_ENABLED, selecting)
@@ -344,6 +361,14 @@ private fun ChatListNormal(
             ) {
                 ChatMessage(
                     node = node,
+                    contextPruningState = pruningState,
+                    onRestoreContextPruning = { batchId -> scope.launch {
+                        try {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pruningRepository.restore(batchId) }
+                        } catch (cancel: CancellationException) { throw cancel }
+                        catch (_: Exception) { android.widget.Toast.makeText(pruningContext,
+                            "恢复未完成，原记录没有删除。请稍后重试。", android.widget.Toast.LENGTH_LONG).show() }
+                    } },
                     model = node.currentMessage.modelId?.let(modelById::get),
                     assistant = assistant,
                     loading = loading && index == lastMessageIndex,
@@ -423,16 +448,16 @@ private fun ChatListNormal(
                 key = { _, item -> item.key },
             ) { _, entry ->
                 if (entry.callId != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     me.rerere.rikkahub.ui.pages.orbis.OrbisCallTimelineCard(entry.callId,
-                        conversation.id.toString(), sourceFallback = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                entry.nodes.forEachIndexed { offset, node ->
-                                    androidx.compose.runtime.key(node.id) {
-                                        renderSourceMessage(node, entry.firstSourceIndex + offset)
-                                    }
-                                }
-                            }
+                        conversation.id.toString(), sourceDetails = {
+                            me.rerere.rikkahub.ui.pages.orbis.OrbisCallSourceMessages(entry.nodes)
+                        }, sourceFallback = {
+                            Text("聊天中仍保留 ${entry.nodes.size} 条原始消息，可打开下方只读记录查看。")
                         })
+                    val callFiles = remember(entry.nodes) { orbisCallFiles(entry.nodes) }
+                    me.rerere.rikkahub.ui.pages.orbis.OrbisCallFileAttachments(callFiles)
+                    }
                 } else {
                     renderSourceMessage(entry.nodes.first(), entry.firstSourceIndex)
                 }
@@ -762,7 +787,7 @@ internal fun ChatListPreview(
             conversation.messageNodes.mapIndexed { index, node -> index to node }
         } else {
             conversation.messageNodes.mapIndexed { index, node -> index to node }
-                .filter { (_, node) -> node.currentMessage.toText().contains(searchQuery, ignoreCase = true) }
+                .filter { (_, node) -> node.currentMessage.privateRoomSafePresentation().toText().contains(searchQuery, ignoreCase = true) }
         }
     }
 
@@ -859,7 +884,7 @@ internal fun ChatListPreview(
                 items = filteredMessages,
                 key = { index, item -> item.second.id },
             ) { _, (originalIndex, node) ->
-                val message = node.currentMessage
+                val message = node.currentMessage.privateRoomSafePresentation()
                 val isUser = message.role == me.rerere.ai.core.MessageRole.USER
                 Column(
                     modifier = Modifier

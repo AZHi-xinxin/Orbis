@@ -105,6 +105,102 @@ class OrbisVoiceRawTranscriptTest {
             captureVoiceCallSource(call(), Conversation(assistantId = Uuid.random(), messageNodes = emptyList()), true, 4)
         }
     }
+
+    @Test fun `private tool call Text stays readable without exposing reasoning or tool details and raw source stays exact`() {
+        val variants = listOf(
+            assistant("公开回复").copy(parts = listOf(UIMessagePart.Text("公开回复"),
+                UIMessagePart.Reasoning("PRIVATE_REASONING"),
+                UIMessagePart.Tool(toolCallId = "synthetic-private", toolName = "orbis_private_room_read",
+                    input = "PRIVATE_ARGUMENT", output = listOf(UIMessagePart.Text("PRIVATE_RESULT"))))),
+            assistant("公开回复").copy(privateRoomContentHidden = true),
+            assistant("公开回复").copy(privateRoomPendingPresentation = true),
+        )
+        for (message in variants) {
+            val node = message.toMessageNode()
+            val source = captureVoiceCallSource(call(), conversation.copy(messageNodes = listOf(node)), true, 4)
+            assertEquals(JsonInstant.encodeToString(listOf(node)), source.sourceNodesJson)
+            assertEquals("公开回复", strictVoiceCallReadableTranscript(source).single().content)
+            assertFalse(JsonInstant.encodeToString(voiceCallTranscriptView(source).entries).contains("PRIVATE_"))
+            assertFalse(voiceCallTranscriptView(source).sourceUnavailable)
+        }
+    }
+
+    @Test fun `already captured assistant text is updated to final public reply without rewriting raw record`() {
+        val message = assistant("完整公开回复").copy(privateRoomContentHidden = true)
+        val captured = OrbisVoiceTranscriptEntry("captured", "ASSISTANT", "先前公开片段", 2,
+            message.id.toString())
+        val record = call().copy(transcript = listOf(captured),
+            sourceNodesJson = JsonInstant.encodeToString(listOf(message.toMessageNode())))
+        val original = JsonInstant.encodeToString(record)
+        val projected = strictVoiceCallReadableTranscript(record).single()
+        assertEquals("完整公开回复", projected.content)
+        assertNull(projected.originalTranscript)
+        assertEquals(original, JsonInstant.encodeToString(record))
+        assertEquals(captured, record.transcript.single())
+    }
+
+    @Test fun `private alternate branch preserves earlier captured public Text without exposing unselected raw parts`() {
+        val hidden = assistant("另一个分支的公开回复").copy(privateRoomContentHidden = true,
+            parts = listOf(UIMessagePart.Text("另一个分支的公开回复"), UIMessagePart.Reasoning("PRIVATE_ALTERNATE_REASONING")))
+        val public = assistant("公开的当前分支")
+        val node = public.toMessageNode().copy(messages = listOf(hidden, public), selectIndex = 1)
+        val record = call().copy(sourceNodesJson = JsonInstant.encodeToString(listOf(node)),
+            transcript = listOf(OrbisVoiceTranscriptEntry(hidden.id.toString(), "ASSISTANT",
+                "此前已说的公开回复", 2)))
+        val entries = strictVoiceCallReadableTranscript(record)
+        assertEquals(listOf("此前已说的公开回复", "公开的当前分支"), entries.map { it.content })
+        assertNull(entries.first().originalTranscript)
+        assertFalse(JsonInstant.encodeToString(entries).contains("PRIVATE_"))
+        assertTrue(record.sourceNodesJson!!.contains("PRIVATE_ALTERNATE_REASONING"))
+    }
+
+    @Test fun `corrupt source retains captured public speech and human ASR as explicitly incomplete without exposing decoder text`() {
+        val human = OrbisVoiceTranscriptEntry("user", "USER", "准确的人类转写", 2, originalTranscript = "原始的人类转写")
+        val assistant = OrbisVoiceTranscriptEntry("assistant", "ASSISTANT", "此前公开说出的正文", 3)
+        val record = call().copy(sourceNodesJson = "PRIVATE_INVALID_JSON", transcript = listOf(human, assistant))
+        val before = JsonInstant.encodeToString(record)
+        val view = voiceCallTranscriptView(record)
+        assertTrue(view.sourceUnavailable)
+        assertEquals(human, view.entries.first())
+        assertEquals(assistant, view.entries.last())
+        assertNull(view.entries.last().originalTranscript)
+        assertFalse(JsonInstant.encodeToString(view.entries).contains("PRIVATE_"))
+        assertEquals(before, JsonInstant.encodeToString(record))
+        assertThrows(VoiceArchiveFailure::class.java) { strictVoiceCallReadableTranscript(record) }
+    }
+
+    @Test fun `tool-only call source remains durable without inventing a spoken placeholder`() {
+        val message = assistant("").copy(parts = listOf(UIMessagePart.Reasoning("PRIVATE_REASONING"),
+            UIMessagePart.Tool(toolCallId = "synthetic-private", toolName = "orbis_private_room_read",
+                input = "PRIVATE_ARGUMENT", output = listOf(UIMessagePart.Text("PRIVATE_RESULT")))))
+        val node = message.toMessageNode()
+        val source = captureVoiceCallSource(call(), conversation.copy(messageNodes = listOf(node)), true, 4)
+        assertEquals(JsonInstant.encodeToString(listOf(node)), source.sourceNodesJson)
+        assertTrue(source.transcript.isEmpty())
+        assertTrue(strictVoiceCallReadableTranscript(source).isEmpty())
+    }
+
+    @Test fun `private think-only and partial openings do not become captured spoken notices`() {
+        for (text in listOf("<think>PRIVATE_ONLY</think>", "<think>PRIVATE_ONLY", "<thi")) {
+            // This is a continuation after an actual private operation. Pending alone, without
+            // a potential private tool, must not classify ordinary streaming text as private.
+            val message = assistant(text).copy(privateRoomContentHidden = true)
+            val node = message.toMessageNode()
+            val source = captureVoiceCallSource(call(), conversation.copy(messageNodes = listOf(node)), true, 4)
+            assertEquals(JsonInstant.encodeToString(listOf(node)), source.sourceNodesJson)
+            assertTrue(source.transcript.isEmpty())
+            assertTrue(strictVoiceCallReadableTranscript(source).isEmpty())
+        }
+    }
+
+    @Test fun `private think followed by public reply captures only the real public Text`() {
+        val message = assistant("<think>PRIVATE_THOUGHT</think>这句可以听见").copy(privateRoomContentHidden = true)
+        val node = message.toMessageNode()
+        val source = captureVoiceCallSource(call(), conversation.copy(messageNodes = listOf(node)), true, 4)
+        assertEquals(JsonInstant.encodeToString(listOf(node)), source.sourceNodesJson)
+        assertEquals("这句可以听见", source.transcript.single().content)
+        assertEquals("这句可以听见", strictVoiceCallReadableTranscript(source).single().content)
+    }
     @Test fun `source fingerprint rejects a changed spoken tail and is independent from archive status`() {
         val source = call().copy(transcript = listOf(OrbisVoiceTranscriptEntry("spoken", "USER", "原文", 2)))
         assertEquals(voiceArchiveSourceDigest(source), voiceArchiveSourceDigest(source.copy(archiveStatus = OrbisVoiceArchiveStatus.GENERATING)))

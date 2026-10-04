@@ -42,6 +42,8 @@ import me.rerere.rikkahub.web.dto.MessageSearchResultDto
 import me.rerere.rikkahub.web.dto.UpdateConversationInjectionsRequest
 import me.rerere.rikkahub.web.dto.UpdateConversationTitleRequest
 import me.rerere.rikkahub.web.dto.toDto
+import me.rerere.rikkahub.web.dto.webPresentationError
+import me.rerere.rikkahub.web.dto.requireWebEditableMessage
 import me.rerere.rikkahub.web.dto.toListDto
 import me.rerere.rikkahub.utils.JsonInstant
 import kotlin.time.Duration.Companion.seconds
@@ -307,6 +309,7 @@ fun Route.conversationRoutes(
             val request = call.receive<EditMessageRequest>()
 
             chatService.initializeConversation(uuid)
+            chatService.getConversationFlow(uuid).value.requireWebEditableMessage(messageId)
             chatService.editMessage(uuid, messageId, request.parts)
 
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
@@ -410,8 +413,7 @@ fun Route.conversationRoutes(
                         .asSequence()
                         .filter { it.conversationId == uuid && knownErrorIds.add(it.id) }
                         .map { chatError ->
-                            chatError.error.message?.takeIf { it.isNotBlank() }
-                                ?: chatError.error.toString()
+                            chatService.getConversationFlow(uuid).value.webPresentationError(chatError.error)
                         }
                         .toList()
                 }.map { events ->

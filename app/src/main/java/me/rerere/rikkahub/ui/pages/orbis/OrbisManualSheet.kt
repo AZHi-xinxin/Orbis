@@ -219,7 +219,6 @@ private fun manualLabel(key: String): String = when (key) {
     "device_facts" -> "设备事实与本地观察"
     "context_message_limit" -> "消息截取与记忆断层"
     "consultation" -> "咨询室开发状态"
-    "native_memory" -> "内置本地记忆（不是 ST）"
     "conversation_reference" -> "会话参考"
     "workspace" -> "工作区边界"
     "skills" -> "技能"

@@ -71,14 +71,39 @@
     android:theme="@style/Theme.Rikkahub"
     android:usesCleartextTraffic="true"
     tools:targetApi="33">
+    <!-- FloatingX belongs to the normal UI process, never the independent rescue process. -->
+    <provider
+      android:name="com.petterp.floatingx.assist.FxContentProvider"
+      android:multiprocess="false"
+      tools:replace="android:multiprocess" />
     <activity android:name=".ui.activity.OrbisIncomingCallActivity"
       android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true"
       android:launchMode="singleTop" android:theme="@style/Theme.Rikkahub" />
+    <!-- Independent, native rescue UI: does not initialize Compose, Koin, settings or databases. -->
     <activity
-      android:name=".ui.activity.SafeModeActivity"
+      android:name=".ui.activity.EmergencyBackupActivity"
+      android:process=":recovery"
+      android:exported="true"
+      android:label="Orbis 紧急备份"
+      android:taskAffinity="${applicationId}.recovery"
+      android:launchMode="singleTask"
+      android:configChanges="keyboardHidden|orientation|screenSize"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+      <activity
+        android:name=".ui.activity.SafeModeActivity"
       android:exported="false"
       android:label="@string/title_activity_safe_mode"
-      android:theme="@style/Theme.Rikkahub" />
+        android:theme="@style/Theme.Rikkahub" />
+      <activity
+        android:name=".ui.activity.ConversationRescueActivity"
+        android:exported="false"
+        android:label="会话检查与恢复"
+        android:theme="@style/Theme.Rikkahub" />
     <activity
       android:name=".RouteActivity"
       android:configChanges="keyboardHidden|orientation|screenSize"

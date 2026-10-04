@@ -35,5 +35,8 @@ internal fun ASRProviderSetting.forVoiceCallSilence(): ASRProviderSetting = when
         copy(silenceDurationMs = callSilence)
     }
 
-    else -> throw IllegalArgumentException("当前识别服务不支持通话所需的服务端静默断句，请选择支持的实时识别服务。")
+    // These dedicated call adapters apply a local >=3s endpoint detector. Their saved
+    // segmentDurationSec still belongs to dictation, and must not delay every call turn.
+    is ASRProviderSetting.MiMo -> copy()
+    is ASRProviderSetting.Step -> copy()
 }

@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.utils
 
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -29,7 +31,7 @@ fun navigateToChatPage(
 }
 
 fun Context.copyMessageToClipboard(message: UIMessage) {
-    this.writeClipboardText(message.toText())
+    this.writeClipboardText(message.privateRoomSafePresentation().toText())
 }
 
 private val ALLOWED_MIME_TYPES = setOf(

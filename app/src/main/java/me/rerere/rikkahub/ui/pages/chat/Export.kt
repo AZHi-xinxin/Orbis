@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
@@ -249,7 +251,7 @@ private fun exportToMarkdown(
         append("# ${conversation.title}\n\n")
         append("*Exported on ${LocalDateTime.now().toLocalString()}*\n\n")
 
-        messages.forEach { message ->
+        messages.map { it.privateRoomSafePresentation() }.forEach { message ->
             val role = if (message.role == MessageRole.USER) "**User**" else "**Assistant**"
             append("$role:\n\n")
             message.parts.forEach { part ->
@@ -404,7 +406,7 @@ private suspend fun exportToImage(
             CompositionLocalProvider(LocalSettings provides settings) {
                 ExportedChatImage(
                     conversation = conversation,
-                    messages = messages,
+                    messages = messages.map { it.privateRoomSafePresentation() },
                     options = options
                 )
             }

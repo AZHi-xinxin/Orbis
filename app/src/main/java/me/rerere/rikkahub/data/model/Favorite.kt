@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 import kotlin.uuid.Uuid
 
 @Serializable
@@ -42,7 +43,7 @@ data class NodeFavoriteTarget(
 )
 
 fun UIMessage.buildFavoritePreview(maxLength: Int = 160): String {
-    val plainText = parts
+    val plainText = privateRoomSafePresentation().parts
         .filterIsInstance<UIMessagePart.Text>()
         .joinToString("\n") { it.text.trim() }
         .trim()

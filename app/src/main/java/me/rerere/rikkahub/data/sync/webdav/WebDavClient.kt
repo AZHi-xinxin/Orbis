@@ -166,7 +166,9 @@ class WebDavClient(
                 }
 
                 val channel = response.bodyAsChannel()
-                targetFile.outputStream().use { outputStream ->
+                me.rerere.rikkahub.data.sync.NativeBackupBudget.Output(targetFile.outputStream()) {
+                    targetFile.parentFile!!.usableSpace
+                }.use { outputStream ->
                     val buffer = ByteArray(8192)
                     while (!channel.isClosedForRead) {
                         val bytesRead = channel.readAvailable(buffer)

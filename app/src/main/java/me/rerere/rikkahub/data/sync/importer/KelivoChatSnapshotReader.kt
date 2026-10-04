@@ -18,6 +18,13 @@ internal class KelivoChatSnapshotReader private constructor(private val database
 
     override fun messages(chatId: String): List<KelivoMessage> {
         requireKelivoId(chatId)
+        // The archive-wide text budget is deliberately larger than one live window. Check the
+        // selected window in SQL before getString() can materialize all reasoning in the heap.
+        database.query("SELECT COUNT(*),COALESCE(SUM(length(CAST(reasoning_segments_json AS BLOB))),0) " +
+            "FROM message_rows WHERE conversation_id COLLATE BINARY=?", arrayOf(chatId)).use { cursor ->
+            require(cursor.moveToFirst())
+            requireKelivoWindowReadBudget(cursor.getLong(0), cursor.getLong(1))
+        }
         val attachments = database.query(
             "SELECT revision_id,COUNT(*) FROM message_asset_rows WHERE conversation_id COLLATE BINARY=? GROUP BY revision_id COLLATE BINARY",
             arrayOf(chatId)
@@ -61,7 +68,7 @@ internal class KelivoChatSnapshotReader private constructor(private val database
             "kind" to "TEXT", "payload" to "TEXT"))
         requireTable("message_asset_rows", mapOf("conversation_id" to "TEXT", "revision_id" to "TEXT",
             "asset_id" to "TEXT", "kind" to "TEXT"))
-        require(expectedChats in 1..10000 && expectedMessages in 0..100000 &&
+        require(expectedChats in 1..10000 && expectedMessages in 0..1000000 &&
             scalar("SELECT COUNT(*) FROM conversation_rows") == expectedChats.toLong() &&
             scalar("SELECT COUNT(*) FROM message_rows") == expectedMessages.toLong()) { "kelivo_row_count" }
         require(scalar("SELECT COUNT(*) FROM message_part_rows") <= 300000 &&
@@ -87,8 +94,8 @@ internal class KelivoChatSnapshotReader private constructor(private val database
         noRows("SELECT 1 FROM message_asset_rows p LEFT JOIN message_rows m ON p.revision_id COLLATE BINARY=m.id COLLATE BINARY " +
             "AND p.conversation_id COLLATE BINARY=m.conversation_id COLLATE BINARY WHERE m.id IS NULL LIMIT 1")
         noRows("SELECT revision_id FROM message_part_rows GROUP BY revision_id COLLATE BINARY,ordinal HAVING COUNT(*)>1 LIMIT 1")
-        require(scalar("SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM message_part_rows") <= 64L*1024*1024 &&
-            scalar("SELECT COALESCE(SUM(length(CAST(reasoning_segments_json AS BLOB))),0) FROM message_rows") <= 32L*1024*1024 &&
+        require(scalar("SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM message_part_rows") <= ArchiveCapacity.MAX_STREAM_JSON_BYTES &&
+            scalar("SELECT COALESCE(SUM(length(CAST(reasoning_segments_json AS BLOB))),0) FROM message_rows") <= ArchiveCapacity.MAX_STREAM_JSON_BYTES &&
             scalar("SELECT COALESCE(SUM(length(CAST(version_selections_json AS BLOB))),0) FROM conversation_rows") <= 8L*1024*1024) {
             "kelivo_total_content_size"
         }
@@ -134,4 +141,10 @@ internal class KelivoChatSnapshotReader private constructor(private val database
             } catch (failure: Throwable) { reader.close(); throw failure }
         }
     }
+}
+
+internal fun requireKelivoWindowReadBudget(rows: Long, reasoningBytes: Long) {
+    if (rows !in 0L..KelivoChatLimits.MAX_WINDOW_MESSAGES.toLong() ||
+        reasoningBytes !in 0L..KelivoChatLimits.MAX_WINDOW_BYTES)
+        throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
 }

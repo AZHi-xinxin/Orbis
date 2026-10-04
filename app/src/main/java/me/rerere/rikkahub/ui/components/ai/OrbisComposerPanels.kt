@@ -102,6 +102,8 @@ internal fun OrbisVoicePanel(
     recording: Boolean,
     busy: Boolean,
     canStartVoice: Boolean,
+    voiceUnavailableReason: String? = null,
+    batchVoiceMode: Boolean = false,
     canSpeak: Boolean,
     speaking: Boolean,
     autoRead: Boolean,
@@ -124,6 +126,8 @@ internal fun OrbisVoicePanel(
             modifier = Modifier.fillMaxWidth()) { Text("发送语音条 · 录音后加入草稿") }
         Text("语音输入先转成草稿。语音通话会自动发送并朗读回复，需主动开启；收起通话界面不会挂断。全局自动朗读：${if (autoRead) "开" else "关"}。",
             fontSize = 10.sp, lineHeight = 15.sp, color = OrbisTheme.colors.mutedInk)
+        if (batchVoiceMode) Text("MiMo / Step 通话：说完后本地等待约 3 秒停顿，再完成识别，回复会多等一会儿。请轮流说话，暂不支持在朗读中抢话；本地未检测到说话时不上传。",
+            fontSize = 10.sp, lineHeight = 15.sp, color = OrbisTheme.colors.mutedInk)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedButton(onClick = onRecognize, enabled = canRecognize && !busy && !voiceActive,
                 modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
@@ -133,6 +137,10 @@ internal fun OrbisVoicePanel(
                 enabled = voiceActive || canStartVoice, modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
                 Text(if (voiceActive) "挂断通话" else "语音通话", fontSize = 11.sp, lineHeight = 16.sp)
             }
+        }
+        if (!voiceActive && !canStartVoice && voiceUnavailableReason != null) {
+            Text("暂不能通话：$voiceUnavailableReason", fontSize = 11.sp, lineHeight = 16.sp,
+                color = OrbisTheme.colors.mutedInk)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedButton(onClick = if (speaking) onStopSpeaking else onSpeak,

@@ -79,6 +79,9 @@ data class TextGenerationParams(
     // Normal chat retains the existing server pause-turn continuation budget;
     // isolated metered tasks can explicitly require exactly one provider request.
     val maxAutomaticContinuations: Int = 5,
+    // Application-only callback; the handle contains the exact in-memory transport credentials.
+    @kotlinx.serialization.Transient
+    val onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
 ) {
     init { require(maxAutomaticContinuations in 0..5) { "invalid_automatic_continuation_limit" } }
 }

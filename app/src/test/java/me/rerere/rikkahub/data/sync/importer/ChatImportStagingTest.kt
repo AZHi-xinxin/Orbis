@@ -54,6 +54,17 @@ class ChatImportStagingTest {
         }
     }
 
+    @Test fun abandonedOperitSnapshotsAreRemovedOnlyInsideOwnedPayload() {
+        val cache = temporary.newFolder()
+        val expired = orphan(cache)
+        File(expired, "payload/orbis-operit-12345.json").writeText("synthetic")
+        val unknown = orphan(cache)
+        File(unknown, "payload/orbis-operit-user.json").writeText("preserve")
+        ChatImportStaging.prune(cache, now)
+        assertFalse(expired.exists())
+        assertTrue(unknown.exists())
+    }
+
     @Test fun unknownMarkersNamesAndPayloadsAreNotDeleted() {
         val cache = temporary.newFolder()
         val unknown = orphan(cache)

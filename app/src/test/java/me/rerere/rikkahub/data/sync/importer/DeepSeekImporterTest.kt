@@ -58,6 +58,18 @@ class DeepSeekImporterTest {
         return file
     }
     private fun parse(value: JsonObject) = DeepSeekParser.parse(JsonArray(listOf(value))).conversations.single()
+
+    @Test fun streamsAValidArchiveAboveTheOld64MiBLimitWithoutBuildingOneLargeString() {
+        val file = temporary.newFile("synthetic-large-stream.zip")
+        ZipOutputStream(file.outputStream()).use { output ->
+            output.putNextEntry(ZipEntry("conversations.json"))
+            output.write(JsonArray(listOf(conversation())).toString().toByteArray())
+            val padding = ByteArray(64 * 1024) { ' '.code.toByte() }
+            repeat(1040) { output.write(padding) } // 65 MiB of legal trailing whitespace, streamed.
+            output.closeEntry()
+        }
+        assertEquals(1, DeepSeekArchive.inspect(file).conversations.size)
+    }
     private class Sink : DeepSeekImportSink {
         val saved = linkedMapOf<Uuid, Conversation>()
         override suspend fun exists(id: Uuid) = id in saved

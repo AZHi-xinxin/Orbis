@@ -20,7 +20,7 @@ class OrbisLcUsageOwnershipTest {
         val names = (0 until tools.length()).map { tools.getJSONObject(it).getString("name") }.toSet()
         assertTrue(names.intersect(removed).isEmpty())
         assertTrue(names.containsAll(setOf("get_battery", "get_steps", "read_memory", "save_memory",
-            "get_l_service_status", "get_device_context", "get_location_safety_status")))
+            "get_runtime_status", "get_device_context", "get_location_safety_status")))
     }
 
     @Test fun staleLcCallsCannotQueryUsageOrResetAnything() {

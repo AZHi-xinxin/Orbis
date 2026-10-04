@@ -14,6 +14,8 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.HttpException
+import java.net.SocketTimeoutException
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
@@ -22,7 +24,6 @@ import me.rerere.asr.ASRCorrectionResult
 import me.rerere.asr.ASRTermCorrectionRule
 import me.rerere.asr.ASRTermCorrectionSettings
 import me.rerere.asr.correctAsrTranscript
-import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.MessageQueue
 import org.junit.Assert.*
 import org.junit.Test
@@ -337,7 +338,7 @@ class VoiceSessionControllerTest {
         } finally { rig.close() }
     }
 
-    @Test fun `queue pause resolves its localized message`() = runBlocking<Unit> {
+    @Test fun `queue pause preserves call and displays recovery entry`() = runBlocking<Unit> {
         val rig = Rig()
         try {
             rig.start()
@@ -345,9 +346,109 @@ class VoiceSessionControllerTest {
             first.end("hello")
             rig.recorder(first)
             rig.queue.pause()
-            awaitCondition { rig.voice.state.value.phase == VoicePhase.Error }
-            assertEquals(R.string.chat_page_voice_queue_paused.toString(), rig.voice.state.value.error)
+            awaitCondition { rig.voice.state.value.replyBlocked && rig.asrs.all { it.disposed } }
+            assertTrue(rig.voice.state.value.isActive)
+            assertTrue(rig.voice.state.value.replyNotice.orEmpty().contains("MODEL_QUEUE_PAUSED"))
         } finally { rig.close() }
+    }
+
+    @Test fun `gateway HTTP 409 holds connected call without five minute replay`() =
+        assertModelFailureRequiresExplicitResume(HttpException("private upstream detail", httpStatus = 409,
+            code = "human_turn_in_progress", errorType = "stiller_gateway_error", gatewayBusyBeforeGeneration = true))
+
+    @Test fun `gateway socket timeout holds connected call without replaying accepted input`() =
+        assertModelFailureRequiresExplicitResume(SocketTimeoutException("private transport detail"))
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun assertModelFailureRequiresExplicitResume(failure: Exception) = runTest {
+        val recorders = mutableListOf<FakeAsr>()
+        val accepted = mutableListOf<String>()
+        val replies = mutableListOf<CompletableDeferred<String?>>()
+        val spoken = mutableListOf<String>()
+        val holds = mutableListOf<Boolean>()
+        var ended = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) { text ->
+            accepted += text
+            CompletableDeferred<String?>().also { replies += it }
+        }
+        try {
+            voice.start(createAsr = { FakeAsr().also { recorders += it } }, speak = { spoken += it },
+                stopSpeaking = {}, onEnded = { ended++ }, onReplyPauseChanged = { holds += it })
+            advanceTimeBy(201); runCurrent()
+            recorders.single().end("accepted once")
+            runCurrent()
+            assertEquals(listOf("accepted once"), accepted)
+            replies.single().completeExceptionally(failure)
+            runCurrent()
+            assertTrue(voice.state.value.isActive)
+            assertTrue(voice.state.value.replyBlocked)
+            assertTrue(recorders.all { it.disposed })
+            assertFalse(voice.state.value.replyNotice.orEmpty().contains("private"))
+            val capturesAtPause = recorders.size
+            advanceTimeBy(300_001); runCurrent()
+            // Neither the old five-minute duration nor audio-focus return authorizes resending.
+            voice.setAudioFocusSuspended(true)
+            voice.setAudioFocusSuspended(false)
+            runCurrent()
+            assertTrue(voice.state.value.replyBlocked)
+            assertEquals(capturesAtPause, recorders.size)
+            assertEquals(listOf("accepted once"), accepted)
+            assertTrue(spoken.isEmpty())
+            assertEquals(0, ended)
+            assertTrue(voice.requestReplyResume { false })
+            runCurrent()
+            assertTrue(voice.state.value.replyBlocked)
+            assertFalse(voice.state.value.replyResumeChecking)
+            assertEquals(capturesAtPause, recorders.size)
+            assertTrue(voice.requestReplyResume { true })
+            runCurrent(); advanceTimeBy(301); runCurrent()
+            assertFalse(voice.state.value.replyBlocked)
+            assertTrue(voice.state.value.isActive)
+            assertEquals(listOf(true, false), holds)
+            assertEquals(listOf("accepted once"), accepted)
+            assertTrue(spoken.isEmpty())
+            recorders.last().end("new human speech after review")
+            runCurrent()
+            assertEquals(listOf("accepted once", "new human speech after review"), accepted)
+            assertEquals(0, ended)
+        } finally { voice.stopAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `cancelled resume check cannot unmute or enqueue in a replacement call`() = runTest {
+        val recorders = mutableListOf<FakeAsr>()
+        val replies = mutableListOf<CompletableDeferred<String?>>()
+        var enqueued = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) {
+            enqueued++
+            CompletableDeferred<String?>().also { replies += it }
+        }
+        val slowCheck = CompletableDeferred<Boolean>()
+        fun start(microphone: Boolean) = voice.start(
+            createAsr = { FakeAsr().also { recorders += it } }, speak = null, stopSpeaking = {},
+            initialMicrophoneEnabled = microphone)
+        try {
+            start(true)
+            advanceTimeBy(201); runCurrent()
+            recorders.single().end("old call")
+            runCurrent()
+            replies.single().completeExceptionally(HttpException("busy", httpStatus = 409))
+            runCurrent()
+            assertTrue(voice.requestReplyResume { slowCheck.await() })
+            assertFalse(voice.requestReplyResume { error("duplicate check must not run") })
+            runCurrent()
+            voice.stopAndJoin()
+            val capturesBeforeRestart = recorders.size
+            start(false)
+            advanceTimeBy(201); runCurrent()
+            slowCheck.complete(true)
+            runCurrent(); advanceTimeBy(1_000); runCurrent()
+            assertTrue(voice.state.value.isActive)
+            assertFalse(voice.state.value.microphoneEnabled)
+            assertFalse(voice.state.value.replyResumeChecking)
+            assertEquals(capturesBeforeRestart, recorders.size)
+            assertEquals(1, enqueued)
+        } finally { voice.stopAndJoin() }
     }
 
     @Test fun `empty utterance never enters queue`() = runBlocking<Unit> {
@@ -361,7 +462,7 @@ class VoiceSessionControllerTest {
         } finally { rig.close() }
     }
 
-    @Test fun `ASR generation and playback errors stop capture and pause voice mode`() = runBlocking<Unit> {
+    @Test fun `ASR and generation errors pause independently while fatal playback ends voice`() = runBlocking<Unit> {
         for (failure in listOf("asr", "generation", "playback")) {
             val rig = Rig()
             try {
@@ -378,8 +479,14 @@ class VoiceSessionControllerTest {
                         rig.replies[0].complete("reply")
                     }
                 }
-                awaitCondition { rig.voice.state.value.phase == VoicePhase.Error }
-                if (failure == "asr") assertEquals("offline", rig.voice.state.value.error)
+                awaitCondition { rig.asrs.all { it.disposed } &&
+                    when (failure) {
+                        "generation" -> rig.voice.state.value.replyBlocked
+                        "asr" -> !rig.voice.state.value.microphoneEnabled
+                        else -> rig.voice.state.value.phase == VoicePhase.Error
+                    } }
+                if (failure != "playback") assertTrue(rig.voice.state.value.isActive)
+                if (failure == "asr") assertTrue(rig.voice.state.value.recoveryNotice.orEmpty().contains("ASR_LISTEN_FAILED"))
                 assertTrue(rig.asrs.all { it.disposed })
             } finally { rig.close() }
         }
@@ -433,6 +540,8 @@ class VoiceSessionControllerTest {
                 onConnected = { connectedCount++; connected.await() },
             )
             val first = rig.recorder()
+            // Recorder creation and the connected callback run on different coroutines.
+            awaitCondition { connectedCount == 1 }
             first.end("first")
             assertEquals(1, connectedCount)
             assertTrue(rig.replies.isEmpty())
@@ -471,7 +580,7 @@ class VoiceSessionControllerTest {
         } finally { rig.close() }
     }
 
-    @Test fun `terminal error callback reports failure after microphone cleanup`() = runBlocking<Unit> {
+    @Test fun `connection persistence failure remains terminal after microphone cleanup`() = runBlocking<Unit> {
         val rig = Rig()
         val ended = CompletableDeferred<String?>()
         try {
@@ -479,14 +588,13 @@ class VoiceSessionControllerTest {
                 createAsr = { FakeAsr().also { rig.asrs.add(it) } },
                 speak = null,
                 stopSpeaking = {},
+                onConnected = { error("connection persistence unavailable") },
                 onEnded = {
                     assertTrue(rig.asrs.all { asr -> asr.disposed })
                     ended.complete(it)
                 },
             )
-            val recorder = rig.recorder()
-            recorder.state.value = recorder.state.value.copy(errorMessage = "microphone unavailable")
-            assertEquals("microphone unavailable", withTimeout(3000) { ended.await() })
+            assertEquals("通话开始记录未能确认，未继续收音 [CONNECT_FAILED]", withTimeout(3000) { ended.await() })
             assertEquals(VoicePhase.Error, rig.voice.state.value.phase)
         } finally { rig.close() }
     }

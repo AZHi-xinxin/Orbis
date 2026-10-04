@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -54,7 +55,6 @@ import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
-import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.utils.CrashHandler
 import org.koin.android.ext.android.inject
@@ -67,12 +67,13 @@ class SafeModeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val stackTrace = CrashHandler.getStackTrace(this)
-        CrashHandler.clearCrashed(this)
         enableEdgeToEdge()
         setContent {
-            RikkahubTheme {
+            // Recovery must not depend on the selected assistant's custom appearance.
+            MaterialTheme {
                 val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
                 var showAssistantPicker by remember { mutableStateOf(false) }
+                var entryError by remember { mutableStateOf<String?>(null) }
                 val scope = rememberCoroutineScope()
                 val context = LocalContext.current
 
@@ -86,6 +87,7 @@ class SafeModeActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
+                            .verticalScroll(rememberScrollState())
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
@@ -94,6 +96,11 @@ class SafeModeActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        Button(
+                            onClick = { startActivity(Intent(this@SafeModeActivity, EmergencyBackupActivity::class.java)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("导出崩溃前内容备份到本机") }
 
                         Text(
                             text = stringResource(
@@ -111,15 +118,27 @@ class SafeModeActivity : ComponentActivity() {
 
                         OutlinedButton(
                             onClick = {
-                                startActivity(Intent(this@SafeModeActivity, RouteActivity::class.java))
-                                finish()
+                                if (CrashHandler.acknowledgeCrashed(this@SafeModeActivity)) {
+                                    startActivity(Intent(this@SafeModeActivity, RouteActivity::class.java))
+                                    finish()
+                                } else entryError = "无法保存恢复状态，请确认设备空间充足；错误报告和聊天仍保留。"
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(stringResource(R.string.safe_mode_enter_app))
                         }
 
+                        OutlinedButton(
+                            onClick = {
+                                startActivity(Intent(this@SafeModeActivity, ConversationRescueActivity::class.java))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("检查会话与保存副本") }
+                        entryError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
                         if (stackTrace != null) {
+                            Text("错误报告会留在本机。复制后请遮去密钥、地址或私人内容再反馈。",
+                                style = MaterialTheme.typography.bodySmall)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -140,7 +159,7 @@ class SafeModeActivity : ComponentActivity() {
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .weight(1f),
+                                    .heightIn(min = 160.dp, max = 320.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant
                                 )

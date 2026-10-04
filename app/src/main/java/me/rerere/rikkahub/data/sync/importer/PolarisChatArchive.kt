@@ -20,15 +20,16 @@ import java.util.zip.ZipFile
 
 /** Reads only the manifest and chat store. Other stores, assets and ZIP paths are never extracted. */
 object PolarisChatArchive {
-    const val MAX_ARCHIVE_BYTES = 512L * 1024 * 1024
-    private const val MAX_ENTRY_BYTES = 512L * 1024 * 1024
-    private const val MAX_EXPANDED_BYTES = 1024L * 1024 * 1024
+    const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_ZIP_BYTES
+    private const val MAX_ENTRY_BYTES = ArchiveCapacity.MAX_DISK_ENTRY_BYTES
+    private const val MAX_EXPANDED_BYTES = ArchiveCapacity.MAX_EXPANDED_BYTES
     private const val MAX_MANIFEST_BYTES = 1024L * 1024
-    private const val MAX_CHAT_BYTES = 64L * 1024 * 1024
+    private const val MAX_CHAT_BYTES = ArchiveCapacity.MAX_STREAM_JSON_BYTES
     private const val CHAT_ENTRY = "stores/chat.json"
 
     fun fingerprint(file: File, checkCancelled: () -> Unit = {}): String {
-        require(file.isFile && file.length() in 1..MAX_ARCHIVE_BYTES) { "polaris_archive_size" }
+        require(file.isFile) { "polaris_missing_file" }
+        ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->
             val buffer = ByteArray(65536)
@@ -46,19 +47,21 @@ object PolarisChatArchive {
     }
 
     internal fun open(file: File, checkCancelled: () -> Unit = {}): ArchiveReader {
-        require(file.isFile && file.length() in 1..MAX_ARCHIVE_BYTES) { "polaris_archive_size" }
+        require(file.isFile) { "polaris_missing_file" }
+        ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
         val zip = ZipFile(file)
         try {
             val paths = linkedMapOf<String, ZipEntry>()
             var expanded = 0L
             for (entry in zip.entries()) {
                 checkCancelled()
-                require(paths.size < 20000) { "polaris_entry_count" }
+                require(paths.size < ArchiveCapacity.MAX_ENTRIES) { "polaris_entry_count" }
                 val path = safePath(entry.name, entry.isDirectory)
-                require(paths.put(path, entry) == null) { "polaris_path_collision" }
-                require(entry.size in 0..MAX_ENTRY_BYTES && entry.compressedSize >= 0) { "polaris_entry_size" }
+                if (paths.put(path, entry) != null) throw ArchiveReadException(ArchiveFailure.UNSAFE_PATH)
+                ArchiveCapacity.requireSize(entry.size, MAX_ENTRY_BYTES, allowEmpty = true)
+                require(entry.compressedSize >= 0) { "polaris_entry_size" }
                 expanded += entry.size
-                require(expanded <= MAX_EXPANDED_BYTES) { "polaris_expanded_size" }
+                ArchiveCapacity.requireSize(expanded, MAX_EXPANDED_BYTES, allowEmpty = true)
                 if (path == "manifest.json" || path == CHAT_ENTRY) {
                     require(entry.size <= maxOf(1024L * 1024, entry.compressedSize * 1000)) {
                         "polaris_compression_ratio"
@@ -85,7 +88,7 @@ object PolarisChatArchive {
             require(stores.string("chat") == CHAT_ENTRY) { "polaris_chat_store" }
             val chat = paths[CHAT_ENTRY]?.takeIf { it.name == CHAT_ENTRY && !it.isDirectory }
                 ?: error("polaris_chat_missing")
-            require(chat.size in 2..MAX_CHAT_BYTES) { "polaris_chat_size" }
+            ArchiveCapacity.requireSize(chat.size, MAX_CHAT_BYTES)
             val stream = CountingCrcStream(zip.getInputStream(chat), chat.size, checkCancelled)
             val reader = InputStreamReader(stream, Charsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT))
@@ -146,6 +149,7 @@ object PolarisChatArchive {
     }
 
     private fun safePath(name: String, directory: Boolean): String {
+        ArchiveCapacity.requireSafePath(name, directory)
         require(name.isNotEmpty() && name.length <= 1024 && !name.startsWith('/') && '\\' !in name &&
             ':' !in name && name.none { it.code < 32 || it.code == 127 }) { "polaris_unsafe_path" }
         val path = if (directory) name.removeSuffix("/") else name
@@ -173,11 +177,11 @@ object PolarisChatArchive {
         }
         private fun account(buffer: ByteArray, offset: Int, count: Int) {
             total += count
-            require(total <= limit) { "polaris_inflated_size" }
+            if (total > limit) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
             checksum.update(buffer, offset, count)
         }
         fun verify(entry: ZipEntry) {
-            require(total == entry.size && checksum.value == entry.crc) { "polaris_zip_checksum" }
+            if (total != entry.size || checksum.value != entry.crc) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
         }
     }
 }
@@ -189,7 +193,8 @@ private class StoreReader(private val reader: Reader, private val checkCancelled
     private fun peek(): Int { if (pending == -2) pending = reader.read(); return pending }
     private fun next(): Char {
         if (offset and 4095L == 0L) checkCancelled()
-        require(peek() >= 0 && ++offset <= 64L * 1024 * 1024) { "polaris_json_size_or_truncated" }
+        require(peek() >= 0) { "polaris_json_truncated" }
+        ArchiveCapacity.requireSize(++offset, ArchiveCapacity.MAX_STREAM_JSON_BYTES)
         return pending.toChar().also { pending = -2 }
     }
     private fun ws() { while (peek() >= 0 && peek().toChar() in " \r\n\t") next() }
@@ -197,7 +202,7 @@ private class StoreReader(private val reader: Reader, private val checkCancelled
     private fun value(limit: Int): String {
         ws()
         val raw = StringBuilder()
-        fun add(c: Char) { require(raw.length < limit) { "polaris_json_value_size" }; raw.append(c) }
+        fun add(c: Char) { if (raw.length >= limit) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT); raw.append(c) }
         when (peek().toChar()) {
             '{', '[' -> {
                 val brackets = ArrayDeque<Char>()
@@ -250,7 +255,7 @@ private class StoreReader(private val reader: Reader, private val checkCancelled
                 expect('[')
                 while (true) {
                     ws(); if (peek() == ']'.code) { next(); break }
-                    val item = DeepSeekStrictJson.parse(value(16 * 1024 * 1024), checkCancelled)
+                    val item = DeepSeekStrictJson.parse(value(ArchiveCapacity.MAX_WINDOW_CHARS), checkCancelled)
                         as? JsonObject ?: error("polaris_conversation_object")
                     yield(item)
                     ws(); val separator = next()

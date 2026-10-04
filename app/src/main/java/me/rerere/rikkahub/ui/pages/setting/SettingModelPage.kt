@@ -115,8 +115,8 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
     var archiveChoice by remember { mutableStateOf<Pair<Model, Boolean>?>(null) }
     var archiveError by remember { mutableStateOf<String?>(null) }
     archiveChoice?.let { (model, fallback) ->
-        AlertDialog(onDismissRequest = { archiveChoice = null }, title = { Text("启用${if (fallback) "备用" else "主"}归档模型？") },
-            text = { Text("通话结束后可将本次通话文字发送给 ${model.displayName} 生成摘要，可能产生模型费用。它不继承聊天人格、工作区或工具；主归档失败时备用最多尝试一次。取消配置可停止以后自动使用，不影响已保存的记录。") },
+        AlertDialog(onDismissRequest = { archiveChoice = null }, title = { Text("启用${if (fallback) "第二" else "第一"}外部兜底模型？") },
+            text = { Text("通话结束先请当前助手本人整理。本人无法完成时，才可把本次通话文字发送给 ${model.displayName} 兜底，可能产生模型费用。外部模型不继承聊天人格、工作区或工具，结果会明确标注外部兜底，不冒充本助手。取消配置可停止以后使用它，不影响已保存记录。") },
             confirmButton = { TextButton(onClick = {
                 archiveChoice = null
                 vm.setVoiceArchiveModel(model.id, fallback) { archiveError = it }
@@ -182,20 +182,20 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
             )
         }
         if (BuildConfig.ORBIS_ENABLED) item {
-            ModelSettingItem(title = "语音通话归档模型",
-                description = "独立整理本次已保存的通话，不依赖聊天队列。未设置时仍完整保留原文，显示未归档，不影响继续聊天。",
+            ModelSettingItem(title = "语音通话外部兜底模型",
+                description = "正常挂断由当前助手本人总结。本人失败或异常结束10秒未开始有效总结时才使用这里的模型；未配置外部模型也会先请求当前助手。原文始终保留。",
                 modelId = settings.orbisVoiceArchiveModelId, providers = settings.providers,
                 onSelect = { archiveChoice = it to false })
             TextButton(enabled = settings.orbisVoiceArchiveModelId != null, onClick = {
                 vm.setVoiceArchiveModel(null, false) { archiveError = it }
-            }) { Text("不使用主归档模型") }
-            ModelSettingItem(title = "语音通话归档备用模型",
-                description = "主归档模型失败时尝试一次；两者都失败则保留原文和重新归档入口。不重发通话消息，不重做工具操作。",
+            }) { Text("不使用第一外部兜底") }
+            ModelSettingItem(title = "语音通话第二外部兜底",
+                description = "第一外部兜底失败后最多尝试一次；所有整理都失败则保留原文和重试入口，也可请本助手通过通话工具补写。不重发通话消息，不重做工具操作。",
                 modelId = settings.orbisVoiceArchiveFallbackModelId, providers = settings.providers,
                 onSelect = { archiveChoice = it to true })
             TextButton(enabled = settings.orbisVoiceArchiveFallbackModelId != null, onClick = {
                 vm.setVoiceArchiveModel(null, true) { archiveError = it }
-            }) { Text("不使用备用归档模型") }
+            }) { Text("不使用第二外部兜底") }
             archiveError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
     }

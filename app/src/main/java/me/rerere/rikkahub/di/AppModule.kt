@@ -122,6 +122,7 @@ val appModule = module {
             workspaceRepository = get(),
             folderRepository = get(),
             compactionRepository = get(),
+            httpClient = get(),
         )
     }
 

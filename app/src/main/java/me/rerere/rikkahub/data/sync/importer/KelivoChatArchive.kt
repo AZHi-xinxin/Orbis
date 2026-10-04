@@ -17,15 +17,16 @@ import java.util.zip.ZipFile
 
 /** Only the portable SQLite snapshot is staged. Never extract settings, skills, media or ZIP paths. */
 internal object KelivoChatArchive {
-    const val MAX_ARCHIVE_BYTES = 512L * 1024 * 1024
-    const val MAX_DATABASE_BYTES = 256L * 1024 * 1024
+    const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_ZIP_BYTES
+    const val MAX_DATABASE_BYTES = ArchiveCapacity.MAX_DISK_ENTRY_BYTES
     private const val MAX_MANIFEST_BYTES = 2L * 1024 * 1024
-    private const val MAX_EXPANDED_BYTES = 1024L * 1024 * 1024
+    private const val MAX_EXPANDED_BYTES = ArchiveCapacity.MAX_EXPANDED_BYTES
     private const val DATABASE_ENTRY = "database/kelivo.db"
     data class Snapshot(val file: File, val conversationCount: Int, val messageCount: Int)
 
     fun fingerprint(file: File, checkCancelled: () -> Unit = {}): String {
-        require(file.isFile && file.length() in 1..MAX_ARCHIVE_BYTES) { "kelivo_archive_size" }
+        require(file.isFile) { "kelivo_missing_file" }
+        ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             var total = 0L
@@ -44,19 +45,21 @@ internal object KelivoChatArchive {
 
     fun extract(file: File, destination: File, checkCancelled: () -> Unit = {},
         usableSpace: (File) -> Long = { it.usableSpace }): Snapshot {
-        require(file.isFile && file.length() in 1..MAX_ARCHIVE_BYTES) { "kelivo_archive_size" }
+        require(file.isFile) { "kelivo_missing_file" }
+        ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
         require(destination.isDirectory && destination.listFiles()?.isEmpty() == true) { "kelivo_private_staging" }
         return ZipFile(file).use { zip ->
             val paths = linkedMapOf<String, ZipEntry>()
             var expanded = 0L
             for (entry in zip.entries()) {
                 checkCancelled()
-                require(paths.size < 20000) { "kelivo_entry_count" }
+                require(paths.size < ArchiveCapacity.MAX_ENTRIES) { "kelivo_entry_count" }
                 val canonical = safePath(entry.name, entry.isDirectory)
-                require(paths.put(canonical, entry) == null) { "kelivo_path_collision" }
-                require(entry.size in 0..MAX_DATABASE_BYTES && entry.compressedSize >= 0) { "kelivo_entry_size" }
+                if (paths.put(canonical, entry) != null) throw ArchiveReadException(ArchiveFailure.UNSAFE_PATH)
+                ArchiveCapacity.requireSize(entry.size, MAX_DATABASE_BYTES, allowEmpty = true)
+                require(entry.compressedSize >= 0) { "kelivo_entry_size" }
                 expanded += entry.size
-                require(expanded <= MAX_EXPANDED_BYTES) { "kelivo_expanded_size" }
+                ArchiveCapacity.requireSize(expanded, MAX_EXPANDED_BYTES, allowEmpty = true)
                 require(entry.size <= maxOf(1024L * 1024, entry.compressedSize * 1000)) { "kelivo_compression_ratio" }
             }
             paths.keys.forEach { path ->
@@ -86,15 +89,17 @@ internal object KelivoChatArchive {
                 database.number("minimumReadableSchemaVersion") in 1L..3L) { "kelivo_schema_version" }
             val conversations = database.number("conversationCount")
             val messages = database.number("messageCount")
-            require(conversations in 1L..10000L && messages in 0L..100000L) { "kelivo_row_count" }
+            require(conversations in 1L..10000L && messages in 0L..1000000L) { "kelivo_row_count" }
             val checksum = (manifest["entries"] as? JsonObject)?.get(DATABASE_ENTRY) as? JsonObject
                 ?: error("kelivo_database_checksum")
             val entry = paths[DATABASE_ENTRY]?.takeIf { it.name == DATABASE_ENTRY && !it.isDirectory }
                 ?: error("kelivo_database_missing")
-            require(entry.size in 16L..MAX_DATABASE_BYTES && checksum.number("bytes") == entry.size) { "kelivo_database_size" }
+            ArchiveCapacity.requireSize(entry.size, MAX_DATABASE_BYTES)
+            require(entry.size >= 16 && checksum.number("bytes") == entry.size) { "kelivo_database_size" }
             val expected = checksum.text("sha256")
             require(expected.matches(Regex("[0-9a-fA-F]{64}"))) { "kelivo_database_checksum" }
             val target = File(destination, "kelivo-chat-snapshot.db")
+            ArchiveCapacity.requireSpace(usableSpace(destination), entry.size)
             require(target.createNewFile()) { "kelivo_staging_collision" }
             try {
                 val digest = target.outputStream().use { out ->
@@ -102,7 +107,7 @@ internal object KelivoChatArchive {
                         RikkaChatArchive.requireExtractionSpace(usableSpace(destination), count)
                     }
                 }
-                require(digest.equals(expected, ignoreCase = true)) { "kelivo_database_checksum" }
+                if (!digest.equals(expected, ignoreCase = true)) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
                 require(target.inputStream().use { input ->
                     val header = ByteArray(16)
                     input.read(header) == 16 && header.contentEquals("SQLite format 3\u0000".toByteArray(Charsets.US_ASCII))
@@ -113,6 +118,7 @@ internal object KelivoChatArchive {
     }
 
     private fun safePath(name: String, directory: Boolean): String {
+        ArchiveCapacity.requireSafePath(name, directory)
         require(name.isNotEmpty() && name.length <= 1024 && !name.startsWith('/') && '\\' !in name && ':' !in name &&
             name.none { it.code < 32 || it.code == 127 }) { "kelivo_unsafe_path" }
         val path = if (directory) name.removeSuffix("/") else name
@@ -133,13 +139,14 @@ internal object KelivoChatArchive {
                 val count = input.read(buffer)
                 if (count < 0) break
                 total += count
-                require(total <= limit && total <= entry.size) { "kelivo_inflated_size" }
+                ArchiveCapacity.requireSize(total, limit, allowEmpty = true)
+                if (total > entry.size) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
                 beforeWrite(count)
                 crc.update(buffer, 0, count); digest.update(buffer, 0, count)
                 output.write(buffer, 0, count)
             }
         }
-        require(total == entry.size && crc.value == entry.crc) { "kelivo_zip_checksum" }
+        if (total != entry.size || crc.value != entry.crc) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
         return digest.digest().hex()
     }
     private fun JsonObject.text(key: String) = (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content

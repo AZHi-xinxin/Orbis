@@ -66,12 +66,14 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
             if (!gate.tryLock()) return@withContext failed("another_invitation_active")
             try {
                 val settingsStore = GlobalContext.get().get<SettingsStore>()
-                val settings = settingsStore.settingsFlow.value
-                val assistant = settings.getAssistantById(Uuid.parse(assistantId)) ?: return@withContext failed("assistant_missing")
                 val conversation = GlobalContext.get().get<ConversationRepository>().getConversationSummaryOfAssistant(
                     Uuid.parse(conversationId), Uuid.parse(assistantId))
                 if (conversation == null) return@withContext failed("conversation_owner_changed")
+                val settings = settingsStore.settingsFlow.value
+                val assistant = settings.getAssistantById(Uuid.parse(assistantId)) ?: return@withContext failed("assistant_missing")
                 if (!settings.orbisContact.allowIncomingCalls) return@withContext failed("incoming_calls_disabled")
+                // Never ring for a configuration which cannot start a call. This is local only.
+                OrbisVoiceCallPreflight.firstFailure(settings, assistant)?.let { return@withContext failed(it.code) }
                 if (OrbisVoiceCallRuntime.get(context).callState.value.let { it.isActive || it.ending }) return@withContext failed("call_busy")
                 val audio = context.getSystemService(android.media.AudioManager::class.java)
                 if (audio.mode != android.media.AudioManager.MODE_NORMAL || audio.activeRecordingConfigurations.isNotEmpty() ||
@@ -141,10 +143,14 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
                 mutableState.value = current.copy(attempt = next)
                 context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)
                 withTimeout(25_000) { start(next) }
+            } catch (_: TimeoutCancellationException) {
+                withContext(NonCancellable) { finish(id, IncomingCallOutcome.FAILED, OrbisCallFailure.TIMEOUT.code) }
             } catch (cancelled: CancellationException) {
                 withContext(NonCancellable) { finish(id, IncomingCallOutcome.FAILED, "answer_interrupted") }
                 throw cancelled
-            } catch (_: Exception) { finish(id, IncomingCallOutcome.FAILED, "connection_failed") }
+            } catch (failure: OrbisCallStartException) {
+                finish(id, IncomingCallOutcome.FAILED, failure.failure.code)
+            } catch (_: Exception) { finish(id, IncomingCallOutcome.FAILED, OrbisCallFailure.STARTUP_FAILED.code) }
         }
     }
 
@@ -152,7 +158,9 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
         finish(id, IncomingCallOutcome.CONNECTED, callId = callId)?.let {
             it.outcome == IncomingCallOutcome.CONNECTED && it.connectedCallId == callId
         } == true
-    suspend fun connectionFailed(id: String) { finish(id, IncomingCallOutcome.FAILED, "connection_failed") }
+    internal suspend fun connectionFailed(id: String, failure: OrbisCallFailure = OrbisCallFailure.STARTUP_FAILED) {
+        finish(id, IncomingCallOutcome.FAILED, failure.code)
+    }
     fun registerConnectingCall(attemptId: String, callId: String) {
         check(mutableState.value?.attempt?.let { it.id == attemptId && it.outcome == IncomingCallOutcome.CONNECTING } == true) { "incoming_expired" }
         preparedCall = attemptId to callId

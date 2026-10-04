@@ -5,7 +5,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -44,6 +43,12 @@ data class VoiceSessionState(
     /** Original ASR only when changed; UI/audit only, never a second model message. */
     val originalTranscript: String? = null,
     val correctionNotice: ASRCorrectionNotice = ASRCorrectionNotice(),
+    val audioFocusSuspended: Boolean = false,
+    val reconnecting: Boolean = false,
+    val recoveryNotice: String? = null,
+    val replyBlocked: Boolean = false,
+    val replyResumeChecking: Boolean = false,
+    val replyNotice: String? = null,
 ) {
     val isActive: Boolean get() = phase != VoicePhase.Off && phase != VoicePhase.Error
 }
@@ -56,6 +61,7 @@ private fun VoiceSessionState.withTranscript(value: ASRCorrectionResult, eventId
 class VoiceSessionController(
     private val scope: CoroutineScope,
     private val getString: (Int) -> String,
+    private val monotonicTimeMs: () -> Long = { System.nanoTime() / 1_000_000L },
     private val enqueueMessage: (String) -> Deferred<String?>,
 ) {
     private val mutableState = MutableStateFlow(VoiceSessionState())
@@ -64,8 +70,11 @@ class VoiceSessionController(
     private var activeAsr: ASRController? = null
     private var stopCurrentPlayback: (() -> Unit)? = null
     private var muteOutput: ((Boolean) -> Unit)? = null
+    private var interruptCurrentAudio: (() -> Unit)? = null
     private var controls: Channel<Event>? = null
     private val microphoneRevision = AtomicLong()
+    private val focusRevision = AtomicLong()
+    private val replyRevision = AtomicLong()
 
     private sealed interface Event {
         data class CaptureState(val epoch: Long, val state: ASRState, val transcribing: Boolean) : Event
@@ -80,6 +89,10 @@ class VoiceSessionController(
         data object SpeakerChanged : Event
         data class OutputFailed(val error: Exception) : Event
         data object CheckAcoustics : Event
+        data object FocusChanged : Event
+        data class RetryCapture(val revision: Long) : Event
+        data class CheckReplies(val revision: Long, val checkReady: suspend () -> Boolean) : Event
+        data class RepliesChecked(val revision: Long, val ready: Boolean) : Event
     }
 
     private class Pending(val id: Long, val reply: Deferred<String?>) {
@@ -104,6 +117,7 @@ class VoiceSessionController(
         requestOpening: (suspend () -> Deferred<String?>?)? = null,
         correctTranscript: (String) -> ASRCorrectionResult = { ASRCorrectionResult(it, it) },
         enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)? = null,
+        onReplyPauseChanged: (Boolean) -> Unit = {},
     ) {
         if (job?.isCompleted == false) return
         val events = Channel<Event>(Channel.UNLIMITED)
@@ -114,6 +128,7 @@ class VoiceSessionController(
             Unit
         }
         stopCurrentPlayback = stopPlayback
+        interruptCurrentAudio = stopSpeaking
         muteOutput = setOutputMuted
         mutableState.value = VoiceSessionState(phase = VoicePhase.Connecting,
             microphoneEnabled = initialMicrophoneEnabled, speakerEnabled = initialSpeakerEnabled)
@@ -121,17 +136,17 @@ class VoiceSessionController(
             var terminalError: String? = null
             try {
                 stopSpeaking()
-                setOutputMuted(!mutableState.value.speakerEnabled)
+                setOutputMuted(!mutableState.value.speakerEnabled || mutableState.value.audioFocusSuspended)
                 delay(200)
                 runSession(events, createAsr, speak, stopSpeaking, onConnected,
                     initialAssistantText, cancelPendingReply, isHeadsetConnected, requestOpening,
-                    correctTranscript, enqueueRecognizedMessage)
+                    correctTranscript, enqueueRecognizedMessage, onReplyPauseChanged)
             } catch (e: Exception) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) throw e
                 terminalError = when (e) {
-                    is TimeoutCancellationException -> "Speech recognition timed out. Restart voice mode."
                     is MessageQueuePausedException -> getString(R.string.chat_page_voice_queue_paused)
-                    else -> e.message ?: getString(R.string.chat_page_voice_failed)
+                    is VoiceSessionFailure -> e.message
+                    else -> VoiceRecoveryPolicy.failure(VoiceFailureStage.CONNECT, e).message
                 }
                 mutableState.update { it.copy(phase = VoicePhase.Error, error = terminalError,
                     canInterruptPlayback = false) }
@@ -140,6 +155,7 @@ class VoiceSessionController(
                 if (stopCurrentPlayback === stopPlayback) {
                     stopCurrentPlayback = null
                     muteOutput = null
+                    interruptCurrentAudio = null
                     controls = null
                 }
                 events.close()
@@ -156,6 +172,7 @@ class VoiceSessionController(
         requestOpening: (suspend () -> Deferred<String?>?)?,
         correctTranscript: (String) -> ASRCorrectionResult,
         enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)?,
+        onReplyPauseChanged: (Boolean) -> Unit,
     ) = coroutineScope {
         val pending = linkedMapOf<Long, Pending>()
         val ready = ArrayDeque<Playback>()
@@ -177,12 +194,20 @@ class VoiceSessionController(
         var tailEpoch = 0L
         var tailWaiting = false
         var transcribing = false
+        var observedFocusRevision = focusRevision.get()
+        var recoveryJob: Job? = null
+        var recoveryRevision = 0L
+        val recoveryBudget = VoiceReconnectBudget()
+        var awaitingRetry = false
+        var replyResumeJob: Job? = null
 
-        fun duplexSafe(): Boolean = mutableState.value.microphoneEnabled &&
+        fun audioAllowed(): Boolean = !mutableState.value.audioFocusSuspended && !mutableState.value.replyBlocked
+        fun duplexSafe(): Boolean = audioAllowed() && mutableState.value.microphoneEnabled &&
             asr?.supportsConcurrentPlayback == true &&
             (runCatching(isHeadsetConnected).getOrDefault(false) || asr?.state?.value?.echoCancellationActive == true)
 
         suspend fun closeCapture() {
+            recoveryBudget.stopListening(monotonicTimeMs())
             captureEpoch++ // Fence callbacks before dispose can produce more.
             runCatching { asr?.pauseCapture() }
             capture?.cancelAndJoin()
@@ -203,6 +228,60 @@ class VoiceSessionController(
             runCatching { stopSpeaking() }
             playback?.cancelAndJoin()
             playback = null
+        }
+        fun cancelRecovery() {
+            recoveryRevision++
+            recoveryJob?.cancel()
+            recoveryJob = null
+            awaitingRetry = false
+            mutableState.update { it.copy(reconnecting = false) }
+        }
+        suspend fun pauseRecognition(failure: VoiceSessionFailure) {
+            // After connection, a failed utterance must not hang up an otherwise healthy call.
+            // Mute is independent of model holds/focus: only the human can enable it again.
+            microphoneRevision.incrementAndGet()
+            mutableState.update { it.copy(microphoneEnabled = false, canInterruptPlayback = false,
+                transcript = "", originalTranscript = null,
+                recoveryNotice = "语音识别已暂停，本句未提交；请点开麦后重新说，旧录音不会重发。" +
+                    "[ASR_MANUAL_RESUME_REQUIRED] [${failure.code}]") }
+            cancelRecovery()
+            closeCapture()
+            mutableState.update { it.copy(correctionNotice = it.correctionNotice.begin(captureEpoch)) }
+        }
+        suspend fun pauseReplies(error: Exception) {
+            replyRevision.incrementAndGet()
+            replyResumeJob?.cancel()
+            replyResumeJob = null
+            // Publish the independent fence before suspending cleanup. Audio focus and mute
+            // controls must never release a model/tool-result hold.
+            mutableState.update { it.copy(replyBlocked = true, replyResumeChecking = false,
+                replyNotice = if (error is MessageQueuePausedException)
+                    "聊天队列已暂停；通话仍保留。请回聊天核对后检查恢复。[MODEL_QUEUE_PAUSED]"
+                else VoiceRecoveryPolicy.failure(VoiceFailureStage.MODEL, error).message,
+                pendingReplies = 0, canInterruptPlayback = false, recoveryNotice = null) }
+            runCatching { onReplyPauseChanged(true) }
+            microphoneRevision.incrementAndGet()
+            cancelRecovery()
+            runCatching { muteOutput?.invoke(true) }
+            closeCapture()
+            stopPlayback()
+            // Detach local listeners only. Accepted input, generation and tools retain their
+            // owners in ChatService; neither failure nor resume replays/cancels their work.
+            pending.values.forEach { it.observer?.cancel() }
+            pending.clear()
+            ready.clear()
+            waitForTail()
+        }
+        suspend fun applyFocusFence() {
+            val revision = focusRevision.get()
+            if (observedFocusRevision != revision) {
+                observedFocusRevision = revision
+                cancelRecovery()
+                closeCapture()
+                stopPlayback()
+                // A partially played utterance is never put back in ready; future replies remain.
+                waitForTail()
+            }
         }
         suspend fun interruptReply() {
             // Cancel the selected exact voice turn, not unrelated work in the chat queue.
@@ -262,6 +341,9 @@ class VoiceSessionController(
         }
         fun refreshState() {
             val phase = when {
+                mutableState.value.replyBlocked -> VoicePhase.Listening
+                mutableState.value.audioFocusSuspended -> VoicePhase.Listening
+                awaitingRetry -> VoicePhase.Connecting
                 playing != null -> VoicePhase.Speaking
                 transcribing -> VoicePhase.Transcribing
                 !connected -> VoicePhase.Connecting
@@ -275,6 +357,7 @@ class VoiceSessionController(
             // Muted acceptance is a connected call without even constructing a recorder.
             if (!mutableState.value.microphoneEnabled) markConnected()
             while (isActive) {
+                applyFocusFence()
                 if (capture != null && (!mutableState.value.microphoneEnabled ||
                         captureMicrophoneRevision != microphoneRevision.get())) closeCapture()
                 checkAcoustics()
@@ -289,7 +372,7 @@ class VoiceSessionController(
                     }
                 }
                 val humanTurnInProgress = asr?.state?.value?.voiceTurn?.itemId != null
-                if (connected && !tailWaiting && playing == null && ready.isNotEmpty() &&
+                if (audioAllowed() && connected && !tailWaiting && playing == null && ready.isNotEmpty() &&
                     !humanTurnInProgress && speak != null) {
                     if (!duplexSafe()) closeCapture()
                     val item = ready.removeFirst()
@@ -306,10 +389,15 @@ class VoiceSessionController(
                         while (isActive) { delay(100); events.send(Event.CheckAcoustics) }
                     }
                 }
-                if (capture == null && !tailWaiting && mutableState.value.microphoneEnabled &&
+                if (audioAllowed() && !awaitingRetry && capture == null && !tailWaiting && mutableState.value.microphoneEnabled &&
                     (playing == null || (playing?.id != captureDeferredForPlayback &&
                         runCatching(isHeadsetConnected).getOrDefault(false)))) {
-                    val recorder = createAsr()
+                    val recorder = try { createAsr() } catch (error: Exception) {
+                        val failure = VoiceRecoveryPolicy.failure(VoiceFailureStage.ASR_START, error)
+                        if (!connected) throw failure
+                        pauseRecognition(failure)
+                        continue
+                    }
                     if (playing != null && !recorder.supportsConcurrentPlayback) {
                         captureDeferredForPlayback = playing?.id
                         recorder.dispose()
@@ -339,25 +427,35 @@ class VoiceSessionController(
                     }
                 }
                 refreshState()
-                when (val event = events.receive()) {
+                val event = events.receive()
+                applyFocusFence()
+                when (event) {
                     Event.Connected -> {
                         connected = true
                         if (!openingRequested) {
                             openingRequested = true
                             if (requestOpening != null) {
                                 // This is a host-connected event, never a fabricated human utterance.
-                                requestOpening.invoke()?.let(::observeReply)
+                                try { requestOpening.invoke()?.let(::observeReply) }
+                                catch (error: Exception) {
+                                    if (error is CancellationException && !isActive) throw error
+                                    pauseReplies(error)
+                                }
                             } else initialAssistantText?.takeIf { it.isNotBlank() }?.let { text ->
                                 mutableState.update { it.copy(lastReplyText = text) }
                                 if (speak != null) ready.addLast(Playback(++sequence, text))
                             }
                         }
                     }
-                    is Event.CaptureState -> if (event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
+                    is Event.CaptureState -> if (audioAllowed() && event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
                         captureMicrophoneRevision == microphoneRevision.get()) {
                         checkAcoustics()
                         if (event.epoch == captureEpoch) {
                             transcribing = event.transcribing
+                            if (!event.transcribing && event.state.status == ASRStatus.Listening &&
+                                event.state.transcript.isBlank() && event.state.voiceTurn.itemId == null) {
+                                recoveryBudget.beginListening(monotonicTimeMs())
+                            } else recoveryBudget.stopListening(monotonicTimeMs())
                             val transcript = correctTranscript(event.state.transcript)
                             mutableState.update { it.withTranscript(transcript, event.epoch) }
                             val turn = event.state.voiceTurn
@@ -368,7 +466,7 @@ class VoiceSessionController(
                         }
                     }
                     is Event.CaptureEnded -> {
-                        if (event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
+                        if (audioAllowed() && event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
                             captureMicrophoneRevision == microphoneRevision.get()) {
                             checkAcoustics()
                             if (event.epoch != captureEpoch) {
@@ -377,6 +475,7 @@ class VoiceSessionController(
                             }
                             // ACK before the recorder releases AEC. An intentional end must not look
                             // like a recording-time effect failure and destroy its waiting final text.
+                            recoveryBudget.stopListening(monotonicTimeMs())
                             interruptForHumanCapture(event.epoch)
                             transcribing = true
                             val transcript = correctTranscript(event.state.transcript)
@@ -384,8 +483,9 @@ class VoiceSessionController(
                             event.acknowledged.complete(Unit)
                         } else event.acknowledged.cancel()
                     }
-                    is Event.Utterance -> if (event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
+                    is Event.Utterance -> if (audioAllowed() && event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
                         captureMicrophoneRevision == microphoneRevision.get()) {
+                        recoveryBudget.stopListening(monotonicTimeMs())
                         capture?.join() // Recorder is disposed before input reaches the chat queue.
                         capture = null
                         asr = null
@@ -394,26 +494,53 @@ class VoiceSessionController(
                             interruptForHumanCapture(event.epoch)
                             val transcript = correctTranscript(event.text)
                             mutableState.update { it.withTranscript(transcript, event.epoch) }
-                            observeReply(enqueueRecognizedMessage?.invoke(transcript) ?: enqueueMessage(transcript.corrected))
+                            try { observeReply(enqueueRecognizedMessage?.invoke(transcript) ?: enqueueMessage(transcript.corrected)) }
+                            catch (error: Exception) {
+                                if (error is CancellationException && !isActive) throw error
+                                pauseReplies(error)
+                            }
                         }
                     }
-                    is Event.CaptureFailed -> if (event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
-                        captureMicrophoneRevision == microphoneRevision.get()) throw event.error
+                    is Event.CaptureFailed -> if (audioAllowed() && event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
+                        captureMicrophoneRevision == microphoneRevision.get()) {
+                        val failure = event.error as? VoiceSessionFailure
+                            ?: VoiceRecoveryPolicy.failure(VoiceFailureStage.ASR_LISTEN, event.error, hadSpeech = true)
+                        val retryDelay = recoveryBudget.nextRetry(monotonicTimeMs(), failure, connected)
+                        if (retryDelay == null) {
+                            if (!connected || failure.stage == VoiceFailureStage.CONNECT) throw failure
+                            pauseRecognition(failure)
+                            continue
+                        }
+                        closeCapture()
+                        awaitingRetry = true
+                        val revision = ++recoveryRevision
+                        mutableState.update { it.copy(reconnecting = true,
+                            recoveryNotice = "识别连接暂断，正在恢复（本轮 ${recoveryBudget.attemptsUsed}/3）；不会重发旧录音或消息。[ASR_IDLE_RECONNECT]") }
+                        recoveryJob = launch { delay(retryDelay); events.send(Event.RetryCapture(revision)) }
+                    }
                     is Event.Reply -> pending[event.id]?.let {
-                        event.error?.let { error -> throw error }
-                        it.completed = true
-                        it.text = event.text
+                        if (event.error != null) pauseReplies(event.error)
+                        else {
+                            it.completed = true
+                            it.text = event.text
+                        }
                     }
                     is Event.PlaybackEnded -> if (playing?.id == event.id) {
                         playing = null
                         playback = null
                         acousticMonitor?.cancel()
                         acousticMonitor = null
-                        event.error?.let { throw it }
+                        event.error?.let {
+                            val failure = VoiceRecoveryPolicy.failure(VoiceFailureStage.TTS, it)
+                            if (!failure.network) throw failure
+                            runCatching { stopSpeaking() }
+                            mutableState.update { state -> state.copy(recoveryNotice = failure.message) }
+                        }
                         if (capture == null) waitForTail()
                     }
                     is Event.TailEnded -> if (event.id == tailEpoch) tailWaiting = false
                     is Event.MicrophoneChanged -> {
+                        if (!mutableState.value.microphoneEnabled) cancelRecovery()
                         if (capture != null && (!mutableState.value.microphoneEnabled ||
                                 captureMicrophoneRevision != microphoneRevision.get())) closeCapture()
                         if (!mutableState.value.microphoneEnabled) {
@@ -422,14 +549,47 @@ class VoiceSessionController(
                         }
                     }
                     Event.SpeakerChanged -> Unit // Gain only: synthesis, queue and timeline continue.
-                    is Event.OutputFailed -> throw event.error
+                    is Event.OutputFailed -> throw VoiceRecoveryPolicy.failure(VoiceFailureStage.AUDIO, event.error)
                     Event.CheckAcoustics -> checkAcoustics()
+                    Event.FocusChanged -> Unit // The synchronous revision fence is applied above.
+                    is Event.RetryCapture -> if (event.revision == recoveryRevision &&
+                        audioAllowed() && mutableState.value.microphoneEnabled) {
+                        recoveryJob = null
+                        awaitingRetry = false
+                        mutableState.update { it.copy(reconnecting = false,
+                            recoveryNotice = "正在重新连接识别；旧录音没有重发。[ASR_IDLE_RECONNECT]") }
+                    }
+                    is Event.CheckReplies -> if (event.revision == replyRevision.get() && mutableState.value.replyBlocked) {
+                        // A slow external check must not hold microphone/service teardown open.
+                        // Its only return path is this old channel plus the revision fence.
+                        replyResumeJob = scope.launch {
+                            val ready = try { event.checkReady() }
+                            catch (error: Exception) {
+                                if (error is CancellationException && !isActive) throw error
+                                false
+                            }
+                            events.trySend(Event.RepliesChecked(event.revision, ready))
+                        }
+                    }
+                    is Event.RepliesChecked -> if (event.revision == replyRevision.get() && mutableState.value.replyBlocked) {
+                        replyResumeJob = null
+                        mutableState.update { it.copy(replyBlocked = !event.ready, replyResumeChecking = false,
+                            replyNotice = if (event.ready) null else
+                                "回复、队列或工具结果尚待核对；请回聊天处理后再检查。通话仍保留。[MODEL_RESUME_BLOCKED]") }
+                        if (event.ready) {
+                            // Only future audio is enabled. Old input and playback were detached.
+                            muteOutput?.invoke(!mutableState.value.speakerEnabled || mutableState.value.audioFocusSuspended)
+                            runCatching { onReplyPauseChanged(false) }
+                        }
+                    }
                 }
             }
         } finally {
             capture?.cancel()
             playback?.cancel()
             acousticMonitor?.cancel()
+            recoveryJob?.cancel()
+            replyResumeJob?.cancel()
             pending.values.forEach { it.observer?.cancel() }
             // Leaving detaches observers; accepted chat work is not globally canceled.
         }
@@ -438,6 +598,7 @@ class VoiceSessionController(
     private suspend fun listen(asr: ASRController, onConnected: suspend () -> Unit,
         onCaptureEnded: suspend (ASRState) -> Unit,
         onState: (ASRState, Boolean) -> Unit): String {
+        var stage = VoiceFailureStage.ASR_START
         try {
             asr.start {}
             withTimeout(15_000) {
@@ -446,17 +607,22 @@ class VoiceSessionController(
                     it.status != ASRStatus.Connecting
                 }.also { check(it.status == ASRStatus.Listening || it.voiceTurn.isComplete) { "Unable to start speech recognition" } }
             }
+            stage = VoiceFailureStage.CONNECT
             onConnected()
-            // No local short-pause heuristic: provider call silence remains >=3s.
+            stage = VoiceFailureStage.ASR_LISTEN
+            mutableState.update { if (it.recoveryNotice?.contains("[ASR_IDLE_RECONNECT]") == true)
+                it.copy(recoveryNotice = "识别连接已恢复；旧录音没有重发。[ASR_RECONNECTED]") else it }
+            // Realtime providers use server VAD; batch adapters use local >=3s endpointing.
             val ended = asr.state.onEach {
                 check(it.errorMessage == null) { it.errorMessage.orEmpty() }
                 check(it.status == ASRStatus.Listening || it.voiceTurn.isComplete) { "Speech recognition disconnected" }
                 onState(it, false)
             }.first { it.voiceTurn.speechEnded }
             onCaptureEnded(ended)
+            stage = VoiceFailureStage.ASR_FINAL
             asr.pauseCapture()
             onState(ended, true)
-            return withTimeout(15_000) {
+            return withTimeout(asr.finalTranscriptTimeoutMs) {
                 asr.state.first {
                     check(it.errorMessage == null) { it.errorMessage.orEmpty() }
                     check(it.voiceTurn.isComplete || it.status == ASRStatus.Listening) {
@@ -465,6 +631,11 @@ class VoiceSessionController(
                     it.voiceTurn.isComplete
                 }.voiceTurn.finalText.orEmpty()
             }
+        } catch (error: Exception) {
+            if (error is CancellationException && !currentCoroutineContext().isActive) throw error
+            val state = asr.state.value
+            throw VoiceRecoveryPolicy.failure(stage, error, hadSpeech = stage == VoiceFailureStage.ASR_FINAL ||
+                state.transcript.isNotBlank() || state.voiceTurn.itemId != null)
         } finally {
             try { asr.dispose() } finally { if (activeAsr === asr) activeAsr = null }
         }
@@ -476,17 +647,53 @@ class VoiceSessionController(
             microphoneRevision.incrementAndGet()
         }
         mutableState.update { it.copy(microphoneEnabled = enabled,
-            canInterruptPlayback = if (enabled) it.canInterruptPlayback else false) }
+            canInterruptPlayback = if (enabled) it.canInterruptPlayback else false,
+            recoveryNotice = if (enabled && it.recoveryNotice?.contains("[ASR_MANUAL_RESUME_REQUIRED]") == true)
+                "收音已恢复，请重新说刚才那句；旧录音不会重发。[ASR_MANUAL_RESUMED]" else it.recoveryNotice) }
         if (!enabled) runCatching { activeAsr?.pauseCapture() }
         controls?.trySend(Event.MicrophoneChanged(enabled))
     }
 
     fun setSpeakerEnabled(enabled: Boolean) {
         if (controls == null || !mutableState.value.isActive) return
-        try { muteOutput?.invoke(!enabled) }
+        try { muteOutput?.invoke(!enabled || mutableState.value.audioFocusSuspended || mutableState.value.replyBlocked) }
         catch (error: Exception) { controls?.trySend(Event.OutputFailed(error)); return }
         mutableState.update { it.copy(speakerEnabled = enabled) }
         controls?.trySend(Event.SpeakerChanged)
+    }
+
+    /** Focus loss stops physical audio immediately; logical user mute choices remain unchanged. */
+    fun setAudioFocusSuspended(suspended: Boolean) {
+        if (controls == null || !mutableState.value.isActive) return
+        if (suspended) {
+            focusRevision.incrementAndGet()
+            microphoneRevision.incrementAndGet()
+        }
+        mutableState.update { it.copy(audioFocusSuspended = suspended,
+            canInterruptPlayback = if (suspended) false else it.canInterruptPlayback,
+            recoveryNotice = if (it.recoveryNotice?.contains("[ASR_MANUAL_RESUME_REQUIRED]") == true) it.recoveryNotice
+                else if (suspended) "音频已暂停；本句未发送的识别和被打断的朗读不会自动重放。[AUDIO_FOCUS_PAUSED]"
+                else if (it.replyBlocked) "系统音频已归还；回复仍暂停，请先核对聊天。[AUDIO_FOCUS_RESUMED]"
+                else "音频已恢复；没有重发旧录音、消息或被打断的朗读。[AUDIO_FOCUS_RESUMED]") }
+        if (suspended) {
+            runCatching { activeAsr?.pauseCapture() }
+            runCatching { interruptCurrentAudio?.invoke() }
+        }
+        try { muteOutput?.invoke(suspended || mutableState.value.replyBlocked || !mutableState.value.speakerEnabled) }
+        catch (error: Exception) { controls?.trySend(Event.OutputFailed(error)) }
+        controls?.trySend(Event.FocusChanged)
+    }
+
+    /** Explicit action only. The asynchronous result belongs to this session's event channel. */
+    fun requestReplyResume(checkReady: suspend () -> Boolean): Boolean {
+        val events = controls ?: return false
+        val current = mutableState.value
+        if (!current.isActive || !current.replyBlocked || current.replyResumeChecking) return false
+        val revision = replyRevision.incrementAndGet()
+        mutableState.update { it.copy(replyResumeChecking = true) }
+        return events.trySend(Event.CheckReplies(revision, checkReady)).isSuccess.also { sent ->
+            if (!sent && controls === events) mutableState.update { it.copy(replyResumeChecking = false) }
+        }
     }
 
     /** UI acknowledgement only; keeps this utterance's raw/corrected audit intact. */
@@ -497,6 +704,7 @@ class VoiceSessionController(
     fun stop() {
         val recorder = activeAsr
         microphoneRevision.incrementAndGet()
+        replyRevision.incrementAndGet()
         // Fence/cancel observers before native stop can synchronously emit old ASR/TTS callbacks.
         job?.cancel()
         runCatching { recorder?.pauseCapture() }

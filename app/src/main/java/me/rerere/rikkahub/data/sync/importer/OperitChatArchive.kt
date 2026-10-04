@@ -32,12 +32,12 @@ internal data class OperitConversation(
 
 /** Only the explicit Operit 1.12.2 JSON-v2 export, not raw snapshots, CSV, memory JSON or legacy lists. */
 object OperitChatArchive {
-    const val MAX_ARCHIVE_BYTES = 64L * 1024 * 1024
+    const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_STREAM_JSON_BYTES
     const val SELECTED_PATH = "selected"
     /** Explicit human choice; never silently replaces an earlier plain-text import. */
     const val CORRECTED_COPY_PATH = "selected-corrected-copy-v1"
-    internal const val MAX_CONVERSATIONS = 2_000
-    internal const val MAX_MESSAGES = 100_000
+    internal const val MAX_CONVERSATIONS = 10_000
+    internal const val MAX_MESSAGES = 1_000_000
     private val attachments = Regex("<attachment\\b|<image\\b|!\\[", RegexOption.IGNORE_CASE)
 
     fun inspect(file: File, checkCancelled: () -> Unit = {}): DeepSeekArchivePreview = safe {
@@ -77,7 +77,8 @@ object OperitChatArchive {
 
     internal fun open(file: File, checkCancelled: () -> Unit = {},
         timeZone: ZoneId = ZoneId.systemDefault()): ArchiveReader {
-        require(file.isFile && file.length() in 1..MAX_ARCHIVE_BYTES) { "Operit JSON 为空或超过 64 MiB" }
+        require(file.isFile) { "operit_missing_file" }
+        ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
         return ArchiveReader(file, checkCancelled, timeZone)
     }
 
@@ -97,7 +98,7 @@ object OperitChatArchive {
             }
             private fun account(count: Int) {
                 bytes += count
-                require(bytes <= MAX_ARCHIVE_BYTES) { "operit_size_limit" }
+                ArchiveCapacity.requireSize(bytes, MAX_ARCHIVE_BYTES)
             }
         }
         private val reader = PushbackReader(InputStreamReader(stream, Charsets.UTF_8.newDecoder()
@@ -176,6 +177,9 @@ object OperitChatArchive {
 
     internal inline fun <T> safe(block: () -> T): T = try { block() }
     catch (cancelled: CancellationException) { throw cancelled }
+    catch (failure: ArchiveReadException) { throw failure }
+    catch (_: java.nio.charset.CharacterCodingException) { throw ArchiveReadException(ArchiveFailure.INVALID_UTF8) }
+    catch (_: java.io.IOException) { throw ArchiveReadException(ArchiveFailure.READ_WRITE) }
     catch (_: Exception) {
         throw IllegalArgumentException("请选择 Operit 的聊天 JSON v2 导出；文件不兼容、损坏或超限，现有聊天未覆盖")
     }

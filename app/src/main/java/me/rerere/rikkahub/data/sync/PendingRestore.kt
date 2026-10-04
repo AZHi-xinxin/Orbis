@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.sync
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -17,6 +18,7 @@ internal class PendingRestore(
     private val root: File,
     private val databaseFile: File,
     private val filesDir: File,
+    private val validateBeforeJournal: (File) -> Unit = {},
 ) {
     private val pending get() = File(root, "pending")
 
@@ -44,9 +46,10 @@ internal class PendingRestore(
             Json.decodeFromString<List<RestoreEntry>>(journal.readText())
         } else {
             try {
-                // Merge only the two explicitly supported local libraries, before any live move.
-                // Old backups lacking these exact entries leave both local libraries untouched.
+                // Only explicitly supported sidecars/libraries, before any live move. Old backups
+                // without these entries leave them alone; the conversation DB stays unmodified.
                 OrbisLocalToolBackup.prepareBeforeJournal(File(pending, "payload"), filesDir)
+                validateBeforeJournal(File(pending, "payload"))
                 buildEntries().also { writeDurably(journal, Json.encodeToString(it)) }
             } catch (e: Exception) {
                 // No live files have been changed yet, so this restore can be safely rejected.
@@ -132,6 +135,8 @@ internal class PendingRestore(
                 }
                 File(databaseFile.parentFile, name)
             }
+            path.startsWith("files/${ContextPruningBackup.DIRECTORY}/") ->
+                ContextPruningBackup.exactPolicyFile(filesDir, path.removePrefix("files/"))
             path.startsWith("files/") -> resolveInside(filesDir, path.removePrefix("files/"))
             else -> error("Invalid restore path: $path")
         }

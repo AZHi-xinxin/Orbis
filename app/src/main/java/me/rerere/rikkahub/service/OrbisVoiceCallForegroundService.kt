@@ -51,7 +51,7 @@ class OrbisVoiceCallForegroundService : Service() {
                 wakeLock?.acquire(WAKE_LOCK_TIMEOUT_MS)
                 handler.postDelayed(this, WAKE_LOCK_RENEWAL_MS)
             } catch (e: Exception) {
-                runtime.serviceDestroyed(activeToken)
+                runtime.serviceFailed(activeToken, "后台通话保活未能续期，已停止收音。[WAKE_LOCK_FAILED]")
                 stopForCall(activeToken)
             }
         }
@@ -101,7 +101,7 @@ class OrbisVoiceCallForegroundService : Service() {
             }
             runtime.serviceReady(requestedToken, this)
         } catch (e: Exception) {
-            runtime.serviceFailed(requestedToken, e.message ?: "无法获得后台录音权限")
+            runtime.serviceFailed(requestedToken, "后台语音服务未能启动，请检查录音权限。[FOREGROUND_START_FAILED]")
             stopForCall(requestedToken)
         }
         return START_NOT_STICKY
@@ -134,7 +134,7 @@ class OrbisVoiceCallForegroundService : Service() {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         val stopped = token
-        stopped?.let(runtime::serviceDestroyed)
+        stopped?.let { runtime.serviceFailed(it, "系统要求结束后台语音服务，已停止收音。[FOREGROUND_TIMEOUT]") }
         stopped?.let(::stopForCall)
         stopSelf(startId)
     }
@@ -176,7 +176,12 @@ class OrbisVoiceCallForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_rikkahub)
             .setContentTitle(state.title.ifBlank { "语音通话" })
-            .setContentText(if (state.connectedAtMillis == null) "正在连接语音通话" else "通话中 · 点此返回")
+            .setContentText(when {
+                runtime.voiceSession.state.value.replyBlocked -> "回复已暂停 · 通话保留，点此检查"
+                state.audioInterruption != null -> if (state.canResumeAudio) "音频已暂停 · 点此返回恢复" else "音频暂时占用 · 等待系统归还"
+                state.connectedAtMillis == null -> "正在连接语音通话"
+                else -> "通话中 · 点此返回"
+            })
             .setContentIntent(returnToCall)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)

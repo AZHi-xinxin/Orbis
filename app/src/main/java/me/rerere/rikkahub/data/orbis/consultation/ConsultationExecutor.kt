@@ -167,7 +167,7 @@ internal class ConsultationExecutor(
         val model = originalModel.copy(customHeaders = originalModel.customHeaders.filterNot { it.name.equals(CONSULTATION_PROFILE_HEADER, true) },
             customBodies = consultationBodies(originalModel.customBodies))
         val safeSettings = settings.copy(networkSetting = settings.networkSetting.copy(enableAutoRetry = false))
-        val ownMemories = if (original.enableMemory) {
+        val ownMemories = if (me.rerere.rikkahub.data.ai.legacyMemoryEnabled(original.enableMemory)) {
             if (original.useGlobalMemory) memories.getGlobalMemories() else memories.getMemoriesOfAssistant(original.id.toString())
         } else emptyList()
         require((json.encodeToString(messages) + assistant.systemPrompt + json.encodeToString(ownMemories)).toByteArray().size <= 196608) {
@@ -206,6 +206,8 @@ internal class ConsultationExecutor(
                 checkLive(config, original, originalModel, currentBinding)
                 check(System.currentTimeMillis() < expires * 1000) { "consultation_delivery_expired" }
                 when (chunk) {
+                    is GenerationChunk.HistoryBudgetStop -> throw me.rerere.rikkahub.data.db.MessageNodeCapacityException("consultation_history_capacity")
+                    is GenerationChunk.ToolStepLimitStop -> throw ConsultationRuntimeFailure("consultation_tool_step_limit")
                     is GenerationChunk.TerminalResponse -> Unit // Legacy executor never requests this evidence.
                     is GenerationChunk.Messages -> {
                         latest = chunk.messages

@@ -32,21 +32,14 @@ class WebDavSync(
     suspend fun backup(config: WebDavConfig) = withContext(Dispatchers.IO) {
         val file = prepareBackupFile(config)
         val client = getClient(config)
-
-        // Ensure the backup directory exists
-        client.ensureCollectionExists().getOrThrow()
-
-        // Upload the backup file
-        client.put(
-            path = file.name,
-            file = file,
-            contentType = "application/zip"
-        ).getOrThrow()
-
-        Log.i(TAG, "backup: Uploaded ${file.name} (${file.length().fileSizeToString()})")
-
-        // Clean up temp file
-        file.delete()
+        try {
+            client.ensureCollectionExists().getOrThrow()
+            client.put(path = file.name, file = file, contentType = "application/zip").getOrThrow()
+            Log.i(TAG, "backup: Uploaded ${file.name} (${file.length().fileSizeToString()})")
+        } finally {
+            // This is a private generated snapshot, never the user's source backup.
+            file.delete()
+        }
     }
 
     suspend fun listBackupFiles(config: WebDavConfig): List<WebDavBackupItem> = withContext(Dispatchers.IO) {
@@ -75,6 +68,9 @@ class WebDavSync(
         val backupFile = File.createTempFile("restore-", ".zip", context.cacheDir)
 
         try {
+            me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.requireSize(item.size,
+                me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.MAX_ZIP_BYTES, allowEmpty = true)
+            me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.requireSpace(backupFile.parentFile!!.usableSpace, item.size)
             // Download backup file directly to file to avoid OOM
             Log.i(TAG, "restore: Downloading ${item.displayName}")
             client.downloadToFile(item.displayName, backupFile).getOrThrow()

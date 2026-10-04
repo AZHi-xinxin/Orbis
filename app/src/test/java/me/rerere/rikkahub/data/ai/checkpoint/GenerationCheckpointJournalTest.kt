@@ -24,6 +24,55 @@ import kotlin.uuid.Uuid
 
 /** Synthetic conversations and private temporary files only; no app, Room, model, or tools. */
 class GenerationCheckpointJournalTest {
+    @Test fun `rescue returns only the single exact tail node and does not clear journal`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
+        val added = response(UIMessagePart.Text("a complete synthetic reply"))
+        j.checkpoint(h, original.assistantId, 0, original.messageNodes.takeLast(1) + added)
+        val bytes = store.bytes.getValue(original.id).copyOf()
+        val broken = original.copy(messageNodes = original.messageNodes + added.copy(messages = emptyList()))
+        assertEquals(added, j.previewDamagedNode(broken, added.id))
+        assertArrayEquals(bytes, store.bytes.getValue(original.id))
+    }
+
+    @Test fun `rescue rejects changed epoch owner prefix and neighboring tail`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
+        val added = response(UIMessagePart.Text("complete"))
+        j.checkpoint(h, original.assistantId, 0, original.messageNodes.takeLast(1) + added)
+        val broken = original.copy(messageNodes = original.messageNodes + added.copy(messages = emptyList()))
+        reject { j.previewDamagedNode(broken.copy(compactionEpoch = 1), added.id) }
+        reject { j.previewDamagedNode(broken.copy(assistantId = Uuid.random()), added.id) }
+        reject { j.previewDamagedNode(broken.copy(messageNodes = broken.messageNodes.toMutableList().also {
+            it[0] = UIMessage.user("changed protected history").toMessageNode()
+        }), added.id) }
+        reject { j.previewDamagedNode(broken.copy(messageNodes = broken.messageNodes.toMutableList().also {
+            it[it.lastIndex - 1] = UIMessage.user("changed neighboring tail").toMessageNode()
+        }), added.id) }
+    }
+
+    @Test fun `rescue refuses unknown external tool effects`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
+        val added = response(tool())
+        j.checkpoint(h, original.assistantId, 0, original.messageNodes.takeLast(1) + added,
+            transition(status = GenerationToolStatus.STARTED))
+        val broken = original.copy(messageNodes = original.messageNodes + added.copy(messages = emptyList()))
+        reject("unknown_tool_requires_manual_review") { j.previewDamagedNode(broken, added.id) }
+    }
+
+    @Test fun `rescue refuses missing branch or extra database row`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
+        val added = response(UIMessagePart.Text("complete"))
+        j.checkpoint(h, original.assistantId, 0, original.messageNodes.takeLast(1) + added)
+        val broken = original.copy(messageNodes = original.messageNodes + added.copy(messages = emptyList(), selectIndex = 1))
+        reject("database_branch_changed") { j.previewDamagedNode(broken, added.id) }
+        reject { j.previewDamagedNode(broken.copy(messageNodes = broken.messageNodes + response(UIMessagePart.Text("newer"))), added.id) }
+    }
+
+    @Test fun `rescue refuses absent or corrupted checkpoint`() {
+        val store = MemoryStore(); val j = journal(store); val original = base()
+        reject("no_complete_recovery_copy") { j.previewDamagedNode(original, original.messageNodes.last().id) }
+        store.bytes[original.id] = "bad private bytes".toByteArray()
+        reject { j.previewDamagedNode(original, original.messageNodes.last().id) }
+    }
     private class MemoryStore : GenerationCheckpointStore {
         val bytes = mutableMapOf<Uuid, ByteArray>()
         var failWrite = false

@@ -57,6 +57,7 @@ import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
@@ -109,6 +110,10 @@ sealed interface GenerationChunk {
     ) : GenerationChunk
     /** Consultation-only opt-in. Consumers must wait for their final durable commit. */
     data class TerminalResponse(val evidence: GenerationTerminalEvidence) : GenerationChunk
+    /** Host capacity pause only; never a provider terminal/completion claim. */
+    data object HistoryBudgetStop : GenerationChunk
+    /** Completed tool results have no next request because the host step budget is exhausted. */
+    data object ToolStepLimitStop : GenerationChunk
 }
 
 class GenerationLoop(
@@ -141,6 +146,8 @@ class GenerationLoop(
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
         emitTerminalEvidence: Boolean = false,
+        admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
+        onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -149,11 +156,20 @@ class GenerationLoop(
         // existing approval-resume path) reevaluates current settings, memory and input transforms.
         val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime)
         val tools = snapshotGenerationTools(tools)
+        val privatePresentation = PrivateRoomGenerationPresentation(
+            enabled = tools.any { it.name == "orbis_private_room_write" },
+        )
         val schemaText = tools.joinToString("\n") { it.name + it.description + it.parameters().toString() }
 
         var messages: List<UIMessage> = messages
+        privatePresentation.classify(messages, completed = false) // also cover approval/resume turns
         var contextEpoch = initialContextEpoch
         var lastVisualEmissionNanos = 0L
+        var historySoftReached = false
+        suspend fun admit(candidate: List<UIMessage>) {
+            requireBoundedWorkingMessage(candidate.lastOrNull())
+            historySoftReached = admitOutput(candidate)
+        }
         var outputScope = outputFrozenPrefixCount?.let { count ->
             require(count in 0..messages.size)
             OutputGenerationScope(messages.take(count))
@@ -167,6 +183,7 @@ class GenerationLoop(
             tool: UIMessagePart.Tool? = null,
             completed: Boolean? = null,
         ) {
+            admit(snapshot)
             if (!durableCheckpoints) return
             val acknowledgement = CompletableDeferred<Unit>()
             emit(GenerationChunk.DurableBoundary(snapshot, contextEpoch,
@@ -183,9 +200,21 @@ class GenerationLoop(
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
+            val protectedResume = privatePresentation.protectOutstandingTools(messages)
+            if (protectedResume !== messages) {
+                messages = protectedResume
+                admit(messages)
+                emit(GenerationChunk.Messages(messages, contextEpoch))
+            }
+
             // Check if we have tool calls ready to continue after user interaction.
             val lastTools = messages.lastOrNull()?.getTools().orEmpty()
             if (lastTools.any { it.isPending }) break
+            admit(messages) // Seed from persisted branches on a resumed/continued generation.
+            if (canStopAtHistoryBudget(historySoftReached, messages)) {
+                emit(GenerationChunk.HistoryBudgetStop)
+                break
+            }
             val pendingTools = resumedApprovalBatch(lastTools)
 
             val toolsToProcess: List<UIMessagePart.Tool>
@@ -194,36 +223,38 @@ class GenerationLoop(
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
                 responseForContinuation = generateInternal(
+                    onGatewayRequest = onGatewayRequest,
                     inputSnapshot = inputSnapshot,
                     assistant = assistant,
                     settings = settings,
                     messages = messages,
                     onUpdateMessages = {
-                        messages = transformOutput(it) { active -> active.transforms(
+                        val classified = privatePresentation.classify(it, completed = false)
+                        val candidate = transformOutput(classified) { active -> active.transforms(
                             transformers = outputTransformers,
                             context = context,
                             model = model,
                             assistant = assistant,
                             settings = settings
                         ) }
+                        requireBoundedWorkingMessage(candidate.lastOrNull())
                         // Persisted UI publication is bounded to 10Hz. The working stream still
                         // merges every token; final/provider and tool boundaries are never skipped.
                         val nowNanos = System.nanoTime()
                         if (!durableCheckpoints || lastVisualEmissionNanos == 0L ||
                             nowNanos - lastVisualEmissionNanos >= 100_000_000L) {
                         lastVisualEmissionNanos = nowNanos
-                        emit(
-                            GenerationChunk.Messages(
-                                transformOutput(messages) { active -> active.visualTransforms(
+                        val visible = transformOutput(candidate) { active -> active.visualTransforms(
                                     transformers = outputTransformers,
                                     context = context,
                                     model = model,
                                     assistant = assistant,
                                     settings = settings
-                                ) }, contextEpoch,
-                            )
-                        )
+                                ) }
+                        admit(visible)
+                        emit(GenerationChunk.Messages(visible, contextEpoch))
                         }
+                        messages = candidate
                     },
                     transformers = inputTransformers,
                     model = model,
@@ -265,6 +296,8 @@ class GenerationLoop(
                     finishedAt = Clock.System.now()
                         .toLocalDateTime(TimeZone.currentSystemDefault())
                 )
+                messages = privatePresentation.classify(messages, completed = true)
+                admit(messages)
                 emit(GenerationChunk.Messages(messages, contextEpoch))
 
                 val toolCalls = messages.last().getTools().filter { !it.isExecuted }
@@ -291,8 +324,10 @@ class GenerationLoop(
                 // Check for tools that need approval
                 var hasPendingApproval = false
                 val updatedTools = toolCalls.map { tool ->
+                    val protected = privatePresentation.protectTool(tool)
                     val toolDef = tools.find { it.name == tool.toolName }
                     when {
+                        protected !== tool -> protected
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
                             tool.approvalState is ToolApprovalState.Auto -> {
@@ -320,6 +355,7 @@ class GenerationLoop(
                         }
                     }
                     messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
+                    admit(messages)
                     emit(GenerationChunk.Messages(messages, contextEpoch))
                 }
 
@@ -334,7 +370,7 @@ class GenerationLoop(
             } else {
                 // Resuming after user interaction - use the resumable tools directly.
                 Log.i(TAG, "generateText: resuming with ${pendingTools.size} resumable tools")
-                toolsToProcess = pendingTools
+                toolsToProcess = pendingTools.map(privatePresentation::protectTool)
             }
 
             // Handle tools (execute approved tools, handle denied tools)
@@ -352,6 +388,9 @@ class GenerationLoop(
                 if (tool.toolName == COMPACT_TOOL_NAME && compactionControl != null &&
                     tool.approvalState !is ToolApprovalState.Denied && !tool.isPending) {
                     val output = runCatching {
+                        check(!privatePresentation.hasPrivateOperation) {
+                            "本轮包含私密操作，不能把私密内容压入普通聊天摘要；请在下一次普通聊天中再整理。"
+                        }
                         check(requestedCompaction == null) { "一批工具只执行一次compact，请先读取这次回执。" }
                         check(inputSnapshot.isPrepared && responseForContinuation != null) {
                             "本轮在恢复旧工具审批，请在接下来的自动续轮重新调用compact；原文未改变。"
@@ -422,20 +461,28 @@ class GenerationLoop(
                                     withContext(CloudToolInvocationContext(tool.toolCallId, messages.last().id.toString(), conversationId?.toString())) { toolDef.execute(args) }
                                 } else toolDef.execute(args)
                                 val hasShellAccess = tools.any { it.name == "workspace_shell" }
-                                tool.withGenerationToolOutput(
-                                    output = maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
+                                val completed = tool.withGenerationToolOutput(
+                                    // Private results must not be spilled as ordinary workspace files.
+                                    output = if (me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName(toolDef.name)) result
+                                        else maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                                 )
+                                val previous = withCurrentToolResults()
+                                admit(previous.dropLast(1) + previous.last().copy(parts = previous.last().parts.map {
+                                    if (it is UIMessagePart.Tool && it.toolCallId == completed.toolCallId) completed else it
+                                }))
+                                completed
                             }
                         }.onFailure {
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                             if (it is CancellationException) throw it
                             if (it is GenerationDurabilityException) throw it
-                            if (durableCheckpoints && executionStarted) {
+                            if (executionStarted && (durableCheckpoints || it is MessageNodeCapacityException)) {
                                 // A transport/implementation exception after dispatch is not proof
                                 // that the external effect failed. Keep STARTED, never synthesize
                                 // a completed receipt or advance to another external action.
                                 throw GenerationToolOutcomeUnknownException()
                             }
+                            if (it is MessageNodeCapacityException) throw it
                             Log.w(TAG, "Tool failed (${it.javaClass.simpleName}); private details withheld")
                             executedTools += tool.copy(
                                 output = listOf(
@@ -498,6 +545,7 @@ class GenerationLoop(
                         assistant = assistant,
                         settings = settings
             ) }
+            admit(messages)
             emit(GenerationChunk.Messages(messages, contextEpoch))
             if (executedTools.any { it.isPending }) break
             val requested = requestedCompaction
@@ -538,11 +586,17 @@ class GenerationLoop(
                         if (it is UIMessagePart.Tool && it.toolCallId == failure.toolCallId) failure else it
                     })
                 }
+                admit(messages)
                 emit(GenerationChunk.Messages(messages, contextEpoch))
             }
             if (!rebased) responseForContinuation?.let { response ->
                 inputSnapshot.appendCompletedResponse(response, executedTools, messages.last().id)
             }
+            if (canStopAtHistoryBudget(historySoftReached, messages)) {
+                emit(GenerationChunk.HistoryBudgetStop)
+                break
+            }
+            if (stepIndex == maxSteps - 1) emit(GenerationChunk.ToolStepLimitStop)
         }
 
     }.orderedGenerationFlow(Dispatchers.IO)
@@ -572,10 +626,13 @@ class GenerationLoop(
         includeCompactionReminder: Boolean = false,
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
+        onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
     ): UIMessage {
         var initialEstimate: Long? = null
         var initialSelection: GenerationContextSelection? = null
         inputSnapshot.initializeInput {
+            // Human display redaction must never erase the owning assistant's tool history.
+            // Keep the ordinary context-selection policy; no privacy placeholder is model input.
             val selection = GenerationContextSelection(messages, assistant.contextMessageLimit)
             initialSelection = selection
             // A changed message-count projection cannot inherit the previous full request's usage.
@@ -595,7 +652,7 @@ class GenerationLoop(
                     }
 
                     // 记忆
-                    if (assistant.enableMemory) {
+                    if (legacyMemoryEnabled(assistant.enableMemory)) {
                         appendLine()
                         append(buildMemoryPrompt(memories = memories))
                     }
@@ -619,7 +676,11 @@ class GenerationLoop(
                 conversationLorebookIds = conversationLorebookIds,
                 processingStatus = processingStatus,
                 workspaceCwd = workspaceCwd,
-            )
+            ).also { projected ->
+                // A reversible local pruning projection must not retain the old, larger usage
+                // anchor. The snapshot will estimate its actual bounded request plus tools.
+                if (shouldResetProjectedUsageEstimate(messages, projected)) initialEstimate = null
+            }
         }
         // This runs outside the one-time transform block: tools can cross the threshold mid-wake.
         // Regenerating a historical slice may remind without granting whole-conversation compact.
@@ -658,6 +719,7 @@ class GenerationLoop(
             sessionId = conversationId?.toString(),
             orbisConversationId = conversationId?.toString(),
             maxAutomaticContinuations = maxAutomaticContinuations,
+            onGatewayRequest = onGatewayRequest,
         )
         try {
             if (stream) {
@@ -697,9 +759,12 @@ class GenerationLoop(
                                 if (retryCount > 0) {
                                     processingStatus.value = null
                                 }
-                                attemptMessages = streamChunkHandler.handle(attemptMessages, chunk)
+                                requireBoundedGenerationChunk(chunk)
+                                val candidate = streamChunkHandler.handle(attemptMessages, chunk)
+                                requireBoundedWorkingMessage(candidate.lastOrNull())
                                 attemptResponse = responseChunkHandler.handle(attemptResponse, chunk)
-                                onUpdateMessages(attemptMessages)
+                                onUpdateMessages(candidate)
+                                attemptMessages = candidate
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (error: Throwable) {

@@ -5,10 +5,11 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.db.MessageNodeBudget
+import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.utils.JsonInstant
@@ -27,6 +28,8 @@ internal interface RikkaChatSource : Closeable {
 }
 
 internal object RikkaChatLimits {
+    // Source admission is independent of the smaller target SQLite write budget. Conversion
+    // can remove a legacy system payload, or grow tools/attachment references, so check again.
     const val MAX_NODE_BYTES = 1024 * 1024
     const val MAX_WINDOW_BYTES = 32L * 1024 * 1024
     const val MAX_WINDOW_NODES = 50_000
@@ -104,9 +107,8 @@ internal suspend fun convertRikkaChat(source: RikkaChatSource, chat: RikkaChatSn
                         listOf(UIMessagePart.Text("[此处为原备份的系统设定；仅聊天导入未包含其正文]"))
                     else message.parts.map { mapPart(it, chat.id) })
             }
-            require(JsonInstant.encodeToString(converted).toByteArray(Charsets.UTF_8).size <= RikkaChatLimits.MAX_NODE_BYTES) {
-                "转换后的单条消息超过安全保存大小；该窗口未导入，原文未截断"
-            }
+            try { MessageNodeBudget.measureNode(converted) }
+            catch (_: MessageNodeCapacityException) { throw ArchiveReadException(ArchiveFailure.NODE_LIMIT) }
             nodes += MessageNode(id = rikkaImportId("node", "${chat.id}/${node.id}"),
                 messages = converted, selectIndex = node.selectIndex)
         }
@@ -117,7 +119,8 @@ internal suspend fun convertRikkaChat(source: RikkaChatSource, chat: RikkaChatSn
 }
 
 internal fun rikkaArchiveFingerprint(file: File, checkCancelled: () -> Unit = {}): String {
-    require(file.isFile && file.length() in 1..RikkaChatArchive.MAX_ARCHIVE_BYTES) { "备份为空或超过 512 MB" }
+    require(file.isFile) { "备份文件不存在" }
+    ArchiveCapacity.requireSize(file.length(), RikkaChatArchive.MAX_ARCHIVE_BYTES)
     val digest = MessageDigest.getInstance("SHA-256")
     file.inputStream().use { stream ->
         val buffer = ByteArray(64 * 1024)
@@ -183,9 +186,9 @@ internal suspend fun importSelectedRikkaChats(source: RikkaChatSource, preview: 
         check(completed == selections.size) { "所选会话已变化" }
         return result
     } catch (_: CancellationException) { throw DeepSeekImportCancelledException(result) }
-    catch (_: Exception) {
+    catch (failure: Exception) {
         if (activeSource != null) result = result.copy(failed = result.failed + 1,
             failures = result.failures + DeepSeekImportFailure(activeSource, "该窗口未完成；已完成窗口保留，未覆盖现有聊天"))
-        throw DeepSeekImportException(result)
+        throw DeepSeekImportException(result, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure))
     }
 }

@@ -16,7 +16,7 @@ internal val orbisSentinelGuide = listOf(
         "长期检查固定会话多久没有新活动或新唤醒。duration_seconds 为 600–86400 秒，默认 1800；每次检查按 probability_percent 抽签，档位只可 10、30、50、70、90、100，默认 50。默认静默 23:30–07:30，可传 quiet_start_local/quiet_end_local 改时间，或 quiet_enabled=false 取消静默。连续唤醒编号递增，人类新消息到来后归零；可选 escalation_after 与 escalation_prompt，在超过次数后附加你亲写的提示。未抽中并非故障，不保证到点必响。",
         """{"type":"agreement","prompt":"看看她是否回来了","duration_seconds":1800,"probability_percent":50,"quiet_start_local":"23:30","quiet_end_local":"07:30"}"""),
     OrbisSentinelGuideEntry("screen_observation", "屏幕观察唤醒",
-        "长期按间隔调用小 L 观察当前屏幕，再由前端报告真实观察结果，不接受 prompt。duration_seconds 只选 1800、3600、5400、7200、9000、10800（30–180 分钟），默认 1800。需要屏幕观察授权及可用观察服务；锁屏、权限缺失、观察失败不会伪造屏幕内容。不是把每次屏幕变化都发给你。",
+        "长期按间隔通过 Orbis 屏幕观察服务观察当前屏幕，再由前端报告真实观察结果，不接受 prompt。duration_seconds 只选 1800、3600、5400、7200、9000、10800（30–180 分钟），默认 1800。需要屏幕观察授权及可用观察服务；锁屏、权限缺失、观察失败不会伪造屏幕内容。不是把每次屏幕变化都发给你。请以执行记录的具体失败码及 companion_get_runtime_status 为准；通用 unavailable 不能证明某品牌不兼容，不要据此要求更换模型或猜测旧开关。",
         """{"type":"screen_observation","duration_seconds":1800}"""),
     OrbisSentinelGuideEntry("night_usage", "夜间使用手机唤醒",
         "长期检测夜间窗口内，在聊天界面之外持续使用手机达到时长；前端报告时间、应用等真实事实，不接受 prompt。window_start_local/window_end_local 默认 00:00–07:30，duration_seconds 默认 300（5 分钟）。同一次连续使用默认提醒一次，停止使用后重新计时；可用 rearm=after_cooldown 选择冷却后再次提醒。需要系统可读取前台应用状态。",

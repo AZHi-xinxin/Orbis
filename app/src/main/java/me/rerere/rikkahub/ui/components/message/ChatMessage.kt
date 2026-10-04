@@ -93,6 +93,10 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.model.replaceRegexes
+import me.rerere.rikkahub.data.orbis.privateroom.hasPrivateRoomToolContent
+import me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolPart
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomPublicParts
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
@@ -105,6 +109,7 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.orbisChatTextStyle
 import me.rerere.rikkahub.ui.theme.extendColors
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.copyMessageToClipboard
 import me.rerere.rikkahub.utils.openUrl
 import me.rerere.rikkahub.utils.urlDecode
 import java.util.Locale
@@ -128,6 +133,8 @@ fun ChatMessage(
     onVoiceNotePlayed: ((OrbisVoiceNotePlayedEdit) -> Unit)? = null,
     onDeleteToolRecord: ((String) -> Unit)? = null,
     onRestoreToolRecord: ((String) -> Unit)? = null,
+    contextPruningState: me.rerere.rikkahub.data.ai.contextpruning.ContextPruningState? = null,
+    onRestoreContextPruning: ((String) -> Unit)? = null,
     onEventPresentation: suspend (me.rerere.rikkahub.data.model.OrbisEventPresentationEdit) -> Unit = {
         error("event_presentation_unavailable")
     },
@@ -140,7 +147,21 @@ fun ChatMessage(
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String, remember: Boolean) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
-    val message = node.messages[node.selectIndex]
+    val originalMessage = node.messages[node.selectIndex]
+    val privateOperation = originalMessage.hasPrivateRoomToolContent()
+    // Render public prose, but keep mutations/branch selection attached to the ORIGINAL node.
+    // Saving a presentation copy would erase the assistant's tool context.
+    val message = originalMessage.privateRoomSafePresentation()
+    if (privateOperation) {
+        PrivateRoomPublicReply(message, node, modifier, loading, assistant, model, onShare, onUpdate,
+            onToolApproval, onToolAnswer, onDeleteToolRecord, onRestoreToolRecord)
+        return
+    }
+    val pruning = remember(message, contextPruningState) {
+        if (privateOperation) null else contextPruningState?.let {
+            me.rerere.rikkahub.data.ai.contextpruning.projectContextPruningForDisplay(message, it)
+        }
+    }
     val currentOnVoiceNotePlayed by rememberUpdatedState(onVoiceNotePlayed)
     if (message.orbisVoiceCallKind in setOf("begin", "archive", "summary", "ended_notice")) {
         me.rerere.rikkahub.ui.pages.orbis.OrbisVoiceCallMessageCard(message, modifier)
@@ -218,13 +239,15 @@ fun ChatMessage(
                 MessagePartsBlock(
                     assistant = assistant,
                     role = message.role,
-                    parts = displayedParts,
+                    parts = if (pruning == null) displayedParts else displayedParts.filterNot { part ->
+                        message.parts.indexOf(part) in pruning.hiddenPartIndexes
+                    },
                     annotations = message.annotations,
                     loading = loading,
                     model = model,
                     onToolApproval = onToolApproval,
                     onToolAnswer = onToolAnswer,
-                    onUserMessageClick = if (message.role == MessageRole.USER) onEdit else null,
+                    onUserMessageClick = if (!privateOperation && message.role == MessageRole.USER) onEdit else null,
                     segmentedReply = segmentedReply,
                     messageKey = message.id.toString(),
                     onDeleteToolRecord = if (BuildConfig.ORBIS_ENABLED) onDeleteToolRecord else null,
@@ -237,6 +260,7 @@ fun ChatMessage(
         }
         val messageExtras = @Composable {
             ProvideTextStyle(textStyle) {
+                ContextPruningNotice(pruning, onRestoreContextPruning)
                 if (BuildConfig.ORBIS_ENABLED && message.deletedToolRecords.isNotEmpty()) {
                     OrbisDeletedToolRecords(
                         records = message.deletedToolRecords.map { it.tool.toolCallId to it.tool.toolName },
@@ -304,21 +328,29 @@ fun ChatMessage(
                 )
             ) {
                 ChatMessageActionButtons(
-                    message = message,
+                    message = originalMessage,
                     onRegenerate = onRegenerate,
                     node = node,
                     onUpdate = onUpdate,
                     onOpenActionSheet = {
                         showActionsSheet = true
                     },
-                    onTranslate = onTranslate,
+                    onTranslate = onTranslate.takeUnless { privateOperation },
                     onClearTranslation = onClearTranslation
                 )
             }
         }
 
+        val retainedPrunedFiles = remember(node, pruning) {
+            me.rerere.rikkahub.ui.pages.chat.prunedContextFiles(node, pruning)
+        }
+        val retainedPrunedMedia = remember(node, pruning) {
+            me.rerere.rikkahub.ui.pages.chat.prunedContextMedia(node, pruning)
+        }
+        if (retainedPrunedMedia.isNotEmpty()) renderParts(retainedPrunedMedia)
+        me.rerere.rikkahub.ui.pages.orbis.OrbisCallFileAttachments(retainedPrunedFiles)
         EditedFilesList(
-            parts = message.parts,
+            parts = message.parts.filterIndexed { index, _ -> index !in (pruning?.hiddenPartIndexes ?: emptySet()) },
             assistant = assistant,
         )
 
@@ -329,7 +361,7 @@ fun ChatMessage(
     }
     if (showActionsSheet) {
         ChatMessageActionsSheet(
-            message = message,
+            message = originalMessage,
             onEdit = onEdit,
             onDelete = onDelete,
             onShare = onShare,
@@ -342,7 +374,7 @@ fun ChatMessage(
             onToggleFavorite = onToggleFavorite,
             onQuote = if (!loading && message.role in setOf(MessageRole.USER, MessageRole.ASSISTANT) &&
                 message.parts.filterIsInstance<UIMessagePart.Text>().any { it.text.isNotBlank() })
-                onQuote?.let { callback -> { callback(node) } } else null,
+                onQuote?.let { callback -> { callback(node.privateRoomSafePresentation()) } } else null,
             onWebViewPreview = {
                 val textContent = message.parts
                     .filterIsInstance<UIMessagePart.Text>()
@@ -374,6 +406,58 @@ fun ChatMessage(
     }
 }
 
+/** Public reply and ordinary tool controls; mutations remain bound to original call IDs, not the projection. */
+@Composable
+private fun PrivateRoomPublicReply(
+    message: UIMessage,
+    originalNode: MessageNode,
+    modifier: Modifier,
+    loading: Boolean,
+    assistant: Assistant?,
+    model: Model?,
+    onShare: () -> Unit,
+    onUpdate: (MessageNode) -> Unit,
+    onToolApproval: ((String, Boolean, String, Boolean) -> Unit)?,
+    onToolAnswer: ((String, String) -> Unit)?,
+    onDeleteToolRecord: ((String) -> Unit)?,
+    onRestoreToolRecord: ((String) -> Unit)?,
+) {
+    val context = LocalContext.current
+    val appearance = LocalSettings.current.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
+    val segmented = BuildConfig.ORBIS_ENABLED && message.role == MessageRole.ASSISTANT && appearance.chatFlow.enabled
+    val textStyle = rememberChatMessageTextStyle()
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val body: @Composable () -> Unit = {
+            ProvideTextStyle(textStyle) {
+                MessagePartsBlock(assistant, message.role, model, message.parts, emptyList(), loading,
+                    segmentedReply = segmented, messageKey = message.id.toString(),
+                    onToolApproval = onToolApproval, onToolAnswer = onToolAnswer,
+                    onDeleteToolRecord = onDeleteToolRecord,
+                    deletedCitationTools = message.deletedToolRecords.map { it.tool })
+                if (BuildConfig.ORBIS_ENABLED && message.deletedToolRecords.isNotEmpty()) {
+                    OrbisDeletedToolRecords(
+                        records = message.deletedToolRecords.map { it.tool.toolCallId to it.tool.toolName },
+                        onRestore = onRestoreToolRecord,
+                    )
+                }
+            }
+        }
+        if (BuildConfig.ORBIS_ENABLED) OrbisChatMessageLayout(message, model, assistant, loading, segmented, body)
+        else body()
+        if (!loading) Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { context.copyMessageToClipboard(message) }) { Text(stringResource(R.string.copy)) }
+            TextButton(onClick = onShare) { Text(stringResource(R.string.share)) }
+            if (originalNode.messages.size > 1) {
+                TextButton(enabled = originalNode.selectIndex > 0,
+                    onClick = { onUpdate(originalNode.copy(selectIndex = originalNode.selectIndex - 1)) }) { Text("上一分支") }
+                Text("${originalNode.selectIndex + 1}/${originalNode.messages.size}")
+                TextButton(enabled = originalNode.selectIndex < originalNode.messages.lastIndex,
+                    onClick = { onUpdate(originalNode.copy(selectIndex = originalNode.selectIndex + 1)) }) { Text("下一分支") }
+            }
+        }
+    }
+}
+
 @OptIn(FlowPreview::class)
 @Composable
 internal fun MessagePartsBlock(
@@ -391,6 +475,10 @@ internal fun MessagePartsBlock(
     onDeleteToolRecord: ((String) -> Unit)? = null,
     deletedCitationTools: List<UIMessagePart.Tool> = emptyList(),
 ) {
+    val privateOperation = parts.any { it.isPrivateRoomToolPart() } || deletedCitationTools.any { it.isPrivateRoomToolPart() }
+    val parts = if (privateOperation) privateRoomPublicParts(parts) else parts
+    val annotations = if (privateOperation) emptyList() else annotations
+    val deletedCitationTools = if (privateOperation) emptyList() else deletedCitationTools
     val context = LocalContext.current
     val contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
 

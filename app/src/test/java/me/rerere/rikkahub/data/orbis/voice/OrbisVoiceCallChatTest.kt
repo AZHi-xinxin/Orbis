@@ -14,6 +14,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisVoiceCallChatTest {
+    @Test fun `assistant archive request preserves identity while external fallback cannot impersonate it`() {
+        val source = OrbisVoiceCallRecord("synthetic", "conversation", "assistant", 1)
+        val own = voiceArchiveRequest(source, OrbisVoiceArchiveAuthor.ASSISTANT)
+        assertTrue(own.contains("保持自己的身份"))
+        assertFalse(own.contains("你是独立的兜底"))
+        val external = voiceArchiveRequest(source, OrbisVoiceArchiveAuthor.FALLBACK)
+        assertTrue(external.contains("不冒充当前助手本人"))
+        assertFalse(external.contains("保持自己的身份"))
+    }
     private val callId = "call-1"
     private val record = OrbisVoiceCallRecord(callId, "conversation-1", "assistant-1", 1000,
         connectedAtMs = 1200, endedAtMs = 13200, durationMs = 12000,
@@ -37,7 +46,7 @@ class OrbisVoiceCallChatTest {
         assertTrue(end.contains("【已结束语音通话】"))
         assertTrue(end.contains("收音和播放已经停止"))
         assertTrue(end.contains("后续回复不会自动朗读"))
-        assertTrue(end.contains("独立的记录整理器，不扮演通话中的任何一方"))
+        assertTrue(end.contains("独立的兜底记录整理器，不扮演通话中的任何一方"))
         assertTrue(end.contains("summary") && end.contains("transcript"))
         assertTrue(end.contains("只写本次通话"))
         assertTrue(end.contains("工具回执、系统提示不是任何一方亲口说的话"))

@@ -4,9 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
-import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomAutomaticSpeechText
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.utils.extractQuotedContentAsText
 import me.rerere.rikkahub.utils.removeBracketedContent
@@ -24,8 +24,9 @@ fun TTSAutoPlay(vm: ChatVM, setting: Settings, conversation: Conversation) {
                 updatedSetting.displaySetting.autoPlayTTSAfterGeneration
             ) {
                 val lastMessage = currentConversation.currentMessages.lastOrNull()
-                if (lastMessage != null && lastMessage.role == MessageRole.ASSISTANT) {
-                    val text = lastMessage.toText()
+                // Private tools hide their details, not the assistant's public reply Text.
+                val text = lastMessage?.privateRoomAutomaticSpeechText()
+                if (text != null) {
                     var textToSpeak = text
                     if (updatedSetting.displaySetting.ttsOnlyReadQuoted) {
                         textToSpeak = textToSpeak.extractQuotedContentAsText() ?: textToSpeak

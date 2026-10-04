@@ -1,6 +1,5 @@
 package me.rerere.rikkahub.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.LocalOverscrollFactory
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -90,10 +89,13 @@ fun RikkahubTheme(
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = lightStatusBars
-                isAppearanceLightNavigationBars = !darkTheme
+            // Wrapped/overlay contexts are valid Compose hosts but need not be Activities.
+            // Only the optional window decoration is skipped; never suppress a Compose failure.
+            themeActivityOrNull(view.context)?.takeUnless { it.isFinishing || it.isDestroyed }?.let { activity ->
+                WindowCompat.getInsetsController(activity.window, view).apply {
+                    isAppearanceLightStatusBars = lightStatusBars
+                    isAppearanceLightNavigationBars = !darkTheme
+                }
             }
         }
     }

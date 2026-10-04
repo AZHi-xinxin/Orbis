@@ -78,7 +78,7 @@ internal fun parseOrbisAtlas(bytes: ByteArray): Atlas.Snapshot {
             val id = star.string("id")
             require(Regex("[0-9a-f]{64}").matches(id) && seen.add(id))
             val type = star.string("type")
-            require(type in Atlas.TYPES)
+            require(type in Atlas.SUPPORTED_TYPES)
             Atlas.Star(id, type, time(star.string("storedAt")))
         }
         val index = stars.mapIndexed { i, star -> star.id to i }.toMap()

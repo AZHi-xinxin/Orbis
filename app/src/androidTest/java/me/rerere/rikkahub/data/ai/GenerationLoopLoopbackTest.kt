@@ -33,6 +33,7 @@ import me.rerere.ai.core.HostToolApproval
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
@@ -44,6 +45,7 @@ import me.rerere.rikkahub.data.ai.transformers.PromptInjectionTransformer
 import me.rerere.rikkahub.data.ai.transformers.TransformerContext
 import me.rerere.rikkahub.data.datastore.NetworkSetting
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Lorebook
@@ -80,6 +82,163 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class GenerationLoopLoopbackTest {
+    @Test(timeout = 30_000)
+    fun privateToolsHideOnlyDetailsAndKeepPublicReplyAndNextWakeRealHistory() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 5, privateMode = true) { fixture ->
+                val final = fixture.collect(onMessages = { emitted ->
+                    val visible = Json.encodeToString(UIMessage.serializer(), emitted.last().privateRoomSafePresentation())
+                    assertFalse(visible.contains("synthetic tool result"))
+                    // Reasoning before the first private invocation is public; subsequent
+                    // continuation reasoning must remain hidden without hiding the reply.
+                    for (step in 2..4) assertFalse(visible.contains("synthetic reasoning $step"))
+                })
+                assertTrue(final.last().privateRoomContentHidden)
+                assertTrue(final.last().privateRoomSafePresentation().toText().contains("synthetic final answer"))
+                assertTrue(Json.encodeToString(UIMessage.serializer(), final.last().privateRoomSafePresentation())
+                    .contains("synthetic reasoning 1"))
+                assertEquals(listOf(1, 2, 3), fixture.executions.toList())
+                assertTrue(fixture.server.requests[1].encodedMessages.contains("synthetic tool result 1"))
+                assertTrue(fixture.server.requests[1].encodedMessages.contains("Synthetic local HTTP fixture"))
+                assertEquals(fixture.initial, final.take(fixture.initial.size))
+                // Persisted dev58 flags must not redact history sent on the next real HTTP request.
+                val restored = final.map { Json.decodeFromString<UIMessage>(Json.encodeToString(UIMessage.serializer(), it)) }
+                val followup = fixture.collect(from = restored + UIMessage.user("what did you just do?"))
+                val next = fixture.server.requests.last().encodedMessages
+                for (step in 1..3) {
+                    assertTrue(next.contains("synthetic tool result $step"))
+                    assertTrue(next.contains("synthetic-call-$step"))
+                }
+                assertTrue(next.contains("synthetic final answer"))
+                assertFalse(next.contains("隐私室操作记录已隐藏"))
+                assertFalse(followup.last().privateRoomContentHidden)
+                assertFalse(followup.last().privateRoomPendingPresentation)
+                assertTrue(followup.last().privateRoomSafePresentation().parts.filterIsInstance<UIMessagePart.Reasoning>()
+                    .any { it.reasoning.contains("synthetic reasoning 5") })
+                assertTrue(followup.last().privateRoomSafePresentation().toText().contains("synthetic final answer"))
+                assertEquals(listOf(1, 2, 3), fixture.executions.toList()) // No replay to recover lost recall.
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun orbisOmitsLegacyMemoryFromActualProviderRequestsDespiteRestoredEnabledFlag() = runBlocking<Unit> {
+        assertTrue(me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
+        for (streaming in listOf(true, false)) {
+            // The fixture deliberately retains enableMemory = true and passes a synthetic
+            // AssistantMemory into the real GenerationLoop. Inspect HTTP bodies, not a reply
+            // or the policy helper, including every continuation after the synthetic tools.
+            fixture(streaming, approval = false, expectedRequests = 4) { fixture ->
+                val final = fixture.collect()
+                assertEquals(4, fixture.server.requests.size)
+                fixture.server.requests.forEach { request ->
+                    assertTrue(request.encodedMessages.contains("Synthetic local HTTP fixture"))
+                    assertFalse(request.json.toString().contains("synthetic initial memory"))
+                    assertFalse(request.encodedMessages.contains("These are memories stored via the memory_tool"))
+                }
+                assertEquals(listOf(1, 2, 3), fixture.executions.toList())
+                assertEquals(fixture.initial, final.take(fixture.initial.size))
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun historyHardRefusalDoesNotPublishArgumentsOrExecuteTheTool() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1) { fixture ->
+                val failure = runCatching {
+                    fixture.collect(durableCheckpoints = true, admitOutput = { candidate ->
+                        if (candidate.lastOrNull()?.getTools()?.isNotEmpty() == true)
+                            throw MessageNodeCapacityException("synthetic_argument_limit")
+                        false
+                    })
+                }.exceptionOrNull()
+                assertTrue(failure is MessageNodeCapacityException)
+                assertTrue(fixture.executions.isEmpty())
+                assertTrue(fixture.lastPublished.last().getTools().isEmpty())
+                assertEquals(1, fixture.server.requests.size)
+                assertEquals(0, fixture.historyBudgetStops)
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun historySoftPauseCommitsCompletedToolThenStopsBeforeAnotherProviderRequest() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1) { fixture ->
+                val boundaries = mutableListOf<Boolean?>()
+                val final = fixture.collect(durableCheckpoints = true, emitTerminalEvidence = true,
+                    admitOutput = { candidate -> candidate.lastOrNull()?.getTools()?.any { it.isExecuted } == true },
+                    onDurableBoundary = { boundary -> boundaries += boundary.toolCompleted; boundary.result.complete(Unit) })
+                assertEquals(listOf(false, true), boundaries)
+                assertEquals(listOf(1), fixture.executions.toList())
+                assertTrue(final.last().getTools().single().isExecuted)
+                assertEquals(1, fixture.historyBudgetStops)
+                assertTrue(fixture.terminalEvidence.isEmpty())
+                assertEquals(1, fixture.server.requests.size)
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun oversizedActualToolResultPreservesStartedReceiptAndNeverClaimsNotExecuted() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1) { fixture ->
+                val boundaries = mutableListOf<Boolean?>()
+                val failure = runCatching {
+                    fixture.collect(durableCheckpoints = true, admitOutput = { candidate ->
+                        if (candidate.lastOrNull()?.getTools()?.any { it.isExecuted } == true)
+                            throw MessageNodeCapacityException("synthetic_result_limit")
+                        false
+                    }, onDurableBoundary = { boundary -> boundaries += boundary.toolCompleted; boundary.result.complete(Unit) })
+                }.exceptionOrNull()
+                assertTrue(failure is GenerationToolOutcomeUnknownException)
+                assertEquals(listOf(false), boundaries)
+                assertEquals(listOf(1), fixture.executions.toList())
+                assertTrue(fixture.lastPublished.last().getTools().all { !it.isExecuted })
+                assertEquals(1, fixture.server.requests.size)
+                assertEquals(0, fixture.historyBudgetStops)
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun toolTransportFailureAfterDispatchUnwindsWithoutContinuationOrFakeReceipt() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1) { fixture ->
+                val boundaries = mutableListOf<Boolean?>()
+                fixture.afterToolExecution = { throw java.io.IOException("synthetic tool response lost") }
+                val failure = runCatching {
+                    fixture.collect(durableCheckpoints = true, emitTerminalEvidence = true,
+                        onDurableBoundary = { boundary -> boundaries += boundary.toolCompleted; boundary.result.complete(Unit) })
+                }.exceptionOrNull()
+                assertTrue(failure is GenerationToolOutcomeUnknownException)
+                assertEquals(listOf(false), boundaries)
+                assertEquals(listOf(1), fixture.executions.toList())
+                assertTrue(fixture.lastPublished.last().getTools().all { !it.isExecuted })
+                assertEquals(1, fixture.server.requests.size)
+                assertTrue(fixture.terminalEvidence.isEmpty())
+                assertEquals(0, fixture.toolStepLimitStops)
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun softBudgetNeverOverridesAnUnresolvedHumanApproval() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = true, expectedRequests = 1) { fixture ->
+                val final = fixture.collect(durableCheckpoints = true,
+                    admitOutput = { candidate -> candidate.lastOrNull()?.getTools()?.isNotEmpty() == true })
+                assertTrue(final.last().getTools().single().isPending)
+                assertTrue(fixture.executions.isEmpty())
+                assertEquals(0, fixture.historyBudgetStops)
+                assertEquals(1, fixture.server.requests.size)
+            }
+        }
+    }
+
     @Test(timeout = 60_000)
     fun finiteThenZeroResendsEarliestSentenceInSameConversationWithoutRewritingHistory() = runBlocking<Unit> {
         val snapshots = Json { encodeDefaults = true }
@@ -152,6 +311,7 @@ class GenerationLoopLoopbackTest {
                 assertEquals(listOf(1), fixture.executions.toList())
                 assertTrue(final.last().getTools().single().isExecuted)
                 assertTrue(fixture.terminalEvidence.isEmpty())
+                assertEquals(1, fixture.toolStepLimitStops)
                 assertEquals(0, fixture.context.privateStorageAccesses.get())
             }
         }
@@ -173,10 +333,11 @@ class GenerationLoopLoopbackTest {
     fun pendingApprovalDoesNotProduceTerminalEvidence() = runBlocking<Unit> {
         for (streaming in listOf(true, false)) {
             fixture(streaming, approval = true, expectedRequests = 1) { fixture ->
-                val final = fixture.collect(emitTerminalEvidence = true)
+                val final = fixture.collect(emitTerminalEvidence = true, maxSteps = 1)
                 assertTrue(final.last().getTools().single().isPending)
                 assertTrue(fixture.executions.isEmpty())
                 assertTrue(fixture.terminalEvidence.isEmpty())
+                assertEquals(0, fixture.toolStepLimitStops)
             }
         }
     }
@@ -651,6 +812,7 @@ class GenerationLoopLoopbackTest {
         enableAutoRetry: Boolean = false,
         busyFirst: Boolean = false,
         finalText: String = "synthetic final answer",
+        privateMode: Boolean = false,
         block: suspend (Fixture) -> Unit,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -659,7 +821,7 @@ class GenerationLoopLoopbackTest {
             "Synthetic fixture must not start the real application."
         }
         val context = NoPrivateStorageContext(instrumentation.context)
-        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, busyFirst, finalText)
+        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, busyFirst, finalText, privateMode)
         val requestBudget = AtomicInteger()
         val client = OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
@@ -714,7 +876,7 @@ class GenerationLoopLoopbackTest {
                 searchServices = emptyList(), ttsProviders = emptyList(),
             )
             val fixture = Fixture(context, server, client, settings, assistant, model, approval, batchWithEmptyResult,
-                mixedApprovalBatch, revokeBeforeExecution, compactionMode, reminderOnly)
+                mixedApprovalBatch, revokeBeforeExecution, compactionMode, reminderOnly, privateMode)
             withTimeout(20_000) { block(fixture) }
             server.assertHealthy()
             assertEquals(expectedRequests, requestBudget.get())
@@ -739,6 +901,7 @@ class GenerationLoopLoopbackTest {
         revokeBeforeExecution: Boolean,
         private val compactionMode: String?,
         private val reminderOnly: Boolean,
+        privateMode: Boolean,
     ) {
         val executions = Collections.synchronizedList(mutableListOf<Int>())
         var afterToolExecution: suspend (Int) -> Unit = {}
@@ -748,6 +911,10 @@ class GenerationLoopLoopbackTest {
         val compactionCommitAttempts = AtomicInteger()
         var lastCompactionEstimate: Long = 0
         val terminalEvidence = mutableListOf<GenerationTerminalEvidence>()
+        var historyBudgetStops = 0
+            private set
+        var toolStepLimitStops = 0
+            private set
         private val approvalChecks = AtomicInteger()
         val initial = listOf(UIMessage.user("synthetic earlier human"), UIMessage.assistant("synthetic earlier assistant"), UIMessage.user("synthetic current human"))
         var lastPublished: List<UIMessage> = initial
@@ -755,7 +922,7 @@ class GenerationLoopLoopbackTest {
         private val manager = ProviderManager(client, context)
         private val loop = GenerationLoop(context, manager, Json)
         private val tool = Tool(
-            name = "synthetic_tool", description = "Synthetic local counter only.",
+            name = if (privateMode) "orbis_private_room_write" else "synthetic_tool", description = "Synthetic local counter only.",
             parameters = {
                 schemas.incrementAndGet()
                 InputSchema.Obj(JsonObject(mapOf("step" to JsonObject(mapOf("type" to JsonPrimitive("integer"))))), listOf("step"))
@@ -795,8 +962,12 @@ class GenerationLoopLoopbackTest {
             maxSteps: Int = 4,
             outputTransformers: List<OutputMessageTransformer> = emptyList(),
             onDurableBoundary: suspend (GenerationChunk.DurableBoundary) -> Unit = { it.result.complete(Unit) },
+            admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
+            onMessages: (List<UIMessage>) -> Unit = {},
         ): List<UIMessage> {
             terminalEvidence.clear() // Evidence belongs to this collection, never an approval retry.
+            historyBudgetStops = 0
+            toolStepLimitStops = 0
             var final = from
             val compaction = if (compactionMode != null || reminderOnly) ConversationCompactionControl(
                 thresholdTokens = if (reminderOnly) 350_000 else 1,
@@ -820,11 +991,15 @@ class GenerationLoopLoopbackTest {
                 durableCheckpoints = durableCheckpoints,
                 consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis,
                 emitTerminalEvidence = emitTerminalEvidence,
+                admitOutput = admitOutput,
             ).collect { chunk ->
                 if (collectorDelayMs > 0) delay(collectorDelayMs)
                 if (compaction != null) delay(15)
                 when (chunk) {
+                    is GenerationChunk.HistoryBudgetStop -> historyBudgetStops++
+                    is GenerationChunk.ToolStepLimitStop -> toolStepLimitStops++
                     is GenerationChunk.Messages -> {
+                        onMessages(chunk.messages)
                         final = chunk.messages
                         lastPublished = chunk.messages
                     }
@@ -875,6 +1050,7 @@ class GenerationLoopLoopbackTest {
         private val emptyContinuation: Boolean,
         private val busyFirst: Boolean,
         private val finalText: String,
+        private val privateMode: Boolean,
     ) : Closeable {
         private val listener = ServerSocket().apply {
             bind(InetSocketAddress(LOOPBACK, 0), 4)
@@ -1000,12 +1176,15 @@ class GenerationLoopLoopbackTest {
                             put("id", "synthetic-call-$toolStep")
                             put("type", "function")
                             put("function", buildJsonObject {
-                                put("name", "synthetic_tool")
+                                put("name", if (privateMode) "orbis_private_room_write" else "synthetic_tool")
                                 put("arguments", "{\"step\":$toolStep}")
                             })
                         }
                     }))
-                } else put("content", finalText)
+                } else {
+                    put("content", finalText)
+                    if (privateMode) put("reasoning_content", "synthetic reasoning $step")
+                }
             }
             val payload = buildJsonObject {
                 put("id", "synthetic-response-$step")

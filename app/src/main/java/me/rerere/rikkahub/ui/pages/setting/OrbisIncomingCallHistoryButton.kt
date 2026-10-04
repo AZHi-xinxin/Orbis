@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.orbis.contact.IncomingCallAttempt
 import me.rerere.rikkahub.service.OrbisIncomingCallRuntime
+import me.rerere.rikkahub.service.OrbisCallFailure
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -66,7 +67,11 @@ fun OrbisIncomingCallHistoryButton() {
                         }}${if (row.mutedAnswer) " · 静音接听" else ""}")
                         Text("降级通知：${if (row.fallbackPosted) "已提交系统" else if (row.fallbackAttempted) "尝试未成功/结果未知" else "未尝试"}" +
                             (row.fallbackSpeech?.let { " · 朗读：$it" } ?: ""), style = MaterialTheme.typography.bodySmall)
-                        row.failureCode?.let { Text("原因：$it", style = MaterialTheme.typography.bodySmall) }
+                        row.failureCode?.let { code ->
+                            val failure = OrbisCallFailure.fromCode(code)
+                            Text("原因：${failure.explanation}", style = MaterialTheme.typography.bodySmall)
+                            Text("诊断代码：${failure.code}", style = MaterialTheme.typography.labelSmall)
+                        }
                         Text("记录 ${row.id}", style = MaterialTheme.typography.labelSmall)
                     }
                 }

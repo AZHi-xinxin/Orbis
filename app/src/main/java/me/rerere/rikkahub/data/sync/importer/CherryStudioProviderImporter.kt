@@ -11,30 +11,54 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.common.http.jsonObjectOrNull
-import me.rerere.rikkahub.utils.JsonInstant
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipFile
 
 object CherryStudioProviderImporter {
-    fun importProviders(file: File): List<ProviderSetting> {
+    internal const val MAX_DATA_BYTES = 64L * ArchiveCapacity.MIB
+
+    fun importProviders(file: File, checkCancelled: () -> Unit = {}): List<ProviderSetting> {
+        ArchiveCapacity.requireSize(file.length(), ArchiveCapacity.MAX_ZIP_BYTES)
         val dataJson = ZipFile(file).use { zip ->
+            val paths = hashSetOf<String>()
+            var expanded = 0L
+            for (item in zip.entries()) {
+                checkCancelled()
+                ArchiveCapacity.requireSafePath(item.name, item.isDirectory)
+                if (paths.size >= ArchiveCapacity.MAX_ENTRIES || !paths.add(item.name))
+                    throw ArchiveReadException(ArchiveFailure.UNSAFE_PATH)
+                ArchiveCapacity.requireSize(item.size, ArchiveCapacity.MAX_DISK_ENTRY_BYTES, allowEmpty = true)
+                expanded += item.size
+                ArchiveCapacity.requireSize(expanded, ArchiveCapacity.MAX_EXPANDED_BYTES, allowEmpty = true)
+            }
             val entry = zip.getEntry("data.json")
                 ?: throw IllegalArgumentException("Invalid Cherry Studio backup: data.json not found")
-            zip.getInputStream(entry).bufferedReader().use { it.readText() }
+            require(!entry.isDirectory)
+            ArchiveCapacity.requireSize(entry.size, MAX_DATA_BYTES)
+            val bytes = ByteArrayOutputStream(minOf(entry.size, 8192).toInt()).use { output ->
+                ArchiveCapacity.copyZipEntry(zip, entry, output, MAX_DATA_BYTES, checkCancelled)
+                output.toByteArray()
+            }
+            val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+            decoder.decode(ByteBuffer.wrap(bytes)).toString()
         }
 
-        val root = JsonInstant.parseToJsonElement(dataJson).jsonObject
+        val root = DeepSeekStrictJson.parse(dataJson, checkCancelled).jsonObject
         val persistedRaw = root["localStorage"]
             ?.jsonObject
             ?.get("persist:cherry-studio")
             ?.jsonPrimitive
             ?.contentOrNull
             ?: throw IllegalArgumentException("Invalid Cherry Studio backup: persist data missing")
-        val persisted = JsonInstant.parseToJsonElement(persistedRaw).jsonObject
+        val persisted = DeepSeekStrictJson.parse(persistedRaw, checkCancelled).jsonObject
 
         val llmRaw = persisted["llm"]?.jsonPrimitive?.contentOrNull
             ?: throw IllegalArgumentException("Invalid Cherry Studio backup: llm settings missing")
-        val llm = JsonInstant.parseToJsonElement(llmRaw).jsonObject
+        val llm = DeepSeekStrictJson.parse(llmRaw, checkCancelled).jsonObject
 
         return llm["providers"]?.jsonArray
             ?.mapNotNull { it.jsonObjectOrNull?.let(::parseProvider) }

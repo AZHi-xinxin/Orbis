@@ -25,6 +25,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationInputSnapshotTest {
+    @Test fun `model compaction retention preserves private history instead of human display placeholder`() = runBlocking {
+        val private = UIMessage.assistant("PRIVATE_SENTINEL").copy(privateRoomContentHidden = true)
+        val snapshot = GenerationInputSnapshot()
+        snapshot.input { listOf(UIMessage.user("public wake")) }
+        val compact = call("compact")
+        val raw = response(compact)
+        val results = listOf(result(compact))
+        val bubble = response(*results.toTypedArray())
+        val replacement = listOf(summary("public summary"), private, bubble)
+        val rebased = snapshot.prepareCompactionInput(replacement, raw, results, bubble.id)
+        assertTrue(rebased.any { it.toText().contains("PRIVATE_SENTINEL") })
+        assertEquals(private.parts, rebased.first { it.id == private.id }.parts)
+        assertEquals("PRIVATE_SENTINEL", replacement[1].toText())
+        assertTrue(rebased.last().getTools().single().isExecuted)
+    }
+
     private fun summary(text: String) = UIMessage.assistant(text).copy(parts = listOf(
         UIMessagePart.Text(text, JsonObject(mapOf(COMPACTION_SUMMARY_MARKER to JsonPrimitive(true)))),
     ))

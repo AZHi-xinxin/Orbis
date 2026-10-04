@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.rikkahub.data.orbis.privateroom.hasPrivateRoomToolContent
+
 import me.rerere.rikkahub.data.model.appearanceForStyle
 import me.rerere.rikkahub.data.model.orbisStartupContentReady
 import me.rerere.rikkahub.ui.pages.orbis.LocalOrbisDeepSeekStyle
@@ -120,7 +122,6 @@ import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
-import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
@@ -521,6 +522,7 @@ private fun ChatPageContent(
             },
             bottomBar = {
                 val messageQueue by vm.messageQueue.collectAsStateWithLifecycle()
+                val gatewayStopNotice by vm.gatewayStopNotice.collectAsStateWithLifecycle()
                 val voiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
                 Column(if (BuildConfig.ORBIS_ENABLED) Modifier.navigationBarsPadding().imePadding() else Modifier) {
                 ChatInput(
@@ -533,6 +535,8 @@ private fun ChatPageContent(
                     onBeginEditQueuedMessage = vm::beginEditQueuedMessage,
                     onFinishEditQueuedMessage = vm::finishEditQueuedMessage,
                     onResumeMessageQueue = vm::resumeMessageQueue,
+                    onStopGatewayWait = vm::stopGeneration,
+                    gatewayStopNotice = gatewayStopNotice,
                     loading = loadingJob != null,
                     settings = setting,
                     hazeState = hazeState,
@@ -672,9 +676,13 @@ private fun ChatPageContent(
                     vm.regenerateAtMessage(it)
                 },
                 onEdit = {
-                    inputState.orbisQuote = null // Editing keeps the original message's quote, not a new draft quote.
-                    inputState.editingMessage = it.id
-                    inputState.setContents(it.parts)
+                    // Never put hidden original content in an editable draft, or save a redacted
+                    // presentation over the assistant's original tool/context record.
+                    if (!it.hasPrivateRoomToolContent()) {
+                        inputState.orbisQuote = null // Editing keeps the original message's quote, not a new draft quote.
+                        inputState.editingMessage = it.id
+                        inputState.setContents(it.parts)
+                    }
                 },
                 onForkMessage = {
                     scope.launch {
@@ -884,8 +892,9 @@ private fun ChatFilesPickerSheet(
             onPickVideo = attachmentPickerActions.onPickVideo,
             onPickAudio = attachmentPickerActions.onPickAudio,
             onPickFile = attachmentPickerActions.onPickFile,
+            // The starter performs the shared local preflight and explains a missing setting.
+            // Do not hide this entry solely because a provider uses local rather than server VAD.
             onStartVoiceMode = if (
-                setting.getSelectedASRProvider()?.supportsServerVadVoiceMode == true &&
                 voiceState.phase == VoicePhase.Off
             ) {
                 {

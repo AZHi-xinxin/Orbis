@@ -51,7 +51,8 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                     })
                     // Freeze the explicitly previewed bytes before validating/committing; a source file changed
                     // during or after preview cannot alter a partly committed import. Only this private temp is deleted.
-                    val snapshot = File.createTempFile("orbis-operit-", ".json")
+                    ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, file.length())
+                    val snapshot = File.createTempFile("orbis-operit-", ".json", file.parentFile)
                     try {
                         file.inputStream().use { input -> snapshot.outputStream().use { output ->
                             RikkaChatArchive.copyLimited(input, output, OperitChatArchive.MAX_ARCHIVE_BYTES, checkCancelled,
@@ -74,6 +75,7 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                                 val id = operitImportId(if (correctedCopy) "conversation-corrected-v1" else "conversation", namespace)
                                 if (sink.exists(id)) result = result.copy(skipped = result.skipped + 1)
                                 else {
+                                    ArchiveCapacity.requireSpace(snapshot.parentFile!!.usableSpace, 2L * ArchiveCapacity.MAX_WINDOW_CHARS)
                                     val converted = try { convert(source, assistantId, checkCancelled, namespace, correctedCopy) }
                                     catch (_: OperitMessageTooLarge) {
                                         result = result.copy(failed = result.failed + 1, failures = result.failures +
@@ -101,7 +103,7 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                 }
             }
         } catch (_: CancellationException) { throw DeepSeekImportCancelledException(result) }
-        catch (_: Exception) { throw DeepSeekImportException(result) }
+        catch (failure: Exception) { throw DeepSeekImportException(result, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure)) }
     }
 
     companion object {
@@ -129,6 +131,7 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
             correctedCopy: Boolean = false): Conversation {
             fun importedId(kind: String, index: String = "") = operitImportId(
                 if (correctedCopy) "$kind-corrected-v1" else kind, idNamespace, index)
+            var serializedBytes = 0L
             val nodes = source.messages.map { message ->
                 checkCancelled()
                 val split = splitOperitReasoningContent(message.text, message.sender, checkCancelled)
@@ -161,8 +164,11 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                 val ui = UIMessage(id = importedId("message", message.sourceIndex.toString()),
                     role = if (message.sender == "user") MessageRole.USER else MessageRole.ASSISTANT,
                     parts = parts, createdAt = time, finishedAt = time)
-                if (JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size > DeepSeekChatImporter.MAX_NODE_JSON_BYTES)
+                val nodeBytes = JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size
+                if (nodeBytes > DeepSeekChatImporter.MAX_NODE_JSON_BYTES)
                     throw OperitMessageTooLarge()
+                serializedBytes += nodeBytes
+                if (serializedBytes > ArchiveCapacity.MAX_WINDOW_CHARS) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
                 MessageNode(id = importedId("node", message.sourceIndex.toString()), messages = listOf(ui))
             }
             return Conversation(id = importedId("conversation"), assistantId = assistantId,

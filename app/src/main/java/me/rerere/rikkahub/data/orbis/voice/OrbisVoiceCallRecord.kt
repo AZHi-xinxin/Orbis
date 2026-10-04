@@ -7,9 +7,13 @@ import kotlinx.serialization.ExperimentalSerializationApi
 @Serializable
 enum class OrbisVoiceCallStatus { CONNECTING, ACTIVE, ENDED, INTERRUPTED }
 
-/** Saving raw source and optionally completing a separately configured model summary are independent. */
+/** Saving raw source and completing the assistant-first summary are independent. */
 @Serializable
 enum class OrbisVoiceArchiveStatus { PENDING, GENERATING, READY, FAILED }
+
+/** Host-written provenance, never taken from a model's response or historical text. */
+@Serializable
+enum class OrbisVoiceArchiveAuthor { ASSISTANT, FALLBACK, ASSISTANT_TOOL }
 
 /** A durable one-shot claim: an unknown opening is never automatically replayed. */
 @Serializable
@@ -41,7 +45,7 @@ data class OrbisVoiceCallRecord(
     val status: OrbisVoiceCallStatus = OrbisVoiceCallStatus.CONNECTING,
     val archiveStatus: OrbisVoiceArchiveStatus = OrbisVoiceArchiveStatus.PENDING,
     val summary: String? = null,
-    /** An independent model's written account, never substituted for the captured source below. */
+    /** A model's written account, never substituted for the captured source below. */
     val modelTranscript: String? = null,
     val transcript: List<OrbisVoiceTranscriptEntry> = emptyList(),
     val sourceMessageIds: List<String> = emptyList(),
@@ -55,9 +59,17 @@ data class OrbisVoiceCallRecord(
     val endReasonText: String? = null,
     val endError: String? = null,
     val archiveError: String? = null,
-    /** Count only explicitly dispatched independent archive requests, not chat/tool retries. */
+    /** Count explicitly dispatched archive requests, not local submit-tool receipts. */
     val archiveRequestCount: Int = 0,
     val archiveLastModelId: String? = null,
+    /** Durable request ownership: old/late attempts cannot overwrite the winner. */
+    val archiveAttemptId: String? = null,
+    val archiveAttemptSourceDigest: String? = null,
+    val archiveAttemptAuthor: OrbisVoiceArchiveAuthor? = null,
+    /** Set only on successful publication. Null means legacy provenance is unknown. */
+    val archiveAuthor: OrbisVoiceArchiveAuthor? = null,
+    /** Caller idempotency key for a local assistant submit, not a claimed provider tool_call_id. */
+    val archiveReceiptId: String? = null,
     /** Closed host code; provider response bodies and private error details do not belong here. */
     val archiveFailureCode: String? = null,
     val aiEndRequestedAtMs: Long? = null,
@@ -76,3 +88,10 @@ fun OrbisVoiceCallRecord.archiveErrorForDisplay(): String? = archiveError ?: err
 
 @Serializable
 data class OrbisVoiceModelArchive(val summary: String, val transcript: String)
+
+fun OrbisVoiceCallRecord.archiveAuthorLabel(): String = when (archiveAuthor) {
+    OrbisVoiceArchiveAuthor.ASSISTANT -> "本助手整理"
+    OrbisVoiceArchiveAuthor.FALLBACK -> "外部模型兜底整理"
+    OrbisVoiceArchiveAuthor.ASSISTANT_TOOL -> "本助手补写"
+    null -> "旧记录未标注整理来源"
+}

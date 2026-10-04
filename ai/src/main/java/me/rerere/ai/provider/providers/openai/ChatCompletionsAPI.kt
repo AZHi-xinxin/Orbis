@@ -1,6 +1,8 @@
 package me.rerere.ai.provider.providers.openai
 
 import me.rerere.ai.util.orbisSourceHeaders
+import me.rerere.ai.util.observeOrbisGatewayRequest
+import me.rerere.ai.util.observeOrbisGatewayResponse
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +58,7 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.ai.util.toHeaders
-import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
@@ -97,37 +99,37 @@ class ChatCompletionsAPI(
                     params.sessionId?.let { header("x-opencode-session", it) }
                 }
             }
-            .build()
+            .build().observeOrbisGatewayRequest(params, requestBody["model"]?.jsonPrimitive?.contentOrNull)
 
         Log.i(TAG, "generateText: request prepared, messages=${messages.size}")
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw response.use { openAIStreamFailure(null, it) }
+        client.newCall(request).awaitAndUse { response ->
+            request.observeOrbisGatewayResponse(response)
+            if (!response.isSuccessful) throw openAIStreamFailure(null, response)
+
+            val bodyStr = response.body.string()
+            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
+
+            // 从 JsonObject 中提取必要的信息
+            val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
+            val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
+            val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
+
+            val message = choice["message"]?.jsonObject ?: throw Exception("message is null")
+            val finishReason = choice["finish_reason"]
+                ?.jsonPrimitive
+                ?.content
+                ?: "unknown"
+            val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
+
+            TextGenerationResult(
+                id = id,
+                model = model,
+                message = parseMessage(message),
+                finishReason = finishReason,
+                usage = usage
+            )
         }
-
-        val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-
-        // 从 JsonObject 中提取必要的信息
-        val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
-        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
-        val choice = bodyJson["choices"]?.jsonArray?.get(0)?.jsonObject ?: error("choices is null")
-
-        val message = choice["message"]?.jsonObject ?: throw Exception("message is null")
-        val finishReason = choice["finish_reason"]
-            ?.jsonPrimitive
-            ?.content
-            ?: "unknown"
-        val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
-
-        TextGenerationResult(
-            id = id,
-            model = model,
-            message = parseMessage(message),
-            finishReason = finishReason,
-            usage = usage
-        )
     }
 
     override suspend fun streamText(
@@ -154,7 +156,7 @@ class ChatCompletionsAPI(
                     params.sessionId?.let { header("x-opencode-session", it) }
                 }
             }
-            .build()
+            .build().observeOrbisGatewayRequest(params, requestBody["model"]?.jsonPrimitive?.contentOrNull)
 
         Log.i(TAG, "streamText: request prepared, messages=${messages.size}")
 
@@ -168,7 +170,7 @@ class ChatCompletionsAPI(
             }
         }
 
-        val listener = OpenAIStreamListener(decoder, ::sendChunks) { error -> close(error) }
+        val listener = OpenAIStreamListener(decoder, ::sendChunks, request::observeOrbisGatewayResponse) { error -> close(error) }
 
         val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
 

@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.orbis
 
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -379,6 +381,7 @@ internal fun GardenQuickChatMessage(
     onEventOpacityChange: (suspend (Float) -> Unit)? = null,
     onVoiceNotePlayed: ((Int, Int?, String) -> Unit)? = null,
 ) {
+    val message = message.privateRoomSafePresentation()
     val appearance = LocalSettings.current.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val segmented = BuildConfig.ORBIS_ENABLED && message.role == MessageRole.ASSISTANT && appearance.chatFlow.enabled
     val textStyle = rememberChatMessageTextStyle()

@@ -61,7 +61,7 @@ internal class RikkaChatSnapshotReader private constructor(private val database:
         val chats = scalar("SELECT COUNT(*) FROM ConversationEntity")
         val nodes = scalar("SELECT COUNT(*) FROM message_node")
         require(chats <= 10000) { "一次最多导入一万个窗口，请拆分备份" }
-        require(nodes <= 100000) { "聊天消息过多，请拆分备份" }
+        require(nodes <= 1000000) { "聊天消息过多，请拆分备份" }
         requireNoRows("SELECT 1 FROM ConversationEntity WHERE typeof(id) != 'text' OR length(trim(id)) = 0 OR length(id) > 128 OR typeof(title) != 'text' OR typeof(create_at) != 'integer' OR typeof(update_at) != 'integer' LIMIT 1")
         requireNoRows("SELECT 1 FROM message_node WHERE typeof(id) != 'text' OR length(trim(id)) = 0 OR length(id) > 128 OR typeof(conversation_id) != 'text' OR typeof(messages) != 'text' OR typeof(node_index) != 'integer' OR node_index < 0 OR typeof(select_index) != 'integer' OR select_index < 0 OR select_index > 2147483647 LIMIT 1")
         requireNoRows("SELECT id FROM ConversationEntity GROUP BY id COLLATE BINARY HAVING COUNT(*) > 1 LIMIT 1")
@@ -77,9 +77,8 @@ internal class RikkaChatSnapshotReader private constructor(private val database:
             }
         }
         // Bound deserialization before loading message JSON; oversized archives fail without touching chats.
-        require(scalar("SELECT COALESCE(SUM(length(CAST(messages AS BLOB))), 0) FROM message_node") <= 64L * 1024 * 1024) {
-            "聊天正文超过本次安全导入上限（64 MB），请拆分备份"
-        }
+        ArchiveCapacity.requireSize(scalar("SELECT COALESCE(SUM(length(CAST(messages AS BLOB))), 0) FROM message_node"),
+            ArchiveCapacity.MAX_STREAM_JSON_BYTES, allowEmpty = true)
         require(scalar("SELECT COALESCE(SUM(length(CAST(title AS BLOB))), 0) FROM ConversationEntity") <= 4L * 1024 * 1024) {
             "聊天标题总量过大，已停止导入；原聊天未更改"
         }

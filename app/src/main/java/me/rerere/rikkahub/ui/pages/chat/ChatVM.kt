@@ -304,6 +304,8 @@ class ChatVM(
     fun clearAllErrors() = chatService.clearAllErrors()
 
     val messageQueue = chatService.getMessageQueueFlow(_conversationId)
+    val gatewayStopNotice = chatService.gatewayStopNotice(_conversationId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun removeQueuedMessage(id: Uuid) = chatService.removeQueuedMessage(_conversationId, id)
 
@@ -558,7 +560,12 @@ class ChatVM(
 
     fun stopGeneration() {
         viewModelScope.launch {
-            chatService.stopGeneration(_conversationId, HostToolFailure.USER_CANCELLED)
+            try {
+                chatService.stopGeneration(_conversationId, HostToolFailure.USER_CANCELLED, stopGatewayWait = true)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                chatService.addError(IllegalStateException("停止或核对未完成，队列保持暂停；未自动重发消息或工具。"), _conversationId)
+            }
         }
     }
 

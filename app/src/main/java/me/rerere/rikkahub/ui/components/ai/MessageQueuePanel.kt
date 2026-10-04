@@ -42,9 +42,12 @@ internal fun MessageQueuePanel(
     onBeginEdit: (Uuid) -> QueuedMessage?,
     onFinishEdit: (Uuid, List<UIMessagePart>?) -> Unit,
     onResume: () -> Unit,
+    onStopGatewayWait: () -> Unit = {},
+    gatewayStopNotice: String? = null,
 ) {
     var editing by remember { mutableStateOf<QueuedMessage?>(null) }
     var confirmResume by remember { mutableStateOf(false) }
+    var confirmStop by remember { mutableStateOf(false) }
     if (state.messages.isNotEmpty() || state.paused) {
         Surface(
             shape = MaterialTheme.shapes.large,
@@ -68,11 +71,18 @@ internal fun MessageQueuePanel(
                             .padding(vertical = 8.dp),
                     )
                     if (state.paused) {
-                        TextButton(onClick = { confirmResume = true }) { Text("检查并恢复") }
+                        TextButton(onClick = { confirmResume = true }) { Text("检查后续消息") }
                     }
                 }
-                if (state.paused) Text("消息队列已暂停。通话原文独立保存，可在通话卡片中重新归档，无需先恢复队列。",
+                if (state.paused) Text(if (state.messages.isEmpty())
+                    "当前没有排队待发的消息。暂停标记用于防止中断后自动继续，不表示聊天丢失。若窗口打不开，请到「数据与本地备份 → 会话自助恢复」检查。"
+                else "这里是尚未发送的输入，不是历史聊天。暂停可防止回复中断或工具结果待核对时自动续发；你可以编辑、移除，或确认后继续。此按钮不修复聊天数据库。",
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                if (state.paused) {
+                    TextButton(onClick = { confirmStop = true }) { Text("停止旧轮并核对网关") }
+                    gatewayStopNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp).testTag("chat_gateway_stop_notice")) }
+                }
                 LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
                     itemsIndexed(
                         state.messages,
@@ -118,9 +128,15 @@ internal fun MessageQueuePanel(
         }
     }
 
+    if (confirmStop) AlertDialog(onDismissRequest = { confirmStop = false },
+        title = { Text("停止旧轮并核对？") },
+        text = { Text("先停止本地生成，再向同一模型服务核对本次运行记录的精确请求。仅支持此接口的网关会在确认旧轮已收尾后结束等待，不会重发消息或工具，也不代表已取消外部工具的实际操作。队列仍保留，需你另外确认恢复。") },
+        confirmButton = { TextButton(onClick = { confirmStop = false; onStopGatewayWait() }) { Text("停止并核对") } },
+        dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("取消") } })
+
     if (confirmResume) AlertDialog(onDismissRequest = { confirmResume = false },
         title = { Text("恢复后续排队消息？") },
-        text = { Text("将继续处理尚未发送的排队消息，可能调用模型。不会自动重做上一条失败或结果未知的工具；若仍有未解决的执行状态，会保留暂停并给出提示。通话重新归档请使用通话卡片中的入口。") },
+        text = { Text("仅检查是否可以继续尚未发送的排队消息；有待发消息时，继续可能调用模型。不会重做上一条失败或结果未知的工具，也不会修复损坏的聊天。仍有未解决状态时保持暂停。窗口打不开请到「数据与本地备份 → 会话自助恢复」；通话重新归档在通话卡片中操作。") },
         confirmButton = { TextButton(onClick = { confirmResume = false; onResume() }) { Text("恢复后续消息") } },
         dismissButton = { TextButton(onClick = { confirmResume = false }) { Text("取消") } })
 

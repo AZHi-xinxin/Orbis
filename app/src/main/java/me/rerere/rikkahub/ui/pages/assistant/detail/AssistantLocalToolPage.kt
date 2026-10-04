@@ -134,6 +134,20 @@ private fun AssistantLocalToolContent(
         AssistantMessageTimeCard(assistant = assistant, onUpdate = onUpdate)
         CardGroup {
             item(
+                headlineContent = { Text("允许 AI 清理旧思考与工具记录") },
+                supportingContent = { Text("仅本对话已完成旧轮，先预览再经批准清理；原文可恢复，正文、附件和当前工具链不删除。下一轮请求生效，不依赖网关。清理回执只显示简短状态，不反复套娃。") },
+                trailingContent = { Switch(checked = LocalToolOption.ContextPruning in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.ContextPruning, it) }) },
+            )
+            item(
+                headlineContent = { Text("格子 · 允许 AI 创作与填写问卷") },
+                supportingContent = { Text("AI 默认可按需读取自己格子的作品与已提交答案。开启后可经批准写入、修改、删除自己创作的作品，或回答给 AI 的问卷；支持此次允许 / 以后允许。未提交的人类答案不可读取。正文不自动进上下文。") },
+                trailingContent = { Switch(checked = LocalToolOption.LocalGallery in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.LocalGallery, it) }) },
+            )
+        }
+        CardGroup {
+            item(
                 headlineContent = {
                     Text(stringResource(R.string.assistant_page_local_tools_javascript_engine_title))
                 },

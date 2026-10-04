@@ -130,7 +130,7 @@ internal fun BridgeSentinelSection(legacyAutomationReadOnly: Boolean = false) {
         }
     }) { Text("保存哨兵配置") }
     if (notice.isNotBlank()) Text(notice, fontSize = 12.sp)
-    Text("验证入口：连接本机 MCP 后，明确授权一次 test_sentinel（会真实发送消息）。get_l_service_status 可只读检查本机运行。返回 accepted 不等于下游已显示、回复或手机已通知。",
+    Text("验证入口：连接本机 MCP 后，明确授权一次 test_sentinel（会真实发送消息）。get_runtime_status 可只读检查本机运行。返回 accepted 不等于下游已显示、回复或手机已通知。",
         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Text("模型自我唤醒是另一项 MCP 服务：schedule_wakeup / list_wakeups / cancel_wakeup。请在 Orbis MCP 管理中手动添加并选用，先用 list_wakeups 只读验证。这里不部署该服务，也不能修改其固定投递会话；仍指向 RikkaHub 的服务器不会自动改投 Orbis。",
         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

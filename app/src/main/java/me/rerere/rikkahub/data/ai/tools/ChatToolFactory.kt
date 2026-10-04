@@ -72,7 +72,7 @@ class ChatToolFactory(
         allowAmbientCallBinding: Boolean = true,
         consultationReferenceOnly: Boolean = false,
     ): List<Tool> = buildList {
-        if (assistant.enableMemory) {
+        if (me.rerere.rikkahub.data.ai.legacyMemoryEnabled(assistant.enableMemory)) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
                 MemoryRepository.GLOBAL_MEMORY_ID
             } else {
@@ -136,6 +136,36 @@ class ChatToolFactory(
             )
         }
         if (BuildConfig.ORBIS_ENABLED) {
+            val privateRoomTools = me.rerere.rikkahub.data.orbis.privateroom.buildPrivateRoomAssistantTools(
+                assistantId = assistant.id.toString(),
+                assistantExists = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
+                openRepository = { ownerId -> me.rerere.rikkahub.data.orbis.privacy.AndroidPrivateVaults.open(context, ownerId) },
+                consultationReferenceOnly = consultationReferenceOnly,
+            )
+            // Unconfigured/paused rooms expose status only. No implicit creation or enabling;
+            // each actual operation also rechecks this owner's live vault state under its lock.
+            val privateRoomReady = !consultationReferenceOnly && withContext(Dispatchers.IO) {
+                runCatching {
+                    val state = me.rerere.rikkahub.data.orbis.privacy.AndroidPrivateVaults
+                        .open(context, assistant.id.toString()).status()
+                    state.availability == me.rerere.rikkahub.data.orbis.privacy.PrivateVaultAvailability.READY &&
+                        state.enabled && state.recoveryConfirmed
+                }.getOrDefault(false)
+            }
+            addAll(privateRoomTools.filter { privateRoomReady || it.name == "orbis_private_room_visit" })
+            addAll(me.rerere.rikkahub.data.orbis.gallery.buildGalleryTools(context, assistant.id.toString(),
+                LocalToolOption.LocalGallery in assistant.localTools))
+            if (conversationId != null && LocalToolOption.ContextPruning in assistant.localTools) {
+                val boundId = kotlin.uuid.Uuid.parse(conversationId)
+                add(createOrbisContextPruningTool(
+                    me.rerere.rikkahub.data.ai.contextpruning.AndroidContextPruning.open(context, assistant.id, boundId),
+                    readConversation = { conversationRepository.getConversationById(boundId) },
+                    isEnabled = {
+                        val live = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                        live != null && LocalToolOption.ContextPruning in live.localTools
+                    },
+                ))
+            }
             addAll(createOrbisKaomojiTools { me.rerere.rikkahub.data.orbis.OrbisKaomojis.open(context.applicationContext) })
             addAll(me.rerere.rikkahub.data.orbis.schedule.buildOrbisScheduleTools(context))
             add(createOrbisVoiceNoteTool(

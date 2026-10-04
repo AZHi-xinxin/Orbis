@@ -12,6 +12,22 @@ import me.rerere.rikkahub.data.repository.LightConversationEntity
 
 @Dao
 interface ConversationDAO {
+    /** Recovery catalogue cannot depend on decoding or loading full conversation headers. */
+    @Query("SELECT id, substr(title, 1, 256) AS title FROM conversationentity " +
+        "WHERE consultation_binding = '' AND instr(lower(title), lower(:query)) > 0 " +
+        "ORDER BY is_pinned DESC, update_at DESC, id ASC LIMIT :limit OFFSET :offset")
+    suspend fun getRescueWindows(query: String, limit: Int, offset: Int): List<RescueWindowMetadata>
+
+    /** Bound legacy nodes/prompts before SELECT * can put them into a CursorWindow or heap. */
+    @Query("SELECT length(CAST(id AS BLOB)) + length(CAST(assistant_id AS BLOB)) + " +
+        "length(CAST(title AS BLOB)) + length(CAST(nodes AS BLOB)) + length(CAST(suggestions AS BLOB)) + " +
+        "length(CAST(custom_system_prompt AS BLOB)) + length(CAST(orbis_prompt AS BLOB)) + " +
+        "length(CAST(mode_injection_ids AS BLOB)) + length(CAST(lorebook_ids AS BLOB)) + " +
+        "length(CAST(workspace_cwd AS BLOB)) + length(CAST(folder_id AS BLOB)) + " +
+        "length(CAST(consultation_binding AS BLOB)) FROM conversationentity " +
+        "WHERE id = :id AND consultation_binding = ''")
+    suspend fun getRescueHeaderBytes(id: String): Long?
+
     @Query("SELECT * FROM conversationentity WHERE consultation_binding = '' ORDER BY is_pinned DESC, update_at DESC")
     fun getAll(): Flow<List<ConversationEntity>>
 
@@ -121,5 +137,7 @@ interface ConversationDAO {
     )
     suspend fun getConversationCountPerDay(startMillis: Long): List<ConversationDayCount>
 }
+
+data class RescueWindowMetadata(val id: String, val title: String)
 
 data class ConversationDayCount(val day: String, val count: Int)

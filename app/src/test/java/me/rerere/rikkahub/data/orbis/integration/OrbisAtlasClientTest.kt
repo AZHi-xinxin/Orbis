@@ -72,10 +72,10 @@ class OrbisAtlasClientTest {
         assertFalse(value.truncated)
     }
 
-    @Test fun acceptsExactlyFourTypesAndCanonicalizesInstants() {
-        val values = Atlas.TYPES.mapIndexed { index, type -> star(index, type, "2026-09-26T11:11:12+01:00") }
+    @Test fun acceptsExplicitSupportedTypesAndCanonicalizesInstants() {
+        val values = Atlas.SUPPORTED_TYPES.mapIndexed { index, type -> star(index, type, "2026-09-26T11:11:12+01:00") }
         val parsed = parse(document(values.joinToString(",")))
-        assertEquals(Atlas.TYPES, parsed.stars.map { it.type })
+        assertEquals(Atlas.SUPPORTED_TYPES, parsed.stars.map { it.type })
         assertTrue(parsed.stars.all { it.storedAt == stamp })
     }
 
@@ -160,7 +160,7 @@ class OrbisAtlasClientTest {
     }
 
     @Test fun rejectsUnknownTypesWithoutUsingOtherAsFallback() {
-        listOf("", "学习 ", "工作", "其他<script>", "other").forEach { invalid(document(star(1, it))) }
+        listOf("", "学习 ", "工作推测", "其他<script>", "other").forEach { invalid(document(star(1, it))) }
     }
 
     @Test fun requiresParseableBoundedTimestampsInBothLocations() {

@@ -31,8 +31,8 @@ data class DeepSeekArchivePreview(
 
 /** Local-only, bounded streaming reader. Never extracts paths or reads user.json contents. */
 object DeepSeekArchive {
-    const val MAX_JSON_BYTES = 64 * 1024 * 1024
-    const val MAX_ARCHIVE_BYTES = 80L * 1024 * 1024
+    const val MAX_JSON_BYTES = ArchiveCapacity.MAX_STREAM_JSON_BYTES
+    const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_ZIP_BYTES
     internal const val MAX_STRING_CHARS = 4 * 1024 * 1024
 
     fun inspect(file: File, checkCancelled: () -> Unit = {}): DeepSeekArchivePreview = safeRead {
@@ -59,7 +59,8 @@ object DeepSeekArchive {
 
     internal fun open(file: File, checkCancelled: () -> Unit): ArchiveReader {
         checkCancelled()
-        require(file.isFile && file.length() in 1..MAX_ARCHIVE_BYTES) { "DeepSeek 导出包为空或超过大小限制" }
+        require(file.isFile) { "deepseek_missing_file" }
+        ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
         return safeRead { ArchiveReader(ZipFile(file), checkCancelled) }
     }
 
@@ -82,7 +83,7 @@ object DeepSeekArchive {
                 require(entries.size in 1..2 && entries.map { it.name }.toSet().size == entries.size &&
                     entries.all { !it.isDirectory && it.name in setOf("user.json", "conversations.json") }) { "deepseek_zip_paths" }
                 val entry = entries.single { it.name == "conversations.json" }
-                require(entry.size in 1..MAX_JSON_BYTES.toLong()) { "deepseek_zip_size" }
+                ArchiveCapacity.requireSize(entry.size, MAX_JSON_BYTES)
                 entries.firstOrNull { it.name == "user.json" }?.let { require(it.size in 0..(1024L * 1024)) { "deepseek_user_size" } }
                 expectedSize = entry.size
                 expectedCrc = entry.crc
@@ -90,7 +91,8 @@ object DeepSeekArchive {
                     private fun account(buffer: ByteArray, offset: Int, count: Int) {
                         if (count <= 0) return
                         bytes += count
-                        require(bytes <= MAX_JSON_BYTES && bytes <= expectedSize) { "deepseek_inflated_size" }
+                        ArchiveCapacity.requireSize(bytes, MAX_JSON_BYTES)
+                        if (bytes > expectedSize) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
                         crc.update(buffer, offset, count)
                     }
                     override fun read(): Int {
@@ -115,46 +117,73 @@ object DeepSeekArchive {
             var nodes = 0
             for (raw in DeepSeekStrictJson.arrayItems(reader, checkCancelled)) {
                 val conversation = DeepSeekParser.parse(JsonArray(listOf(raw)), checkCancelled).conversations.single()
-                require(identities.add(conversation.sourceId) && identities.size <= 2_000) { "deepseek_duplicate_or_many_conversations" }
+                require(identities.add(conversation.sourceId) && identities.size <= 10_000) { "deepseek_duplicate_or_many_conversations" }
                 nodes += conversation.nodes.size
-                require(nodes <= 100_000) { "deepseek_many_nodes" }
+                require(nodes <= 1_000_000) { "deepseek_many_nodes" }
                 yield(conversation)
             }
-            require(identities.isNotEmpty() && bytes == expectedSize && crc.value == expectedCrc) { "deepseek_archive_checksum" }
+            require(identities.isNotEmpty()) { "deepseek_empty" }
+            if (bytes != expectedSize || crc.value != expectedCrc) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
         }
         override fun close() { try { reader.close() } finally { zip.close() } }
     }
 
     internal inline fun <T> safeRead(block: () -> T): T = try { block() }
     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+    catch (failure: ArchiveReadException) { throw failure }
+    catch (_: java.nio.charset.CharacterCodingException) { throw ArchiveReadException(ArchiveFailure.INVALID_UTF8) }
+    catch (_: java.util.zip.ZipException) { throw ArchiveReadException(ArchiveFailure.CHECKSUM) }
+    catch (_: java.io.IOException) { throw ArchiveReadException(ArchiveFailure.READ_WRITE) }
     catch (_: Exception) { throw IllegalArgumentException("DeepSeek 导出包格式不兼容或已损坏；未覆盖现有聊天") }
 }
 
 /** Duplicate-key rejecting JSON reader, materializing only one conversation from the outer array. */
+internal data class StreamingJsonBudget(
+    val totalChars: Long = ArchiveCapacity.MAX_STREAM_JSON_BYTES,
+    val itemChars: Int = ArchiveCapacity.MAX_WINDOW_CHARS,
+    val itemValues: Int = 2_000_000,
+) {
+    init {
+        require(totalChars in 1..ArchiveCapacity.MAX_STREAM_JSON_BYTES)
+        require(itemChars in 1..ArchiveCapacity.MAX_WINDOW_CHARS && itemValues in 1..2_000_000)
+    }
+}
+
 internal object DeepSeekStrictJson {
-    fun parse(text: String, checkCancelled: () -> Unit = {}): JsonElement = JsonReader(StringReader(text), checkCancelled).read()
-    fun arrayItems(reader: Reader, checkCancelled: () -> Unit): Sequence<JsonElement> = JsonReader(reader, checkCancelled).arrayItems()
+    fun parse(text: String, checkCancelled: () -> Unit = {}): JsonElement {
+        ArchiveCapacity.requireSize(text.length.toLong(), ArchiveCapacity.MAX_WINDOW_CHARS.toLong(), allowEmpty = true)
+        return JsonReader(StringReader(text), checkCancelled).read()
+    }
+    fun arrayItems(reader: Reader, checkCancelled: () -> Unit,
+        budget: StreamingJsonBudget = StreamingJsonBudget()): Sequence<JsonElement> = JsonReader(reader, checkCancelled, budget).arrayItems()
     /** Streams a named array inside a small, explicitly allowed object envelope. Header order is not significant. */
     fun objectArrayItems(reader: Reader, arrayKey: String, headerKeys: Set<String>,
         checkCancelled: () -> Unit, validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> =
         JsonReader(reader, checkCancelled).objectArrayItems(arrayKey, headerKeys, validateHeader)
 
-    private class JsonReader(private val source: Reader, private val checkCancelled: () -> Unit) {
+    private class JsonReader(private val source: Reader, private val checkCancelled: () -> Unit,
+        private val budget: StreamingJsonBudget = StreamingJsonBudget()) {
         private var pending = -2
-        private var offset = 0
+        private var offset = 0L
         private var values = 0
+        private var itemStart: Long? = 0L
         private fun peek(): Int { if (pending == -2) pending = source.read(); return pending }
         private fun next(): Char {
-            if (offset and 4095 == 0) checkCancelled()
-            require(peek() >= 0 && ++offset <= DeepSeekArchive.MAX_JSON_BYTES) { "deepseek_json_size_or_truncated" }
+            if (offset and 4095L == 0L) checkCancelled()
+            require(peek() >= 0) { "deepseek_json_truncated" }
+            if (++offset > budget.totalChars)
+                throw ArchiveReadException(ArchiveFailure.SIZE_LIMIT, ArchiveCapacity.MAX_STREAM_JSON_BYTES)
+            if (itemStart?.let { offset - it > budget.itemChars } == true)
+                throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
             return pending.toChar().also { pending = -2 }
         }
         private fun whitespace() { while (peek() >= 0 && peek().toChar() in " \r\n\t") next() }
         fun read(): JsonElement { val result = value(0); whitespace(); require(peek() == -1) { "deepseek_json_trailing" }; return result }
         fun arrayItems(): Sequence<JsonElement> = sequence {
+            itemStart = null
             whitespace(); require(next() == '[') { "deepseek_root_array" }; whitespace()
             if (peek() == ']'.code) next() else while (true) {
-                yield(value(1)); whitespace()
+                yield(itemValue(1)); whitespace()
                 val separator = next()
                 if (separator == ']') break
                 require(separator == ',') { "deepseek_json_separator" }
@@ -163,6 +192,7 @@ internal object DeepSeekStrictJson {
         }
         fun objectArrayItems(arrayKey: String, headerKeys: Set<String>,
             validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> = sequence {
+            itemStart = null
             whitespace(); require(next() == '{') { "archive_root_object" }; whitespace()
             val seen = hashSetOf<String>()
             val header = linkedMapOf<String, JsonElement>()
@@ -173,7 +203,7 @@ internal object DeepSeekStrictJson {
                 if (key == arrayKey) {
                     require(next() == '[') { "archive_items_array" }; whitespace()
                     if (peek() == ']'.code) next() else while (true) {
-                        yield(value(2)); whitespace()
+                        yield(itemValue(2)); whitespace()
                         val separator = next()
                         if (separator == ']') break
                         require(separator == ',') { "archive_json_separator" }
@@ -191,8 +221,13 @@ internal object DeepSeekStrictJson {
             whitespace(); require(peek() == -1) { "archive_json_trailing" }
             validateHeader(JsonObject(header))
         }
+        private fun itemValue(depth: Int): JsonElement {
+            values = 0
+            itemStart = offset
+            return value(depth).also { itemStart = null }
+        }
         private fun value(depth: Int): JsonElement {
-            require(depth <= 48 && ++values <= 2_000_000) { "deepseek_json_complexity" }
+            if (depth > 48 || ++values > budget.itemValues) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
             whitespace()
             return when (peek().toChar()) {
                 '{' -> {

@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.data.sync.importer
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.encodeToString
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
@@ -24,6 +28,8 @@ import me.rerere.rikkahub.utils.JsonInstantPretty
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.time.Instant
 import java.util.UUID
 import java.util.zip.ZipEntry
@@ -56,8 +62,23 @@ object ChatboxImporter {
     ): ChatboxStreamingImportResult {
         var parsedConversations = 0
         val counters = ImportCounters()
+        val coroutine = currentCoroutineContext()
 
-        ZipFile(file).use { zip ->
+        try {
+            ArchiveCapacity.requireSize(file.length(), ArchiveCapacity.MAX_ZIP_BYTES)
+            ZipFile(file).use { zip ->
+            // Inspect metadata before committing any session. Sessions remain bounded and are read
+            // one by one; a large archive never becomes one giant JSON tree or byte array.
+            val paths = hashSetOf<String>()
+            var expanded = 0L
+            for (entry in zip.entries()) {
+                coroutine.ensureActive()
+                ArchiveCapacity.requireSafePath(entry.name, entry.isDirectory)
+                require(paths.size < ArchiveCapacity.MAX_ENTRIES && paths.add(entry.name)) { "chatbox_entry_count_or_duplicate" }
+                ArchiveCapacity.requireSize(entry.size, ArchiveCapacity.MAX_DISK_ENTRY_BYTES, allowEmpty = true)
+                expanded += entry.size
+                ArchiveCapacity.requireSize(expanded, ArchiveCapacity.MAX_EXPANDED_BYTES, allowEmpty = true)
+            }
             val manifest = zip.readJsonObject(MANIFEST_PATH, required = true)
                 ?: error("Invalid Chatbox backup: $MANIFEST_PATH not found")
             validateManifest(manifest)
@@ -99,6 +120,8 @@ object ChatboxImporter {
                     return null
                 }
                 val bytes = zip.readEntryBytes(entry, MAX_IMAGE_ENTRY_SIZE)
+                ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, bytes.size.toLong())
+                coroutine.ensureActive()
                 val url = saveImage(
                     ChatboxImageResource(
                         storageKey = storageKey,
@@ -116,6 +139,7 @@ object ChatboxImporter {
             }
 
             parseSessionEntries(manifest).forEach { sessionEntry ->
+                coroutine.ensureActive()
                 val session = zip.readJsonObject(sessionEntry.path, required = true)
                     ?: error("Invalid Chatbox backup: ${sessionEntry.path} not found")
                 val sessionId = session["id"]?.asString ?: sessionEntry.id
@@ -138,8 +162,9 @@ object ChatboxImporter {
                 if (conversation == null) {
                     counters.skippedSessions++
                 } else {
-                    parsedConversations++
+                    ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, 2L * ArchiveCapacity.MAX_WINDOW_CHARS)
                     onConversation(conversation)
+                    parsedConversations++
                 }
             }
 
@@ -153,6 +178,11 @@ object ChatboxImporter {
                 skippedSessions = counters.skippedSessions,
                 hasConversationSystemPrompt = counters.hasConversationSystemPrompt,
             )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            throw ChatboxPartialImportException(parsedConversations, ArchiveCapacity.publicError(failure))
         }
     }
 
@@ -293,8 +323,10 @@ object ChatboxImporter {
         var customSystemPrompt: String? = null
         var reachedConversationMessages = false
         val nodes = arrayListOf<MessageNode>()
+        var serializedBytes = 0L
 
         rawMessages.forEachIndexed { index, message ->
+            currentCoroutineContext().ensureActive()
             val role = message["role"]?.asString?.toMessageRole() ?: return@forEachIndexed
             if (role == MessageRole.SYSTEM && !reachedConversationMessages) {
                 val systemPrompt = extractText(message).trim()
@@ -351,6 +383,11 @@ object ChatboxImporter {
             }
             val distinctAlternatives = alternatives.distinctBy { it.id }
             if (distinctAlternatives.isEmpty()) return@forEachIndexed
+            val nodeBytes = JsonInstant.encodeToString(distinctAlternatives).toByteArray(Charsets.UTF_8).size
+            if (nodeBytes > DeepSeekChatImporter.MAX_NODE_JSON_BYTES) throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
+            serializedBytes += nodeBytes
+            if (serializedBytes > ArchiveCapacity.MAX_WINDOW_CHARS || nodes.size >= 50_000)
+                throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
             val selectedMessageId = mainMessage?.id
             selectedIndex = distinctAlternatives.indexOfFirst { it.id == selectedMessageId }
                 .takeIf { it >= 0 }
@@ -598,29 +635,20 @@ object ChatboxImporter {
             if (required) error("Invalid Chatbox backup: $path not found")
             return null
         }
-        require(!entry.isDirectory && entry.hasAllowedSize(MAX_JSON_ENTRY_SIZE)) {
-            "Invalid Chatbox backup JSON entry: $path"
-        }
-        val json = readEntryBytes(entry, MAX_JSON_ENTRY_SIZE).toString(StandardCharsets.UTF_8)
-        return JsonInstant.parseToJsonElement(json).jsonObject
+        require(!entry.isDirectory) { "chatbox_json_directory" }
+        ArchiveCapacity.requireSize(entry.size, MAX_JSON_ENTRY_SIZE)
+        val decoder = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        val json = decoder.decode(ByteBuffer.wrap(readEntryBytes(entry, MAX_JSON_ENTRY_SIZE))).toString()
+        return DeepSeekStrictJson.parse(json).jsonObject
     }
 
     private fun ZipFile.readEntryBytes(entry: ZipEntry, maxSize: Long): ByteArray {
-        require(entry.hasAllowedSize(maxSize)) { "Chatbox backup entry is too large: ${entry.name}" }
+        ArchiveCapacity.requireSize(entry.size, maxSize, allowEmpty = true)
         val initialSize = entry.size.coerceAtMost(8192).toInt()
-        return getInputStream(entry).use { input ->
-            ByteArrayOutputStream(initialSize).use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var totalBytes = 0L
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    totalBytes += count
-                    require(totalBytes <= maxSize) { "Chatbox backup entry is too large: ${entry.name}" }
-                    output.write(buffer, 0, count)
-                }
-                output.toByteArray()
-            }
+        return ByteArrayOutputStream(initialSize).use { output ->
+            ArchiveCapacity.copyZipEntry(this, entry, output, maxSize)
+            output.toByteArray()
         }
     }
 
@@ -718,6 +746,9 @@ data class ChatboxImageResource(
     val fileName: String,
     val mimeType: String,
 )
+
+class ChatboxPartialImportException(val imported: Int, val publicDetail: String) : IllegalArgumentException(
+    "ChatBox 导入未完成，已保留 $imported 个已导入窗口；其余未完成。$publicDetail 可重新选择原包继续，已有窗口会跳过。")
 
 data class ChatboxStreamingImportResult(
     val providers: List<ProviderSetting>,

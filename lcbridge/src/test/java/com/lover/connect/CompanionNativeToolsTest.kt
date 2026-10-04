@@ -37,7 +37,8 @@ class CompanionNativeToolsTest {
         assertEquals(27, catalog.size)
         assertEquals(27, catalog.map { it.name }.toSet().size)
         assertFalse(catalog.any { it.name in setOf("get_screen_time", "get_app_timeline", "reset_screen_time") })
-        assertEquals(setOf("save_memory", "read_memory", "get_l_service_status", "get_alarms"), catalog.filter { !it.requiresService }.map { it.name }.toSet())
+        assertEquals(setOf("save_memory", "read_memory", "get_runtime_status", "get_alarms"), catalog.filter { !it.requiresService }.map { it.name }.toSet())
+        assertFalse(catalog.any { it.name == "get_l_service_status" || it.description.contains("Little L") })
         val legacy = CompanionToolCatalog.json()
         assertEquals((0 until legacy.length()).map { legacy.getJSONObject(it).getString("name") }, catalog.map { it.name })
     }
@@ -150,11 +151,13 @@ class CompanionNativeToolsTest {
             it.preparation = { error("status must not initiate recovery") }
         }
         val bridge = CompanionNativeTools(runtime, CompanionMemoryStore(temporary.root), StandardTestDispatcher(testScheduler))
-        val result = bridge.execute("get_l_service_status", "{}")
-        assertTrue(result.ok)
-        assertFalse(JSONObject(result.content!!).getBoolean("native_runtime_ready"))
+        listOf("get_runtime_status", "get_l_service_status").forEach { name ->
+            val result = bridge.execute(name, "{}")
+            assertTrue(result.ok)
+            assertFalse(JSONObject(result.content!!).getBoolean("native_runtime_ready"))
+        }
         assertEquals(0, runtime.preparations)
-        assertEquals(1, runtime.calls)
+        assertEquals(2, runtime.calls)
     }
 
     @Test fun alarmCatalogIsReadOnlyWithBoundedOptionalHistoryArgumentsAndHonestScope() {

@@ -55,14 +55,19 @@ class OrbisCloudSettingsStore internal constructor(
     private var writable = false
     private val json = Json { encodeDefaults = true }
 
-    init { scope.launch { reload() } }
+    init { scope.launch { mutex.withLock { if (!state.value.loaded) loadLocked() } } }
 
     /** A failed load never fabricates an enabled entry and never permits overwriting unread data. */
     suspend fun reload() = mutex.withLock { loadLocked() }
 
     /** A local tool invocation cannot race a route switch or write through an unread configuration. */
     internal suspend fun <T> withLocalGarden(block: suspend (OrbisCloudHomeConfig) -> T): T = mutex.withLock {
-        check(state.value.loaded && writable && !state.value.config.enabled) { "garden_local_mode_required" }
+        // Koin creates this store lazily. The first tool can arrive before the scheduled init
+        // coroutine runs; join/perform the initial read under the same lock rather than treating
+        // an unread local route as an explicitly selected remote route.
+        if (!state.value.loaded) loadLocked()
+        check(writable) { "garden_configuration_unavailable" }
+        check(!state.value.config.enabled) { "garden_local_mode_required" }
         block(state.value.config)
     }
 

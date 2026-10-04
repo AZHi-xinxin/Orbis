@@ -106,6 +106,7 @@ object McpServiceController {
         val ready = live?.nativeRuntimeReady() == true
         return JSONObject().apply {
             put("checked_at_ms", System.currentTimeMillis())
+            put("screen_observation_guidance", SCREEN_OBSERVATION_GUIDANCE)
             put("app_package", app.packageName)
             put("mcp_desired_enabled", isEnabled(app))
             put("mcp_service_alive", live != null)

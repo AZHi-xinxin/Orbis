@@ -35,4 +35,11 @@ class ASRVoiceTurnTest {
         assertFalse(ASRProviderSetting.Step().supportsServerVadVoiceMode)
         assertFalse(ASRProviderSetting.MiMo().supportsServerVadVoiceMode)
     }
+
+    @Test fun `every selectable adapter has an implemented voice call path`() {
+        val settings = listOf(ASRProviderSetting.OpenAIRealtime(), ASRProviderSetting.DashScope(),
+            ASRProviderSetting.Volcengine(), ASRProviderSetting.MiMo(), ASRProviderSetting.Step())
+        assertEquals(ASRProviderSetting.Types.toSet(), settings.map { it::class }.toSet())
+        assertTrue(settings.all { it.supportsVoiceCall })
+    }
 }

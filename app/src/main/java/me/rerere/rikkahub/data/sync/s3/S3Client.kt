@@ -178,7 +178,9 @@ class S3Client(
                 }
 
                 response.bodyAsChannel().toInputStream().use { input ->
-                    targetFile.outputStream().use { output ->
+                    me.rerere.rikkahub.data.sync.NativeBackupBudget.Output(targetFile.outputStream()) {
+                        targetFile.parentFile!!.usableSpace
+                    }.use { output ->
                         input.copyTo(output)
                     }
                 }

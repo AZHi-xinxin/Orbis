@@ -28,6 +28,8 @@ object OrbisMemoryAtlas {
     private const val CAMERA_DISTANCE = 3.8
     private const val NEAR_DISTANCE = .05
     val TYPES = listOf("学习", "规划", "情感", "其他")
+    // Never reinterpret an old adapter's "其他" as work or tools.
+    val SUPPORTED_TYPES = TYPES + listOf("工具", "工作")
     private val storedAtFormat = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 
     data class Star(val id: String, val type: String, val storedAt: String)
@@ -78,7 +80,7 @@ object OrbisMemoryAtlas {
      */
     fun metadataOnly(stars: List<Star>, edges: List<Edge>, seed: Int = 0): Demo {
         val safeStars = stars.take(2000).mapIndexed { index, star ->
-            require(star.type in TYPES && star.storedAt.length in 1..80) { "invalid_star_metadata" }
+            require(star.type in SUPPORTED_TYPES && star.storedAt.length in 1..80) { "invalid_star_metadata" }
             val time = try { Instant.parse(star.storedAt) }
             catch (_: Exception) { throw IllegalArgumentException("invalid_star_metadata") }
             Star("star-$index", star.type, storedAtFormat.format(time))

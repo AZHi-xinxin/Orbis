@@ -19,6 +19,25 @@ class ChatboxImporterTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
+    fun `oversized message rejects the whole session without truncating or writing it`() = runBlocking {
+        val backup = temporaryFolder.newFile("chatbox-oversized.zip")
+        ZipOutputStream(backup.outputStream()).use { zip ->
+            zip.writeEntry("manifest.json", """{"format":"chatbox-backup","formatVersion":2,"sessions":[{"id":"test","path":"session.json"}]}""".toByteArray())
+            zip.writeEntry("session.json", ("""{"id":"test","messages":[{"id":"m","role":"user","content":"""" +
+                "x".repeat(DeepSeekChatImporter.MAX_NODE_JSON_BYTES + 1) + "\"}]}").toByteArray())
+        }
+        var writes = 0
+        try {
+            ChatboxImporter.importStreaming(backup, Uuid.random(), emptyList(), onConversation = { writes++ })
+            org.junit.Assert.fail("expected whole-session rejection")
+        } catch (failure: ChatboxPartialImportException) {
+            assertEquals(0, failure.imported)
+            assertTrue(failure.publicDetail.contains("单条消息"))
+        }
+        assertEquals(0, writes)
+    }
+
+    @Test
     fun `imports backup v2 providers resources and message forks`() = runBlocking {
         val backup = temporaryFolder.newFile("chatbox.zip")
         val imageBytes = byteArrayOf(1, 2, 3, 4)

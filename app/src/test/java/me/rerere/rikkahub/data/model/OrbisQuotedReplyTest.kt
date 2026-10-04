@@ -84,7 +84,10 @@ class OrbisQuotedReplyTest {
 
     @Test fun `quote roundtrips with message and legacy messages default null`() {
         val message = UIMessage.user("reply").copy(orbisQuote = quote(source()))
-        assertEquals(message, Json.decodeFromString<UIMessage>(Json.encodeToString(message)))
+        // Match the persistence codec: a clock-derived default can be omitted by plain Json
+        // and regenerated a millisecond later, unrelated to quote serialization.
+        val persistenceJson = Json { encodeDefaults = true }
+        assertEquals(message, persistenceJson.decodeFromString<UIMessage>(persistenceJson.encodeToString(message)))
         val old = UIMessage.user("legacy")
         assertNull(Json.decodeFromString<UIMessage>(Json.encodeToString(old)).orbisQuote)
     }

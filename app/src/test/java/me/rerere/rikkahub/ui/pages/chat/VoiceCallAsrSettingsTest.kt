@@ -132,11 +132,11 @@ class VoiceCallAsrSettingsTest {
     }
 
     @Test
-    fun `non endpointing providers stay unsupported and unchanged`() {
+    fun `batch providers use local endpointing without changing dictation segmentation`() {
         val mimo = ASRProviderSetting.MiMo(segmentDurationSec = 20)
         val step = ASRProviderSetting.Step(segmentDurationSec = 10)
-        assertThrows(IllegalArgumentException::class.java) { mimo.forVoiceCallSilence() }
-        assertThrows(IllegalArgumentException::class.java) { step.forVoiceCallSilence() }
+        assertEquals(mimo, mimo.forVoiceCallSilence())
+        assertEquals(step, step.forVoiceCallSilence())
         assertEquals(20, mimo.segmentDurationSec)
         assertEquals(10, step.segmentDurationSec)
     }

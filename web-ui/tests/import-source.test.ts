@@ -26,7 +26,7 @@ test("pending job and once-only confirmation receipts are isolated by source", (
 });
 
 test("archive sources use ZIP and Codex uses raw NDJSON with independent size limits", () => {
-  const expected = { deepseek: [80, ".zip", "application/zip"], rikkahub: [512, ".zip", "application/zip"], codex: [64, ".jsonl", "application/x-ndjson"], operit: [64, ".json", "application/json"], kelivo: [512, ".zip", "application/zip"] } as const;
+  const expected = { deepseek: [8192, ".zip", "application/zip"], rikkahub: [8192, ".zip", "application/zip"], codex: [64, ".jsonl", "application/x-ndjson"], operit: [1024, ".json", "application/json"], kelivo: [8192, ".zip", "application/zip"] } as const;
   for (const source of IMPORT_SOURCES) {
     const [limit, extension, contentType] = expected[source];
     const info = IMPORT_SOURCE_INFO[source];

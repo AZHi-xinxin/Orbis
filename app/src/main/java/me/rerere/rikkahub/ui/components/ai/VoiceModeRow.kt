@@ -42,7 +42,9 @@ internal fun VoiceModeRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.chat_page_voice_title), style = MaterialTheme.typography.labelLarge, color = statusColor)
                 Text(
-                    text = when (state.phase) {
+                    text = if (state.replyBlocked) "回复已暂停，通话仍保留；收音与朗读已暂停"
+                    else if (state.audioFocusSuspended) "其他音频暂时占用，收音与朗读已暂停"
+                    else when (state.phase) {
                         VoicePhase.Off -> ""
                         VoicePhase.Connecting -> stringResource(R.string.chat_page_voice_connecting)
                         VoicePhase.Listening -> if (state.pendingReplies > 0)
@@ -60,6 +62,9 @@ internal fun VoiceModeRow(
         }
         if (isError && !state.error.isNullOrBlank()) {
             Text(state.error, style = MaterialTheme.typography.bodySmall, color = statusColor)
+        }
+        if (state.replyBlocked && !state.replyNotice.isNullOrBlank()) {
+            Text(state.replyNotice, style = MaterialTheme.typography.bodySmall, color = statusColor)
         }
         if (state.transcript.isNotBlank()) {
             Text(

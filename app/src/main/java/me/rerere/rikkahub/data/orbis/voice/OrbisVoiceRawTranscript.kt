@@ -4,6 +4,7 @@ import kotlinx.serialization.encodeToString
 import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomPublicReplyText
 import me.rerere.rikkahub.utils.JsonInstant
 import java.security.MessageDigest
 
@@ -19,6 +20,8 @@ const val VOICE_CALL_SOURCE_UNAVAILABLE_MESSAGE =
 fun voiceCallTranscriptView(record: OrbisVoiceCallRecord): OrbisVoiceTranscriptView = try {
     OrbisVoiceTranscriptView(strictVoiceCallReadableTranscript(record), sourceUnavailable = false)
 } catch (_: VoiceArchiveFailure) {
+    // Captured entries are spoken Text/accepted ASR, not raw tool parts. Preserve that public
+    // text while clearly marking the missing source; do not invent a successful archive.
     OrbisVoiceTranscriptView(record.transcript.toList(), sourceUnavailable = true)
 }
 
@@ -38,17 +41,19 @@ private fun strictVoiceCallSourceNodes(record: OrbisVoiceCallRecord): List<Messa
 
 /** Strict archive projection: a missing/corrupt fragment never becomes a successful partial archive. */
 internal fun strictVoiceCallReadableTranscript(record: OrbisVoiceCallRecord): List<OrbisVoiceTranscriptEntry> {
-    val entries = record.transcript.toMutableList()
     val nodes = strictVoiceCallSourceNodes(record)
+    val entries = record.transcript.toMutableList()
     for (node in nodes) {
         val message = node.currentMessage
         if (message.orbisVoiceCallId != record.id || message.orbisVoiceCallKind !in setOf("turn", "opening") ||
-            message.role !in setOf(MessageRole.USER, MessageRole.ASSISTANT) || message.toText().isBlank()) continue
+            message.role !in setOf(MessageRole.USER, MessageRole.ASSISTANT)) continue
+        // Only real Text after filtering; think-only/tool-only visual notices are not utterances.
+        val readableText = message.privateRoomPublicReplyText() ?: continue
         val index = entries.indexOfFirst { it.messageId == message.id.toString() }
         // Accepted ASR is stored before the host CALL_MODE wrapper is added. Keep its captured
         // corrected content AND original-ASR audit; never re-run current name rules on history.
         if (index >= 0 && message.role == MessageRole.USER) continue
-        val entry = OrbisVoiceTranscriptEntry(message.id.toString(), message.role.name, message.toText(),
+        val entry = OrbisVoiceTranscriptEntry(message.id.toString(), message.role.name, readableText,
             entries.getOrNull(index)?.timestampMs ?: record.startedAtMs, message.id.toString())
         if (index >= 0) entries[index] = entry else entries.add(entry)
     }

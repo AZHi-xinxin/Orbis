@@ -57,6 +57,8 @@ import me.rerere.hugeicons.stroke.Mic01
 import me.rerere.hugeicons.stroke.VolumeHigh
 import me.rerere.rikkahub.ui.pages.chat.VoicePhase
 import me.rerere.rikkahub.ui.pages.chat.OrbisHeartbeatLoading
+import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.utils.navigateToChatPage
 import kotlin.uuid.Uuid
 
 /** A phone surface; closing/minimizing it is deliberately not the hang-up action. */
@@ -66,6 +68,7 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
     summaryCallIds: Set<String> = emptySet()) {
     val call by runtime.callState.collectAsStateWithLifecycle()
     val voice by runtime.voiceSession.state.collectAsStateWithLifecycle()
+    val navController = LocalNavController.current
     var minimized by rememberSaveable(call.callId) { mutableStateOf(false) }
     var microphoneError by remember(call.callId) { mutableStateOf<String?>(null) }
     val callId = call.callId ?: return
@@ -80,9 +83,9 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
     }
     val microphonePermission = rememberPermissionState(PermissionRecordAudio)
     PermissionManager(microphonePermission)
-    if (minimized) {
+    if (minimized || call.reviewingReplies) {
         // Returning to the chat can always reopen the call; the notification also returns here.
-        OrbisVoiceCallReopenButton(onReopen = { minimized = false })
+        OrbisVoiceCallReopenButton(onReopen = { minimized = false; runtime.setReviewingReplies(callId, false) })
         return
     }
     val callAssistant = assistant.takeIf { call.conversationId == currentConversationId }
@@ -115,7 +118,7 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                             val seconds = ((now - it).coerceAtLeast(0) / 1000)
                             "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
                         } ?: "正在接通…", color = cream.copy(alpha = .7f), fontSize = 16.sp)
-                        Text(when (voice.phase) {
+                        Text(if (voice.replyBlocked) "回复已暂停，通话仍保留" else call.audioInterruption ?: if (voice.reconnecting) "正在恢复识别连接" else when (voice.phase) {
                             VoicePhase.Connecting -> "正在连接"
                             VoicePhase.Listening -> if (!voice.microphoneEnabled) "麦克风已关闭"
                                 else if (voice.pendingReplies > 0) "正在回应，也在等你说完" else "正在聆听"
@@ -124,6 +127,27 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                             VoicePhase.Error -> voice.error ?: "通话暂时中断"
                             VoicePhase.Off -> "正在准备"
                         }, color = cream, fontSize = 15.sp)
+                        if (voice.replyBlocked) {
+                            voice.replyNotice?.let { Text(it, color = cream.copy(alpha = .7f), fontSize = 12.sp,
+                                modifier = Modifier.testTag("orbis-call-reply-pause-notice")) }
+                            TextButton(onClick = {
+                                runtime.setReviewingReplies(callId, true)
+                                call.conversationId?.takeIf { it != currentConversationId }?.let {
+                                    navigateToChatPage(navController, chatId = it)
+                                }
+                            }, modifier = Modifier.testTag("orbis-call-review-replies")) {
+                                Text("回聊天检查", color = cream)
+                            }
+                            FilledTonalButton(onClick = { runtime.resumeReplies(callId) },
+                                enabled = !voice.replyResumeChecking,
+                                modifier = Modifier.testTag("orbis-call-resume-replies")) {
+                                Text(if (voice.replyResumeChecking) "正在检查…" else "检查并恢复收音")
+                            }
+                        }
+                        if (call.canResumeAudio) FilledTonalButton(onClick = { runtime.resumeAudio(callId) },
+                            modifier = Modifier.testTag("orbis-call-resume-audio")) { Text("恢复通话音频") }
+                        voice.recoveryNotice?.let { Text(it, color = cream.copy(alpha = .7f), fontSize = 12.sp,
+                            modifier = Modifier.testTag("orbis-call-recovery-notice")) }
                         if (voice.transcript.isNotBlank()) Text(voice.transcript,
                             modifier = Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
                             color = cream.copy(alpha = .6f), fontSize = 13.sp)
@@ -147,6 +171,8 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
                         Text(when {
+                            voice.replyBlocked -> "收音与朗读已暂停；请先核对聊天中的回复和工具结果"
+                            voice.audioFocusSuspended -> "麦克风与朗读已暂停；不会重发旧录音或消息"
                             !voice.microphoneEnabled -> "静音接听中；不会收取你的声音"
                             voice.canInterruptPlayback -> "可直接插话；停顿时会等你说完"
                             else -> "当前轮流说话；耳机或可用回声处理支持播放时插话"
@@ -155,7 +181,8 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                             verticalAlignment = Alignment.Top) {
                             OrbisCallRoundControl(label = if (voice.microphoneEnabled) "关闭麦克风" else "开启麦克风",
-                                tag = "orbis-call-microphone", state = if (voice.microphoneEnabled) "麦克风已开启" else "麦克风已关闭",
+                                tag = "orbis-call-microphone", state = if (voice.replyBlocked || voice.audioFocusSuspended) "麦克风已暂停"
+                                    else if (voice.microphoneEnabled) "麦克风已开启" else "麦克风已关闭",
                                 color = cream.copy(alpha = .1f), foreground = cream,
                                 icon = 0, crossedOut = !voice.microphoneEnabled, onClick = {
                                 val enabled = !voice.microphoneEnabled
@@ -177,6 +204,8 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                         }
                         microphoneError?.let { Text(it, color = cream, fontSize = 12.sp) }
                         Text("可切到后台或锁屏；挂断后停止收音", color = cream.copy(alpha = .55f), fontSize = 12.sp)
+                        Text("关麦可停止识别连接；关闭声音只静音，不停止语音合成。", color = cream.copy(alpha = .45f), fontSize = 11.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
                 }
             }

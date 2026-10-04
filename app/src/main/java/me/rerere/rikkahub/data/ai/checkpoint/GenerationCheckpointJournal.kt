@@ -208,6 +208,34 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         )
     }
 
+    /** Emergency read-only preview. The caller supplies exactly one undecodable node as an
+     * empty placeholder, never publishes that Conversation, and separately proves a narrow
+     * encoding-only difference against the raw damaged cell. No tail is appended or replayed. */
+    @Synchronized
+    fun previewDamagedNode(persisted: Conversation, damagedNodeId: Uuid): MessageNode = guarded {
+        val record = read(persisted.id)
+        checkSafe(record != null, "no_complete_recovery_copy")
+        val saved = checkNotNull(record)
+        validateBaseIdentity(saved, persisted)
+        val currentTail = persisted.messageNodes.drop(saved.prefixCount).dropLast(saved.suffixCount)
+        checkSafe(currentTail.size == saved.tail.size, "database_tail_changed")
+        checkSafe(persisted.messageNodes.count { it.id == damagedNodeId } == 1 &&
+            currentTail.count { it.id == damagedNodeId } == 1, "damage_outside_checkpoint")
+        checkSafe(saved.tools.none { it.status != GenerationToolStatus.COMPLETED } &&
+            saved.tail.none { node -> node.currentMessage.parts.any { it is UIMessagePart.Tool && !it.isExecuted } },
+            "unknown_tool_requires_manual_review")
+        val protectedIds = (persisted.messageNodes.take(saved.prefixCount) +
+            persisted.messageNodes.takeLast(saved.suffixCount)).map { it.id }.toSet()
+        checkSafe(saved.tail.none { it.id in protectedIds }, "checkpoint_overlaps_protected_nodes")
+        currentTail.zip(saved.tail).forEach { (current, candidate) ->
+            checkSafe(current.id == candidate.id && current.selectIndex == candidate.selectIndex,
+                "database_branch_changed")
+            if (current.id == damagedNodeId) checkSafe(current.messages.isEmpty(), "damage_not_isolated")
+            else checkSafe(nodesHash(listOf(current)) == nodesHash(listOf(candidate)), "database_tail_changed")
+        }
+        saved.tail.single { it.id == damagedNodeId }
+    }
+
     /** Room committed a later compaction epoch before the rebase acknowledgement reached IO.
      * The caller must enforce that new-epoch generation cannot precede rebase acknowledgement.
      * This never merges old contents into the new page, and never drops a pending external effect.

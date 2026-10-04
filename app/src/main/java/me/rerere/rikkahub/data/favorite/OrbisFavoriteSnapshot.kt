@@ -5,6 +5,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.OrbisMessageQuote
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.NodeFavoriteTarget
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 import kotlin.uuid.Uuid
 
 @Serializable
@@ -34,7 +35,7 @@ data class OrbisFavoriteSnapshot(
 
 fun NodeFavoriteTarget.favoriteSnapshot(): OrbisFavoriteSnapshot {
     check(node.id == nodeId) { "收藏目标已改变。" }
-    val message = node.currentMessage
+    val message = node.currentMessage.privateRoomSafePresentation()
     check(message.role in setOf(MessageRole.USER, MessageRole.ASSISTANT) && message.orbisEvent == null) {
         "只能收藏自己或 AI 的消息。"
     }

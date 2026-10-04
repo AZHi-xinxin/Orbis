@@ -58,13 +58,19 @@ class CompanionToolsTest {
         assertTrue(result.toString().contains("orbis_companion_native"))
     }
     @Test fun stoppedServiceDiagnosticsAreNotDescribedAsOfflineMemory() {
-        val status = descriptor("get_l_service_status").copy(requiresService = false)
+        val status = descriptor("get_runtime_status").copy(requiresService = false)
         val tool = buildCompanionTools(listOf(status), null, { "one" }) { _, _, _ -> error("not called") }.single()
         assertTrue(tool.description.contains("只读运行诊断"))
         assertTrue(tool.description.contains("服务停止也可用"))
         assertTrue(tool.description.contains("不会因此启动服务"))
         assertFalse(tool.description.contains("离线记忆库"))
         assertFalse(tool.needsApproval(JsonObject(emptyMap())))
+    }
+    @Test fun oldReadOnlyStatusSelectionPublishesOnlyTheCurrentName() {
+        val status = CompanionNativeTools.descriptors().single { it.name == "get_runtime_status" }
+        val tools = buildCompanionTools(listOf(status), setOf("get_l_service_status"), { "one" }) { _, _, _ -> error("not called") }
+        assertEquals(listOf("companion_get_runtime_status"), tools.map { it.name })
+        assertNull(tools.single().hostApproval)
     }
     @Test fun alarmQueryHasNativeNameNoApprovalAndNoOfflineMemoryOrServiceRequirement() = runTest {
         val descriptor = CompanionNativeTools.descriptors().single { it.name == "get_alarms" }

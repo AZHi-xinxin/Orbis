@@ -82,7 +82,7 @@ internal class AndroidCompanionRuntime(private val context: Context) : Companion
 
     override fun execute(name: String, arguments: org.json.JSONObject): String {
         if (name == "get_alarms") return AndroidCompanionAlarms(context).query(arguments)
-        if (name == "get_l_service_status" && !available())
+        if (name in setOf("get_runtime_status", "get_l_service_status") && !available())
             return McpServiceController.runtimeStatusJson(context)
         return (McpService.instance ?: error("service_unavailable")).executeNativeTool(name, arguments)
     }

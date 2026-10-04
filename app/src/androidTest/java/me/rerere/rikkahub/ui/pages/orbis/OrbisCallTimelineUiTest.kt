@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.orbis
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.test.onNodeWithTag
@@ -12,6 +13,7 @@ import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceTranscriptEntry
 import me.rerere.rikkahub.testutil.createShellComposeRule
+import me.rerere.rikkahub.ui.pages.chat.OrbisCallFile
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -80,5 +82,33 @@ class OrbisCallTimelineUiTest {
         compose.onNodeWithText("不应显示的重复原文").assertDoesNotExist()
         compose.onNodeWithText("不应显示的读取中原文").assertDoesNotExist()
         compose.onNodeWithText("◌  正在读取通话记录…").assertExists()
+    }
+
+    @Test fun fileEntryStaysVisibleWhenCallBodyIsCollapsedAndDoesNotOpenAutomatically() {
+        var opens = 0
+        val file = OrbisCallFile.Workspace("/workspace/需求单.md", 100, 2000,
+            "synthetic-message", "synthetic-tool", "synthetic-workspace")
+        compose.setContent { MaterialTheme { Column {
+            OrbisCallTimelineCardContent(record)
+            OrbisCallFileAttachmentsContent(listOf(file)) { opens++ }
+        } } }
+        compose.onNodeWithText("我：合成通话原文").assertDoesNotExist()
+        compose.onNodeWithText("文件 · 需求单.md").assertExists()
+        compose.runOnIdle { assertEquals(0, opens) }
+        compose.onNodeWithTag("orbis-call-timeline-toggle").performClick()
+        compose.onNodeWithTag("orbis-call-timeline-toggle").performClick()
+        compose.onNodeWithText("文件 · 需求单.md").performClick()
+        compose.runOnIdle { assertEquals(1, opens) }
+    }
+
+    @Test fun rawToolHistoryRequiresExplicitHumanAction() {
+        var opens = 0
+        compose.setContent { MaterialTheme {
+            OrbisCallTimelineCardContent(record, onSourceDetails = { opens++ })
+        } }
+        compose.onNodeWithTag("orbis-call-source-details").assertExists()
+        compose.runOnIdle { assertEquals(0, opens) }
+        compose.onNodeWithTag("orbis-call-source-details").performClick()
+        compose.runOnIdle { assertEquals(1, opens) }
     }
 }

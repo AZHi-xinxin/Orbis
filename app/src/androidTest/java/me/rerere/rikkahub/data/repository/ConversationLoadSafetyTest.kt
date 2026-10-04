@@ -144,7 +144,7 @@ class ConversationLoadSafetyTest {
                 assertTrue(result.isFailure)
                 assertNull(result.getOrNull())
                 assertEquals(listOf(0, 64), offsets)
-                assertEquals("对话加载失败，原记录未改动。请返回后重试。", result.exceptionOrNull()?.message)
+                assertEquals("对话加载失败，原记录未改动。请返回，到「数据与本地备份 → 会话自助恢复」检查；不要清除数据或卸载。", result.exceptionOrNull()?.message)
                 assertNull(result.exceptionOrNull()?.cause)
                 assertFalse(result.exceptionOrNull().toString().contains("synthetic-private-payload"))
                 assertEquals(before, fixture.db.messageNodeDao().getNodesOfConversation(original.id.toString()))

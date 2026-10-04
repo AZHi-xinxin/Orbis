@@ -87,6 +87,7 @@ class PolarisChatImporter internal constructor(private val sink: DeepSeekImportS
                             if (sink.exists(polarisImportId("conversation", chat.id))) {
                                 result = result.copy(skipped = result.skipped + 1)
                             } else {
+                                ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, 2 * PolarisChatLimits.MAX_WINDOW_BYTES)
                                 val converted = convertPolarisConversation(chat, assistantId, checkCancelled)
                                 checkCancelled()
                                 withContext(NonCancellable) {
@@ -108,10 +109,10 @@ class PolarisChatImporter internal constructor(private val sink: DeepSeekImportS
                 }
             }
         } catch (_: CancellationException) { throw DeepSeekImportCancelledException(result) }
-        catch (_: Exception) {
+        catch (failure: Exception) {
             if (active != null) result = result.copy(failed = result.failed + 1,
                 failures = result.failures + DeepSeekImportFailure(active, "该北极星窗口未完成；已完成窗口保留，现有聊天未覆盖"))
-            throw DeepSeekImportException(result)
+            throw DeepSeekImportException(result, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure))
         }
     }
 

@@ -229,9 +229,9 @@ internal suspend fun importSelectedKelivoChats(source: KelivoChatSource, preview
         require(completed == selections.size)
         return result
     } catch (_: CancellationException) { throw DeepSeekImportCancelledException(result) }
-    catch (_: Exception) {
+    catch (failure: Exception) {
         if (active != null) result = result.copy(failed = result.failed + 1,
             failures = result.failures + DeepSeekImportFailure(active, "该会话未完成；已完成会话保留，现有聊天未覆盖"))
-        throw DeepSeekImportException(result)
+        throw DeepSeekImportException(result, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure))
     }
 }

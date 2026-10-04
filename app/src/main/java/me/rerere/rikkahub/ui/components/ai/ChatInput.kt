@@ -113,7 +113,9 @@ import me.rerere.rikkahub.data.model.OrbisComposerPanel
 import me.rerere.rikkahub.data.model.OrbisComposerAction
 import me.rerere.rikkahub.data.model.OrbisDictationDraft
 import me.rerere.rikkahub.data.model.toggleOrbisComposerPanel
+import me.rerere.rikkahub.service.OrbisVoiceCallPreflight
 import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
+import me.rerere.asr.ASRProviderSetting
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.service.MessageQueueState
 import me.rerere.rikkahub.service.QueuedMessage
@@ -159,6 +161,8 @@ fun ChatInput(
     onBeginEditQueuedMessage: (Uuid) -> QueuedMessage? = { null },
     onFinishEditQueuedMessage: (Uuid, List<UIMessagePart>?) -> Unit = { _, _ -> },
     onResumeMessageQueue: () -> Unit = {},
+    onStopGatewayWait: () -> Unit = {},
+    gatewayStopNotice: String? = null,
     onStartVoiceMode: (() -> Unit)? = null,
     voiceState: VoiceSessionState = VoiceSessionState(),
     onStopVoiceMode: () -> Unit = {},
@@ -216,6 +220,16 @@ fun ChatInput(
 
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
+    val voiceUnavailableReason = when {
+        voiceState.phase != VoicePhase.Off -> "已有通话正在进行或收尾，请先结束当前通话。"
+        loading -> "当前回复尚未结束，请完成或停止本轮后再发起通话。"
+        asrState.isRecording || asrState.status == ASRStatus.Connecting || asrState.status == ASRStatus.Stopping ->
+            "请先结束当前录音或识别，再发起通话。"
+        messageQueue.paused -> "消息队列已暂停，请先检查并恢复队列。"
+        messageQueue.messages.isNotEmpty() -> "消息队列尚未处理完，请稍后再发起通话。"
+        onStartVoiceMode == null -> "当前页面暂不能发起通话，请回到聊天页面。"
+        else -> OrbisVoiceCallPreflight.firstFailure(settings, assistant)?.explanation
+    }
     val asrCorrectionNotice by asr.correctionNotice.collectAsState()
     val hapticFeedback = LocalHapticFeedback.current
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
@@ -303,6 +317,8 @@ fun ChatInput(
                 onBeginEdit = onBeginEditQueuedMessage,
                 onFinishEdit = onFinishEditQueuedMessage,
                 onResume = onResumeMessageQueue,
+                onStopGatewayWait = onStopGatewayWait,
+                gatewayStopNotice = gatewayStopNotice,
             )
             Surface(
                 modifier = Modifier
@@ -524,8 +540,11 @@ fun ChatInput(
                                 canRecognize = asrState.isAvailable || asrState.isRecording,
                                 recording = asrState.isRecording,
                                 busy = asrState.status == ASRStatus.Connecting || asrState.status == ASRStatus.Stopping,
-                                canStartVoice = settings.getSelectedASRProvider()?.supportsServerVadVoiceMode == true &&
-                                    onStartVoiceMode != null && !loading && !asrState.isRecording,
+                                canStartVoice = voiceUnavailableReason == null,
+                                voiceUnavailableReason = voiceUnavailableReason,
+                                batchVoiceMode = settings.getSelectedASRProvider().let {
+                                    it is ASRProviderSetting.MiMo || it is ASRProviderSetting.Step
+                                },
                                 canSpeak = ttsAvailable,
                                 speaking = ttsSpeaking,
                                 autoRead = settings.displaySetting.autoPlayTTSAfterGeneration,

@@ -24,6 +24,9 @@ import kotlin.uuid.Uuid
 
 data class RikkaChatImportResult(val imported: Int, val skipped: Int, val attachments: Int, val missingAttachments: Int)
 
+class RikkaPartialImportException(val imported: Int, val skipped: Int, detail: String) : IllegalArgumentException(
+    "已保留 $imported 个已导入窗口，跳过 $skipped 个已有窗口；其余未完成。$detail 可重新选择原包继续，已有窗口会跳过。")
+
 internal fun rikkaImportId(kind: String, source: String): Uuid =
     Uuid.parse(UUID.nameUUIDFromBytes("orbis-rikka-chat-v1/$kind/$source".toByteArray(Charsets.UTF_8)).toString())
 
@@ -53,8 +56,10 @@ class RikkaChatImporter(private val context: Context, private val repository: Co
                         val preview = inspectRikkaSource(incoming, fingerprint, checkCancelled)
                         importSelectedRikkaChats(incoming, preview, selections, object : DeepSeekImportSink {
                             override suspend fun exists(id: Uuid) = repository.existsConversationById(id)
-                            override suspend fun insert(conversation: Conversation) =
-                                repository.insertImportedConversations(listOf(conversation)) == 1
+                            override suspend fun insert(conversation: Conversation): Boolean {
+                                ArchiveCapacity.requireSpace(context.filesDir.usableSpace, 2 * RikkaChatLimits.MAX_WINDOW_BYTES)
+                                return repository.insertImportedConversations(listOf(conversation)) == 1
+                            }
                         }, prepare = { chat ->
                             val attachments = AttachmentSession(staging)
                             try {
@@ -75,35 +80,49 @@ class RikkaChatImporter(private val context: Context, private val repository: Co
         } catch (cancelled: DeepSeekImportCancelledException) { throw cancelled }
         catch (failed: DeepSeekImportException) { throw failed }
         catch (_: CancellationException) { throw DeepSeekImportCancelledException(accountedResult) }
-        catch (_: Exception) { throw DeepSeekImportException(accountedResult) }
+        catch (failure: Exception) { throw DeepSeekImportException(accountedResult, ArchiveCapacity.publicError(failure), ArchiveCapacity.reasonOf(failure)) }
     }
 
-    // Keep the existing phone entry point's whole-batch atomicity and result shape. It intentionally
-    // does not delegate to the selected-window workflow, whose partial-success contract is different.
+    // Phone import validates every window first, then commits one window at a time. It must not
+    // retain the entire archive in RAM. A later failure reports retained progress explicitly.
     suspend fun import(archive: File, assistantId: Uuid): RikkaChatImportResult = withContext(Dispatchers.IO) {
         importMutex.withLock {
             val coroutine = currentCoroutineContext()
             val checkCancelled = { coroutine.ensureActive() }
             withSnapshot(archive, null, checkCancelled) { incoming, staging, _ ->
-                val attachments = AttachmentSession(staging)
-                var committed = false
+                inspectRikkaSource(incoming, "local-phone-preflight", checkCancelled)
+                var imported = 0
+                var skipped = 0
+                var copiedAttachments = 0
+                var missingAttachments = 0
                 try {
-                    var skipped = 0
-                    val conversations = mutableListOf<Conversation>()
                     for (chat in incoming.conversations()) {
                         checkCancelled()
                         if (repository.existsConversationById(rikkaImportId("conversation", chat.id))) skipped++
-                        else conversations += convertRikkaChat(incoming, chat, assistantId, attachments::mapPart, checkCancelled)
+                        else {
+                            val attachments = AttachmentSession(staging)
+                            var committed = false
+                            try {
+                                ArchiveCapacity.requireSpace(context.filesDir.usableSpace, RikkaChatLimits.MAX_WINDOW_BYTES)
+                                val conversation = convertRikkaChat(incoming, chat, assistantId, attachments::mapPart, checkCancelled)
+                                withContext(NonCancellable) {
+                                    if (repository.insertImportedConversations(listOf(conversation)) == 1) {
+                                        committed = true
+                                        imported++
+                                        copiedAttachments += attachments.createdFiles.size
+                                        missingAttachments += attachments.missing
+                                    } else skipped++
+                                }
+                            } finally {
+                                if (!committed) withContext(NonCancellable) { attachments.rollback() }
+                            }
+                        }
                     }
-                    // No cancellation gap after the transaction commits: keep committed attachments.
-                    withContext(NonCancellable) {
-                        val imported = repository.insertImportedConversations(conversations)
-                        committed = true
-                        RikkaChatImportResult(imported, skipped + conversations.size - imported,
-                            attachments.createdFiles.size, attachments.missing)
-                    }
-                } finally {
-                    if (!committed) withContext(NonCancellable) { attachments.rollback() }
+                    RikkaChatImportResult(imported, skipped, copiedAttachments, missingAttachments)
+                } catch (_: CancellationException) {
+                    throw DeepSeekImportCancelledException(DeepSeekImportResult(imported = imported, skipped = skipped))
+                } catch (failure: Exception) {
+                    throw RikkaPartialImportException(imported, skipped, ArchiveCapacity.publicError(failure))
                 }
             }
         }
@@ -118,9 +137,7 @@ class RikkaChatImporter(private val context: Context, private val repository: Co
             val snapshot = RikkaChatArchive.extract(archive, staging, checkCancelled)
             checkCancelled()
             val normalizationReserve = snapshot.length() + File(staging, "rikka_hub.db-wal").length()
-            require(staging.usableSpace >= RikkaChatArchive.MIN_FREE_BYTES + normalizationReserve) {
-                "手机空间不足以安全整理导入副本；已停止导入，原聊天未更改"
-            }
+            ArchiveCapacity.requireSpace(staging.usableSpace, normalizationReserve)
             DatabaseBackup.normalize(context, snapshot)
             checkCancelled()
             require(fingerprint == rikkaArchiveFingerprint(archive, checkCancelled)) { "Rikka 源文件已变化，请重新预览" }

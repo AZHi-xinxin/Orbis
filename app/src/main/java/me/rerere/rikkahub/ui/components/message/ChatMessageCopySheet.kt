@@ -35,6 +35,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.utils.copyMessageToClipboard
+import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 
 @Composable
 fun ChatMessageCopySheet(
@@ -91,7 +92,7 @@ fun ChatMessageCopySheet(
 
             // Content
             val textParts =
-                message.parts.filterIsInstance<UIMessagePart.Text>().filter { it.text.isNotBlank() }
+                message.privateRoomSafePresentation().parts.filterIsInstance<UIMessagePart.Text>().filter { it.text.isNotBlank() }
 
             if (textParts.isEmpty()) {
                 // No text content available

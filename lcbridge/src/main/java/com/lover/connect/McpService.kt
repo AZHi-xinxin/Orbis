@@ -563,7 +563,9 @@ class McpService : Service(), SensorEventListener {
     }
 
     private fun executeCompanionTool(toolName: String, args: JSONObject): String {
-        val descriptor = CompanionNativeTools.descriptors().firstOrNull { it.name == toolName }
+        val descriptor = CompanionNativeTools.descriptors().firstOrNull {
+            it.name == (if (toolName == "get_l_service_status") "get_runtime_status" else toolName)
+        }
             ?: return "未知工具：$toolName"
         try { validateCompanionArguments(descriptor, args) } catch (_: Exception) { return "Invalid arguments" }
         return when (toolName) {
@@ -582,7 +584,7 @@ class McpService : Service(), SensorEventListener {
             "get_now_playing" -> toolGetNowPlaying()
             "take_screenshot" -> toolTakeScreenshot()
             "read_eyes_log" -> toolReadEyesLog(args)
-            "get_l_service_status" -> toolGetLServiceStatus()
+            "get_runtime_status", "get_l_service_status" -> toolGetLServiceStatus()
             "lock_app" -> toolLockApp(args)
             "unlock_app" -> toolUnlockApp(args)
             "list_locked_apps" -> toolListLockedApps()
@@ -859,7 +861,7 @@ class McpService : Service(), SensorEventListener {
         }
 
         if (!latch.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
-            return "截图或分析仍在进行，尚未确认日记写入；请稍后读取日记与 get_l_service_status，不要立即重复截屏"
+            return "截图或分析仍在进行，尚未确认日记写入；请稍后读取日记与 get_runtime_status，不要立即重复截屏"
         }
         return result
     }
@@ -906,8 +908,7 @@ class McpService : Service(), SensorEventListener {
             put("mcp_restore_last_trigger", diagnostics.getString("mcp_restore_last_trigger", ""))
             put("mcp_restore_last_result", diagnostics.getString("mcp_restore_last_result", ""))
             put("mcp_server_last_error", diagnostics.getString("mcp_server_last_error", ""))
-            put("eyes_enabled", config.getBoolean("eyes_enabled", false))
-            put("eyes_timer_active", eyesTimer != null)
+            put("screen_observation_guidance", SCREEN_OBSERVATION_GUIDANCE)
             put("rest_timer_active", restTimer != null)
             put("rest_usage_basis", "continuous_non_chat_app")
             put("rest_threshold_minutes", config.getInt("rest_threshold_minutes", 60).coerceIn(60, 1440))
@@ -943,7 +944,7 @@ class McpService : Service(), SensorEventListener {
             val usesAccessibilityScreenshot = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
             put("android_sdk_int", android.os.Build.VERSION.SDK_INT)
             put(
-                "eyes_capture_mode",
+                "screen_capture_mode",
                 if (usesAccessibilityScreenshot) "accessibility_screenshot" else "media_projection",
             )
             put("pixel_capture_supported", true)
@@ -951,13 +952,9 @@ class McpService : Service(), SensorEventListener {
                 "pixel_capture_authorized",
                 if (usesAccessibilityScreenshot) LCAccessibilityService.instance != null else ScreenCaptureService.isReady(),
             )
-            put(
-                "eyes_effective_ready",
-                config.getBoolean("eyes_enabled", false) &&
-                    eyesTimer != null &&
-                    LCAccessibilityService.instance != null &&
-                    (usesAccessibilityScreenshot || ScreenCaptureService.isReady()),
-            )
+            // The host sentinel uses observeScreenForHost, not the legacy automatic timer.
+            // Report prerequisites separately; only an actual capture can establish success.
+            put("screen_observation_success_not_verified", true)
             put("screenshot_last_requested_at_ms", diagnostics.getLong("screenshot_last_requested_at", 0L))
             put("screenshot_last_success_at_ms", diagnostics.getLong("screenshot_last_success_at", 0L))
             put("screenshot_last_failure_at_ms", diagnostics.getLong("screenshot_last_failure_at", 0L))
@@ -1109,6 +1106,7 @@ class McpService : Service(), SensorEventListener {
             return failure("service_disabled")
         if (!hostObservationInFlight.compareAndSet(false, true)) return failure("observation_busy")
         var metadata = JSONObject()
+        var stage = ObservationStage.CAPTURE
         try {
             val prefs = getSharedPreferences("lc_config", Context.MODE_PRIVATE)
             val apiUrl = prefs.getString("vision_api_url", "").orEmpty()
@@ -1120,8 +1118,12 @@ class McpService : Service(), SensorEventListener {
             if (!capture.ok) return failure(capture.errorCode ?: "screen_capture_failed")
             val image = capture.images.singleOrNull() ?: return failure("screen_capture_missing_image")
             val observedAt = System.currentTimeMillis()
-            val response = callVisionApi(apiUrl, apiKey, model, buildEyesPrompt(observedAt), image.base64)
+            stage = ObservationStage.CONTEXT
+            val prompt = buildEyesPrompt(observedAt)
+            stage = ObservationStage.REQUEST
+            val response = callVisionApi(apiUrl, apiKey, model, prompt, image.base64)
             metadata = response.metadata
+            stage = ObservationStage.DECODE
             val parsed = EyesResponseParser.parseDetailed(response.content)
             val rejection = response.rejectionCode ?: parsed.rejectionCode
             if (rejection != null) {
@@ -1131,6 +1133,7 @@ class McpService : Service(), SensorEventListener {
             if (!isScreenUsable() || !McpServiceController.isEnabled(this) || instance !== this)
                 return failure("screen_observation_interrupted")
             val analysis = parsed.analysis ?: return failure("analysis_missing")
+            stage = ObservationStage.DIARY
             val written = writeEyesLog(analysis.message)
             saveEyesAnalysisDiagnostic(requestedAt, if (written) "written" else "diary_write_failed", metadata)
             // The host's scheduled rule decides delivery, including a log-only observation.
@@ -1143,11 +1146,7 @@ class McpService : Service(), SensorEventListener {
         } catch (interrupted: InterruptedException) {
             throw interrupted
         } catch (error: Exception) {
-            val code = when (error) {
-                is java.net.SocketTimeoutException -> "request_timeout"
-                is java.io.IOException -> "request_failed"
-                else -> "analysis_failed"
-            }
+            val code = observationStageFailure(stage, error)
             saveEyesAnalysisDiagnostic(requestedAt, code, metadata)
             return failure(code)
         } finally {
@@ -1159,6 +1158,7 @@ class McpService : Service(), SensorEventListener {
         val startedAtMs = System.currentTimeMillis()
         var metadata = JSONObject()
         var diaryWritten = false
+        var stage = ObservationStage.CONTEXT
         return try {
             val prefs = getSharedPreferences("lc_config", Context.MODE_PRIVATE)
             val apiUrl = prefs.getString("vision_api_url", "") ?: ""
@@ -1176,18 +1176,21 @@ class McpService : Service(), SensorEventListener {
 
             val observedAtMs = System.currentTimeMillis()
             val prompt = buildEyesPrompt(observedAtMs)
+            stage = ObservationStage.REQUEST
             val response = callVisionApi(apiUrl, apiKey, model, prompt, base64)
             metadata = response.metadata
+            stage = ObservationStage.DECODE
             val parsed = EyesResponseParser.parseDetailed(response.content)
             val rejection = response.rejectionCode ?: parsed.rejectionCode
             if (rejection != null) {
                 saveEyesAnalysisDiagnostic(startedAtMs, rejection, metadata)
-                return "本次未写入日记：$rejection；详情见 get_l_service_status 的 eyes_analysis_last（不含截图或正文）"
+                return "本次未写入日记：$rejection；详情见 get_runtime_status 的 eyes_analysis_last（不含截图或正文）"
             }
             val analysis = parsed.analysis ?: error("Missing parsed analysis")
+            stage = ObservationStage.DIARY
             if (!writeEyesLog(analysis.message)) {
                 saveEyesAnalysisDiagnostic(startedAtMs, "diary_write_failed", metadata)
-                return "分析已完成，但日记写入失败；详情见 get_l_service_status"
+                return "分析已完成，但日记写入失败；详情见 get_runtime_status"
             }
             diaryWritten = true
             saveEyesAnalysisDiagnostic(startedAtMs, "written", metadata)
@@ -1195,14 +1198,10 @@ class McpService : Service(), SensorEventListener {
                 ?.let { dispatchEyesAlert(it) }
             "分析完成：${analysis.message}"
         } catch (e: Exception) {
-            val code = if (diaryWritten) "written_alert_failed" else when (e) {
-                is java.net.SocketTimeoutException -> "request_timeout"
-                is java.io.IOException -> "request_failed"
-                else -> "analysis_failed"
-            }
+            val code = if (diaryWritten) "written_alert_failed" else observationStageFailure(stage, e)
             saveEyesAnalysisDiagnostic(startedAtMs, code, metadata)
             if (diaryWritten) return "日记已写入，但后续提醒处理失败；请读取最新日记，不要重复截屏"
-            "本次分析失败：$code；详情见 get_l_service_status（不含截图或正文）"
+            "本次分析失败：$code；详情见 get_runtime_status（不含截图或正文）"
         }
     }
 
@@ -1252,6 +1251,10 @@ class McpService : Service(), SensorEventListener {
 
         return try {
             conn.outputStream.use { it.write(requestBody.toString().toByteArray(Charsets.UTF_8)) }
+            val status = conn.responseCode
+            visionHttpFailure(status)?.let { code ->
+                return EyesVisionResult("", code, JSONObject().put("http_status", status))
+            }
             val response = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { it.readText() }
             EyesVisionResponse.decode(response)
         } finally {

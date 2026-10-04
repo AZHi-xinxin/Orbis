@@ -40,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -138,22 +139,11 @@ fun ColumnScope.ConversationList(
                 )
             }
         } else {
-        if (conversations.itemCount == 0) {
-            item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow
-                ) {
-                    Text(
-                        text = stringResource(id = R.string.chat_page_no_conversations),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
+        val notice = conversationListNotice(conversations.itemCount, conversations.loadState.refresh,
+            conversations.loadState.append, conversations.loadState.prepend)
+        if (notice != null) {
+            item(key = "conversation_list_status", contentType = "conversation_list_status") {
+                ConversationListStatusCard(notice, onRetry = conversations::retry)
             }
         }
 
@@ -204,6 +194,32 @@ fun ColumnScope.ConversationList(
         }
         }
         if (footer != null) item(key = "orbis_drawer_appearance") { footer() }
+    }
+}
+
+@Composable
+internal fun ConversationListStatusCard(notice: ConversationListNotice, onRetry: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = when (notice) {
+                    ConversationListNotice.LOADING -> "正在读取会话列表……"
+                    ConversationListNotice.REFRESH_FAILED -> "会话列表暂时加载失败，不代表聊天已删除。请重试；仍失败时先保留数据，不要卸载或清除数据。"
+                    ConversationListNotice.MORE_FAILED -> "部分会话暂未加载完成；已显示的记录仍保留，请重试加载。"
+                    ConversationListNotice.EMPTY -> stringResource(R.string.chat_page_no_conversations)
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (notice == ConversationListNotice.REFRESH_FAILED || notice == ConversationListNotice.MORE_FAILED) {
+                // Retry only the failed paging load; never re-import, delete or regenerate a chat.
+                TextButton(onClick = onRetry) { Text("重试加载") }
+            }
+        }
     }
 }
 

@@ -195,6 +195,8 @@ internal class GenerationLoopGroupResponder(private val loop: GenerationLoop) : 
             maxAutomaticContinuations = 0,
         ).collect { chunk ->
             when (chunk) {
+                is GenerationChunk.HistoryBudgetStop -> throw me.rerere.rikkahub.data.db.MessageNodeCapacityException("group_history_capacity")
+                is GenerationChunk.ToolStepLimitStop -> throw OrbisGroupException("group_tool_step_limit")
                 is GenerationChunk.TerminalResponse -> Unit // Not requested by group generation.
                 is GenerationChunk.Messages -> save(chunk.messages)
                 is GenerationChunk.DurableBoundary -> {
