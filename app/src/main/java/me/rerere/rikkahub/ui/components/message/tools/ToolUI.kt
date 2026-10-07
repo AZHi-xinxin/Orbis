@@ -187,7 +187,9 @@ fun DefaultToolPreview(
                                 style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
                             )
 
-                            is UIMessagePart.Image -> ZoomableAsyncImage(
+                            is UIMessagePart.Image -> if (part.url.startsWith("orbis-video-frame://")) {
+                                Text("视频临时画面 · 已按通话权限提供给助手；到期自动清理，保留的图片可在照片墙查看。")
+                            } else ZoomableAsyncImage(
                                 model = part.url,
                                 contentDescription = null,
                                 modifier = Modifier.fillMaxWidth(),

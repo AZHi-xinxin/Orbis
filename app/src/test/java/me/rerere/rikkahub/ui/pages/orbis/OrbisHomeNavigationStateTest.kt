@@ -48,4 +48,22 @@ class OrbisHomeNavigationStateTest {
         assertFalse(newActivity.visible)
         assertEquals(0, newActivity.homeRevision)
     }
+
+    @Test fun releasesFocusBeforeEitherVisibilityWriteAndNotForNoOpReturn() {
+        val navigation = OrbisHomeNavigationState()
+        val observedVisibility = mutableListOf<Boolean>()
+        navigation.beforeVisibilityChange = { observedVisibility += navigation.visible }
+        navigation.returnToChat()
+        navigation.openHome()
+        navigation.returnToChat()
+        navigation.returnToChat()
+        assertEquals(listOf(false, true), observedVisibility)
+    }
+
+    @Test fun failedFocusPreparationDoesNotStartUnmountingFocusedContent() {
+        val navigation = OrbisHomeNavigationState().apply { openHome() }
+        navigation.beforeVisibilityChange = { error("synthetic focus preparation failure") }
+        assertThrows(IllegalStateException::class.java) { navigation.returnToChat() }
+        assertTrue(navigation.visible)
+    }
 }

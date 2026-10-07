@@ -100,6 +100,10 @@ class EmergencyBackupActivity : Activity() {
             column.addView(this)
         }
         statusDetails = text("请选择操作。不要先卸载或清除数据。", 14f).apply { setTextIsSelectable(true) }
+        text("重要：Orbis 与“Orbis 紧急备份”是同一个应用的两个入口。卸载任意一个图标，都会卸载整个 Orbis，并删除本机聊天、助手与未导出的内容。请勿卸载或清除数据！", 18f).apply {
+            setTextColor(Color.rgb(180, 40, 40))
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
         setStatus("请选择操作。不要先卸载或清除数据。")
         text("先保住内容，再处理故障。这里不打开聊天，也不加载助手外观。即使普通页面打不开，仍可从桌面的“Orbis 紧急备份”图标进入。")
         text("备份保存的是此刻磁盘上仍存在的数据，不是时间倒流：未写入的最后片段、已删除内容或损坏的存储无法凭空恢复。原始包可能保留故障，导出成功不等于故障已修好。")
@@ -180,7 +184,12 @@ class EmergencyBackupActivity : Activity() {
             }
         }
         button("系统设置：强行停止 Orbis") {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            AlertDialog.Builder(this).setTitle("两个图标属于同一个应用")
+                .setMessage("接下来是 Android 系统设置。可以强行停止 Orbis，但请不要点卸载或清除数据：紧急备份图标不是独立应用，卸载它也会删除 Orbis 的本机内容。Orbis 无法拦截系统卸载。")
+                .setNegativeButton("留在这里", null)
+                .setPositiveButton("我知道了，打开系统设置") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }.show()
         }
         button("已备份，尝试会话检查与恢复") {
             confirmPause("建议先完成应用外备份。此操作会退出救援保护并启动原有的会话检查页面；它仍依赖正常的数据库和界面组件，未知故障可能使它打不开。它不会自动修复或打开聊天，但正常后台服务可能恢复运行。") {

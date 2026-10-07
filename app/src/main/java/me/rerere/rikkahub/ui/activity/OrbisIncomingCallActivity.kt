@@ -36,6 +36,9 @@ class OrbisIncomingCallActivity : ComponentActivity() {
     private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permissionMessage = if (granted) "麦克风权限已开启，请再次点击接听。" else "未开启麦克风；仍可选择静音接听。"
     }
+    private val camera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        permissionMessage = if (granted) "相机权限已开启，请再次点击接听视频。" else "视频来电未接听；相机保持关闭。"
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true); setTurnScreenOn(true)
@@ -71,7 +74,7 @@ class OrbisIncomingCallActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = Color(0xFF1D263D)) {
                     Column(Modifier.fillMaxSize().systemBarsPadding().padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween) {
-                        Text("ORBIS · 来电", color = Color.White.copy(alpha = .6f))
+                        Text(if (visible?.attempt?.video == true) "ORBIS · 视频来电" else "ORBIS · 来电", color = Color.White.copy(alpha = .6f))
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
                             Surface(Modifier.size(116.dp), shape = CircleShape, color = Color(0xFF405E93)) {
                                 Box(contentAlignment = Alignment.Center) { Text("★", fontSize = 54.sp, color = Color.White) }
@@ -87,7 +90,9 @@ class OrbisIncomingCallActivity : ComponentActivity() {
                             } else {
                                 Text(visible?.attempt?.reason.orEmpty(), color = Color.White.copy(alpha = .8f),
                                     modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()))
-                                Text(if (visible?.attempt?.outcome == IncomingCallOutcome.CONNECTING) "正在接通…" else "等待你接听 · 接听前不开麦",
+                                Text(if (visible?.attempt?.outcome == IncomingCallOutcome.CONNECTING) "正在接通…"
+                                    else if (visible?.attempt?.video == true) "接听后开启视频与语音 · 画面定期发给当前模型"
+                                    else "等待你接听 · 接听前不开麦",
                                     color = Color.White.copy(alpha = .6f))
                                 permissionMessage?.let { Text(it, color = Color.White) }
                             }
@@ -116,6 +121,15 @@ class OrbisIncomingCallActivity : ComponentActivity() {
         permissionMessage = null
     }
     private fun answer(muted: Boolean) {
+        if (runtime.state.value?.attempt?.video == true) {
+            if (getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) {
+                permissionMessage = "请先解锁手机，再接听视频；锁屏时不会打开相机。"
+                return
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                camera.launch(Manifest.permission.CAMERA); return
+            }
+        }
         if (!muted && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             microphone.launch(Manifest.permission.RECORD_AUDIO); return
         }

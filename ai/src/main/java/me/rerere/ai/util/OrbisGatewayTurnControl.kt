@@ -45,6 +45,11 @@ class OrbisGatewayRequest internal constructor(
             endpoint == evidence.endpoint && authorization == evidence.authorization &&
             thread == evidence.thread && model == evidence.model
 
+    /** Classification only: a known control peer is not proof that this new owner was retired. */
+    fun hasObservedControlPeerOf(evidence: OrbisGatewayRequest): Boolean =
+        evidence.supportsAutomaticFinish && conversationId == evidence.conversationId &&
+            endpoint == evidence.endpoint && authorization == evidence.authorization && thread == evidence.thread
+
     internal fun acknowledgeControlProtocol() { acceptedControlProtocol = true }
     override fun toString() = "OrbisGatewayRequest(redacted)"
 }
@@ -221,11 +226,11 @@ private fun controlRequest(
         .post(body.toString().toRequestBody("application/json".toMediaType())).build()
 }
 
-private interface GatewayControlTransport {
+internal interface GatewayControlTransport {
     suspend fun <T> read(request: Request, block: (Response) -> T): T
 }
 
-private fun controlTransport(client: OkHttpClient): GatewayControlTransport {
+internal fun controlTransport(client: OkHttpClient): GatewayControlTransport {
     val safe = orbisGatewayControlHttpClient(client)
     return object : GatewayControlTransport {
         override suspend fun <T> read(request: Request, block: (Response) -> T): T =
@@ -245,7 +250,7 @@ private fun requireSuccess(response: Response) {
         if (response.code == 409) "binding_not_released" else "http_failure", response.code)
 }
 
-private fun Response.readControlObject(): JsonObject {
+internal fun Response.readControlObject(): JsonObject {
     if (body.contentLength() > 16 * 1024) invalidControl()
     val source = body.source()
     if (source.request(16 * 1024L + 1)) invalidControl()
@@ -257,7 +262,7 @@ private fun JsonObject.boolean(key: String): Boolean? = (this[key] as? JsonPrimi
 private fun JsonObject.requireProtocol() {
     if (string("protocol") != "st-turn-control/1" || string("external_tool_status") != "unknown") invalidControl()
 }
-private fun validateBinding(binding: JsonObject): JsonObject {
+internal fun validateBinding(binding: JsonObject): JsonObject {
     if (binding.keys != setOf("session_id", "generation", "revision", "batch_id") ||
         binding.string("session_id")?.matches(Regex("[0-9a-f]{32}")) != true) invalidControl()
     val generation = binding["generation"] as? JsonPrimitive ?: invalidControl()

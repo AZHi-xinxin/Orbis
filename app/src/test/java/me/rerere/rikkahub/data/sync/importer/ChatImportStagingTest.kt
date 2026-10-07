@@ -65,6 +65,18 @@ class ChatImportStagingTest {
         assertTrue(unknown.exists())
     }
 
+    @Test fun claudeSnapshotsArePrunedOnlyWithAnExactLeaseAndOwnedNumericName() {
+        val cache = temporary.newFolder()
+        val expired = orphan(cache)
+        File(expired, "payload/orbis-claude-12345.json").writeText("synthetic")
+        val unknown = orphan(cache)
+        File(unknown, "payload/orbis-claude-user.json").writeText("preserve")
+        val source = File(cache, "conversations.json").apply { writeText("preserve") }
+        ChatImportStaging.prune(cache, now)
+        assertFalse(expired.exists()); assertTrue(unknown.exists())
+        assertEquals("preserve", source.readText())
+    }
+
     @Test fun unknownMarkersNamesAndPayloadsAreNotDeleted() {
         val cache = temporary.newFolder()
         val unknown = orphan(cache)
@@ -75,6 +87,18 @@ class ChatImportStagingTest {
         File(unrelated, "kelivo-chat-snapshot.db").writeText("not owned by this helper")
         ChatImportStaging.prune(cache, now)
         assertTrue(unknown.exists()); assertTrue(differentMarker.exists()); assertTrue(unrelated.exists())
+    }
+
+    @Test fun chatGptSnapshotsArePrunedOnlyWithinExactExpiredOwnedLease() {
+        val cache = temporary.newFolder()
+        val expired = orphan(cache)
+        File(expired, "payload/orbis-chatgpt-12345.json").writeText("synthetic")
+        val unknown = orphan(cache)
+        File(unknown, "payload/orbis-chatgpt-user.json").writeText("preserve")
+        val source = File(cache, "conversations-001.json").apply { writeText("preserve") }
+        ChatImportStaging.prune(cache, now)
+        assertFalse(expired.exists()); assertTrue(unknown.exists())
+        assertEquals("preserve", source.readText())
     }
 
     @Test fun reservesSpaceBeforeFirstWriteAndEveryChunk() {

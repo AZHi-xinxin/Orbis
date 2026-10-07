@@ -22,6 +22,11 @@ class SoupRepositoryTest {
         val state = repository.snapshot()
         return repository.reserve(requireNotNull(state.activeId), state.revision, SoupAction.ASK, player, text, model, "synthetic-model", "https://api.deepseek.com/v1", false)
     }
+    private fun submit(repository: SoupRepository, player: SoupPlayer): SoupAttempt {
+        val state = repository.snapshot()
+        return repository.reserve(requireNotNull(state.activeId), state.revision, SoupAction.SUBMIT, player,
+            "${player.name}的合成推理", model, "synthetic-model", "https://api.deepseek.com/v1", false)
+    }
 
     @Test fun startsEmptyAndStoresOnlyRealActionsWithoutPrivatePuzzleFields() {
         val storage = SoupMemoryStorage(); val repository = repo(storage)
@@ -186,5 +191,143 @@ class SoupRepositoryTest {
         rejected { repository.reserve(game.id, proposedRevision, proposal.action, SoupPlayer.TEAMMATE, proposal.text,
             model, "synthetic-model", "https://api.deepseek.com/v1", false) }
         assertTrue(repository.snapshot().active!!.attempts.isEmpty())
+    }
+
+    @Test fun wrongTurnProposalIsExplicitlyPrewriteAndLeavesBothBudgetsUntouched() {
+        val storage = SoupMemoryStorage(); val repository = repo(storage)
+        val session = repository.start("soup_sample_001", SoupMode.NORMAL)
+        val before = repository.snapshot(); val writes = storage.writes
+        val error = assertThrows(SoupPrewriteRejection::class.java) {
+            repository.propose(session.id, SoupAction.ASK, "故事中有闹钟吗？")
+        }
+        assertEquals("soup_other_turn", error.message)
+        assertEquals(before, repository.snapshot()); assertEquals(writes, storage.writes)
+        assertEquals(6, repository.snapshot().active!!.remaining(SoupPlayer.HUMAN))
+        assertEquals(6, repository.snapshot().active!!.remaining(SoupPlayer.TEAMMATE))
+        // Submission is not governed by question alternation; it only queues approval.
+        repository.propose(session.id, SoupAction.SUBMIT, "伙伴的合成推理")
+        assertNotNull(repository.snapshot().active!!.proposal)
+        assertTrue(repository.snapshot().active!!.attempts.isEmpty())
+    }
+
+    @Test fun persistedProposalThenStorageFailureMustNotBeClassifiedAsPrewrite() {
+        val storage = SoupMemoryStorage(); val repository = repo(storage)
+        val session = repository.start("soup_sample_001", SoupMode.NORMAL)
+        storage.failAfterWrite = true
+        val error = assertThrows(IllegalStateException::class.java) {
+            repository.propose(session.id, SoupAction.SUBMIT, "伙伴的合成推理")
+        }
+        assertFalse(error is SoupPrewriteRejection)
+        assertTrue(repository.blocked.value)
+        // The durable write happened before the synthetic exception: no retry credit.
+        assertNotNull(soupJson.decodeFromString<SoupState>(storage.value!!).active!!.proposal)
+    }
+
+    @Test fun unavailableHintAndRevealArePrewriteButWriteFailuresStayUnknown() {
+        val storage = SoupMemoryStorage(); val repository = repo(storage)
+        val session = repository.start("soup_sample_001", SoupMode.HARD)
+        val before = storage.writes
+        assertThrows(SoupPrewriteRejection::class.java) { repository.hint(session.id) }
+        assertEquals(before, storage.writes)
+        storage.failAfterWrite = true
+        val error = assertThrows(IllegalStateException::class.java) { repository.reveal(session.id) }
+        assertFalse(error is SoupPrewriteRejection)
+        assertTrue(soupJson.decodeFromString<SoupState>(storage.value!!).active!!.revealed)
+    }
+
+    @Test fun submittingPlayersYieldToEligiblePartnerAndAreSkippedAfterLaterQuestions() {
+        listOf(SoupMode.NORMAL, SoupMode.EASY).forEach { mode ->
+            SoupPlayer.entries.forEach { submittingPlayer ->
+                val storage = SoupMemoryStorage(); val repository = repo(storage)
+                val session = repository.start("soup_sample_001", mode)
+                if (submittingPlayer == SoupPlayer.TEAMMATE) {
+                    val first = ask(repository, SoupPlayer.HUMAN, "首次问题成立吗？")
+                    repository.complete(session.id, first.id, """{"answer":"是"}""")
+                }
+                assertEquals(submittingPlayer, repository.snapshot().active!!.currentPlayer)
+                val ticket = submit(repository, submittingPlayer)
+                repository.complete(session.id, ticket.id,
+                    """{"key_plot":50,"logic":50,"detail":50,"comment":"合成评分"}""")
+                val partner = if (submittingPlayer == SoupPlayer.HUMAN) SoupPlayer.TEAMMATE else SoupPlayer.HUMAN
+                repeat(2) { index ->
+                    val before = repository.snapshot().active!!
+                    assertEquals(partner, before.currentPlayer)
+                    assertEquals(0, before.remaining(submittingPlayer))
+                    if (mode == SoupMode.EASY) assertNull(before.remaining(partner))
+                    val question = ask(repository, partner, "后续问题${index}成立吗？")
+                    repository.complete(session.id, question.id, """{"answer":"否"}""")
+                }
+                val after = repository.snapshot().active!!
+                assertEquals(partner, after.currentPlayer)
+                assertEquals(submittingPlayer, after.submissions.single().player)
+                assertFalse(after.revealed); assertFalse(after.abandoned); assertTrue(after.playable)
+                assertEquals(after, repo(storage).snapshot().active)
+                rejected { ask(repository, submittingPlayer, "已提交者还能提问吗？") }
+            }
+        }
+    }
+
+    @Test fun outOfTurnSubmissionPreservesTheEligiblePlayersTurn() {
+        SoupPlayer.entries.forEach { submittingPlayer ->
+            val repository = repo(); val session = repository.start("soup_sample_001", SoupMode.NORMAL)
+            if (submittingPlayer == SoupPlayer.HUMAN) {
+                val first = ask(repository, SoupPlayer.HUMAN)
+                repository.complete(session.id, first.id, """{"answer":"是"}""")
+            }
+            val currentPlayer = repository.snapshot().active!!.currentPlayer
+            assertNotEquals(submittingPlayer, currentPlayer)
+            val ticket = submit(repository, submittingPlayer)
+            repository.complete(session.id, ticket.id,
+                """{"key_plot":50,"logic":50,"detail":50,"comment":"合成评分"}""")
+            assertEquals(currentPlayer, repository.snapshot().active!!.currentPlayer)
+            val question = ask(repository, currentPlayer, "剩余玩家可以继续吗？")
+            repository.complete(session.id, question.id, """{"answer":"是"}""")
+            assertEquals(currentPlayer, repository.snapshot().active!!.currentPlayer)
+        }
+    }
+
+    @Test fun exhaustedBudgetIsSkippedUntilBothPlayersFinishWithoutAutomaticReveal() {
+        val storage = SoupMemoryStorage(); val repository = repo(storage)
+        val session = repository.start("soup_sample_001", SoupMode.NORMAL)
+        repeat(6) { index ->
+            if (index > 0) repository.takeHumanTurn(session.id)
+            val ticket = ask(repository, SoupPlayer.HUMAN, "人类问题${index}成立吗？")
+            repository.complete(session.id, ticket.id, """{"answer":"是"}""")
+        }
+        assertEquals(0, repository.snapshot().active!!.remaining(SoupPlayer.HUMAN))
+        assertEquals(6, repository.snapshot().active!!.remaining(SoupPlayer.TEAMMATE))
+        repeat(6) { index ->
+            assertEquals(SoupPlayer.TEAMMATE, repository.snapshot().active!!.currentPlayer)
+            val ticket = ask(repository, SoupPlayer.TEAMMATE, "伙伴问题${index}成立吗？")
+            repository.complete(session.id, ticket.id, """{"answer":"否"}""")
+        }
+        val after = repository.snapshot().active!!
+        assertEquals(0, after.remaining(SoupPlayer.HUMAN)); assertEquals(0, after.remaining(SoupPlayer.TEAMMATE))
+        assertEquals(12, after.questions.size); assertTrue(after.submissions.isEmpty()); assertNull(after.pending)
+        assertFalse(after.revealed); assertFalse(after.abandoned); assertTrue(after.playable)
+        assertEquals(session.id, repository.snapshot().activeId); assertEquals(1, repository.snapshot().sessions.size)
+        assertFalse(soupPublicSession(after).containsKey("soup_bottom"))
+        assertEquals(after, repo(storage).snapshot().active)
+        SoupPlayer.entries.forEach { player -> rejected { ask(repository, player, "额度用完还能提问吗？") } }
+        // Exhausting questions must not prevent either side from explicitly submitting a solution.
+        SoupPlayer.entries.forEach { player ->
+            val ticket = submit(repository, player)
+            repository.complete(session.id, ticket.id,
+                """{"key_plot":50,"logic":50,"detail":50,"comment":"合成评分"}""")
+        }
+        assertEquals(2, repository.snapshot().active!!.submissions.size)
+        assertFalse(repository.snapshot().active!!.revealed)
+    }
+
+    @Test fun failedSubmissionDoesNotAdvanceTurnOrConsumeQuestions() {
+        val repository = repo(); val session = repository.start("soup_sample_001", SoupMode.NORMAL)
+        val ticket = submit(repository, SoupPlayer.HUMAN)
+        rejected { repository.complete(session.id, ticket.id, """{"answer":"是"}""") }
+        repository.failed(session.id, ticket.id)
+        val after = repository.snapshot().active!!
+        assertEquals(SoupPlayer.HUMAN, after.currentPlayer)
+        assertEquals(6, after.remaining(SoupPlayer.HUMAN)); assertEquals(6, after.remaining(SoupPlayer.TEAMMATE))
+        assertTrue(after.questions.isEmpty()); assertTrue(after.submissions.isEmpty())
+        assertEquals(SoupAttemptState.UNKNOWN, after.pending!!.state)
     }
 }

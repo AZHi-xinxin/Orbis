@@ -14,6 +14,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.pebbletemplates.pebble.PebbleEngine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -72,7 +74,7 @@ private val Context.settingsStore by preferencesDataStore(
 )
 
 class SettingsStore(
-    context: Context,
+    private val context: Context,
     scope: AppScope,
 ) : KoinComponent {
     companion object {
@@ -437,6 +439,15 @@ class SettingsStore(
         if(settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
             return
+        }
+        // Retain old and newly selected artwork before publishing the new setting. A fast
+        // avatar change must not race asynchronous attachment cleanup or StateFlow conflation.
+        val beforeArtwork = me.rerere.rikkahub.data.files.protectedAppearancePaths(context.filesDir, settingsFlow.value)
+        val afterArtwork = me.rerere.rikkahub.data.files.protectedAppearancePaths(context.filesDir, settings)
+        if (beforeArtwork != afterArtwork) withContext(Dispatchers.IO) {
+            me.rerere.rikkahub.data.files.FileProtection(java.io.File(context.filesDir.canonicalFile,
+                me.rerere.rikkahub.data.files.FileProtection.PATH))
+                .protectAppearanceChange(context.filesDir, beforeArtwork, afterArtwork)
         }
         settingsFlow.value = settings
         persistSettings(dataStore, settings)

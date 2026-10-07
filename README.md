@@ -8,8 +8,8 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 
 ## 从这里开始
 
-- [下载 Orbis 2.6.4 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.4)：普通用户直接下载 APK，不需要自行编译。
-- [本版说明](docs/RELEASE-2.6.4.md)：本次更新、安装选择、验收范围及当前限制。
+- [下载 Orbis 2.6.5 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.5)：普通用户直接下载 APK，不需要自行编译。
+- [本版说明](docs/RELEASE-2.6.5.md)：本次更新、安装选择、验收范围及当前限制。
 - [上手指南](docs/GETTING_STARTED.md)：配置模型、选择本地或自建云端、导书和开始游戏。
 - [隐私与权限](docs/PRIVACY.md)：什么保存在手机，什么可能发给外部服务，以及备份的范围。
 - [更新记录](docs/CHANGELOG.md)：当前功能与仍未开放的部分。

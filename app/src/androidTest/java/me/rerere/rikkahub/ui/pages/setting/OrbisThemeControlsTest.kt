@@ -22,17 +22,19 @@ import org.junit.runner.RunWith
 class OrbisThemeControlsTest {
     @get:Rule val compose = createShellComposeRule()
 
-    @Test fun presetGridContainsOrbisAndDeepSeekWithoutRetiredThemes() {
+    @Test fun presetGridContainsOrbisDeepSeekAndFourSeasonsWithoutRetiredThemes() {
         val selections = mutableListOf<String>()
         compose.setContent {
             MaterialTheme { PresetThemeButtonGroup(themeId = "orbis", onChangeTheme = { selections.add(it) }) }
         }
         compose.onNodeWithTag("preset-theme-orbis").assertIsDisplayed()
         compose.onNodeWithTag("preset-theme-deepseek").assertIsDisplayed()
-        PresetThemes.filter { it.id !in setOf("orbis", "deepseek") }.forEach {
+        val activeIds = setOf("orbis", "deepseek", "orbis-spring", "orbis-summer", "orbis-autumn", "orbis-winter")
+        activeIds.forEach { compose.onNodeWithTag("preset-theme-$it").assertIsDisplayed() }
+        PresetThemes.filter { it.id !in activeIds }.forEach {
             compose.onNodeWithTag("preset-theme-${it.id}").assertDoesNotExist()
         }
-        compose.onAllNodes(hasClickAction()).assertCountEquals(2)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(6)
         compose.onNodeWithTag("preset-theme-orbis").performClick()
         compose.onNodeWithTag("preset-theme-deepseek").performClick()
         compose.runOnIdle { assertEquals(listOf("orbis", "deepseek"), selections) }

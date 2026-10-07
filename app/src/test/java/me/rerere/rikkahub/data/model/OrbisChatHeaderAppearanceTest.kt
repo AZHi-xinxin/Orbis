@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.model
 
+import me.rerere.rikkahub.BuildConfig
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -7,34 +8,52 @@ import org.junit.Test
 
 class OrbisChatHeaderAppearanceTest {
     @Test fun `light default backdrop retains dark header and system icons`() {
-        assertFalse(orbisChatUsesLightHeader(OrbisAppearance(), false, false))
+        assertFalse(orbisChatUsesLightStatusIcons(OrbisAppearance(), false))
         assertTrue(orbisChatLightStatusBarOverride(true, true, false, false)!!)
     }
 
     @Test fun `stars remain light foreground even with global light theme`() {
-        assertTrue(orbisChatUsesLightHeader(OrbisAppearance(backgroundEnabled = true,
-            backgroundStyle = OrbisBackgroundStyle.STARS), false, false))
+        assertTrue(orbisChatUsesLightStatusIcons(OrbisAppearance(backgroundEnabled = true,
+            backgroundStyle = OrbisBackgroundStyle.STARS), false))
         assertFalse(orbisChatLightStatusBarOverride(true, true, false, true)!!)
     }
 
-    @Test fun `custom and inherited photos and dark theme use protected light foreground`() {
-        assertTrue(orbisChatUsesLightHeader(OrbisAppearance(backgroundEnabled = true,
-            backgroundImage = "synthetic.jpg"), false, false))
-        assertTrue(orbisChatUsesLightHeader(OrbisAppearance(), false, true))
-        assertTrue(orbisChatUsesLightHeader(OrbisAppearance(), true, false))
+    @Test fun `custom photos follow theme instead of requiring a gray strip for white icons`() {
+        val custom = OrbisAppearance(backgroundEnabled = true, backgroundImage = "synthetic.jpg")
+        assertFalse(orbisChatUsesLightStatusIcons(custom, false))
+        assertTrue(orbisChatUsesLightStatusIcons(custom, true))
+        assertTrue(orbisChatUsesLightStatusIcons(OrbisAppearance(), true))
     }
 
-    @Test fun `disabled stars preset and overridden assistant photo do not change light preset contrast`() {
-        assertFalse(orbisChatUsesLightHeader(OrbisAppearance(backgroundEnabled = false,
-            backgroundStyle = OrbisBackgroundStyle.STARS), false, false))
-        assertFalse(orbisChatUsesLightHeader(OrbisAppearance(backgroundEnabled = true,
-            backgroundStyle = OrbisBackgroundStyle.PAPER), false, true))
+    @Test fun `disabled stars and inherited backgrounds retain selected theme contrast`() {
+        val inherited = OrbisAppearance(backgroundEnabled = false, backgroundStyle = OrbisBackgroundStyle.STARS)
+        assertFalse(orbisChatUsesLightStatusIcons(inherited, false))
+        assertTrue(orbisChatUsesLightStatusIcons(inherited, true))
+        assertFalse(orbisChatUsesLightStatusIcons(OrbisAppearance(backgroundEnabled = true,
+            backgroundStyle = OrbisBackgroundStyle.PAPER), false))
     }
 
-    @Test fun `home other top route and release always return ownership to theme`() {
+    @Test fun `photo replacing stars does not inherit star-only white system icons`() {
+        val photoOverStars = OrbisAppearance(backgroundEnabled = true,
+            backgroundStyle = OrbisBackgroundStyle.STARS, backgroundImage = "synthetic.jpg")
+        assertFalse(orbisChatUsesLightStatusIcons(photoOverStars, false))
+        assertTrue(orbisChatUsesLightStatusIcons(photoOverStars, true))
+    }
+
+    @Test fun `empty custom image leaves the known dark stars backdrop in charge`() {
+        assertTrue(orbisChatUsesLightStatusIcons(OrbisAppearance(backgroundEnabled = true,
+            backgroundStyle = OrbisBackgroundStyle.STARS, backgroundImage = "  "), false))
+    }
+
+    @Test fun `home other top route and non Orbis build return ownership to theme`() {
         assertNull(orbisChatLightStatusBarOverride(true, true, true, true))
         assertNull(orbisChatLightStatusBarOverride(true, false, false, true))
         assertNull(orbisChatLightStatusBarOverride(false, true, false, true))
+    }
+
+    @Test fun `both build variants use the Orbis feature flag not debug status for icon ownership`() {
+        assertTrue(orbisChatLightStatusBarOverride(BuildConfig.ORBIS_ENABLED, true, false, false)!!)
+        assertFalse(orbisChatLightStatusBarOverride(BuildConfig.ORBIS_ENABLED, true, false, true)!!)
     }
 
     @Test fun `open light drawer returns status icons to theme and closing restores star chat`() {

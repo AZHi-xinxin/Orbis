@@ -19,6 +19,13 @@ import kotlin.time.Duration.Companion.seconds
 
 private const val TAG = "OAuthCallbackFgs"
 
+/** The embedded host has a separate rescue launcher; package-launcher resolution is ambiguous. */
+fun oauthCallbackAppLaunchIntent(context: Context): Intent = Intent(Intent.ACTION_MAIN).apply {
+    setClassName(context.packageName, "me.rerere.rikkahub.RouteActivity")
+    addCategory(Intent.CATEGORY_LAUNCHER)
+    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+}
+
 /** 在浏览器授权期间保持应用进程和 loopback callback server 活跃。 */
 class OAuthCallbackForegroundService : Service() {
     private var isForeground = false
@@ -86,15 +93,12 @@ class OAuthCallbackForegroundService : Service() {
     }
 
     private fun buildNotification(): android.app.Notification {
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-        val contentIntent = launchIntent?.let {
-            PendingIntent.getActivity(
-                this,
-                NOTIFICATION_ID,
-                it,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-        }
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            NOTIFICATION_ID,
+            oauthCallbackAppLaunchIntent(this),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.oauth_ic_notification)
             .setContentTitle(getString(R.string.oauth_notification_title))
@@ -103,7 +107,7 @@ class OAuthCallbackForegroundService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .apply { contentIntent?.let(::setContentIntent) }
+            .setContentIntent(contentIntent)
             .build()
     }
 

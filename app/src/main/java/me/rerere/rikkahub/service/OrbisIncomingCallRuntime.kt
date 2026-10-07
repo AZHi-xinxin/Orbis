@@ -54,13 +54,13 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
     private var preparedCall: Pair<String, String>? = null
     private var acceptedCall: Pair<String, String>? = null
 
-    suspend fun request(assistantId: String, conversationId: String, reason: String, ringSeconds: Int): IncomingCallAttempt =
+    suspend fun request(assistantId: String, conversationId: String, reason: String, ringSeconds: Int, video: Boolean = false): IncomingCallAttempt =
         withContext(Dispatchers.Main.immediate) {
             require(reason.isNotBlank() && reason.length <= 2000) { "reason 必须为 1–2000 字的来电原因" }
             require(ringSeconds in 5..60) { "max_ring_seconds 必须为 5–60 秒" }
             recovery.await()
             val attempt = ledger.create(IncomingCallAttempt(Uuid.random().toString(), assistantId,
-                conversationId, reason, System.currentTimeMillis(), ringSeconds))
+                conversationId, reason, System.currentTimeMillis(), ringSeconds, video = video))
             suspend fun failed(code: String) = ledger.update(attempt.id) { it.copy(
                 outcome = IncomingCallOutcome.FAILED, finishedAtMs = System.currentTimeMillis().coerceAtLeast(it.startedAtMs), failureCode = code) }
             if (!gate.tryLock()) return@withContext failed("another_invitation_active")
@@ -214,7 +214,7 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
         val manager = context.getSystemService(NotificationManager::class.java)
         val view = activityIntent(value.attempt, "view")
         val notification = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_rikkahub).setContentTitle("${value.title}的语音来电")
+            .setSmallIcon(R.drawable.ic_stat_rikkahub).setContentTitle("${value.title}的${if (value.attempt.video) "视频" else "语音"}来电")
             .setContentText(value.attempt.reason).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true).setContentIntent(view)

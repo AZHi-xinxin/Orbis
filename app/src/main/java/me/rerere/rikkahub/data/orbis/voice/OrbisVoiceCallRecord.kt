@@ -39,6 +39,7 @@ data class OrbisVoiceCallRecord(
     val assistantId: String,
     val startedAtMs: Long,
     val modelId: String? = null,
+    val video: Boolean = false,
     val connectedAtMs: Long? = null,
     val endedAtMs: Long? = null,
     val durationMs: Long? = null,

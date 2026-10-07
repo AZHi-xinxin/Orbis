@@ -118,7 +118,7 @@ internal fun OrbisCallTimelineCardContent(
     val active = record?.status in setOf(OrbisVoiceCallStatus.ACTIVE, OrbisVoiceCallStatus.CONNECTING)
     val title = when {
         record == null -> if (readFailed) "通话记录暂不可读取" else "正在读取通话记录…"
-        active -> "正在通话中"
+        active -> if (record?.video == true) "正在视频通话中" else "正在通话中"
         else -> {
             val seconds = record.durationMs?.coerceAtLeast(0)?.div(1000)
             val duration = seconds?.let { "通话时长 ${it / 60}分${it % 60}秒" } ?: "通话已结束 · 时长未确定"

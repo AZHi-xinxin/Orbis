@@ -27,8 +27,8 @@ class DeepSeekThemeTest {
         }
     }
 
-    @Test fun activeCatalogIncludesOnlyTwoBuiltInOrbisChoices() {
-        assertEquals(listOf("orbis", DeepSeekThemeId),
+    @Test fun activeCatalogKeepsExistingChoicesBeforeFourSeasons() {
+        assertEquals(listOf("orbis", DeepSeekThemeId, "orbis-spring", "orbis-summer", "orbis-autumn", "orbis-winter"),
             selectablePresetThemes(orbis = true).map { it.id })
         assertSame(DeepSeekThemePreset, findPresetTheme(DeepSeekThemeId))
         assertSame(DeepSeekThemePreset, findThemeById(DeepSeekThemeId, emptyList()))

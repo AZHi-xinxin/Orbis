@@ -1,22 +1,24 @@
 package me.rerere.rikkahub.data.model
 
-/** Keep route status icons and floating chat controls on the same contrast policy. */
-fun orbisChatUsesLightHeader(
+/**
+ * System icons follow the selected day/night theme over photos, just like the
+ * rest of the controls. A photo is not evidence that its top edge is dark.
+ * Only the known, image-free star backdrop overrides a light theme.
+ */
+fun orbisChatUsesLightStatusIcons(
     appearance: OrbisAppearance,
     darkTheme: Boolean,
-    assistantHasBackground: Boolean,
-): Boolean = darkTheme || if (appearance.backgroundEnabled) {
-    appearance.backgroundStyle == OrbisBackgroundStyle.STARS || !appearance.backgroundImage.isNullOrBlank()
-} else assistantHasBackground
+): Boolean = darkTheme || (appearance.backgroundEnabled &&
+    appearance.backgroundImage.isNullOrBlank() && appearance.backgroundStyle == OrbisBackgroundStyle.STARS)
 
 /** null leaves the global theme in charge; hidden/back-stack chats never own status icons. */
 fun orbisChatLightStatusBarOverride(
-    debug: Boolean,
+    orbisEnabled: Boolean,
     chatIsTopRoute: Boolean,
     homeVisible: Boolean,
-    lightHeader: Boolean,
+    lightStatusIcons: Boolean,
     drawerVisible: Boolean = false,
-): Boolean? = if (debug && chatIsTopRoute && !homeVisible && !drawerVisible) !lightHeader else null
+): Boolean? = if (orbisEnabled && chatIsTopRoute && !homeVisible && !drawerVisible) !lightStatusIcons else null
 
 /** Keep the drawer's palette in charge throughout opening, dragging, and closing. */
 fun orbisChatDrawerVisible(

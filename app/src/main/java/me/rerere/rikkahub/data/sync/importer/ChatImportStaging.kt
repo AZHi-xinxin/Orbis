@@ -22,6 +22,8 @@ internal object ChatImportStaging {
     // Operit's immutable preview copy lives beside archive.bin. Recognize only our exact
     // createTempFile naming pattern, never arbitrary JSON files from an unowned directory.
     private val operitSnapshot = Regex("orbis-operit-[0-9]+\\.json")
+    private val claudeSnapshot = Regex("orbis-claude-[0-9]+\\.json")
+    private val chatGptSnapshot = Regex("orbis-chatgpt-[0-9]+\\.json")
 
     class Lease internal constructor(val directory: File, val payload: File,
         private val channel: FileChannel, private val lock: FileLock) : Closeable {
@@ -111,7 +113,7 @@ internal object ChatImportStaging {
         if (payload.exists()) {
             if (!regularDirectory(payload)) return false
             val files = payload.listFiles() ?: return false
-            if (files.any { (it.name !in payloadNames && !operitSnapshot.matches(it.name)) ||
+            if (files.any { (it.name !in payloadNames && !operitSnapshot.matches(it.name) && !claudeSnapshot.matches(it.name) && !chatGptSnapshot.matches(it.name)) ||
                     !Files.isRegularFile(it.toPath(), NOFOLLOW_LINKS) }) return false
             if (files.any { !it.delete() } || !payload.delete()) return false
         }

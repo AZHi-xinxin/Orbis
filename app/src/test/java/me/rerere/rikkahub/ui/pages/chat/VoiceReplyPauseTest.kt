@@ -10,11 +10,15 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import me.rerere.ai.util.HttpException
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.ASRVoiceTurn
 import me.rerere.rikkahub.service.MessageQueuePausedException
+import me.rerere.rikkahub.service.MessageQueue
+import me.rerere.rikkahub.service.VoiceReplyResumeSnapshot
+import me.rerere.rikkahub.service.canResumeOwnedVoiceReplies
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -218,6 +222,93 @@ class VoiceReplyPauseTest {
             assertTrue(r.voice.state.value.replyBlocked)
             assertFalse(r.voice.state.value.replyResumeChecking)
             assertFalse(r.voice.state.value.replyNotice.orEmpty().contains("private storage details"))
+            assertTrue(r.ended.isEmpty())
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun manualContinueChecksOnlyOnceAndResumesOnlyFreshSpeechWithoutSuccessPopup() = runTest {
+        val r = Rig(backgroundScope)
+        val gate = CompletableDeferred<Boolean>()
+        var checks = 0
+        try {
+            r.start(); advanceTimeBy(201); runCurrent()
+            r.recorders.single().final("already accepted"); runCurrent()
+            r.failReply(); runCurrent()
+            assertTrue(r.voice.requestReplyResume { checks++; gate.await() }); runCurrent()
+            assertTrue(r.voice.state.value.replyResumeChecking)
+            assertFalse(r.voice.requestReplyResume { error("must not run twice") })
+            gate.complete(true)
+            runCurrent(); advanceTimeBy(301); runCurrent()
+            assertFalse(r.voice.state.value.replyBlocked)
+            assertFalse(r.voice.state.value.replyResumeChecking)
+            assertNull(r.voice.state.value.recoveryNotice)
+            assertEquals(listOf("already accepted"), r.inputs)
+            assertEquals(1, checks)
+            assertEquals(1, r.openings)
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun chatRecoveryAndFinishingTextDoNotResumeCallUntilSeparateManualContinue() = runTest {
+        val r = Rig(backgroundScope)
+        val queue = MessageQueue(initiallyPaused = true)
+        queue.enqueue(listOf(UIMessagePart.Text("independent queued text")))
+        var chatGenerating = false
+        var checks = 0
+        suspend fun checkReady() = canResumeOwnedVoiceReplies({ true }) {
+            checks++
+            VoiceReplyResumeSnapshot(true, true, queue.state.value.paused, queue.state.value.messages.size,
+                0, chatGenerating, false, false, false, false, false).ready
+        }
+        try {
+            r.start(); advanceTimeBy(201); runCurrent()
+            r.recorders.single().final("keep this input"); runCurrent()
+            r.failReply(); runCurrent()
+            val pausedQueue = queue.state.value
+            assertTrue(r.voice.requestReplyResume { checkReady() }); runCurrent()
+            assertTrue(r.voice.state.value.replyBlocked)
+            assertFalse(r.voice.state.value.replyResumeChecking)
+            assertTrue(r.voice.state.value.replyNotice.orEmpty().contains("MODEL_RESUME_BLOCKED"))
+            assertEquals(pausedQueue, queue.state.value) // Continue did not mutate or dispatch.
+            // The human handles the chat separately. Starting/finishing this text is not an
+            // audio permission, nor does it run another implicit recovery/check operation.
+            queue.resume()
+            assertNotNull(queue.takeNext())
+            chatGenerating = true
+            assertTrue(r.voice.requestReplyResume { checkReady() }); runCurrent()
+            assertTrue(r.voice.state.value.replyBlocked)
+            chatGenerating = false
+            advanceTimeBy(1_000); runCurrent()
+            assertTrue(r.voice.state.value.replyBlocked)
+            assertEquals(2, checks)
+            assertTrue(r.voice.requestReplyResume { checkReady() }); runCurrent()
+            assertFalse(r.voice.state.value.replyBlocked)
+            assertEquals(3, checks)
+            // The same retained call can admit the NEXT camera observation after manual
+            // continuation. This does not reuse the failed frame or reopen a new call.
+            val freshFrameReply = r.voice.enqueueSupplementaryReply({ true }) { CompletableDeferred<String?>(null) }
+            assertNotNull(freshFrameReply)
+            runCurrent()
+            assertEquals(1, r.openings)
+            assertNull(queue.takeNext())
+            assertEquals(listOf("keep this input"), r.inputs)
+            assertTrue(r.ended.isEmpty())
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun readinessTimeoutLeavesManualContinueAvailableAndDoesNotHangUp() = runTest {
+        val r = Rig(backgroundScope)
+        try {
+            r.start(); advanceTimeBy(201); runCurrent()
+            r.recorders.single().final("kept once"); runCurrent()
+            r.failReply(); runCurrent()
+            assertTrue(r.voice.requestReplyResume { CompletableDeferred<Boolean>().await() })
+            runCurrent(); advanceTimeBy(60_001); runCurrent()
+            assertTrue(r.voice.state.value.replyBlocked)
+            assertFalse(r.voice.state.value.replyResumeChecking)
+            assertTrue(r.voice.state.value.replyNotice.orEmpty().contains("MODEL_RESUME_BLOCKED"))
+            assertTrue(r.voice.requestReplyResume { true }); runCurrent()
+            assertFalse(r.voice.state.value.replyBlocked)
+            assertEquals(listOf("kept once"), r.inputs)
             assertTrue(r.ended.isEmpty())
         } finally { r.voice.stopAndJoin() }
     }

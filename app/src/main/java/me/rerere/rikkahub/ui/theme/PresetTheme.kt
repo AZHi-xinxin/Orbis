@@ -5,13 +5,13 @@ import androidx.compose.runtime.Composable
 import me.rerere.rikkahub.ui.theme.presets.AutumnThemePreset
 import me.rerere.rikkahub.ui.theme.presets.BlackThemePreset
 import me.rerere.rikkahub.ui.theme.presets.ClaudeThemePreset
-import me.rerere.rikkahub.ui.theme.presets.DeepSeekThemeId
 import me.rerere.rikkahub.ui.theme.presets.DeepSeekThemePreset
 import me.rerere.rikkahub.ui.theme.presets.MinimalThemePreset
 import me.rerere.rikkahub.ui.theme.presets.OceanThemePreset
 import me.rerere.rikkahub.ui.theme.presets.SakuraThemePreset
 import me.rerere.rikkahub.ui.theme.presets.SpringThemePreset
 import me.rerere.rikkahub.ui.theme.presets.OrbisThemePreset
+import me.rerere.rikkahub.ui.theme.presets.OrbisSeasonThemes
 import me.rerere.rikkahub.BuildConfig
 
 data class PresetTheme(
@@ -26,7 +26,7 @@ data class PresetTheme(
 }
 
 val PresetThemes by lazy {
-    (if (BuildConfig.ORBIS_ENABLED) listOf(OrbisThemePreset) else emptyList()) + listOf(
+    (if (BuildConfig.ORBIS_ENABLED) listOf(OrbisThemePreset) + OrbisSeasonThemes else emptyList()) + listOf(
         DeepSeekThemePreset,
         SakuraThemePreset,
         OceanThemePreset,
@@ -40,17 +40,17 @@ val PresetThemes by lazy {
 
 /** Presentation catalog only. Keep every historical ID above readable for backups and release. */
 internal fun selectablePresetThemes(orbis: Boolean = BuildConfig.ORBIS_ENABLED): List<PresetTheme> =
-    if (orbis) listOf(OrbisThemePreset, DeepSeekThemePreset) else PresetThemes
+    if (orbis) listOf(OrbisThemePreset, DeepSeekThemePreset) + OrbisSeasonThemes else PresetThemes
 
 /** The stored preference remains intact, but legacy color overrides are inactive in Orbis. */
 internal fun legacyThemeColorOptionEnabled(saved: Boolean, orbis: Boolean = BuildConfig.ORBIS_ENABLED): Boolean =
     !orbis && saved
 
-/** Only the two active native presets are selectable; explicit custom themes keep priority. */
+/** Active native presets are selectable; explicit custom themes keep priority. */
 internal fun resolveThemeForAppearance(id: String, customThemes: List<CustomTheme>,
     orbis: Boolean = BuildConfig.ORBIS_ENABLED): PresetTheme = if (orbis) {
     customThemes.find { it.id == id }?.asPresetTheme()
-        ?: if (id == DeepSeekThemeId) DeepSeekThemePreset else OrbisThemePreset
+        ?: selectablePresetThemes(orbis = true).find { it.id == id } ?: OrbisThemePreset
 } else {
     findThemeById(id, customThemes) ?: findPresetTheme(id)
 }

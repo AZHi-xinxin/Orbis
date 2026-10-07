@@ -31,6 +31,8 @@ enum class ChatArchiveSource(val label: String, val maxBytes: Long) {
     OPERIT("Operit v2 JSON", OperitChatArchive.MAX_ARCHIVE_BYTES),
     KELIVO("Kelivo 安卓 ZIP", KelivoChatArchive.MAX_ARCHIVE_BYTES),
     POLARIS("北极星 ZIP", PolarisChatArchive.MAX_ARCHIVE_BYTES),
+    CLAUDE("Claude 对话 JSON", ClaudeChatArchive.MAX_ARCHIVE_BYTES),
+    CHATGPT("ChatGPT 对话 JSON", ChatGPTChatArchive.MAX_ARCHIVE_BYTES),
 }
 
 /** Owned by BackupVM, not a lazy-list item; scrolling/rotation cannot restart an import. */
@@ -49,7 +51,7 @@ class DeepSeekImportController(
     private var job: Job? = null
     private var fingerprint: String? = null
     val sourceLabel: String get() = source.label
-    val selectedAnswersOnly: Boolean get() = source != ChatArchiveSource.DEEPSEEK
+    val selectedAnswersOnly: Boolean get() = source !in setOf(ChatArchiveSource.DEEPSEEK, ChatArchiveSource.CLAUDE, ChatArchiveSource.CHATGPT)
 
     init { scope.launch(Dispatchers.IO) { runCatching { ChatImportStaging.prune(context.cacheDir) } } }
 
@@ -74,6 +76,16 @@ class DeepSeekImportController(
                         ChatImportStaging.copyArchive(input, file, source.maxBytes, { coroutine.ensureActive() })
                     }
                     when (source) {
+                        ChatArchiveSource.CHATGPT -> {
+                            val result = ChatGPTChatArchive.inspect(file) { coroutine.ensureActive() }
+                            fingerprint = ChatGPTChatImporter.archiveFingerprint(file) { coroutine.ensureActive() }
+                            result
+                        }
+                        ChatArchiveSource.CLAUDE -> {
+                            val result = ClaudeChatArchive.inspect(file) { coroutine.ensureActive() }
+                            fingerprint = ClaudeChatImporter.archiveFingerprint(file) { coroutine.ensureActive() }
+                            result
+                        }
                         ChatArchiveSource.OPERIT -> {
                             val result = OperitChatArchive.inspect(file) { coroutine.ensureActive() }
                             fingerprint = OperitChatImporter.archiveFingerprint(file) { coroutine.ensureActive() }
@@ -139,6 +151,10 @@ class DeepSeekImportController(
                     mutableState.update { it.copy(phase = "已处理 ${progress.completed} / ${progress.total} 个会话…") }
                 }
                 val result = when (source) {
+                    ChatArchiveSource.CHATGPT -> ChatGPTChatImporter(repository).import(file, target, selected,
+                        requireNotNull(fingerprint), progress)
+                    ChatArchiveSource.CLAUDE -> ClaudeChatImporter(repository).import(file, target, selected,
+                        requireNotNull(fingerprint), progress)
                     ChatArchiveSource.OPERIT -> OperitChatImporter(repository).import(file, target, selected,
                         requireNotNull(fingerprint), progress)
                     ChatArchiveSource.KELIVO -> KelivoChatImporter(context, repository).importSelected(file, target,
@@ -193,6 +209,8 @@ class DeepSeekImportController(
         append("已导入 ${result.imported} 个会话路径、${result.messages} 条消息；跳过 ${result.skipped} 个已有路径；${result.failed} 个未导入。")
         if (result.attachmentReferences > 0) append("\n有 ${result.attachmentReferences} 个附件引用；未导入文件本体，只保留说明，不自动联网下载。")
         if (result.skippedSummaries > 0) append("\n本次新增会话跳过 ${result.skippedSummaries} 条内部摘要；没有把摘要当作聊天或系统提示，原导出文件未改动。")
+        if (source == ChatArchiveSource.CLAUDE) append("\n按完整路径分别保存；公共前文可能重复。相同内容版本跳过，源会话内容变化则另建窗口，旧记录未更新或覆盖。")
+        if (source == ChatArchiveSource.CHATGPT) append("\n按所选可见完整路径分别保存；公共前文可能重复。系统及隐藏消息未导入，附件未恢复。相同内容版本跳过，变化则另建窗口。请保管全部原始 JSON 与附件。")
         result.failures.map { it.reason }.distinct().forEach { append("\n").append(it) }
         append("\n未覆盖原聊天、未导入账号/密钥/工具授权，也没有向模型发送消息。请保留原文件。")
     }
@@ -203,7 +221,9 @@ internal fun requireImportTargetName(id: Uuid, lookup: (Uuid) -> String?): Strin
     checkNotNull(lookup(id)) { "import_target_missing" }.ifBlank { "未命名 AI" }
 
 internal fun importPreviewCounts(conversation: DeepSeekConversationPreview, branch: DeepSeekBranchPreview): String =
-    if (conversation.defaultSelectionReason.startsWith("kelivo_selected"))
+    if (conversation.defaultSelectionReason.startsWith("claude_complete_path") || conversation.defaultSelectionReason.startsWith("chatgpt_complete_path"))
+        "此完整路径 ${branch.messageCount} 条 · 源会话 ${conversation.totalNodes} 条不同消息"
+    else if (conversation.defaultSelectionReason.startsWith("kelivo_selected"))
         "导入当前回答 ${branch.messageCount} 条 · 源消息（含备用版本）${conversation.totalNodes} 条"
     else if (conversation.defaultSelectionReason == "polaris_original_order")
         "导入 ${branch.messageCount} 条 · 原窗口 ${conversation.totalNodes} 条（只读聊天，不导入配置）"

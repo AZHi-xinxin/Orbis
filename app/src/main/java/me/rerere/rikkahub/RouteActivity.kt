@@ -45,8 +45,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -73,8 +71,7 @@ import com.dokar.sonner.Toaster
 import com.dokar.sonner.rememberToasterState
 import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.model.orbisChatUsesLightHeader
+import me.rerere.rikkahub.data.model.orbisChatUsesLightStatusIcons
 import me.rerere.rikkahub.data.model.orbisChatLightStatusBarOverride
 import me.rerere.rikkahub.ui.theme.LocalStatusBarAppearanceOverride
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
@@ -112,6 +109,7 @@ import me.rerere.rikkahub.ui.pages.chat.LocalOrbisChatAnimationVisible
 import me.rerere.rikkahub.ui.pages.orbis.LocalOpenOrbisHome
 import me.rerere.rikkahub.ui.pages.orbis.OrbisHomeOverlay
 import me.rerere.rikkahub.ui.pages.orbis.OrbisHomeNavigationState
+import me.rerere.rikkahub.ui.pages.orbis.BindOrbisHomeNavigationFocus
 import me.rerere.rikkahub.ui.pages.orbis.LocalReturnToOrbisChat
 import me.rerere.rikkahub.ui.pages.orbis.OrbisSettingsPage
 import me.rerere.rikkahub.ui.pages.orbis.OrbisToolsPage
@@ -335,14 +333,7 @@ class RouteActivity : ComponentActivity() {
 
         val orbisVisible = orbisHomeNavigation.visible
         val orbisHomeRevision = orbisHomeNavigation.homeRevision
-        val orbisFocusManager = LocalFocusManager.current
-        val orbisKeyboard = LocalSoftwareKeyboardController.current
-        LaunchedEffect(orbisVisible) {
-            if (orbisVisible) {
-                orbisFocusManager.clearFocus(force = true)
-                orbisKeyboard?.hide()
-            }
-        }
+        BindOrbisHomeNavigationFocus(orbisHomeNavigation)
 
         val backStack = rememberNavBackStack(startScreen)
         val startup = rememberOrbisStartupState(
@@ -365,11 +356,10 @@ class RouteActivity : ComponentActivity() {
         // leaves ChatPage composed, and navigation transitions may retain older chats.
         val statusBarOverride = LocalStatusBarAppearanceOverride.current
         var orbisHomeLightStatusBars by remember { mutableStateOf<Boolean?>(null) }
-        val headerAssistant = settings.getCurrentAssistant()
-        val lightChatHeader = orbisChatUsesLightHeader(settings.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current),
-            LocalDarkMode.current, headerAssistant.background != null || headerAssistant.useGradientBackground)
+        val lightChatStatusIcons = orbisChatUsesLightStatusIcons(
+            settings.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current), LocalDarkMode.current)
         val routeStatusBarOverride = orbisChatLightStatusBarOverride(BuildConfig.ORBIS_ENABLED,
-            backStack.lastOrNull() is Screen.Chat, orbisVisible, lightChatHeader,
+            backStack.lastOrNull() is Screen.Chat, orbisVisible, lightChatStatusIcons,
             drawerVisible = (backStack.lastOrNull() as? Screen.Chat)?.let { chatDrawerVisibility[it] } == true)
         SideEffect { statusBarOverride?.value = if (startup.visible) false
             else if (orbisVisible) orbisHomeLightStatusBars else routeStatusBarOverride }
@@ -377,10 +367,11 @@ class RouteActivity : ComponentActivity() {
             onDispose { statusBarOverride?.value = null }
         }
         val returnToOrbisChat: () -> Unit = {
+            // Release embedded focus before either home or back-stack mutations.
+            orbisHomeNavigation.returnToChat()
             while (backStack.size > 1 && backStack.lastOrNull() !is Screen.Chat) {
                 backStack.removeLastOrNull()
             }
-            orbisHomeNavigation.returnToChat()
         }
         SideEffect { this@RouteActivity.navStack = backStack }
         LaunchedEffect(backStack.lastOrNull()) {

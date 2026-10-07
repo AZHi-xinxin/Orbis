@@ -90,6 +90,9 @@ class BackupManager(
                     for ((name, bytes) in listOf(
                         OrbisLocalToolBackup.SCHEDULE to OrbisLocalToolBackup.encodeSchedule(schedule),
                         OrbisLocalToolBackup.KAOMOJI to OrbisLocalToolBackup.encodeKaomoji(kaomoji),
+                        me.rerere.rikkahub.data.files.FileProtection.PATH to me.rerere.rikkahub.data.files.FileProtection.encode(
+                            me.rerere.rikkahub.data.files.FileProtection(File(context.filesDir.canonicalFile,
+                                me.rerere.rikkahub.data.files.FileProtection.PATH)).snapshot()).toByteArray(),
                     )) {
                         currentCoroutineContext().ensureActive()
                         reserve(name, bytes.size.toLong())
@@ -101,6 +104,13 @@ class BackupManager(
                         context.filesDir, File(staging, "gallery-snapshot"),
                         checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
                     for ((name, file) in gallery) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
+                    val spaces = me.rerere.rikkahub.data.orbis.spaces.CompanionSpacesBackup.stageSnapshot(
+                        context.filesDir, File(staging, "companion-spaces-snapshot"),
+                        checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    for ((name, file) in spaces) {
                         coroutine.ensureActive()
                         addFile(zip, file, name) { coroutine.ensureActive() }
                     }

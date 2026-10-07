@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -118,7 +119,7 @@ private fun KaomojiLibrary(repository: OrbisKaomojiRepository, onInsertText: ((S
                     },
                         enabled = enabled && !busy && (onInsertText != null || onSendText != null) && !managing,
                         modifier = Modifier.fillMaxWidth()) {
-                        Text(item.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(item.text, maxLines = 7, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace)
                     }
                     Text(item.label, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (managing || (onInsertText == null && onSendText == null)) Row {
@@ -161,14 +162,19 @@ private fun KaomojiEditor(repository: OrbisKaomojiRepository, original: OrbisKao
         text = {
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("只保存文字，不读取聊天。与 AI 的颜文字工具共用同一份库。", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(value = label, onValueChange = { if (it.length <= 40) label = it }, label = { Text("名称") }, singleLine = true, enabled = !busy)
-                OutlinedTextField(value = text, onValueChange = { if (it.length <= 160) text = it }, label = { Text("颜文字正文") }, singleLine = true, enabled = !busy)
+                OutlinedTextField(value = label, onValueChange = { if (OrbisKaomojiRepository.characterCount(it) <= 40) label = it }, label = { Text("名称") }, singleLine = true, enabled = !busy)
+                OutlinedTextField(value = text, onValueChange = { text = it }, label = { Text("颜文字正文 · 支持换行和 emoji") },
+                    minLines = 3, maxLines = 10, enabled = !busy, modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    isError = OrbisKaomojiRepository.characterCount(text) > OrbisKaomojiRepository.MAX_TEXT_CHARACTERS,
+                    supportingText = { Text("${OrbisKaomojiRepository.characterCount(text)} / ${OrbisKaomojiRepository.MAX_TEXT_CHARACTERS} 字符（按 Unicode 字符计数，不按字节）") })
                 OutlinedTextField(value = tags, onValueChange = { if (it.length <= 200) tags = it }, label = { Text("标签，用逗号分隔（最多 8 个）") }, singleLine = true, enabled = !busy)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } },
-        confirmButton = { TextButton(enabled = !busy && label.isNotBlank() && text.isNotBlank(), onClick = {
+        confirmButton = { TextButton(enabled = !busy && label.isNotBlank() && text.isNotBlank() &&
+            OrbisKaomojiRepository.characterCount(text) <= OrbisKaomojiRepository.MAX_TEXT_CHARACTERS, onClick = {
             busy = true; error = null
             scope.launch {
                 try {
@@ -187,7 +193,7 @@ private fun KaomojiEditor(repository: OrbisKaomojiRepository, original: OrbisKao
 
 private fun kaomojiUiError(error: Exception): String = when (error.message) {
     "kaomoji_revision_conflict", "kaomoji_not_found" -> "条目已被修改或删除。请关闭编辑框，重新读取后再编辑。"
-    "kaomoji_invalid_text", "kaomoji_text_not_emoji" -> "请输入文字颜文字（不是图片或 emoji），名称最多 40 字，正文最多 160 字，不含换行或控制字符。"
+    "kaomoji_invalid_text", "kaomoji_text_not_emoji" -> "名称最多 40 字，正文最多 ${OrbisKaomojiRepository.MAX_TEXT_CHARACTERS} 个 Unicode 字符，支持多行与 emoji；不能全为空白或含异常控制字符。"
     "kaomoji_invalid_tags" -> "最多 8 个标签，每个标签最多 20 字。"
     "kaomoji_duplicate_text" -> "库中已有这个颜文字，请编辑已有条目。"
     "kaomoji_library_full" -> "颜文字已达 500 个，请先整理现有条目。"

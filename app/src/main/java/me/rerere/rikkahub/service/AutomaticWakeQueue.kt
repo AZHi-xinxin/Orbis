@@ -19,6 +19,9 @@ class AutomaticWakeQueue {
     }
 
     fun remove(id: Uuid): QueuedMessage? = queue.remove(id)
+    internal fun holdAllForRecovery(eventIds: Set<String>? = null): Int =
+        if (eventIds == null) queue.holdAllInputsForFreshRecovery()
+        else queue.holdInputsForRecovery(pending.filter { it.orbisEventId in eventIds }.map { it.id }.toSet())
     internal fun takeNext(): QueuedMessage? = queue.takeNext()
 }
 

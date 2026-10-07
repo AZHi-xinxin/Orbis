@@ -33,4 +33,19 @@ class ChatImportReviewPolicyTest {
         assertEquals("所选路径 2 条 · 原窗口 2 条 · 1 条可选路径",
             importPreviewCounts(conversation, conversation.branches.single()))
     }
+    @Test fun claudeCountsDistinguishCompletePathFromAllUniqueSourceMessages() {
+        for (reason in listOf("claude_complete_path", "claude_complete_path_missing_parent")) {
+            val conversation = preview(reason)
+            assertEquals("此完整路径 2 条 · 源会话 3 条不同消息",
+                importPreviewCounts(conversation, conversation.branches.single()))
+        }
+    }
+
+    @Test fun chatGptCountsExposeWholeSourceDistinctFromSelectedVisiblePath() {
+        for (reason in listOf("chatgpt_complete_path", "chatgpt_complete_path_current")) {
+            val conversation = preview(reason)
+            assertEquals("此完整路径 2 条 · 源会话 3 条不同消息",
+                importPreviewCounts(conversation, conversation.branches.single()))
+        }
+    }
 }

@@ -145,6 +145,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     val isPending = tool.isPending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val images = tool.output.filterIsInstance<UIMessagePart.Image>()
+        .filterNot { it.url.startsWith("orbis-video-frame://") }
 
     // 摘要由注册的渲染器决定; 图片输出与拒绝原因为所有工具通用
     val hasExtraContent = isPending || hostFailure != null || renderer.hasSummary(context) || isDenied || images.isNotEmpty()

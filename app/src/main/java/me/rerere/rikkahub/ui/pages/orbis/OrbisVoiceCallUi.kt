@@ -83,6 +83,12 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
     }
     val microphonePermission = rememberPermissionState(PermissionRecordAudio)
     PermissionManager(microphonePermission)
+    val videoRuntime = me.rerere.rikkahub.service.OrbisVideoCallRuntime.get(androidx.compose.ui.platform.LocalContext.current)
+    val video by videoRuntime.state.collectAsStateWithLifecycle()
+    if (video.callId == callId) {
+        OrbisVideoCallOverlay(runtime, videoRuntime)
+        return
+    }
     if (minimized || call.reviewingReplies) {
         // Returning to the chat can always reopen the call; the notification also returns here.
         OrbisVoiceCallReopenButton(onReopen = { minimized = false; runtime.setReviewingReplies(callId, false) })
@@ -127,23 +133,13 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                             VoicePhase.Error -> voice.error ?: "通话暂时中断"
                             VoicePhase.Off -> "正在准备"
                         }, color = cream, fontSize = 15.sp)
-                        if (voice.replyBlocked) {
-                            voice.replyNotice?.let { Text(it, color = cream.copy(alpha = .7f), fontSize = 12.sp,
-                                modifier = Modifier.testTag("orbis-call-reply-pause-notice")) }
-                            TextButton(onClick = {
+                        OrbisCallQueueRecoveryControls(voice, cream,
+                            onRecover = { runtime.resumeReplies(callId) }, onReview = {
                                 runtime.setReviewingReplies(callId, true)
                                 call.conversationId?.takeIf { it != currentConversationId }?.let {
                                     navigateToChatPage(navController, chatId = it)
                                 }
-                            }, modifier = Modifier.testTag("orbis-call-review-replies")) {
-                                Text("回聊天检查", color = cream)
-                            }
-                            FilledTonalButton(onClick = { runtime.resumeReplies(callId) },
-                                enabled = !voice.replyResumeChecking,
-                                modifier = Modifier.testTag("orbis-call-resume-replies")) {
-                                Text(if (voice.replyResumeChecking) "正在检查…" else "检查并恢复收音")
-                            }
-                        }
+                            })
                         if (call.canResumeAudio) FilledTonalButton(onClick = { runtime.resumeAudio(callId) },
                             modifier = Modifier.testTag("orbis-call-resume-audio")) { Text("恢复通话音频") }
                         voice.recoveryNotice?.let { Text(it, color = cream.copy(alpha = .7f), fontSize = 12.sp,

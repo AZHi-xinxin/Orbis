@@ -128,7 +128,7 @@ class OrbisSettingsPresentationTest {
         listOf("MCP", "TTS", "快捷消息", "天气", "未接入").forEach {
             assertFalse("Unexpected duplicated or unavailable tool: $it", labels.contains(it))
         }
-        assertEquals(6, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
+        assertEquals(9, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
         assertEquals(1, orbisToolEntries.count { it.destination == OrbisToolDestination.BLUETOOTH_TOY })
     }
 
@@ -139,5 +139,7 @@ class OrbisSettingsPresentationTest {
             OrbisToolDestination.BLUETOOTH_TOY), rows[0])
         assertEquals(listOf(OrbisToolDestination.GALLERY, OrbisToolDestination.SCHEDULE,
             OrbisToolDestination.PRIVATE_ROOM), rows[1])
+        assertEquals(listOf(OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
+            OrbisToolDestination.PHOTO_WALL), rows[2])
     }
 }

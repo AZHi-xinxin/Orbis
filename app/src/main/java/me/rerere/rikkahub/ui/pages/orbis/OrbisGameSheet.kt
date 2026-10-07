@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -400,6 +401,7 @@ internal fun GameContent(
                     Surface(shape = RoundedCornerShape(20.dp), color = colors.panel,
                         border = BorderStroke(1.dp, colors.border)) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OrbisEntryArt(OrbisEntryArtwork.ARCADE, Modifier.fillMaxWidth().height(88.dp))
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Surface(Modifier.size(52.dp), shape = RoundedCornerShape(16.dp), color = colors.accent) {
                                     Box(contentAlignment = Alignment.Center) { Text("●○", fontSize = 23.sp, color = colors.onAccent) }
@@ -514,7 +516,7 @@ private fun MiniGameCard(game: OrbisInstalledGame, enabled: Boolean, modifier: M
         onClickLabel = "开一局${game.title}", onClick = onOpen), shape = RoundedCornerShape(18.dp), color = colors.tintedPanel,
         border = BorderStroke(1.dp, colors.border)) {
         Column(Modifier.padding(14.dp).heightIn(min = 120.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("✧", fontSize = 26.sp, color = colors.accent)
+            OrbisEntryArt(OrbisEntryArtwork.ARCADE, Modifier.fillMaxWidth().height(70.dp))
             Text(game.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = colors.ink)
             Text(game.description.ifBlank { "点开游玩" }, maxLines = 3, fontSize = 11.sp, color = colors.mutedInk)
             Text("${game.authorName} · 本地游戏", maxLines = 1, fontSize = 10.sp, color = colors.mutedInk)

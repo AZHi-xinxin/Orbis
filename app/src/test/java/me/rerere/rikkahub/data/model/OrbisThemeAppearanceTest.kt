@@ -40,6 +40,24 @@ class OrbisThemeAppearanceTest {
         assertEquals(flow, display.appearanceForStyle(false).chatFlow)
     }
 
+    @Test fun headerOpacityPersistsIndependentlyAndResetOnlyChangesTheSelectedProfile() {
+        val original = DisplaySetting(userNickname = "Synthetic", orbisAppearance = OrbisAppearance(
+            headerOpacity = .25f, composerOpacity = .6f, bubbleOpacity = .8f,
+            backgroundImage = "file:///synthetic/original.png"))
+        val changed = original.withAppearanceForStyle(true) { it.copy(headerOpacity = 0f) }
+        val restored = Json.decodeFromString<DisplaySetting>(Json.encodeToString(changed))
+        assertEquals(original.orbisAppearance, restored.orbisAppearance)
+        assertEquals(0f, restored.appearanceForStyle(true).headerOpacity, 0f)
+        assertEquals(.25f, restored.appearanceForStyle(false).headerOpacity, 0f)
+        val deepSeekReset = restored.withAppearanceForStyle(true) { deepSeekDefaultAppearance() }
+        assertEquals(.75f, deepSeekReset.appearanceForStyle(true).headerOpacity, 0f)
+        assertEquals(original.orbisAppearance, deepSeekReset.orbisAppearance)
+        val orbisReset = restored.withAppearanceForStyle(false) { OrbisAppearance() }
+        assertEquals(.75f, orbisReset.appearanceForStyle(false).headerOpacity, 0f)
+        assertEquals(restored.deepSeekAppearance, orbisReset.deepSeekAppearance)
+        assertEquals("Synthetic", orbisReset.userNickname)
+    }
+
     @Test fun themeOverridesAreNormalized() {
         val value = DisplaySetting().withAppearanceForStyle(true) { it.copy(composerOpacity = -2f, bubbleOpacity = 8f) }
         assertEquals(.15f, value.appearanceForStyle(true).composerOpacity, 0f)

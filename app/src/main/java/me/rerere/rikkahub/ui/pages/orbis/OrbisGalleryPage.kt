@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -93,6 +95,7 @@ internal fun OrbisGalleryPage(assistantId: String, assistantName: String, onClos
     var notice by remember { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("all") }
+    var navigationExpanded by rememberSaveable { mutableStateOf(false) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var fullScreen by remember(selected) { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
@@ -173,7 +176,9 @@ internal fun OrbisGalleryPage(assistantId: String, assistantName: String, onClos
                             onReload = { task { null } }, fullScreen = fullScreen, onFullScreen = { fullScreen = it })
                     } else {
                         BackHandler { onClose() }
-                        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        GalleryNavigationPanel(navigationExpanded, { navigationExpanded = !navigationExpanded },
+                            activeFilter = query.isNotBlank() || filter != "all",
+                            onClearFilter = { query = ""; filter = "all" }) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) { Text("留住一份心意", style = MaterialTheme.typography.titleMedium)
                                     Text("作品仅存本机，打开不会发送给 AI。", style = MaterialTheme.typography.bodySmall, color = OrbisTheme.colors.mutedInk) }
@@ -185,12 +190,12 @@ internal fun OrbisGalleryPage(assistantId: String, assistantName: String, onClos
                             }
                             Text("右侧开关：允许 AI 写 / 改 / 删、填写给 AI 的问卷；正文与答案仅在 AI 按需调用工具时交给模型。", style = MaterialTheme.typography.labelSmall)
                             OutlinedTextField(query, { query = galleryTextPrefix(it, 120) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("按作品名字搜索") }, shape = RoundedCornerShape(20.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 listOf("all" to "全部", "questionnaire" to "问卷", "html" to "礼物", "favorite" to "收藏").forEach { (key, label) ->
                                     FilterChip(filter == key, { filter = key }, label = { Text(label) })
                                 }
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 TextButton(enabled = !busy, onClick = { files.launch(arrayOf("text/html", "text/plain", "application/json")) }) { Text("导入作品") }
                                 TextButton(enabled = !busy, onClick = { questionnaire.launch(arrayOf("text/html", "application/json", "text/plain")) }) { Text("导入问卷") }
                                 TextButton(enabled = !busy, onClick = { urlEntry = true }) { Text("问卷网址") }
@@ -238,6 +243,22 @@ internal fun OrbisGalleryPage(assistantId: String, assistantName: String, onClos
         discardDraft?.let { draft -> AlertDialog(onDismissRequest = { discardDraft = null }, title = { Text("丢弃这个草稿？") }, text = { Text("${draft.title}\n只删除尚未发布的草稿，不动已有作品、版本或答案。") },
             confirmButton = { TextButton(onClick = { discardDraft = null; task { withContext(Dispatchers.IO) { repo.discardDraftByHuman(draft.id) }; pendingDrafts = withContext(Dispatchers.IO) { repo.drafts() }; "草稿已丢弃。" } }) { Text("确认丢弃") } },
             dismissButton = { TextButton(onClick = { discardDraft = null }) { Text("取消") } }) }
+    }
+}
+
+/** Collapsed on entry; expanding never changes a search, permission or import state. */
+@Composable
+internal fun GalleryNavigationPanel(expanded: Boolean, onToggle: () -> Unit, activeFilter: Boolean,
+    onClearFilter: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onToggle, modifier = Modifier.weight(1f)) {
+                Text(if (expanded) "收起导航与设置  ▴" else "搜索、筛选与设置  ▾")
+            }
+            if (activeFilter) TextButton(onClick = onClearFilter) { Text("清除筛选") }
+        }
+        if (expanded) Column(Modifier.fillMaxWidth().heightIn(max = 310.dp)
+            .verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
     }
 }
 

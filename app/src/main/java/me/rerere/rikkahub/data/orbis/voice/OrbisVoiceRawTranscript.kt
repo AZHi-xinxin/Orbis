@@ -45,8 +45,9 @@ internal fun strictVoiceCallReadableTranscript(record: OrbisVoiceCallRecord): Li
     val entries = record.transcript.toMutableList()
     for (node in nodes) {
         val message = node.currentMessage
-        if (message.orbisVoiceCallId != record.id || message.orbisVoiceCallKind !in setOf("turn", "opening") ||
+        if (message.orbisVoiceCallId != record.id || message.orbisVoiceCallKind !in setOf("turn", "opening", "visual") ||
             message.role !in setOf(MessageRole.USER, MessageRole.ASSISTANT)) continue
+        if (message.orbisVoiceCallKind == "visual" && message.role != MessageRole.ASSISTANT) continue
         // Only real Text after filtering; think-only/tool-only visual notices are not utterances.
         val readableText = message.privateRoomPublicReplyText() ?: continue
         val index = entries.indexOfFirst { it.messageId == message.id.toString() }

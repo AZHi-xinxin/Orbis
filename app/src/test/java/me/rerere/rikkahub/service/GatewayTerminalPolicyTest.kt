@@ -81,4 +81,48 @@ class GatewayTerminalPolicyTest {
             fail("must cancel")
         } catch (_: CancellationException) { }
     }
+
+    @Test fun `cancelled voice waits for exact generating request to become not current`() = runTest {
+        var probes = 0
+        val result = finishTerminatedGatewayRequests(listOf(Request("own")), { it.capable }, { _, _ -> true },
+            { probes++; if (probes < 3) GatewayStopProbe.GENERATING else GatewayStopProbe.NOT_CURRENT },
+            { _, _ -> error("no finish or replay") }, stillSafeCancelledVoice = { true })
+        assertEquals(3, probes)
+        assertEquals(1, result.checked)
+        assertFalse(result.mustKeepPaused)
+        assertEquals(0, result.retired)
+    }
+
+    @Test fun `cancelled voice busy status cannot extend terminal budget`() = runTest {
+        var probes = 0
+        val started = testScheduler.currentTime
+        val result = finishTerminatedGatewayRequests(listOf(Request("own")), { it.capable }, { _, _ -> true },
+            { probes++; GatewayStopProbe.CLEANUP_PENDING }, { _, _ -> error("no finish") },
+            stillSafeCancelledVoice = { true })
+        assertTrue(probes > 1)
+        assertEquals(4_000L, testScheduler.currentTime - started)
+        assertTrue(result.mustKeepPaused)
+        assertTrue(result.uncertain)
+    }
+
+    @Test fun `cancelled voice changed owner cannot consume a later idle or finish receipt`() = runTest {
+        for (late in listOf(GatewayStopProbe.NOT_CURRENT, GatewayStopProbe.CAN_STOP)) {
+            var safe = true
+            var probes = 0
+            val result = finishTerminatedGatewayRequests(listOf(Request("own")), { it.capable }, { _, _ -> true },
+                { probes++; if (probes == 1) GatewayStopProbe.GENERATING else { safe = false; late } },
+                { _, _ -> error("stale owner cannot finish") }, stillSafeCancelledVoice = { safe })
+            assertEquals(2, probes)
+            assertTrue(result.mustKeepPaused)
+        }
+    }
+
+    @Test fun `unknown protocol is not retried even during a voice cancellation`() = runTest {
+        var probes = 0
+        val result = finishTerminatedGatewayRequests(listOf(Request("own")), { it.capable }, { _, _ -> true },
+            { probes++; GatewayStopProbe.UNSUPPORTED }, { _, _ -> error("no finish") },
+            stillSafeCancelledVoice = { true })
+        assertEquals(1, probes)
+        assertTrue(result.mustKeepPaused)
+    }
 }

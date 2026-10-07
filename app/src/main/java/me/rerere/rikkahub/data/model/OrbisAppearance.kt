@@ -13,6 +13,8 @@ data class OrbisAppearance(
     val bubbleOpacity: Float = .92f,
     /** Only the chat composer's backdrop; text and controls retain their own contrast. */
     val composerOpacity: Float = 1f,
+    /** Floating chat header backdrops only; labels, icons, rings and borders remain visible. */
+    val headerOpacity: Float = .75f,
     /** False inherits the current assistant's existing image without changing it. */
     val backgroundEnabled: Boolean = false,
     val backgroundStyle: OrbisBackgroundStyle = OrbisBackgroundStyle.PAPER,
@@ -40,6 +42,7 @@ data class OrbisAppearance(
         userBubbleOpacity = userBubbleOpacity?.takeIf { it.isFinite() }?.coerceIn(0f, 1f),
         assistantBubbleOpacity = assistantBubbleOpacity?.takeIf { it.isFinite() }?.coerceIn(0f, 1f),
         composerOpacity = if (composerOpacity.isFinite()) composerOpacity.coerceIn(.15f, 1f) else 1f,
+        headerOpacity = if (headerOpacity.isFinite()) headerOpacity.coerceIn(0f, 1f) else .75f,
         chatTextColor = chatTextColor?.or(0xFF000000.toInt()),
         eventOpacity = if (eventOpacity.isFinite()) eventOpacity.coerceIn(0f, 1f) else .22f,
     )

@@ -25,10 +25,11 @@ object OrbisVoiceCallProtocol {
     const val CALL_MODE_PREFIX = "CALL_MODE_V1 "
     private val json = Json { encodeDefaults = false }
 
-    fun begin(id: String): String {
+    fun begin(id: String, video: Boolean = false): String {
         validateVoiceCallId(id)
         return encode(OrbisVoiceCallMarker(OrbisVoiceCallMarkerKind.BEGIN, id)) +
-            "\n【已进入语音通话】\n通话输入是语音转写后的文字，不含音频、语调或呼吸信息。回答会被朗读，请用自然短句，不写代码块、装饰符号或括号动作。"
+            (if (video) "\n【已进入视频通话】\n画面由相机定期抽帧提供，并非连续视频流；可用 orbis_video_frame_now 即时看一帧。" else "\n【已进入语音通话】") +
+            "\n语音输入是转写后的文字，不含音频本身、语调或呼吸信息。回答会被朗读，请用自然短句，不写代码块、装饰符号或括号动作。"
     }
 
     fun userTurn(id: String, text: String): String {
@@ -40,7 +41,8 @@ object OrbisVoiceCallProtocol {
 
     fun end(record: OrbisVoiceCallRecord): String =
         encode(OrbisVoiceCallMarker(OrbisVoiceCallMarkerKind.END, record.id, record.durationMs)) +
-            "\n" + title(record.durationMs) + "\nCALL_MODE_V1 {\"active\":false}"
+            "\n" + title(record.durationMs) + "\nCALL_MODE_V1 {\"active\":false}" +
+            if (record.video) "\n[视频通话画面仍临时保留 10 分钟。可用 orbis_video_frames / orbis_video_frame_read 重新查看，并用 orbis_video_frame_keep 选择最多 10 张存入照片墙；到期未保留画面自动清理。]" else ""
 
     /** Call only after the complete archive has been durably saved; text remains model-readable. */
     fun summary(record: OrbisVoiceCallRecord): String {

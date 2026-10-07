@@ -215,6 +215,10 @@ private fun ManualCard(title: String, body: String, footnote: String? = null) {
 private fun manualLabel(key: String): String = when (key) {
     "local_schedule" -> "本地课表与日程"
     "local_kaomoji" -> "文字颜文字库"
+    "companion_spaces" -> "秘密基地、共同空间与照片墙"
+    "video_calls" -> "抽帧视频通话"
+    "companion_spaces_and_video" -> "新空间与视频使用边界"
+    "local_presentation_and_files" -> "外观、附件保护与救援说明"
     "voice_notes" -> "可点击语音条"
     "device_facts" -> "设备事实与本地观察"
     "context_message_limit" -> "消息截取与记忆断层"

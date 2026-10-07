@@ -120,6 +120,7 @@ private fun HighlightCodeBlockContent(
     val settings = LocalSettings.current
     val normalizedLanguage = remember(language) { language.lowercase() }
     val canInlinePreview = completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES
+    val autoRenderMermaid = shouldAutoRenderMermaid(normalizedLanguage, completeCodeBlock, LocalImportedHistory.current)
     var previewMode by remember(canInlinePreview, code, normalizedLanguage) {
         mutableStateOf(false)
     }
@@ -186,7 +187,7 @@ private fun HighlightCodeBlockContent(
                             .height(200.dp),
                     )
                 }
-                completeCodeBlock && normalizedLanguage == "mermaid" -> {
+                autoRenderMermaid -> {
                     Mermaid(
                         code = code,
                         modifier = Modifier.fillMaxWidth(),

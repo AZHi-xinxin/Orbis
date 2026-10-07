@@ -88,6 +88,31 @@ internal class GenerationDurabilityException(cause: Throwable) :
 internal class GenerationToolOutcomeUnknownException :
     IllegalStateException("工具已开始但未收到可靠结果，后续调用已暂停；请核对外部结果，不要直接重试。")
 
+/**
+ * A tool-owned, side-effect-free preflight rejected the request before its mutation callback.
+ * [publicReason] is deliberately supplied by the tool and must be safe to show to the model.
+ */
+internal class ToolRejectedBeforeExecutionException(
+    val publicReason: String,
+    cause: Throwable? = null,
+) : IllegalArgumentException("Tool request was rejected before execution", cause)
+
+internal fun toolOutcomeIsUnknown(
+    executionStarted: Boolean,
+    durableCheckpoints: Boolean,
+    failure: Throwable,
+): Boolean = executionStarted && failure !is ToolRejectedBeforeExecutionException &&
+    (durableCheckpoints || failure is MessageNodeCapacityException)
+
+internal fun rejectedToolPayload(failure: ToolRejectedBeforeExecutionException) = buildJsonObject {
+    put("status", JsonPrimitive("failed"))
+    put("reason_code", JsonPrimitive("tool_rejected_before_execution"))
+    put("execution_performed", JsonPrimitive(false))
+    put("message", JsonPrimitive(failure.publicReason.ifBlank {
+        "工具在写入前拒绝了请求；请核对当前参数后再试。"
+    }.take(300)))
+}
+
 @Serializable
 sealed interface GenerationChunk {
     data class Messages(
@@ -148,6 +173,7 @@ class GenerationLoop(
         emitTerminalEvidence: Boolean = false,
         admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
+        requireActiveTurn: () -> Unit = {},
     ): Flow<GenerationChunk> = flow {
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
@@ -198,6 +224,7 @@ class GenerationLoop(
         }
 
         for (stepIndex in 0 until maxSteps) {
+            requireActiveTurn()
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
             val protectedResume = privatePresentation.protectOutstandingTools(messages)
@@ -223,6 +250,7 @@ class GenerationLoop(
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
                 responseForContinuation = generateInternal(
+                    requireActiveTurn = requireActiveTurn,
                     onGatewayRequest = onGatewayRequest,
                     inputSnapshot = inputSnapshot,
                     assistant = assistant,
@@ -384,6 +412,7 @@ class GenerationLoop(
             }
             var requestedCompaction: Pair<UIMessagePart.Tool, PreparedCompaction>? = null
             toolsToProcess.forEach { tool ->
+                requireActiveTurn()
                 var executionStarted = false
                 if (tool.toolName == COMPACT_TOOL_NAME && compactionControl != null &&
                     tool.approvalState !is ToolApprovalState.Denied && !tool.isPending) {
@@ -456,6 +485,7 @@ class GenerationLoop(
                                 }
                                 Log.i(TAG, "generateText: executing tool ${toolDef.name}; arguments withheld")
                                 durableBoundary(withCurrentToolResults(), tool, completed = false)
+                                requireActiveTurn()
                                 executionStarted = true
                                 val result = if (cloudNative) {
                                     withContext(CloudToolInvocationContext(tool.toolCallId, messages.last().id.toString(), conversationId?.toString())) { toolDef.execute(args) }
@@ -476,7 +506,7 @@ class GenerationLoop(
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                             if (it is CancellationException) throw it
                             if (it is GenerationDurabilityException) throw it
-                            if (executionStarted && (durableCheckpoints || it is MessageNodeCapacityException)) {
+                            if (toolOutcomeIsUnknown(executionStarted, durableCheckpoints, it)) {
                                 // A transport/implementation exception after dispatch is not proof
                                 // that the external effect failed. Keep STARTED, never synthesize
                                 // a completed receipt or advance to another external action.
@@ -487,7 +517,7 @@ class GenerationLoop(
                             executedTools += tool.copy(
                                 output = listOf(
                                     UIMessagePart.Text(
-                                        json.encodeToString(
+                                        if (it is ToolRejectedBeforeExecutionException) rejectedToolPayload(it).toString() else json.encodeToString(
                                             buildJsonObject {
                                                 put(
                                                     "error",
@@ -627,6 +657,7 @@ class GenerationLoop(
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
+        requireActiveTurn: () -> Unit = {},
     ): UIMessage {
         var initialEstimate: Long? = null
         var initialSelection: GenerationContextSelection? = null
@@ -693,6 +724,15 @@ class GenerationLoop(
         compactionControl?.observeRequestEstimate(prepared.estimatedTokens)
         // Reversible tool deletions are private local bookkeeping, never provider input.
         val internalMessages = prepared.messages.map { it.withoutDeletedToolRecordData().withVoiceNoteTranscripts() }
+        // Resolve expiring frame handles anew for each HTTP attempt; never freeze image bytes
+        // into history, the continuation snapshot, or a retry that may outlive their TTL.
+        suspend fun providerMessages(): List<UIMessage> {
+            // Host-bound identity survives in-turn compaction and message-count projection.
+            requireActiveTurn()
+            return me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages(
+                context, assistant.id.toString(), internalMessages,
+                modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE))
+        }
         // Publish once per new invocation, not on tool continuations. Counts remain local, never
         // alter prompts/cache keys, and deliberately do not claim upstream delivery or recall.
         if (conversationId != null) initialSelection?.let { selection ->
@@ -751,7 +791,7 @@ class GenerationLoop(
                     try {
                         providerImpl.streamText(
                             providerSetting = provider,
-                            messages = internalMessages,
+                            messages = providerMessages(),
                             params = params
                         ).collect { chunk ->
                             sawAnyChunk = true
@@ -810,7 +850,7 @@ class GenerationLoop(
                     ) {
                         providerImpl.generateText(
                             providerSetting = provider,
-                            messages = internalMessages,
+                            messages = providerMessages(),
                             params = params,
                         )
                     }

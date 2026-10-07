@@ -3,6 +3,7 @@ package com.lover.connect
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.os.*
 import androidx.core.app.NotificationCompat
 
@@ -11,6 +12,19 @@ class AlarmRingService : Service() {
     private val ringtonePlayer by lazy { OrbisRingtonePlayer(this) }
     private var vibrator: Vibrator? = null
     private var recordId: String? = null
+    private val vibrationHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val vibrationSession by lazy {
+        CompanionAlarmVibrationSession(
+            isAllowed = ::isVibrationAllowed,
+            startVibrating = ::startVibrating,
+            stopVibrating = {
+                runCatching { vibrator?.cancel() }
+                vibrator = null
+            },
+            scheduleCheck = { vibrationHandler.postDelayed(it, 1_000L) },
+            cancelCheck = { vibrationHandler.removeCallbacks(it) },
+        )
+    }
 
     companion object {
         private const val CHANNEL_ID = "lc_alarm"
@@ -38,7 +52,7 @@ class AlarmRingService : Service() {
             startForeground(NOTIFICATION_ID, buildAlarmNotification(message))
             activeAlarmId = recordId
             startRinging()
-            runCatching { startVibrating() }
+            runCatching { vibrationSession.start() }
         } catch (_: Exception) {
             val failedId = recordId
             releasePlayback("playback_cleanup")
@@ -60,8 +74,7 @@ class AlarmRingService : Service() {
 
     private fun releasePlayback(reason: String) {
         ringtonePlayer.stop()
-        runCatching { vibrator?.cancel() }
-        vibrator = null
+        vibrationSession.stop()
         if (recordId != null) record("stopped", reason)
         recordId = null
         activeAlarmId = null
@@ -79,18 +92,32 @@ class AlarmRingService : Service() {
         )
     }
 
+    private fun isVibrationAllowed(): Boolean = runCatching {
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return@runCatching false
+        val groupBlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            channel.group?.let { manager.getNotificationChannelGroup(it)?.isBlocked } == true
+        companionAlarmVibrationAllowed(
+            notificationsEnabled = manager.areNotificationsEnabled(),
+            channelEnabled = companionAlarmVibrationImportanceAllowed(channel.importance) && !groupBlocked,
+            channelVibrationEnabled = channel.shouldVibrate(),
+        )
+    }.getOrDefault(false)
+
+    @Suppress("DEPRECATION")
     private fun startVibrating() {
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         val pattern = longArrayOf(0, 800, 400, 800, 400)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator?.vibrate(pattern, 0)
-        }
+        // Give Android the correct usage so its alarm/DND vibration policy can also apply.
+        val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+        vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0), attributes)
     }
 
     private fun createChannel() {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // Keep the existing ID and the human's existing channel choices intact.
+        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
             CHANNEL_ID, "Orbis 陪伴闹钟",
             NotificationManager.IMPORTANCE_HIGH
@@ -98,7 +125,6 @@ class AlarmRingService : Service() {
             enableVibration(true)
             setSound(null, null)
         }
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(channel)
     }
 

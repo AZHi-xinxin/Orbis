@@ -40,6 +40,11 @@ class ConversationSession(
     var generationRecoveryBlocked: Boolean = false
         internal set
 
+    // An ended remote owner has not yet been proven retired. Never cleared by a plain resume.
+    @Volatile
+    var gatewayRecoveryBlocked: Boolean = false
+        internal set
+
     // A short manual transaction may suspend for Room IO. RAM-only UI edits must not be
     // silently overwritten by its publication. Mutations/changes use synchronized(this).
     @Volatile
@@ -63,7 +68,7 @@ class ConversationSession(
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
     val isInUse: Boolean
-        get() = refCount.get() > 0 || _generationJob.value != null ||
+        get() = refCount.get() > 0 || hasUnfinishedJobs() || gatewayRecoveryBlocked ||
                 messageQueue.state.value.messages.isNotEmpty() || automaticWakeQueue.pending.isNotEmpty()
 
     // 空闲检查任务
@@ -121,6 +126,10 @@ class ConversationSession(
     }
 
     fun getJob(): Job? = _generationJob.value
+
+    /** Includes replaced/cancelled predecessors still inside NonCancellable persistence/cleanup. */
+    @Synchronized
+    fun hasUnfinishedJobs(): Boolean = activeJobs.any { !it.isCompleted }
 
     @Synchronized
     fun cancelJobs(): List<Job> = activeJobs.toList().also { jobs ->

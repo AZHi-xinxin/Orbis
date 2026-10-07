@@ -15,17 +15,23 @@ internal fun showConsultationInNavigation(featureEnabled: Boolean, connectionAva
  * Cloud connection consent and website storage remain separate and unchanged.
  */
 internal class OrbisHomeNavigationState {
+    // Installed by the visible Compose host, but invoked by every navigation entry
+    // point (including Activity intents) BEFORE a focused AndroidView can detach.
+    internal var beforeVisibilityChange: (() -> Unit)? = null
+
     var visible by mutableStateOf(false)
         private set
     var homeRevision by mutableIntStateOf(0)
         private set
 
     fun openHome() {
+        if (!visible) beforeVisibilityChange?.invoke()
         homeRevision++
         visible = true
     }
 
     fun returnToChat() {
+        if (visible) beforeVisibilityChange?.invoke()
         visible = false
     }
 }

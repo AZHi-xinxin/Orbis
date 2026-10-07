@@ -28,6 +28,8 @@ import androidx.compose.ui.semantics.stateDescription
 import kotlinx.coroutines.isActive
 import me.rerere.rikkahub.data.orbis.OrbisMemoryAtlas as Atlas
 import me.rerere.rikkahub.data.orbis.OrbisAtlasGalaxy as Galaxy
+import me.rerere.rikkahub.data.orbis.OrbisAtlasMilkyWay as MilkyWay
+import me.rerere.rikkahub.data.orbis.OrbisAtlasDisplayMode
 import kotlin.math.PI
 import kotlin.math.min
 
@@ -46,9 +48,15 @@ internal fun OrbisMemoryAtlasCanvas(
     onReset: () -> Unit,
     onToggleMotion: () -> Unit,
     modifier: Modifier = Modifier,
+    displayMode: OrbisAtlasDisplayMode = OrbisAtlasDisplayMode.LIGHTWEIGHT,
 ) {
     val density = LocalDensity.current.density
     val galaxy = remember(demo) { Galaxy.layout(demo) }
+    val milkyWay = remember(demo, displayMode) {
+        if (displayMode == OrbisAtlasDisplayMode.GALAXY) MilkyWay.layout(demo)
+        else MilkyWay.Layout(emptyList(), emptyList(), emptyList())
+    }
+    val milkyWayCache = remember(milkyWay) { MilkyWayFrameCache(milkyWay) }
     val tint = remember(galaxy) { galaxy.profile.tint.color() }
     val starColors = remember(demo) { demo.stars.map { Galaxy.tintForType(it.type).color() } }
     val related = remember(demo, selected) { Atlas.relatedIndices(demo, selected) }
@@ -102,7 +110,7 @@ internal fun OrbisMemoryAtlasCanvas(
             }
         }
         .focusable()
-        .pointerInput(galaxy, density) {
+        .pointerInput(galaxy, density, displayMode) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 var totalPan = Offset.Zero
@@ -138,7 +146,9 @@ internal fun OrbisMemoryAtlasCanvas(
                         }
                     } while (true)
                     if (!cancelled && !transformed && !multiplePointers) {
-                        val points = Galaxy.projectStars(galaxy, readCamera(), (size.width / density).toDouble(), (size.height / density).toDouble())
+                        val points = if (displayMode == OrbisAtlasDisplayMode.GALAXY)
+                            MilkyWay.projectMemories(milkyWay, readCamera(), (size.width / density).toDouble(), (size.height / density).toDouble())
+                        else Galaxy.projectStars(galaxy, readCamera(), (size.width / density).toDouble(), (size.height / density).toDouble())
                             .map { Galaxy.displace(it, flow) }
                         select(Atlas.nearestStar(points, (lastPosition.x / density).toDouble(), (lastPosition.y / density).toDouble()))
                     }
@@ -154,6 +164,10 @@ internal fun OrbisMemoryAtlasCanvas(
         val h = (size.height / density).toDouble()
         if (w <= 0 || h <= 0) return@Canvas
         val view = Atlas.normalized(camera())
+        if (displayMode == OrbisAtlasDisplayMode.GALAXY) {
+            drawMilkyWay(milkyWayCache.frame(view, w, h), density, w, h, selected, starColors, demo.edges)
+            return@Canvas
+        }
         val time = clock()
         val touch = if (motionAllowed) flow else Galaxy.Flow()
         val points = Galaxy.projectStars(galaxy, view, w, h).map { Galaxy.displace(it, touch) }

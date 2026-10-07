@@ -50,6 +50,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -185,9 +186,11 @@ internal fun resolveOrbisVisualColors(
     deepSeekStyle: Boolean,
     inherited: OrbisColors? = null,
     inheritedDarkTheme: Boolean = darkTheme,
+    season: OrbisSeason = OrbisSeason.NONE,
 ): OrbisColors = inherited?.takeIf { inheritedDarkTheme == darkTheme } ?: when {
     deepSeekStyle && darkTheme -> OrbisPalette.DeepSeekDark
     deepSeekStyle -> OrbisPalette.DeepSeekLight
+    season != OrbisSeason.NONE -> orbisSeasonColors(season, darkTheme)
     darkTheme -> OrbisPalette.Dark
     else -> OrbisPalette.Light
 }
@@ -197,7 +200,7 @@ object OrbisTheme {
         @Composable
         @ReadOnlyComposable
         get() = resolveOrbisVisualColors(LocalDarkMode.current, LocalOrbisDeepSeekStyle.current,
-            inherited = LocalOrbisColors.current)
+            inherited = LocalOrbisColors.current, season = LocalOrbisSeason.current)
 }
 
 /**
@@ -209,7 +212,8 @@ object OrbisTheme {
 fun OrbisVisualTheme(
     darkTheme: Boolean = LocalDarkMode.current,
     colors: OrbisColors = resolveOrbisVisualColors(darkTheme, LocalOrbisDeepSeekStyle.current,
-        inherited = LocalOrbisColors.current, inheritedDarkTheme = LocalDarkMode.current),
+        inherited = LocalOrbisColors.current, inheritedDarkTheme = LocalDarkMode.current,
+        season = LocalOrbisSeason.current),
     useOrbisMaterialColors: Boolean = true,
     content: @Composable () -> Unit,
 ) {
@@ -355,17 +359,33 @@ fun OrbisPageHeader(
 fun OrbisHeaderIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    backgroundOpacity: Float = .75f,
     content: @Composable () -> Unit,
 ) {
-    val colors = OrbisTheme.colors
     IconButton(onClick = onClick, modifier = modifier.size(48.dp)) {
-        Surface(modifier = Modifier.size(39.dp), shape = RoundedCornerShape(13.dp),
-            color = colors.raisedPanel.copy(alpha = .75f), contentColor = colors.ink,
-            border = BorderStroke(1.dp, colors.border.copy(alpha = .65f))) {
+        OrbisHeaderControlSurface(backgroundOpacity, modifier = Modifier.size(39.dp),
+            shape = RoundedCornerShape(13.dp)) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) { content() }
             }
         }
+    }
+}
+
+/** Fade only the backdrop; preserve the selected theme, outline and content contrast. */
+@Composable
+internal fun OrbisHeaderControlSurface(
+    backgroundOpacity: Float,
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(12.dp),
+    content: @Composable () -> Unit,
+) {
+    val colors = OrbisTheme.colors
+    val opacity = backgroundOpacity.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: .75f
+    Surface(modifier = modifier, shape = shape,
+        color = colors.raisedPanel.copy(alpha = opacity), contentColor = colors.ink,
+        border = BorderStroke(1.dp, colors.border.copy(alpha = .65f))) {
+        content()
     }
 }
 
@@ -504,15 +524,16 @@ fun OrbisBottomDock(
 ) {
     val colors = OrbisTheme.colors
     val deepSeekStyle = LocalOrbisDeepSeekStyle.current
-    val starColor = if (deepSeekStyle) colors.star else Color(0xFFFFE3A7)
+    val themedDock = deepSeekStyle || LocalOrbisSeason.current != OrbisSeason.NONE
+    val starColor = if (themedDock) colors.star else Color(0xFFFFE3A7)
     Box(modifier.fillMaxWidth().windowInsetsPadding(windowInsets)
         .padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
         // Reserve the protruding star inside layout bounds, so all 66 dp remain tappable.
         Box(Modifier.fillMaxWidth().height(72.dp)) {
             Surface(modifier = Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter),
                 shape = RoundedCornerShape(22.dp),
-                color = if (deepSeekStyle || LocalDarkMode.current) colors.dock else Color(0xE81F283D),
-                contentColor = if (deepSeekStyle) colors.onDock else Color.White.copy(alpha = .76f),
+                color = if (themedDock || LocalDarkMode.current) colors.dock else Color(0xE81F283D),
+                contentColor = if (themedDock) colors.onDock else Color.White.copy(alpha = .76f),
                 shadowElevation = if (deepSeekStyle) 0.dp else 10.dp) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -529,7 +550,7 @@ fun OrbisBottomDock(
                             modifier = Modifier.size(68.dp, 48.dp)
                                 .semantics { contentDescription = navigationDescription }) {
                             OrbisConstellation(Modifier.size(62.dp, 42.dp),
-                                color = if (deepSeekStyle) colors.star else Color(0xFFFFE0A0))
+                                color = if (themedDock) colors.star else Color(0xFFFFE0A0))
                         }
                     }
                 }
@@ -541,7 +562,7 @@ fun OrbisBottomDock(
                 modifier = Modifier.align(Alignment.TopCenter).size(66.dp)
                     .semantics { contentDescription = homeDescription }) {
                 Box(Modifier.fillMaxSize().background(Brush.linearGradient(
-                    if (deepSeekStyle) listOf(colors.homeButton, colors.homeButton)
+                    if (themedDock) listOf(colors.homeButton, colors.homeButton)
                     else listOf(Color(0xFF6982BA), Color(0xFF344B7C)))),
                     contentAlignment = Alignment.Center) {
                     OrbisStar(Modifier.size(36.dp), color = starColor)

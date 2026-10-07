@@ -123,13 +123,45 @@ class McpManager(
         } catch (e: McpClientUnavailableException) {
             return listOf(UIMessagePart.Text("Failed to execute MCP tool: ${e.message ?: e.javaClass.name}"))
         }
-        return result.content.map { content ->
+        val imageRequest = StMemoryImageProtocol.readArguments(toolName, args)
+        return result.content.flatMap { content ->
             when (content) {
-                is TextContent -> UIMessagePart.Text(content.text)
-                is ImageContent -> convertImageContentToFilePart(content)
-                else -> UIMessagePart.Text(JsonInstant.encodeToString(content))
+                is TextContent -> {
+                    val decoded = try {
+                        imageRequest?.let { StMemoryImageProtocol.decodeRead(content.text, it) }
+                    } catch (e: IllegalArgumentException) {
+                        return@flatMap listOf(UIMessagePart.Text(e.message ?: "ST 图片校验失败。"))
+                    }
+                    if (decoded == null) listOf(UIMessagePart.Text(content.text)) else {
+                        val image = saveImageBytes(decoded.bytes, decoded.mimeType)
+                        listOf(UIMessagePart.Text(decoded.metadata.toString()), image)
+                    }
+                }
+                is ImageContent -> listOf(convertImageContentToFilePart(content))
+                else -> listOf(UIMessagePart.Text(JsonInstant.encodeToString(content)))
             }
         }
+    }
+
+    fun supportsMemoryImageUploads(serverId: Uuid): Boolean {
+        val server = settingsStore.settingsFlow.value.mcpServers.find { it.id == serverId }
+            ?: return false
+        return server.commonOptions.enable && StMemoryImageProtocol.supports(server.commonOptions.tools)
+    }
+
+    /** Host-side transport only; the model's signed store arguments are sent separately, unchanged. */
+    suspend fun stageMemoryImageUpload(
+        serverId: Uuid, uploadRef: String, mimeType: String, bytes: ByteArray, sha256: String,
+    ) {
+        check(supportsMemoryImageUploads(serverId)) { "此 ST 尚未支持聊天图片直存，请先更新 ST 并刷新工具。" }
+        val args = StMemoryImageProtocol.stageArguments(uploadRef, mimeType, bytes, sha256)
+        val receipt = sessionRegistry.callTool(serverId, StMemoryImageProtocol.STAGE_TOOL, args)
+        check(receipt.isError != true && receipt.content.size == 1 && receipt.content.single() is TextContent) {
+            "ST 图片传输未确认，尚未提交存入；请稍后重试。"
+        }
+        StMemoryImageProtocol.validateStageReceipt(
+            (receipt.content.single() as TextContent).text, uploadRef, mimeType, bytes.size, sha256,
+        )
     }
 
     suspend fun addClient(config: McpServerConfig) = sessionRegistry.addClient(config)
@@ -153,12 +185,16 @@ class McpManager(
 
     private suspend fun convertImageContentToFilePart(image: ImageContent): UIMessagePart.Image {
         val bytes = Base64.decode(image.data)
+        return saveImageBytes(bytes, image.mimeType)
+    }
+
+    private suspend fun saveImageBytes(bytes: ByteArray, mimeType: String): UIMessagePart.Image {
         val extension = android.webkit.MimeTypeMap.getSingleton()
-            .getExtensionFromMimeType(image.mimeType) ?: "bin"
+            .getExtensionFromMimeType(mimeType) ?: "bin"
         val entity = filesManager.saveUploadFromBytes(
             bytes = bytes,
             displayName = "mcp_image.$extension",
-            mimeType = image.mimeType,
+            mimeType = mimeType,
         )
         return UIMessagePart.Image(url = filesManager.getFile(entity).toUri().toString())
     }

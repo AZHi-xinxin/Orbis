@@ -62,6 +62,8 @@ class ChatToolFactory(
     private val cloudTools: CloudToolsEngine? = null,
     private val settingsStore: SettingsStore? = null,
 ) {
+    private val stImageAttachments = StMemoryImageAttachmentRegistry()
+
     suspend fun createTools(
         settings: Settings,
         assistant: Assistant,
@@ -71,6 +73,7 @@ class ChatToolFactory(
         voiceCallId: String? = null,
         allowAmbientCallBinding: Boolean = true,
         consultationReferenceOnly: Boolean = false,
+        imageSourceMessageIds: Set<kotlin.uuid.Uuid>? = null,
     ): List<Tool> = buildList {
         if (me.rerere.rikkahub.data.ai.legacyMemoryEnabled(assistant.enableMemory)) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -113,14 +116,54 @@ class ChatToolFactory(
         if (invalidNames.isNotEmpty()) {
             throw InvalidMcpServerNamesException(invalidNames)
         }
-        mcpTools.forEach { (serverId, serverName, tool) ->
+        val imageDestinations = if (conversationId == null || imageSourceMessageIds == null) emptyList() else mcpTools
+            .filter { it.third.name in setOf("store_memory_image", "stbrain_manage") &&
+                mcpManager.supportsMemoryImageUploads(it.first) }
+            .groupBy { it.first }.map { (serverId, entries) ->
+                val server = settings.mcpServers.first { it.id == serverId }
+                val store = entries.firstOrNull { it.third.name == "store_memory_image" } ?: entries.first()
+                StImageDestination(serverId, approvalFingerprint(json.encodeToString(server)), store.second,
+                    "mcp__${store.second}__${store.third.name}")
+            }
+        val imageConversationId = conversationId?.let(kotlin.uuid.Uuid::parse)
+        val imageScope = if (imageDestinations.isEmpty() || imageConversationId == null) null else
+            conversationRepository.getConversationById(imageConversationId)
+                ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
+                ?.takeIf { current -> current.currentMessages.map { it.id }.toSet().containsAll(imageSourceMessageIds!!) }
+                ?.let { StImageAttachmentScope.capture(assistant.id, imageConversationId, it, imageSourceMessageIds!!) }
+        val readImageConversation: suspend () -> me.rerere.rikkahub.data.model.Conversation? = {
+            imageConversationId?.let { conversationRepository.getConversationById(it) }
+        }
+        val readImageOriginal: suspend (String) -> StImageOriginal = { url ->
+            readStMemoryImageOriginal(url, context.filesDir.resolve("upload"),
+                org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.files.FilesManager>())
+        }
+        fun imageTargetsCurrent(): Boolean {
+            val live = settingsStore?.settingsFlow?.value ?: settings
+            val owner = live.getAssistantById(assistant.id) ?: return false
+            return imageDestinations.all { destination ->
+                val current = live.mcpServers.firstOrNull { it.id == destination.serverId }
+                current != null && approvalFingerprint(json.encodeToString(current)) == destination.revision &&
+                    destination.serverId in owner.mcpServers && mcpManager.supportsMemoryImageUploads(destination.serverId)
+            }
+        }
+        if (imageScope != null) add(createStImageListTool(imageScope, imageDestinations, stImageAttachments,
+            readImageConversation, readImageOriginal, ::imageTargetsCurrent))
+        // This authenticated staging primitive is for the host bridge only, never model tool discovery.
+        mcpTools.filterNot { me.rerere.rikkahub.data.ai.mcp.StMemoryImageProtocol.isHostUploadTool(it.third) }.forEach { (serverId, serverName, tool) ->
             val server = settings.mcpServers.firstOrNull { it.id == serverId }
-            val revision = approvalFingerprint("mcp-v1\n${json.encodeToString(server)}\n${json.encodeToString(tool)}")
-            add(
-                Tool(
+            val imageDestination = imageDestinations.firstOrNull { it.serverId == serverId }
+            val bridgeImageTool = imageScope != null && imageDestination != null &&
+                tool.name in setOf("store_memory_image", "stbrain_manage")
+            val schema = if (bridgeImageTool && tool.name == "store_memory_image")
+                stImageReferenceSchema(tool.inputSchema) else tool.inputSchema
+            val revision = approvalFingerprint("mcp-v1\n${json.encodeToString(server)}\n${json.encodeToString(tool)}" +
+                if (bridgeImageTool) "\nst-image-reference-v1\n$schema" else "")
+            val definition = Tool(
                     name = "mcp__${serverName}__${tool.name}",
-                    description = tool.description ?: "",
-                    parameters = { tool.inputSchema },
+                    description = (tool.description ?: "") + if (bridgeImageTool)
+                        "\nOrbis 当前聊天图片请先调用 orbis_list_current_images 获取 upload_ref 和 mime_type，再原样提交。宿主验证并暂存原图；不要生成 data_base64。" else "",
+                    parameters = { schema },
                     needsApproval = { tool.needsApproval },
                     hostApproval = HostToolApproval("mcp:$serverId:${tool.name}", revision, "MCP $serverName · ${tool.name}"),
                     isApprovalCurrent = {
@@ -133,7 +176,11 @@ class ChatToolFactory(
                     },
                     execute = { mcpManager.callTool(serverId, tool.name, it.jsonObject) },
                 )
-            )
+            add(if (bridgeImageTool) wrapStImageUploadTool(definition, tool.name, imageScope!!, imageDestination!!,
+                stImageAttachments, readImageConversation, readImageOriginal, stage = { ref, original ->
+                    check(imageTargetsCurrent()) { "st_image_target_changed" }
+                    mcpManager.stageMemoryImageUpload(serverId, ref, original.mimeType, original.bytes, original.sha256)
+                }) else definition)
         }
         if (BuildConfig.ORBIS_ENABLED) {
             val privateRoomTools = me.rerere.rikkahub.data.orbis.privateroom.buildPrivateRoomAssistantTools(
@@ -198,6 +245,11 @@ class ChatToolFactory(
                 addAll(createOrbisSentinelTools(controller, assistant.id.toString(), conversationId))
             }
             addAll(createOrbisVoiceCallTools(me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository(context), assistant.id.toString()))
+            if (!consultationReferenceOnly) {
+                addAll(createOrbisCompanionSpaceTools(context, assistant.id.toString()))
+                if (conversationId != null) addAll(createOrbisVideoCallTools(context, assistant.id.toString(),
+                    conversationId, voiceCallId, allowAmbientCallBinding))
+            }
             // Independent JSON API, explicitly opted in per current assistant; not MCP wrapping.
             addAll(cloudTools?.createTools(assistant.id).orEmpty())
             add(createOrbisDeviceTool(
@@ -240,7 +292,7 @@ class ChatToolFactory(
                         live.localTools == assistant.localTools
                     tool.name.startsWith("calendar_") -> LocalToolOption.Calendar in live.localTools
                     tool.name.startsWith("workspace_") -> live.workspaceId == assistant.workspaceId
-                    tool.name.startsWith("mcp__") -> live.mcpServers == assistant.mcpServers
+                    tool.name.startsWith("mcp__") || tool.name == ST_IMAGE_LIST_TOOL -> live.mcpServers == assistant.mcpServers
                     else -> live.localTools == assistant.localTools &&
                         live.enableMemory == assistant.enableMemory &&
                         live.useGlobalMemory == assistant.useGlobalMemory &&

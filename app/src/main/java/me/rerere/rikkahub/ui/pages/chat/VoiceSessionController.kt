@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -49,6 +51,8 @@ data class VoiceSessionState(
     val replyBlocked: Boolean = false,
     val replyResumeChecking: Boolean = false,
     val replyNotice: String? = null,
+    /** Listening also includes live human speech; periodic camera work must not use it as idle. */
+    val humanTurnInProgress: Boolean = false,
 ) {
     val isActive: Boolean get() = phase != VoicePhase.Off && phase != VoicePhase.Error
 }
@@ -93,6 +97,12 @@ class VoiceSessionController(
         data class RetryCapture(val revision: Long) : Event
         data class CheckReplies(val revision: Long, val checkReady: suspend () -> Boolean) : Event
         data class RepliesChecked(val revision: Long, val ready: Boolean) : Event
+        data class SupplementaryReply(val reply: Deferred<String?>) : Event
+        data class RequestSupplementaryReply(
+            val stillCurrent: () -> Boolean,
+            val createReply: () -> Deferred<String?>,
+            val accepted: CompletableDeferred<Deferred<String?>?>,
+        ) : Event
     }
 
     private class Pending(val id: Long, val reply: Deferred<String?>) {
@@ -118,6 +128,9 @@ class VoiceSessionController(
         correctTranscript: (String) -> ASRCorrectionResult = { ASRCorrectionResult(it, it) },
         enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)? = null,
         onReplyPauseChanged: (Boolean) -> Unit = {},
+        // Readiness only, including call/model ownership before and after checking. This
+        // callback must never clear a queue/tool hold, resend input or start model work.
+        checkReplyResume: (suspend () -> Boolean)? = null,
     ) {
         if (job?.isCompleted == false) return
         val events = Channel<Event>(Channel.UNLIMITED)
@@ -140,7 +153,7 @@ class VoiceSessionController(
                 delay(200)
                 runSession(events, createAsr, speak, stopSpeaking, onConnected,
                     initialAssistantText, cancelPendingReply, isHeadsetConnected, requestOpening,
-                    correctTranscript, enqueueRecognizedMessage, onReplyPauseChanged)
+                    correctTranscript, enqueueRecognizedMessage, onReplyPauseChanged, checkReplyResume)
             } catch (e: Exception) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) throw e
                 terminalError = when (e) {
@@ -173,6 +186,7 @@ class VoiceSessionController(
         correctTranscript: (String) -> ASRCorrectionResult,
         enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)?,
         onReplyPauseChanged: (Boolean) -> Unit,
+        checkReplyResume: (suspend () -> Boolean)?,
     ) = coroutineScope {
         val pending = linkedMapOf<Long, Pending>()
         val ready = ArrayDeque<Playback>()
@@ -200,6 +214,39 @@ class VoiceSessionController(
         val recoveryBudget = VoiceReconnectBudget()
         var awaitingRetry = false
         var replyResumeJob: Job? = null
+        val replyCheckMutex = Mutex()
+
+        suspend fun checkRepliesReady(revision: Long, timeoutMs: Long, checkReady: suspend () -> Boolean): Boolean =
+            try {
+                withTimeout(timeoutMs) {
+                    // A cancelled, non-cooperative old probe must not overlap a manual one.
+                    // The lock and timeout cover admission as well as the readiness query.
+                    replyCheckMutex.withLock {
+                        controls === events && revision == replyRevision.get() &&
+                            mutableState.value.replyBlocked && checkReady()
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException && !currentCoroutineContext().isActive) throw error
+                false
+            }
+
+        fun scheduleReplyChecks(revision: Long) {
+            val checkReady = checkReplyResume ?: return
+            // Detached from the session's structured teardown: even a broken external
+            // checker cannot delay hang-up. Its old channel/revision cannot regain audio.
+            replyResumeJob = scope.launch {
+                for (delayMs in longArrayOf(250L, 750L, 1_500L, 3_000L)) {
+                    delay(delayMs)
+                    if (controls !== events || revision != replyRevision.get() || !mutableState.value.replyBlocked) return@launch
+                    if (checkRepliesReady(revision, 2_000L, checkReady)) {
+                        events.trySend(Event.RepliesChecked(revision, true))
+                        return@launch
+                    }
+                }
+                events.trySend(Event.RepliesChecked(revision, false))
+            }
+        }
 
         fun audioAllowed(): Boolean = !mutableState.value.audioFocusSuspended && !mutableState.value.replyBlocked
         fun duplexSafe(): Boolean = audioAllowed() && mutableState.value.microphoneEnabled &&
@@ -249,14 +296,14 @@ class VoiceSessionController(
             mutableState.update { it.copy(correctionNotice = it.correctionNotice.begin(captureEpoch)) }
         }
         suspend fun pauseReplies(error: Exception) {
-            replyRevision.incrementAndGet()
+            val revision = replyRevision.incrementAndGet()
             replyResumeJob?.cancel()
             replyResumeJob = null
             // Publish the independent fence before suspending cleanup. Audio focus and mute
             // controls must never release a model/tool-result hold.
             mutableState.update { it.copy(replyBlocked = true, replyResumeChecking = false,
                 replyNotice = if (error is MessageQueuePausedException)
-                    "聊天队列已暂停；通话仍保留。请回聊天核对后检查恢复。[MODEL_QUEUE_PAUSED]"
+                    "聊天队列已暂停；通话仍保留。请回聊天处理后点继续回复。[MODEL_QUEUE_PAUSED]"
                 else VoiceRecoveryPolicy.failure(VoiceFailureStage.MODEL, error).message,
                 pendingReplies = 0, canInterruptPlayback = false, recoveryNotice = null) }
             runCatching { onReplyPauseChanged(true) }
@@ -271,6 +318,10 @@ class VoiceSessionController(
             pending.clear()
             ready.clear()
             waitForTail()
+            // Failure can arrive just before ChatService finishes its exact turn. Allow
+            // only a bounded, read-only recheck; unresolved holds still require the human.
+            // Keep the manual action available while these background checks are running.
+            scheduleReplyChecks(revision)
         }
         suspend fun applyFocusFence() {
             val revision = focusRevision.get()
@@ -351,7 +402,8 @@ class VoiceSessionController(
                 else -> VoicePhase.Listening
             }
             mutableState.update { it.copy(phase = phase, canInterruptPlayback = duplexSafe(),
-                pendingReplies = pending.values.count { reply -> !reply.completed }) }
+                pendingReplies = pending.values.count { reply -> !reply.completed },
+                humanTurnInProgress = asr?.state?.value?.voiceTurn?.itemId != null) }
         }
         try {
             // Muted acceptance is a connected call without even constructing a recorder.
@@ -483,6 +535,27 @@ class VoiceSessionController(
                             event.acknowledged.complete(Unit)
                         } else event.acknowledged.cancel()
                     }
+                    is Event.SupplementaryReply -> if (connected && audioAllowed()) observeReply(event.reply)
+                        else cancelPendingReply(event.reply)
+                    is Event.RequestSupplementaryReply -> {
+                        // Admit before creating any model/queue work, in the same event owner
+                        // as speech. A late camera capture may not jump into a spoken sentence.
+                        if (!event.accepted.isActive) continue
+                        try {
+                            if (!connected || !audioAllowed() || transcribing || tailWaiting ||
+                                asr?.state?.value?.voiceTurn?.itemId != null || playing != null ||
+                                pending.isNotEmpty() || ready.isNotEmpty() || !event.stillCurrent()) {
+                                event.accepted.complete(null)
+                            } else {
+                                val reply = event.createReply()
+                                observeReply(reply)
+                                event.accepted.complete(reply)
+                            }
+                        } catch (error: Exception) {
+                            event.accepted.completeExceptionally(error)
+                            if (error is CancellationException && !isActive) throw error
+                        }
+                    }
                     is Event.Utterance -> if (audioAllowed() && event.epoch == captureEpoch && mutableState.value.microphoneEnabled &&
                         captureMicrophoneRevision == microphoneRevision.get()) {
                         recoveryBudget.stopListening(monotonicTimeMs())
@@ -562,12 +635,9 @@ class VoiceSessionController(
                     is Event.CheckReplies -> if (event.revision == replyRevision.get() && mutableState.value.replyBlocked) {
                         // A slow external check must not hold microphone/service teardown open.
                         // Its only return path is this old channel plus the revision fence.
+                        replyResumeJob?.cancel()
                         replyResumeJob = scope.launch {
-                            val ready = try { event.checkReady() }
-                            catch (error: Exception) {
-                                if (error is CancellationException && !isActive) throw error
-                                false
-                            }
+                            val ready = checkRepliesReady(event.revision, 60_000L, event.checkReady)
                             events.trySend(Event.RepliesChecked(event.revision, ready))
                         }
                     }
@@ -575,7 +645,7 @@ class VoiceSessionController(
                         replyResumeJob = null
                         mutableState.update { it.copy(replyBlocked = !event.ready, replyResumeChecking = false,
                             replyNotice = if (event.ready) null else
-                                "回复、队列或工具结果尚待核对；请回聊天处理后再检查。通话仍保留。[MODEL_RESUME_BLOCKED]") }
+                                "回复、队列或工具结果尚待核对；请回聊天处理，等回复结束后再点继续回复。通话仍保留。[MODEL_RESUME_BLOCKED]") }
                         if (event.ready) {
                             // Only future audio is enabled. Old input and playback were detached.
                             muteOutput?.invoke(!mutableState.value.speakerEnabled || mutableState.value.audioFocusSuspended)
@@ -699,6 +769,23 @@ class VoiceSessionController(
     /** UI acknowledgement only; keeps this utterance's raw/corrected audit intact. */
     fun dismissCorrectionNotice(eventId: Long) {
         mutableState.update { it.copy(correctionNotice = it.correctionNotice.dismiss(eventId)) }
+    }
+
+    /** A camera observation uses the same ordered playback and hang-up cancellation as speech. */
+    fun acceptSupplementaryReply(reply: Deferred<String?>): Boolean =
+        controls?.trySend(Event.SupplementaryReply(reply))?.isSuccess == true
+
+    /** Periodic camera work is created only after the live speech event owner admits it. */
+    suspend fun enqueueSupplementaryReply(
+        stillCurrent: () -> Boolean,
+        createReply: () -> Deferred<String?>,
+    ): Deferred<String?>? {
+        val events = controls ?: return null
+        val accepted = CompletableDeferred<Deferred<String?>?>(currentCoroutineContext()[Job])
+        if (!events.trySend(Event.RequestSupplementaryReply(stillCurrent, createReply, accepted)).isSuccess) {
+            accepted.complete(null)
+        }
+        return accepted.await()
     }
 
     fun stop() {

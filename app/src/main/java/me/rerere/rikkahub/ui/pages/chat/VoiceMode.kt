@@ -53,7 +53,7 @@ private val voiceCallPreparing = AtomicBoolean(false)
 
 /** Lives above adaptive drawer branches, so resizing does not recreate the voice session. */
 @Composable
-fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
+fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings, video: Boolean = false): () -> Unit {
     val context = LocalContext.current.applicationContext
     val client = koinInject<OkHttpClient>()
     val asr = LocalASRState.current
@@ -61,6 +61,8 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
     val toaster = LocalToaster.current
     val permission = rememberPermissionState(PermissionRecordAudio)
     PermissionManager(permission)
+    val cameraPermission = rememberPermissionState(me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera)
+    PermissionManager(cameraPermission)
     val runtime = vm.voiceRuntime
     val chatService = koinInject<ChatService>()
     val appScope = koinInject<AppScope>()
@@ -73,10 +75,13 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
         val conversation = vm.conversation.value
         val assistant = settings.getAssistantById(conversation.assistantId)
         val configurationFailure = OrbisVoiceCallPreflight.firstFailure(settings, assistant)
+        val model = settings.findModelById(assistant?.chatModelId ?: settings.chatModelId)
         val blocked = when {
             voiceCallPreparing.get() -> "正在准备语音通话，请稍候。"
             runtime.callState.value.isActive || runtime.callState.value.ending -> "已有通话正在进行或收尾，请先结束当前通话。"
             configurationFailure != null -> configurationFailure.explanation
+            video && me.rerere.ai.provider.Modality.IMAGE !in model?.inputModalities.orEmpty() ->
+                "视频通话需要当前助手使用支持看图的模型，请先在模型设置确认图片输入能力。"
             asr.state.value.isRecording -> context.getString(R.string.chat_page_voice_finish_dictation)
             vm.messageQueue.value.paused ->
                 context.getString(R.string.chat_page_voice_resume_queue)
@@ -88,6 +93,7 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
         when {
             blocked != null -> toaster.show(message = blocked)
             !permission.allRequiredPermissionsGranted -> permission.requestPermissions()
+            video && !cameraPermission.allRequiredPermissionsGranted -> cameraPermission.requestPermissions()
             else -> {
                 if (voiceCallPreparing.compareAndSet(false, true)) appScope.launch {
                     var player: TtsController? = null
@@ -116,7 +122,7 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
                         tts.stop()
                         chatService.addConversationReference(conversation.id)
                         referenceHeld = true
-                        val call = chatService.prepareVoiceCall(conversation.id)
+                        val call = chatService.prepareVoiceCall(conversation.id, video = video)
                         record = call
                         // Preparing/persisting may suspend. Android must still see the originating
                         // activity when its microphone foreground service is created.
@@ -161,7 +167,10 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings): () -> Unit {
                             onEnded = ::finishOnce,
                         )
                         check(accepted) { "已有另一通电话进行中。" }
+                        if (video) me.rerere.rikkahub.service.OrbisVideoCallRuntime.get(context).begin(
+                            conversation.assistantId.toString(), conversation.id.toString(), call.id)
                     } catch (error: Exception) {
+                        if (video) record?.let { runtime.hangUpCall(it.id) }
                         // Startup and runtime callbacks share one finalizer. Even a failed archive
                         // write or player disposal cannot double-release the conversation reference.
                         withContext(NonCancellable) {

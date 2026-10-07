@@ -27,6 +27,41 @@ class EmergencyArchiveTest {
         writeBytes(bytes)
     }
 
+    @Test fun temporaryVideoFramesAreExcludedButNearbyNoBackupDataRemainsByteExact() {
+        val source = temporary.newFolder("video-source")
+        val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte())
+        val current = write(source, "no_backup/orbis-video-frames/call/current.jpg", jpeg)
+        val expired = write(source, "no_backup/orbis-video-frames/call/expired.jpg", jpeg)
+        assertTrue(expired.setLastModified(1))
+        write(source, "no_backup/orbis-video-frames/call.json", "synthetic index".toByteArray())
+        val preserved = mapOf(
+            "no_backup/orbis-private-vaults/synthetic/record" to "ciphertext".toByteArray(),
+            "no_backup/orbis-generation-journal-v1/receipt" to "receipt".toByteArray(),
+            "no_backup/orbis-video-frames-other/keep" to "nearby".toByteArray(),
+            "files/orbis-companion-spaces/synthetic/saved.image" to jpeg,
+            "files/orbis-video-frames/ordinary-file" to "different root".toByteArray(),
+        )
+        preserved.forEach { (path, bytes) -> write(source, path, bytes) }
+        val output = File(temporary.root, "video-excluded.zip")
+        val progress = mutableListOf<EmergencyArchiveProgress>()
+        val manifest = EmergencyArchive.create(roots(source), output, metadata) { progress.add(it) }
+        assertEquals(preserved.keys, manifest.files.map { it.path }.toSet())
+        assertFalse(manifest.directories.any { it == "no_backup/orbis-video-frames" || it.startsWith("no_backup/orbis-video-frames/") })
+        assertTrue(manifest.links.isEmpty())
+        assertEquals(manifest, EmergencyArchive.verify(output))
+        val extracted = File(temporary.root, "video-extracted")
+        EmergencyArchive.extractVerified(output, extracted)
+        assertFalse(File(extracted, "no_backup/orbis-video-frames").exists())
+        preserved.forEach { (path, bytes) -> assertArrayEquals(bytes, File(extracted, path).readBytes()) }
+        assertArrayEquals(jpeg, current.readBytes())
+        assertArrayEquals(jpeg, expired.readBytes()) // Export never deletes even expired originals.
+        assertEquals("complete", progress.last().phase)
+        assertEquals(preserved.size.toLong(), progress.last().totalEntries)
+        assertEquals(preserved.size.toLong(), progress.last().completedEntries)
+        assertEquals(preserved.values.sumOf { it.size.toLong() }, progress.last().totalBytes)
+        assertEquals(progress.last().totalBytes, progress.last().completedBytes)
+    }
+
     @Test fun rawRoundTripPreservesInvalidDatabaseSettingsAndAllSidecarsWithoutParsing() {
         val source = temporary.newFolder("source")
         val values = mapOf(

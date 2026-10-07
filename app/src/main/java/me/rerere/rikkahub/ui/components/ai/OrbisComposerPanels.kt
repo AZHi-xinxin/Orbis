@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -116,11 +117,33 @@ internal fun OrbisVoicePanel(
     onConfigure: () -> Unit,
     onVoiceNote: (() -> Unit)? = null,
     canRecordNote: Boolean = true,
+    canStartVideo: Boolean = false,
+    videoUnavailableReason: String? = null,
+    onStartVideo: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().heightIn(max = 224.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(5.dp)) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
-        Text("语音与朗读", fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold)
+        Text("语音与视频", fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = if (voiceActive) onStopVoice else onStartVoice,
+                enabled = voiceActive || canStartVoice, modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
+                Text(if (voiceActive) "挂断通话" else "语音通话", fontSize = 11.sp, lineHeight = 16.sp)
+            }
+            OutlinedButton(onClick = onStartVideo, enabled = !voiceActive && canStartVideo,
+                modifier = Modifier.weight(1f).testTag("orbis-start-video-call"), contentPadding = PaddingValues(6.dp)) {
+                Text("视频通话", fontSize = 11.sp, lineHeight = 16.sp)
+            }
+        }
+        if (!voiceActive && !canStartVoice && voiceUnavailableReason != null) {
+            Text("暂不能通话：$voiceUnavailableReason", fontSize = 11.sp, lineHeight = 16.sp,
+                color = OrbisTheme.colors.mutedInk)
+        } else if (!voiceActive && !canStartVideo && videoUnavailableReason != null) {
+            Text("暂不能视频：$videoUnavailableReason", fontSize = 11.sp, lineHeight = 16.sp,
+                color = OrbisTheme.colors.mutedInk)
+        }
+        Text("视频会把相机画面定期发给当前模型；需要相机权限，可能产生图片用量。", fontSize = 10.sp,
+            lineHeight = 15.sp, color = OrbisTheme.colors.mutedInk)
         if (onVoiceNote != null) OutlinedButton(onClick = onVoiceNote,
             enabled = canRecognize && canRecordNote && !busy && !recording && !voiceActive,
             modifier = Modifier.fillMaxWidth()) { Text("发送语音条 · 录音后加入草稿") }
@@ -133,22 +156,12 @@ internal fun OrbisVoicePanel(
                 modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
                 Text(if (recording) "停止录音" else "语音输入", fontSize = 11.sp, lineHeight = 16.sp)
             }
-            OutlinedButton(onClick = if (voiceActive) onStopVoice else onStartVoice,
-                enabled = voiceActive || canStartVoice, modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
-                Text(if (voiceActive) "挂断通话" else "语音通话", fontSize = 11.sp, lineHeight = 16.sp)
-            }
-        }
-        if (!voiceActive && !canStartVoice && voiceUnavailableReason != null) {
-            Text("暂不能通话：$voiceUnavailableReason", fontSize = 11.sp, lineHeight = 16.sp,
-                color = OrbisTheme.colors.mutedInk)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedButton(onClick = if (speaking) onStopSpeaking else onSpeak,
                 enabled = speaking || canSpeak, modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
                 Text(if (speaking) "停止朗读" else "试听当前音色", fontSize = 11.sp, lineHeight = 16.sp)
             }
-            TextButton(onClick = onConfigure, modifier = Modifier.weight(1f)) { Text("音色与语音设置", fontSize = 11.sp, lineHeight = 16.sp) }
         }
+        TextButton(onClick = onConfigure, modifier = Modifier.fillMaxWidth()) { Text("音色与语音设置", fontSize = 11.sp, lineHeight = 16.sp) }
         Text("未配置的能力不会启动。试听、识别、语音通话及挂断后的 AI 归档可能使用已配置的收费服务；打开面板不录音、不请求服务。",
             fontSize = 10.sp, lineHeight = 15.sp, color = OrbisTheme.colors.mutedInk)
     }

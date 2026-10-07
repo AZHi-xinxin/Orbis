@@ -134,6 +134,7 @@ class RikkaHubApp : Application() {
 
         // sync upload files to DB
         syncManagedFiles()
+        if (BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.service.OrbisVideoCallRuntime.get(this)
 
         // Start WebServer if enabled in settings
         startWebServerIfEnabled()

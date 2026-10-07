@@ -85,14 +85,20 @@ class OrbisKaomojiRepository(private val storage: OrbisKaomojiStorage) {
     companion object {
         const val MAX_ENTRIES = 500
         const val MAX_STORAGE_CHARS = 512 * 1024
+        const val MAX_TEXT_CHARACTERS = 1200
+        fun characterCount(text: String): Int = text.codePointCount(0, text.length)
         fun normalize(value: OrbisKaomoji): OrbisKaomoji {
             require(value.id.matches(Regex("[A-Za-z0-9_-]{1,64}")) && value.revision >= 1) { "kaomoji_invalid_identity" }
-            fun validText(text: String, min: Int, max: Int) = text.length in min..max && text.none { Character.isISOControl(it) || it == '\u200D' || it == '\uFE0F' }
+            fun validText(text: String, min: Int, max: Int, multiline: Boolean = false) =
+                characterCount(text) in min..max && text.codePoints().noneMatch {
+                    (Character.isISOControl(it) && !(multiline && it == 10)) || it in 0xD800..0xDFFF
+                }
             val label = value.label.trim()
-            val text = value.text.trim()
+            // Keep indentation: whitespace is part of multi-line text art. Canonicalize line endings only.
+            val text = value.text.replace("\r\n", "\n").replace('\r', '\n').replace("\t", "    ")
             val tags = value.tags.map(String::trim).filter(String::isNotEmpty).distinct()
-            require(validText(label, 1, 40) && validText(text, 1, 160)) { "kaomoji_invalid_text" }
-            require(text.codePoints().noneMatch { it in 0x1F000..0x1FFFF }) { "kaomoji_text_not_emoji" }
+            require(validText(label, 1, 40) && text.isNotBlank() &&
+                validText(text, 1, MAX_TEXT_CHARACTERS, multiline = true)) { "kaomoji_invalid_text" }
             require(tags.size <= 8 && tags.all { validText(it, 1, 20) }) { "kaomoji_invalid_tags" }
             return value.copy(label = label, text = text, tags = tags)
         }

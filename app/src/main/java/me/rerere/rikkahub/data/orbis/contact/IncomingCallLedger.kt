@@ -29,6 +29,7 @@ data class IncomingCallAttempt(
     val fallbackAttempted: Boolean = false,
     val fallbackPosted: Boolean = false,
     val fallbackSpeech: String? = null,
+    val video: Boolean = false,
 )
 
 internal interface IncomingCallStorage {

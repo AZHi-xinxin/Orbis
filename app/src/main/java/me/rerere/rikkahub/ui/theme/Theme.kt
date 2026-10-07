@@ -27,6 +27,8 @@ import me.rerere.rikkahub.ui.hooks.rememberAmoledDarkMode
 import me.rerere.rikkahub.ui.hooks.rememberCurrentColorMode
 import me.rerere.rikkahub.ui.hooks.rememberUserSettingsState
 import me.rerere.rikkahub.ui.pages.orbis.LocalOrbisDeepSeekStyle
+import me.rerere.rikkahub.ui.pages.orbis.LocalOrbisSeason
+import me.rerere.rikkahub.ui.theme.presets.orbisSeasonForTheme
 
 private val ExtendLightColors = lightExtendColors()
 private val ExtendDarkColors = darkExtendColors()
@@ -92,8 +94,8 @@ fun RikkahubTheme(
             // Wrapped/overlay contexts are valid Compose hosts but need not be Activities.
             // Only the optional window decoration is skipped; never suppress a Compose failure.
             themeActivityOrNull(view.context)?.takeUnless { it.isFinishing || it.isDestroyed }?.let { activity ->
+                applyTransparentStatusBarAppearance(activity.window, view, lightStatusBars)
                 WindowCompat.getInsetsController(activity.window, view).apply {
-                    isAppearanceLightStatusBars = lightStatusBars
                     isAppearanceLightNavigationBars = !darkTheme
                 }
             }
@@ -103,6 +105,7 @@ fun RikkahubTheme(
     CompositionLocalProvider(
         LocalDarkMode provides darkTheme,
         LocalOrbisDeepSeekStyle provides isDeepSeekAppearance(selectedTheme),
+        LocalOrbisSeason provides orbisSeasonForTheme(selectedTheme),
         LocalStatusBarAppearanceOverride provides statusBarAppearanceOverride,
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null

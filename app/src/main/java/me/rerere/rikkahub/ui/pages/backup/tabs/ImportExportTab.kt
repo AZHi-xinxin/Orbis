@@ -56,6 +56,14 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     val operitState by vm.operitImport.state.collectAsStateWithLifecycle()
     val kelivoState by vm.kelivoImport.state.collectAsStateWithLifecycle()
     val polarisState by vm.polarisImport.state.collectAsStateWithLifecycle()
+    val claudeState by vm.claudeImport.state.collectAsStateWithLifecycle()
+    val chatGptState by vm.chatGptImport.state.collectAsStateWithLifecycle()
+    val openChatGpt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.chatGptImport.preview(uri)
+    }
+    val openClaude = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.claudeImport.preview(uri)
+    }
     val openPolaris = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.polarisImport.preview(uri)
     }
@@ -123,7 +131,13 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
             Text("导入聊天是追加；恢复 Orbis 备份是替换。两件事分开做。", color = OrbisTheme.colors.mutedInk, fontSize = 12.sp)
         }
         if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在处理，请稍候…") }
-        item { ConversationRescueEntry(!busy && !deepSeekState.busy && !operitState.busy && !kelivoState.busy && !polarisState.busy) }
+        item { ConversationRescueEntry(!busy && !deepSeekState.busy && !operitState.busy && !kelivoState.busy && !polarisState.busy && !claudeState.busy && !chatGptState.busy) }
+        item { BackupCard("ChatGPT 聊天记录", "选择官方导出包解压后的 conversations.json 或 conversations-NNN.json，分片逐个选择。先预览并选择完整路径，各分支另建窗口；全选保留全部可见分支，公共前文会重复。不导入系统设置，历史工具仅作文字，媒体仅留未恢复说明，不下载附件。请保留全部原始资料。", !busy && !chatGptState.busy, "选择 ChatGPT JSON") {
+            openChatGpt.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+        } }
+        item { BackupCard("Claude 聊天记录", "选择 Claude 导出的 conversations.json。先预览并勾选完整路径；分支分别保存，全选保留全部原消息。思考单独折叠，工具只作历史文字，附件仅留引用；不导入账号、设置或授权。相同版本跳过，内容变化另建窗口。", !busy && !claudeState.busy, "选择 Claude JSON") {
+            openClaude.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+        } }
         item { BackupCard("Operit 聊天记录", "支持 Operit v2 JSON 导出。先预览再选择会话，只追加当前选中的回答，内部摘要会跳过并提示；不导入模型设置、人格、权限、工作区或附件实体。", !busy && !operitState.busy, "选择 Operit JSON") {
             openOperit.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }
@@ -171,6 +185,8 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     DeepSeekImportDialogs(vm.operitImport, operitState)
     DeepSeekImportDialogs(vm.kelivoImport, kelivoState)
     DeepSeekImportDialogs(vm.polarisImport, polarisState)
+    DeepSeekImportDialogs(vm.claudeImport, claudeState)
+    DeepSeekImportDialogs(vm.chatGptImport, chatGptState)
     result?.let { message -> AlertDialog(onDismissRequest = { result = null }, title = { Text("处理结果") }, text = { Text(message) }, confirmButton = { TextButton(onClick = { result = null }) { Text("知道了") } }) }
 }
 

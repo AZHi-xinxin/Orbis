@@ -19,7 +19,7 @@ val OrbisThemePreset by lazy {
     )
 }
 
-private fun orbisScheme(base: ColorScheme, c: OrbisColors) = base.copy(
+internal fun orbisScheme(base: ColorScheme, c: OrbisColors) = base.copy(
     primary = c.accent, onPrimary = c.onAccent,
     primaryContainer = c.tintedPanel, onPrimaryContainer = c.ink,
     secondary = c.onSand, onSecondary = c.sand,

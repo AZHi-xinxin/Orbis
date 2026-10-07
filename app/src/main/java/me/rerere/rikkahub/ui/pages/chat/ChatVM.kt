@@ -306,6 +306,12 @@ class ChatVM(
     val messageQueue = chatService.getMessageQueueFlow(_conversationId)
     val gatewayStopNotice = chatService.gatewayStopNotice(_conversationId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val messageQueueRecovery = chatService.messageQueueRecoveryState(_conversationId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000),
+            me.rerere.rikkahub.service.QueueRecoveryState())
+
+    fun dismissQueueRecoveryResult(expected: me.rerere.rikkahub.service.QueueRecoveryState) =
+        chatService.dismissQueueRecoveryResult(_conversationId, expected)
 
     fun removeQueuedMessage(id: Uuid) = chatService.removeQueuedMessage(_conversationId, id)
 

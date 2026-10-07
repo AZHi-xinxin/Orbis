@@ -2,9 +2,11 @@ package me.rerere.rikkahub.data.sync
 
 import java.io.ByteArrayOutputStream
 import java.io.File
+import me.rerere.rikkahub.data.files.FileProtection
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import me.rerere.rikkahub.data.orbis.gallery.GalleryBackup
+import me.rerere.rikkahub.data.orbis.spaces.CompanionSpacesBackup
 import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,13 +22,14 @@ import me.rerere.rikkahub.data.orbis.schedule.validateOrbisScheduleSnapshot
 internal object OrbisLocalToolBackup {
     const val SCHEDULE = "orbis-schedule/schedule-v1.json"
     const val KAOMOJI = "orbis-kaomoji/library-v1.json"
-    val paths: List<String> = listOf(SCHEDULE, KAOMOJI)
+    val paths: List<String> = listOf(SCHEDULE, KAOMOJI, FileProtection.PATH)
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = false }
 
     fun maxBytes(path: String): Int? = when (path) {
         SCHEDULE -> ORBIS_SCHEDULE_MAX_BYTES
         KAOMOJI -> OrbisKaomojiRepository.MAX_STORAGE_CHARS * 4
-        else -> GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path)
+        FileProtection.PATH -> FileProtection.MAX_BYTES
+        else -> GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path) ?: CompanionSpacesBackup.maxBytes(path)
     }
 
     fun encodeSchedule(value: OrbisScheduleSnapshot): ByteArray = json.encodeToString(value).toByteArray(Charsets.UTF_8).also { validate(SCHEDULE, it) }
@@ -36,6 +39,7 @@ internal object OrbisLocalToolBackup {
         when (path) {
             SCHEDULE -> schedule(bytes)
             KAOMOJI -> kaomoji(bytes)
+            FileProtection.PATH -> FileProtection.decode(text(path, bytes, setOf("version", "automatic", "overrides")))
             else -> if (ContextPruningBackup.maxBytes(path) != null) ContextPruningBackup.validate(path, bytes)
                 else error("local_tool_backup_unknown_path")
         }
@@ -65,8 +69,6 @@ internal object OrbisLocalToolBackup {
             require(value.entries.map { it.text }.distinct().size == value.entries.size)
             value.entries.forEach {
                 require(OrbisKaomojiRepository.normalize(it) == it)
-                require(validOrbisScheduleText(it.label, 40) && validOrbisScheduleText(it.text, 160) &&
-                    it.tags.all { tag -> validOrbisScheduleText(tag, 20) })
             }
         }
     } catch (_: Exception) { error(invalid(KAOMOJI)) }
@@ -99,6 +101,15 @@ internal object OrbisLocalToolBackup {
                 val additions = backup.entries.filter { it.id !in ids }
                 if (additions.isEmpty()) current.copyOf() else encodeKaomoji(before.copy(entries = before.entries + additions))
             }
+            FileProtection.PATH -> {
+                val before = FileProtection.decode(current.toString(Charsets.UTF_8))
+                val backup = FileProtection.decode(incoming.toString(Charsets.UTF_8))
+                // A restore must never silently unlock a locally protected file.
+                val keys = before.overrides.keys + backup.overrides.keys
+                val merged = before.copy(automatic = before.automatic + backup.automatic,
+                    overrides = keys.associateWith { before.isLocked(it) || backup.isLocked(it) })
+                FileProtection.encode(merged).toByteArray()
+            }
             else -> error("local_tool_backup_unknown_path")
         }
     }
@@ -106,6 +117,7 @@ internal object OrbisLocalToolBackup {
     /** Used on private staging before publication. Bad local-tool data cannot stage a partial restore. */
     fun validateStaged(payload: File) {
         GalleryBackup.validateStaged(payload)
+        CompanionSpacesBackup.validateStaged(payload)
         ContextPruningBackup.validateStaged(payload)
         paths.forEach { path ->
             val source = exactFile(File(payload, "files"), path)
@@ -116,6 +128,7 @@ internal object OrbisLocalToolBackup {
     /** Startup only, before any repository opens; prepare all merges before changing any payload file. */
     fun prepareBeforeJournal(payload: File, liveFiles: File) {
         GalleryBackup.prepareBeforeJournal(payload, liveFiles)
+        CompanionSpacesBackup.prepareBeforeJournal(payload, liveFiles)
         ContextPruningBackup.prepareBeforeJournal(payload, liveFiles)
         val prepared = paths.mapNotNull { path ->
             val source = exactFile(File(payload, "files"), path)
@@ -134,7 +147,8 @@ internal object OrbisLocalToolBackup {
 
     /** Sidecars are journalled with originals, not blindly deleted or restored from an archive. */
     fun sidecarPaths(installedPaths: Set<String>): List<String> = paths.filter { "files/$it" in installedPaths }
-        .flatMap { listOf("files/$it.bak", "files/$it.new") } + GalleryBackup.sidecarPaths(installedPaths)
+        .flatMap { listOf("files/$it.bak", "files/$it.new") } + GalleryBackup.sidecarPaths(installedPaths) +
+        CompanionSpacesBackup.sidecarPaths(installedPaths)
 
     private fun exactFile(root: File, path: String): File {
         val canonicalRoot = root.canonicalFile
@@ -159,10 +173,17 @@ internal object OrbisLocalToolBackup {
         }
     }
 
-    private fun invalid(path: String) = if (path == SCHEDULE) "local_tool_backup_invalid_schedule" else "local_tool_backup_invalid_kaomoji"
+    private fun invalid(path: String) = when (path) {
+        SCHEDULE -> "local_tool_backup_invalid_schedule"
+        FileProtection.PATH -> "file_protection_invalid"
+        else -> "local_tool_backup_invalid_kaomoji"
+    }
     private fun conflict(path: String) = if (path == SCHEDULE) "local_tool_backup_conflict_schedule" else "local_tool_backup_conflict_kaomoji"
 
     fun publicError(code: String?): String? = when (code) {
+        "file_protection_invalid", "file_protection_unsafe_path" -> "附件锁定清单校验失败，整次恢复已停止；本机文件与保护状态保留。"
+        "space_backup_conflict" -> "共同空间、秘密基地或照片墙存在同编号但不同内容，整次恢复已停止；本机内容保留，请核对备份。"
+        "space_backup_invalid", "space_backup_path", "space_backup_unreferenced" -> "空间或照片的备份内容、路径或完整性校验失败，整次恢复已停止；本机内容保留。"
         "context_pruning_backup_conflict" -> "上下文清理标记存在编号冲突或合并后超出安全上限，整次恢复已停止；本机原文和清理状态保留。"
         "context_pruning_backup_owner" -> "上下文清理标记与将恢复的助手或聊天窗口不匹配，整次恢复已停止；请同时选择对应的聊天数据库与文件。"
         "context_pruning_backup_invalid", "context_pruning_backup_path", "context_pruning_unreadable" -> "上下文清理标记的格式、大小或路径校验失败，整次恢复已停止；本机聊天原文未被删除。"

@@ -30,6 +30,37 @@ import org.junit.Test
 
 class VoiceSessionControllerTest {
     @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `video supplement uses existing speech output and dropped frame does not pause speech`() = runTest {
+        var humanInputs = 0
+        val spoken = mutableListOf<String>()
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) {
+            humanInputs++; error("camera tick must never become recognized human speech")
+        }
+        try {
+            voice.start(createAsr = { error("synthetic muted test never opens microphone") },
+                speak = { spoken.add(it) }, stopSpeaking = {}, initialMicrophoneEnabled = false)
+            advanceTimeBy(201); runCurrent()
+            // CompletableDeferred(null) selects its nullable parent-Job overload and remains
+            // pending forever. A withdrawn camera tick is instead explicitly completed null.
+            val droppedFrame = CompletableDeferred<String?>().apply { complete(null) }
+            assertTrue(droppedFrame.isCompleted)
+            assertTrue(voice.acceptSupplementaryReply(droppedFrame))
+            runCurrent()
+            assertTrue(voice.state.value.isActive)
+            assertFalse(voice.state.value.replyBlocked)
+            assertEquals(0, voice.state.value.pendingReplies)
+            val frameReply = CompletableDeferred<String?>()
+            assertTrue(voice.acceptSupplementaryReply(frameReply)); runCurrent()
+            frameReply.complete("合成视频回复"); runCurrent()
+            advanceTimeBy(500); runCurrent()
+            assertEquals(listOf("合成视频回复"), spoken)
+            assertEquals("合成视频回复", voice.state.value.lastReplyText)
+            assertEquals(0, humanInputs)
+            assertFalse(voice.state.value.replyBlocked)
+        } finally { voice.stopAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun `call live and final ASR use one correction snapshot while preserving original`() = runTest {
         val recorders = mutableListOf<FakeAsr>()
         val accepted = mutableListOf<ASRCorrectionResult>()

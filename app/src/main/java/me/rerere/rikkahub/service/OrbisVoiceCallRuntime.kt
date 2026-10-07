@@ -210,6 +210,10 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                         }
                     },
                     onReplyPauseChanged = { if (current === session && !session.ending) session.service?.refresh(session.token) },
+                    checkReplyResume = {
+                        canResumeOwnedVoiceReplies(stillOwned = { current === session && !session.ending },
+                            checkReady = session.checkReplyResume)
+                    },
                 )
                 if (session.focusState != VoiceAudioFocusState.AVAILABLE) voiceSession.setAudioFocusSuspended(true)
             } catch (e: CancellationException) {
@@ -253,14 +257,14 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
     @MainThread
     fun setSpeakerEnabled(enabled: Boolean) { voiceSession.setSpeakerEnabled(enabled) }
 
-    /** Check host recovery/queue state without replaying work or changing audio-focus ownership. */
+    /** Readiness only: handle the chat separately, then explicitly resume future call audio. */
     @MainThread
     fun resumeReplies(callId: String): Boolean {
         val session = current?.takeIf { it.callId == callId && !it.ending && it.connectedAtMillis != null }
             ?: return false
         return voiceSession.requestReplyResume {
-            if (current !== session || session.ending) false
-            else session.checkReplyResume() && current === session && !session.ending
+            canResumeOwnedVoiceReplies(stillOwned = { current === session && !session.ending },
+                checkReady = session.checkReplyResume)
         }
     }
 
@@ -387,6 +391,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
         val ended = OrbisVoiceCallEnd(session.callId, reason, session.connectedAtMillis, endedAt, duration, error, endReasonText)
         // This is deliberately synchronous: summary/archive work never keeps the microphone open.
         voiceSession.stop()
+        OrbisVideoCallRuntime.get(context).end(session.callId)
         val audio = context.getSystemService(AudioManager::class.java)
         session.previousAudioMode?.let { previous -> runCatching { if (audio.mode == AudioManager.MODE_IN_COMMUNICATION) audio.mode = previous } }
         session.focus?.let { runCatching { audio.abandonAudioFocusRequest(it) } }

@@ -59,18 +59,33 @@ internal fun createSoupTools(execute: suspend (String, SoupToolArgs) -> JsonObje
             hostApproval = if (action == "current") null else HostToolApproval("orbis:soup:$action", "local-soup-v1",
                 when (action) { "ask" -> "海龟汤 · 保存提问建议（等待页面确认）"; "submit" -> "海龟汤 · 保存推理建议（等待页面确认）"; "hint" -> "海龟汤 · 使用共享提示"; else -> "海龟汤 · 揭示汤底" }),
             execute = { raw ->
+                var mutationReserved = false
                 try {
                     val args = soupToolArgs(action, raw)
-                    if (action != "current") check(mutationUsed.compareAndSet(false, true)) { "soup_one_step_per_turn" }
+                    if (action != "current") {
+                        check(mutationUsed.compareAndSet(false, true)) { "soup_one_step_per_turn" }
+                        mutationReserved = true
+                    }
                     listOf(UIMessagePart.Text(buildJsonObject {
                         put("ok", true); put("storage", "local_soup"); put("result", execute(action, args))
                     }.toString()))
                 } catch (error: CancellationException) { throw error }
                 catch (error: Exception) {
+                    // Only an explicitly classified repository prewrite rejection can
+                    // return this generation's one-step permit. A cancellation or an
+                    // arbitrary failure may have crossed storage and remains consumed.
+                    if (mutationReserved && error is SoupPrewriteRejection) {
+                        mutationUsed.compareAndSet(true, false)
+                    }
                     listOf(UIMessagePart.Text(buildJsonObject {
                         put("ok", false)
                         put("error", when (error.message) { "soup_one_step_per_turn" -> "one_step_per_turn"; "soup_invalid_parameters" -> "invalid_parameters"; else -> "operation_not_confirmed" })
-                        put("note", if (error.message == "soup_one_step_per_turn") "这一轮已经推进过一步。先回到共同讨论，等人类参与后再继续。" else soupErrorText(error))
+                        put("note", when {
+                            error.message == "soup_one_step_per_turn" -> "这一轮已经推进过一步。先回到共同讨论，等人类参与后再继续。"
+                            error is SoupPrewriteRejection && error.message == "soup_other_turn" ->
+                                "现在轮到人类提问；先由人类完成本回合，再由伙伴继续。"
+                            else -> soupErrorText(error)
+                        })
                     }.toString()))
                 }
             })

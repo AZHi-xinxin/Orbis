@@ -742,6 +742,9 @@ internal fun MessagePartsBlock(
 
                         }
                     is UIMessagePart.Image -> {
+                        if (part.url.startsWith("orbis-video-frame://")) {
+                            Text("视频临时画面 · 到期自动清理")
+                        } else {
                         val isImageLoading =
                             part.url.isBlank() || part.url.matches(Regex("^data:image/[^;]*;base64,\\s*$"))
                         if (isImageLoading) {
@@ -760,6 +763,7 @@ internal fun MessagePartsBlock(
                                     .clip(MaterialTheme.shapes.medium)
                                     .height(72.dp)
                             )
+                        }
                         }
                     }
 

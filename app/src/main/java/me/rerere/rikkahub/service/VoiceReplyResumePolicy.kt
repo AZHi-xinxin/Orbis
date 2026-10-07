@@ -2,6 +2,13 @@ package me.rerere.rikkahub.service
 
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.hostToolFailure
+
+/** Same explicit call, read-only admission before/after IO; no queue recovery operation is accepted. */
+internal suspend fun canResumeOwnedVoiceReplies(
+    stillOwned: () -> Boolean,
+    checkReady: suspend () -> Boolean,
+): Boolean = stillOwned() && checkReady() && stillOwned()
 
 /** Readiness only: never clears a checkpoint, resumes a queue, or replays an utterance. */
 internal data class VoiceReplyResumeSnapshot(
@@ -25,7 +32,8 @@ internal data class VoiceReplyResumeSnapshot(
 internal fun List<UIMessage>.hasUnfinishedVoiceReplyTools(): Boolean = any { message ->
     message.parts.any { part ->
         when (part) {
-            is UIMessagePart.Tool -> !part.isExecuted
+            is UIMessagePart.Tool -> !part.isExecuted ||
+                (part.hostToolFailure() != null && part.hostToolFailure()?.executionPerformed == null)
             is UIMessagePart.ServerTool -> !part.isFinished
             else -> false
         }

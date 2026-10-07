@@ -34,6 +34,17 @@ internal suspend fun startIncomingVoice(context: Context, lifecycle: Lifecycle, 
     if (!settings.orbisContact.allowIncomingCalls) throw OrbisCallStartException(OrbisCallFailure.INCOMING_DISABLED)
     val assistant = settings.getAssistantById(conversation.assistantId)
         ?: throw OrbisCallStartException(OrbisCallFailure.ASSISTANT_MISSING)
+    if (attempt.video) {
+        require(me.rerere.ai.provider.Modality.IMAGE in
+            settings.findModelById(assistant.chatModelId ?: settings.chatModelId)?.inputModalities.orEmpty()) {
+            "当前模型不支持图片输入。"
+        }
+        check(androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED &&
+            !context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) {
+            "视频接听需要解锁手机并开启相机权限。"
+        }
+    }
     OrbisVoiceCallPreflight.firstFailure(settings, assistant)?.let { throw OrbisCallStartException(it) }
     val provider = checkNotNull(settings.getSelectedASRProvider())
     val ttsProvider = checkNotNull(settings.getSelectedTTSProvider())
@@ -61,7 +72,7 @@ internal suspend fun startIncomingVoice(context: Context, lifecycle: Lifecycle, 
     }
     try {
         chat.addConversationReference(conversationId); held = true
-        val call = chat.prepareVoiceCall(conversationId); record = call
+        val call = chat.prepareVoiceCall(conversationId, video = attempt.video); record = call
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) throw OrbisCallStartException(OrbisCallFailure.ACTIVITY_INACTIVE)
         if (incoming.state.value?.attempt?.id != attempt.id) throw OrbisCallStartException(OrbisCallFailure.INVITATION_EXPIRED)
         incoming.registerConnectingCall(attempt.id, call.id)
@@ -95,7 +106,9 @@ internal suspend fun startIncomingVoice(context: Context, lifecycle: Lifecycle, 
                     check(incoming.connected(attempt.id, call.id)) { "来电已过期，未建立新通话" }
                 }
             }, onEnded = ::end)) throw OrbisCallStartException(OrbisCallFailure.CALL_BUSY)
+        if (attempt.video) OrbisVideoCallRuntime.get(app).begin(attempt.assistantId, attempt.conversationId, call.id)
     } catch (error: Exception) {
+        if (attempt.video) record?.let { runtime.hangUpCall(it.id) }
         startupFailure = when (error) {
             is OrbisCallStartException -> error.failure
             is TimeoutCancellationException -> OrbisCallFailure.TIMEOUT

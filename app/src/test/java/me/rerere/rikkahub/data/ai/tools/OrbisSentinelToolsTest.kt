@@ -4,8 +4,18 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.providers.google.GoogleProvider
+import me.rerere.ai.provider.providers.openai.ChatCompletionsAPI
+import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.KeyRoulette
+import me.rerere.rikkahub.data.ai.ToolRejectedBeforeExecutionException
 import me.rerere.rikkahub.data.orbis.sentinel.*
+import okhttp3.OkHttpClient
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -56,6 +66,57 @@ class OrbisSentinelToolsTest {
             assertFalse(keys.contains("conversation_id"))
             assertFalse(keys.contains("human_master_enabled"))
         }
+        assertEquals(0, fixture.writes)
+        assertEquals(0, fixture.scheduleRequests)
+    }
+
+    private fun assertPortableProbabilitySchema(schema: JsonObject) {
+        val probability = schema["properties"]!!.jsonObject["probability_percent"]!!.jsonObject
+        assertEquals("integer", probability["type"]!!.jsonPrimitive.content)
+        assertEquals(10, probability["minimum"]!!.jsonPrimitive.int)
+        assertEquals(100, probability["maximum"]!!.jsonPrimitive.int)
+        assertFalse("Numeric enums must not reach Google-converting relays", probability.containsKey("enum"))
+        assertTrue(probability["description"]!!.jsonPrimitive.content.contains("10、30、50、70、90、100"))
+    }
+
+    @Test fun `create and update declare integer probability without numeric wire enums`() {
+        val fixture = Fixture()
+        fixture.tools().filter { it.name in setOf("orbis_sentinel_create", "orbis_sentinel_update") }.forEach { tool ->
+            val schema = tool.parameters() as InputSchema.Obj
+            assertPortableProbabilitySchema(buildJsonObject { put("properties", schema.properties) })
+            assertFalse(schema.required.orEmpty().contains("probability_percent"))
+        }
+        assertEquals(0, fixture.writes)
+    }
+
+    @Test fun `ordinary chat sends real create and update schemas safely through OpenAI and Google builders`() {
+        val fixture = Fixture()
+        val tools = fixture.tools().filter { it.name in setOf("orbis_sentinel_create", "orbis_sentinel_update") }
+        assertEquals(2, tools.size)
+        val params = TextGenerationParams(
+            model = Model(modelId = "gemini-test", abilities = listOf(ModelAbility.TOOL)), tools = tools,
+        )
+        val messages = listOf(UIMessage.user("hello"))
+        val client = OkHttpClient()
+        val openAiMethod = ChatCompletionsAPI::class.java.getDeclaredMethod(
+            "buildChatCompletionRequest", List::class.java, TextGenerationParams::class.java,
+            ProviderSetting.OpenAI::class.java, Boolean::class.javaPrimitiveType,
+        ).apply { isAccessible = true }
+        val openAiBody = openAiMethod.invoke(
+            ChatCompletionsAPI(client, KeyRoulette.default()), messages, params,
+            ProviderSetting.OpenAI(baseUrl = "https://relay.invalid/v1"), false,
+        ) as JsonObject
+        val openAiFunctions = openAiBody["tools"]!!.jsonArray.map { it.jsonObject["function"]!!.jsonObject }
+        assertEquals(tools.map { it.name }, openAiFunctions.map { it["name"]!!.jsonPrimitive.content })
+        openAiFunctions.forEach { assertPortableProbabilitySchema(it["parameters"]!!.jsonObject) }
+
+        val googleMethod = GoogleProvider::class.java.getDeclaredMethod(
+            "buildCompletionRequestBody", List::class.java, TextGenerationParams::class.java,
+        ).apply { isAccessible = true }
+        val googleBody = googleMethod.invoke(GoogleProvider(client), messages, params) as JsonObject
+        val googleFunctions = googleBody["tools"]!!.jsonArray.single().jsonObject["functionDeclarations"]!!.jsonArray
+        assertEquals(tools.map { it.name }, googleFunctions.map { it.jsonObject["name"]!!.jsonPrimitive.content })
+        googleFunctions.forEach { assertPortableProbabilitySchema(it.jsonObject["parameters"]!!.jsonObject) }
         assertEquals(0, fixture.writes)
         assertEquals(0, fixture.scheduleRequests)
     }
@@ -142,7 +203,7 @@ class OrbisSentinelToolsTest {
         val tools = fixture.tools(editRule = { _, _, action -> callbacks++; action() })
         listOf("update", "pause", "resume", "delete").forEach { name ->
             val args = if (name == "update") buildJsonObject { put("rule_id", "foreign"); put("prompt", "replacement") } else id("foreign")
-            failed { call(tools, name, args) }
+            assertTrue(failed { call(tools, name, args) } is ToolRejectedBeforeExecutionException)
         }
         assertEquals(0, callbacks)
         assertEquals(before, fixture.persisted)
@@ -219,9 +280,66 @@ class OrbisSentinelToolsTest {
         val before = fixture.persisted
         var callbacks = 0
         val tools = fixture.tools(editRule = { _, _, action -> callbacks++; action() })
-        failed { call(tools, "update", buildJsonObject { put("rule_id", "own-rule"); put("prompt", "") }) }
+        val failure = failed { call(tools, "update", buildJsonObject { put("rule_id", "own-rule"); put("prompt", "") }) }
+        assertTrue(failure is ToolRejectedBeforeExecutionException)
         assertEquals(0, callbacks)
         assertEquals(before, fixture.persisted)
+    }
+
+    @Test fun `update of a deleted own rule is rejected before edit write or reschedule`() = runTest {
+        val fixture = Fixture()
+        var callbacks = 0
+        val tools = fixture.tools(editRule = { _, _, action -> callbacks++; action() })
+        call(tools, "create", buildJsonObject { put("type", "night_usage") })
+        val ruleId = fixture.store.list().single().id
+        call(tools, "delete", id(ruleId))
+        assertNull(fixture.store.get(ruleId))
+
+        // Isolate the attempted update from the expected create/delete effects above.
+        fixture.writes = 0
+        fixture.scheduleRequests = 0
+        callbacks = 0
+        val failure = failed {
+            call(tools, "update", buildJsonObject {
+                put("rule_id", ruleId)
+                put("window_start_local", "23:30")
+                put("window_end_local", "07:30")
+            })
+        }
+
+        assertTrue(failure is ToolRejectedBeforeExecutionException)
+        val rejection = failure as ToolRejectedBeforeExecutionException
+        assertEquals(
+            "该哨兵不存在或不属于当前 AI；未修改任何配置。",
+            rejection.publicReason,
+        )
+        assertFalse(rejection.publicReason.contains(ruleId))
+        assertEquals(0, callbacks)
+        assertEquals(0, fixture.writes)
+        assertEquals(0, fixture.scheduleRequests)
+        assertNull(fixture.store.get(ruleId))
+    }
+
+    @Test fun `night usage update accepts reported cross midnight window and persists once`() = runTest {
+        val fixture = Fixture()
+        call(fixture.tools(), "create", buildJsonObject { put("type", "night_usage") })
+        val ruleId = fixture.store.list().single().id
+        val writesBefore = fixture.writes
+        val schedulesBefore = fixture.scheduleRequests
+
+        val result = call(fixture.tools(), "update", buildJsonObject {
+            put("rule_id", ruleId)
+            put("window_start_local", "23:30")
+            put("window_end_local", "07:30")
+        })
+
+        val updated = fixture.store.get(ruleId)!!
+        assertEquals("23:30", updated.windowStartLocal)
+        assertEquals("07:30", updated.windowEndLocal)
+        assertEquals("23:30", result["rule"]!!.jsonObject["window_start_local"]!!.jsonPrimitive.content)
+        assertEquals("07:30", result["rule"]!!.jsonObject["window_end_local"]!!.jsonPrimitive.content)
+        assertEquals(writesBefore + 1, fixture.writes)
+        assertEquals(schedulesBefore + 1, fixture.scheduleRequests)
     }
 
     @Test fun `unsettled pending event refuses update with readable query path and keeps original`() = runTest {
@@ -441,6 +559,10 @@ class OrbisSentinelToolsTest {
             val fixture = Fixture()
             call(fixture.tools(), "create", buildJsonObject { put("type", "low_battery"); put("probability_percent", percent) })
             assertEquals(percent, fixture.store.list().single().probabilityPercent)
+            call(fixture.tools(), "update", buildJsonObject {
+                put("rule_id", fixture.store.list().single().id); put("probability_percent", percent)
+            })
+            assertEquals(percent, fixture.store.list().single().probabilityPercent)
         }
         listOf(1800,3600,5400,7200,9000,10800).forEach { seconds ->
             call(Fixture().tools(), "create", buildJsonObject { put("type", "screen_observation"); put("duration_seconds", seconds) })
@@ -450,6 +572,27 @@ class OrbisSentinelToolsTest {
             failed { call(fixture.tools(), "create", buildJsonObject { put("type", "screen_observation"); put("duration_seconds", seconds) }) }
             assertEquals(0, fixture.writes)
         }
+    }
+
+    @Test fun `portable probability declaration does not relax create or update validation`() = runTest {
+        val fixture = Fixture()
+        call(fixture.tools(), "create", buildJsonObject { put("type", "low_battery") })
+        val ruleId = fixture.store.list().single().id
+        val before = fixture.persisted
+        val writesBefore = fixture.writes
+        val schedulesBefore = fixture.scheduleRequests
+        listOf(JsonPrimitive(20), JsonPrimitive(0), JsonPrimitive(101), JsonPrimitive(50.5),
+            JsonPrimitive("50"), JsonPrimitive(true), JsonNull).forEach { value ->
+            failed { call(fixture.tools(), "create", buildJsonObject {
+                put("type", "low_battery"); put("probability_percent", value)
+            }) }
+            failed { call(fixture.tools(), "update", buildJsonObject {
+                put("rule_id", ruleId); put("probability_percent", value)
+            }) }
+        }
+        assertEquals(before, fixture.persisted)
+        assertEquals(writesBefore, fixture.writes)
+        assertEquals(schedulesBefore, fixture.scheduleRequests)
     }
 
     @Test fun `changing authored rule to fact rule clears prompt and changing back requires authored content`() = runTest {

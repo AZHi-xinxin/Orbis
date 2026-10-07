@@ -138,7 +138,7 @@ class OrbisManualChaptersTest {
 
     @Test fun `updates and consultation preserve honest unfinished boundaries`() {
         val updates = guide("updates")
-        listOf("versionCode", "不自动卸载", "签名", "先只读核实", "真机功能通过是四回事", "真实发布包端到端自更新仍待验收").forEach { assertTrue(it, updates.contains(it)) }
+        listOf("versionCode", "不自动卸载", "签名", "先只读核实", "真机功能通过是四回事", "实际安装结果须核实当前版本", "不能直接归因于手机品牌").forEach { assertTrue(it, updates.contains(it)) }
         val consultation = guide("consultation")
         listOf("正在开发，暂未开放", "不自动恢复生成", "不公开内部正文", "不宣称已修好").forEach { assertTrue(it, consultation.contains(it)) }
     }
@@ -151,5 +151,78 @@ class OrbisManualChaptersTest {
         assertEquals(local.map { it.name }.toSet(), data.getValue("tools").jsonArray.map { it.jsonObject.getValue("name").jsonPrimitive.content }.toSet())
         val readOnly = createOrbisHelpTool(listOf("orbis_schedule_list"), build)
         assertEquals(1, call(readOnly, """{"topic":"local_tools"}""").getValue("content").jsonObject.getValue("tools").jsonArray.size)
+    }
+
+    @Test fun `companion spaces document ownership human prompt boundary and actual styles`() {
+        val secret = guide("secret_base")
+        listOf("按当前助手隔离", "不是隐私室", "双方可见", "默认折叠为第一句话", "左滑卡片",
+            "AI 不可改写人类原指令", "expected_revision", "5 种信纸", "星笺", "牛皮纸", "花笺", "手账", "夜航").forEach {
+            assertTrue(it, secret.contains(it))
+        }
+        val social = guide("shared_space")
+        listOf("不是联网社交平台", "不自动跨设备同步", "当前配置", "reply_to", "最多 9 张", "AI 不能冒充人类",
+            "不自动发聊天或唤醒模型", "当前模型请求").forEach { assertTrue(it, social.contains(it)) }
+        val photos = guide("photo_wall")
+        listOf("4 种布局", "拍立得", "相册", "悬挂", "拼贴", "翻到背面", "前移", "后移", "不修改手机原图",
+            "需要支持图片的模型", "不能读取其他助手", "最多保留 10 张", "不会重置", "永久照片不随临时画面到期清理").forEach {
+            assertTrue(it, photos.contains(it))
+        }
+    }
+
+    @Test fun `video guidance distinguishes camera consent frame sampling ASR and retention`() {
+        val text = guide("video")
+        listOf("人类接受", "Android 相机权限", "手机解锁", "前台", "应用内小窗", "离开应用或锁屏会暂停相机",
+            "周期抽帧，不是直播视频流", "30 秒", "15 秒", "60 秒", "仅按需", "不积压补发", "ASR 转文字",
+            "至少间隔 3 秒", "压缩后", "最多保留 10 张", "结束后 10 分钟", "下次启动补清",
+            "360 帧", "96 MiB", "不偷删旧帧", "临时图片不进入普通完整备份", "已配置的外部模型保底",
+            "AI 耳朵目前仅为待办方案，尚未实现").forEach { assertTrue(it, text.contains(it)) }
+        assertFalse(text.contains("实时音频理解已实现"))
+        assertFalse(text.contains("所有机型验收通过"))
+    }
+
+    @Test fun `files emojis presentation and rescue guidance do not promise impossible protection`() {
+        val files = guide("attachments")
+        listOf("默认锁定", "长按", "解锁需要确认", "全部清理", "跳过锁定项", "不是加密", "不可撤销",
+            "独立空间不属于聊天附件清理", "共同空间资料", "不会自动解锁", "聊天追加导入替代").forEach {
+            assertTrue(it, files.contains(it))
+        }
+        val expressions = guide("expressions")
+        listOf("多行", "emoji", "等宽字体", "1200 个 Unicode 码点", "不按 UTF-8 字节数", "原单行条目", "不能保证").forEach {
+            assertTrue(it, expressions.contains(it))
+        }
+        assertTrue(guide("context").contains("消息下方不再提供‘隐藏’按钮"))
+        val appearance = guide("appearance")
+        listOf("默认折叠", "收起不清空筛选", "春·樱信", "夏·萤夏", "秋·枫笺", "冬·雪灯", "自定义壁纸",
+            "轻量与银河", "在本机记住选择", "装饰星尘不可点击", "不会伪造记忆").forEach { assertTrue(it, appearance.contains(it)) }
+        val rescue = guide("rescue")
+        listOf("同一个应用的两个入口", "卸载整个 Orbis", "应用外位置", "诊断错误 TXT 不是聊天备份",
+            "无法拦截系统卸载", "不能保证再出现", "不表示故障已修复").forEach { assertTrue(it, rescue.contains(it)) }
+    }
+
+    @Test fun `new chapters remain read only and expose only exactly registered new tools`() {
+        val descriptions = mapOf(
+            "secret_base" to setOf("orbis_secret_base"),
+            "shared_space" to setOf("orbis_shared_space", "orbis_photo_wall"),
+            "photo_wall" to setOf("orbis_photo_wall", "orbis_video_frame_keep"),
+            "video" to setOf("start_video_call", "end_voice_call", "orbis_video_frame_now", "orbis_video_frames", "orbis_video_frame_read", "orbis_video_frame_keep"),
+        )
+        descriptions.forEach { (chapter, names) ->
+            val registered = names.first()
+            val trap = Tool(registered, "must-not-expose-private-description",
+                parameters = { error("must not inspect implementation") },
+                systemPrompt = { _, _ -> error("must not load private prompt") },
+                execute = { error("must not perform action") })
+            val help = appendOrbisHelpTool(listOf(trap), build, true).last()
+            val response = call(help, """{"topic":"guide","chapter":"$chapter","limit":10}""")
+            val content = response.getValue("content").jsonObject
+            assertEquals(listOf(registered), content.getValue("registered_tools").jsonArray.map { it.jsonPrimitive.content })
+            assertTrue(response.getValue("read_only").jsonPrimitive.boolean)
+            assertFalse(response.getValue("network_requested").jsonPrimitive.boolean)
+            assertFalse(response.toString().contains("must-not-expose-private-description"))
+            assertEquals(names, orbisManualChapters.single { it.id == chapter }.tools.toSet())
+            assertTrue(orbisManualReadChapter(chapter, emptySet()).getValue("registered_tools").jsonArray.isEmpty())
+            assertTrue(orbisManualChapterIndex(query = registered).getValue("chapters").jsonArray
+                .any { it.jsonObject.getValue("id").jsonPrimitive.content == chapter })
+        }
     }
 }

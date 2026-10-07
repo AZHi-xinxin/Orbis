@@ -106,6 +106,7 @@ internal fun FilesPicker(
     onPickAudio: () -> Unit,
     onPickFile: () -> Unit,
     onStartVoiceMode: (() -> Unit)? = null,
+    onStartVideoMode: (() -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val provider = settings.getCurrentChatModel()?.findProvider(providers = settings.providers)
@@ -141,6 +142,9 @@ internal fun FilesPicker(
                     text = { Text(stringResource(R.string.chat_page_voice_title)) },
                     onClick = start,
                 )
+            }
+            onStartVideoMode?.let { start ->
+                BigIconTextButton(icon = { Text("▣") }, text = { Text("视频通话") }, onClick = start)
             }
         }
 

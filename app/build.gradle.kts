@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 243
-        versionName = "2.6.4"
+        versionCode = 246
+        versionName = "2.6.5"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
@@ -98,7 +98,7 @@ android {
             buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED",
                 (providers.gradleProperty("orbisInternalConsultation").orNull == "true").toString())
             applicationIdSuffix = ".dev"
-            versionNameSuffix = "-orbis-dev.60"
+            versionNameSuffix = "-orbis-dev.71"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$versionNameSuffix\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
@@ -250,6 +250,9 @@ dependencies {
     implementation(libs.quickie.bundled)
     implementation(libs.barcode.scanning)
     implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     // Room
     implementation(libs.androidx.room.runtime)

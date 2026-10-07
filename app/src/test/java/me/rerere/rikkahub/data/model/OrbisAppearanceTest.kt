@@ -44,6 +44,7 @@ class OrbisAppearanceTest {
         val value = OrbisAppearance()
         assertEquals(OrbisBubbleStyle.SILK, value.bubbleStyle)
         assertEquals(.92f, value.bubbleOpacity, 0f)
+        assertEquals(.75f, value.headerOpacity, 0f)
         assertEquals(OrbisBackgroundStyle.PAPER, value.backgroundStyle)
         assertTrue(value.floatingStars)
         assertFalse(value.reduceMotion)
@@ -54,7 +55,7 @@ class OrbisAppearanceTest {
     @Test
     fun `every style background and new field survives serialization`() {
         for (bubble in OrbisBubbleStyle.entries) for (background in OrbisBackgroundStyle.entries) {
-            val value = OrbisAppearance(bubbleStyle = bubble, bubbleOpacity = .73f,
+            val value = OrbisAppearance(bubbleStyle = bubble, bubbleOpacity = .73f, headerOpacity = .35f,
                 backgroundEnabled = true, backgroundStyle = background, backgroundImage = "file:///synthetic/image.png",
                 floatingStars = false, reduceMotion = true)
             assertEquals(value, json.decodeFromString<OrbisAppearance>(json.encodeToString(value)))
@@ -87,6 +88,20 @@ class OrbisAppearanceTest {
             backgroundEnabled = true, backgroundStyle = OrbisBackgroundStyle.BLUSH,
             backgroundImage = "file:///synthetic/kept.png", floatingStars = false, reduceMotion = true)
         assertEquals(value.copy(bubbleOpacity = 0f), value.normalized())
+    }
+
+    @Test
+    fun `header opacity supports transparent backgrounds and rejects invalid saved values`() {
+        assertEquals(.75f, json.decodeFromString<OrbisAppearance>("{}").headerOpacity, 0f)
+        assertEquals(0f, OrbisAppearance(headerOpacity = -1f).normalized().headerOpacity, 0f)
+        assertEquals(1f, OrbisAppearance(headerOpacity = 12f).normalized().headerOpacity, 0f)
+        assertEquals(.35f, OrbisAppearance(headerOpacity = .35f).normalized().headerOpacity, 0f)
+        listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY).forEach {
+            assertEquals(.75f, OrbisAppearance(headerOpacity = it).normalized().headerOpacity, 0f)
+        }
+        val original = OrbisAppearance(headerOpacity = 0f, composerOpacity = .4f,
+            backgroundEnabled = true, backgroundImage = "file:///synthetic/photo.png")
+        assertEquals(original, json.decodeFromString<OrbisAppearance>(json.encodeToString(original)).normalized())
     }
 
     @Test

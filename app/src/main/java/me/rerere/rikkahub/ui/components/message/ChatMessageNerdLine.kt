@@ -12,12 +12,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,18 +28,10 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.dokar.sonner.ToastType
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.datetime.toJavaLocalDateTime
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.model.presentMessageUsage
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.ui.context.LocalToaster
-import org.koin.compose.koinInject
 import java.time.Duration
 
 /** A plain-language summary, with optional detail. The persisted display switch never deletes usage. */
@@ -52,12 +42,6 @@ fun ChatMessageNerdLine(
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     val settings = LocalSettings.current.displaySetting
-    val settingsStore = koinInject<SettingsStore>() // Existing singleton, not a new store per message.
-    val toaster = LocalToaster.current
-    // Keep this scope in composition while the display preference hides the content.
-    val scope = rememberCoroutineScope()
-    var hiding by remember { mutableStateOf(false) }
-    var hideFailed by remember { mutableStateOf(false) }
     var expanded by rememberSaveable(message.id.toString()) { mutableStateOf(false) }
     val presentation = remember(message.usage, message.createdAt, message.finishedAt) {
         val millis = message.finishedAt?.let { finished ->
@@ -82,33 +66,7 @@ fun ChatMessageNerdLine(
                     color = color, modifier = Modifier.weight(1f))
                 Text(if (expanded) "收起" else "展开", fontSize = 10.sp, lineHeight = 15.sp, color = color)
             }
-            TextButton(onClick = {
-                if (!hiding) {
-                    hiding = true
-                    hideFailed = false
-                    scope.launch {
-                        try {
-                            // Finish this small, explicitly requested local preference write even
-                            // if hiding the row or leaving the conversation disposes its UI.
-                            withContext(NonCancellable) {
-                                settingsStore.update { current ->
-                                    current.copy(displaySetting = current.displaySetting.copy(showTokenUsage = false))
-                                }
-                            }
-                        } catch (error: CancellationException) { throw error }
-                        catch (_: Exception) {
-                            hideFailed = true
-                            toaster.show("显示偏好未能保存；若用量记录重新出现，请在设置中重试。", type = ToastType.Error)
-                        }
-                        finally { hiding = false }
-                    }
-                }
-            }, enabled = !hiding, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("隐藏", fontSize = 11.sp, lineHeight = 17.sp, color = color)
-            }
         }
-        if (hideFailed) Text("显示偏好未能保存，请在设置中重新调整。", fontSize = 11.sp,
-            lineHeight = 17.sp, color = MaterialTheme.colorScheme.error)
         if (expanded) {
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(14.dp),
@@ -121,7 +79,7 @@ fun ChatMessageNerdLine(
                             Text(detail.value, fontSize = 12.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
-                    Text("隐藏后可在 设置→外观与显示→消息用量记录 重新开启",
+                    Text("显示开关在 设置→外观与显示→消息用量记录",
                         fontSize = 11.sp, lineHeight = 18.sp, color = color)
                 }
             }

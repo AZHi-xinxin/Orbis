@@ -1,11 +1,26 @@
 package me.rerere.rikkahub.data.orbis.soup
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import java.util.UUID
 
 internal interface SoupStorage { fun read(): String?; fun write(value: String) }
+
+/** Evidence that only local reads/validation ran, never a commit or a host request. */
+internal class SoupPrewriteRejection(code: String, cause: Exception? = null) : IllegalStateException(code, cause)
+
+private inline fun <T> soupPrewriteValidation(block: () -> T): T = try {
+    block()
+} catch (error: CancellationException) {
+    throw error
+} catch (error: SoupPrewriteRejection) {
+    throw error
+} catch (error: Exception) {
+    val code = error.message?.takeIf { it.matches(Regex("soup_[a-z_]+")) } ?: "soup_action_unavailable"
+    throw SoupPrewriteRejection(code, error)
+}
 
 /** One process-local lock, atomic independent storage, and no automatic paid retry or fabricated result. */
 internal class SoupRepository(
@@ -97,12 +112,18 @@ internal class SoupRepository(
         replace(s.copy(currentPlayer = SoupPlayer.HUMAN))
     }
     @Synchronized fun hint(id: String) {
-        val s = current(id); require(s.playable && s.pending == null && s.proposal == null) { "soup_action_unavailable" }
-        require(s.hintsUsed < minOf(s.mode.hints, SoupCatalogue.get(s.puzzleId).hints.size)) { "soup_no_hints" }
+        val s = soupPrewriteValidation {
+            current(id).also {
+                require(it.playable && it.pending == null && it.proposal == null) { "soup_action_unavailable" }
+                require(it.hintsUsed < minOf(it.mode.hints, SoupCatalogue.get(it.puzzleId).hints.size)) { "soup_no_hints" }
+            }
+        }
         replace(s.copy(hintsUsed = s.hintsUsed + 1))
     }
     @Synchronized fun reveal(id: String) {
-        val s = current(id); require(!s.abandoned && s.pending?.state != SoupAttemptState.RUNNING) { "soup_action_unavailable" }
+        val s = soupPrewriteValidation {
+            current(id).also { require(!it.abandoned && it.pending?.state != SoupAttemptState.RUNNING) { "soup_action_unavailable" } }
+        }
         replace(s.copy(revealed = true, attempts = acknowledgeUnknown(s), proposals = declinePending(s)))
     }
     @Synchronized fun abandon(id: String) {
@@ -117,7 +138,7 @@ internal class SoupRepository(
         checkAction(id, action, SoupPlayer.TEAMMATE, text, false)
         val s = current(id)
         s.proposal?.let { return it }
-        require(s.proposals.size < 60) { "soup_proposal_limit" }
+        soupPrewriteValidation { require(s.proposals.size < 60) { "soup_proposal_limit" } }
         val proposal = SoupProposal(newId(), action, text, maxOf(now(), s.startedAt))
         replace(s.copy(proposals = s.proposals + proposal)); return proposal
     }
@@ -126,7 +147,7 @@ internal class SoupRepository(
         replace(s.copy(proposals = declinePending(s)))
     }
 
-    @Synchronized fun checkAction(id: String, action: SoupAction, player: SoupPlayer, text: String, retry: Boolean) {
+    @Synchronized fun checkAction(id: String, action: SoupAction, player: SoupPlayer, text: String, retry: Boolean) = soupPrewriteValidation<Unit> {
         val s = current(id); require(s.playable) { "soup_game_finished" }
         s.proposal?.let { require(!retry && player == SoupPlayer.TEAMMATE && action == it.action && text == it.text) { "soup_proposal_pending" } }
         require(s.attempts.size < SOUP_CALL_LIMIT) { "soup_call_limit" }
@@ -162,7 +183,13 @@ internal class SoupRepository(
             questions = s.questions + SoupQuestion(ticket.player, ticket.text, soupParseAnswer(response), at),
             currentPlayer = if (ticket.player == SoupPlayer.HUMAN) SoupPlayer.TEAMMATE else SoupPlayer.HUMAN,
         ) else s.copy(submissions = s.submissions + soupParseScore(response, ticket.player, ticket.text, at))
-        replace(result.copy(attempts = result.attempts.map { if (it.id == attemptId) it.copy(state = SoupAttemptState.COMPLETE) else it }))
+        val otherPlayer = if (result.currentPlayer == SoupPlayer.HUMAN) SoupPlayer.TEAMMATE else SoupPlayer.HUMAN
+        // Keep normal alternation, but skip a submitted/exhausted player. Null is an unlimited budget.
+        // If neither can ask, keep the game and records intact for explicit submission/reveal/end.
+        val nextPlayer = if (result.remaining(result.currentPlayer) == 0 && result.remaining(otherPlayer) != 0)
+            otherPlayer else result.currentPlayer
+        replace(result.copy(currentPlayer = nextPlayer,
+            attempts = result.attempts.map { if (it.id == attemptId) it.copy(state = SoupAttemptState.COMPLETE) else it }))
     }
     @Synchronized fun failed(id: String, attemptId: String) {
         val s = current(id)

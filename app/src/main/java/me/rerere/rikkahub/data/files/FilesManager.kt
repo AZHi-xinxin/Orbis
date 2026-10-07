@@ -15,6 +15,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessage
@@ -23,6 +25,8 @@ import me.rerere.common.android.Logging
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.data.repository.FilesRepository
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.utils.exportImage
 import me.rerere.rikkahub.utils.exportImageFile
 import me.rerere.rikkahub.utils.getActivity
@@ -33,9 +37,55 @@ class FilesManager(
     private val context: Context,
     private val repository: FilesRepository,
     private val appScope: AppScope,
+    private val settingsStore: SettingsStore? = null,
 ) {
     companion object {
         private const val TAG = "FilesManager"
+    }
+
+    private val protection = FileProtection(File(context.filesDir.canonicalFile, FileProtection.PATH))
+    private val protectionGuard = Any()
+    private val protectionChanges = MutableStateFlow(0L)
+    val protectionRevision = protectionChanges.asStateFlow()
+    init {
+        settingsStore?.let { store -> appScope.launch(Dispatchers.IO) {
+            store.settingsFlow.collect { settings ->
+                if (!settings.init) synchronized(protectionGuard) {
+                    runCatching { protection.rememberAutomatic(protectedAppearancePaths(context.filesDir, settings)) }
+                    protectionChanges.value++
+                }
+            }
+        } }
+    }
+    private fun currentProtectedPaths(): Set<String> {
+        val settings = settingsStore?.settingsFlow?.value ?: return emptySet()
+        check(!settings.init) { "file_protection_settings_not_ready" }
+        return protectedAppearancePaths(context.filesDir, settings)
+    }
+    suspend fun lockedPaths(): Set<String> = withContext(Dispatchers.IO) {
+        synchronized(protectionGuard) {
+            val state = protection.rememberAutomatic(currentProtectedPaths())
+            (state.automatic + state.overrides.keys).filterTo(mutableSetOf()) { state.isLocked(it) }
+        }
+    }
+    suspend fun setLocked(entity: ManagedFileEntity, locked: Boolean) = withContext(Dispatchers.IO) {
+        synchronized(protectionGuard) {
+            check(entity.folder == FileFolders.UPLOAD && FileProtection.validPath(entity.relativePath))
+            protection.rememberAutomatic(currentProtectedPaths())
+            protection.setLocked(entity.relativePath, locked)
+            protectionChanges.value++
+        }
+    }
+    private fun isLocked(path: String): Boolean = protection.rememberAutomatic(currentProtectedPaths()).isLocked(path)
+    private fun deleteOwnedFile(path: String): Boolean = synchronized(protectionGuard) {
+        if (!FileProtection.validPath(path)) return@synchronized false
+        val root = context.filesDir.canonicalFile
+        val file = File(root, path)
+        protection.withAutomaticProtection(currentProtectedPaths()) { state ->
+            if (file.absoluteFile != file.canonicalFile || !file.canonicalPath.startsWith(root.path + File.separator) ||
+                file == root || file.isDirectory || state.isLocked(path)) false
+            else !file.exists() || file.delete()
+        }
     }
 
     suspend fun saveManagedFromUri(
@@ -206,19 +256,9 @@ class FilesManager(
         }
 
     fun deleteChatFiles(uris: List<Uri>) {
-        val relativePaths = mutableSetOf<String>()
-        uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
-            val file = uri.toFile()
-            getRelativePathInFilesDir(file)?.let { relativePaths.add(it) }
-            if (file.exists()) {
-                file.delete()
-            }
-        }
-        if (relativePaths.isNotEmpty()) {
-            appScope.launch(Dispatchers.IO) {
-                relativePaths.forEach { path ->
-                    repository.deleteByPath(path)
-                }
+        appScope.launch(Dispatchers.IO) {
+            uris.mapNotNull { FileProtection.relativeUpload(context.filesDir, it.toString()) }.distinct().forEach { path ->
+                if (runCatching { deleteOwnedFile(path) }.getOrDefault(false)) repository.deleteByPath(path)
             }
         }
     }
@@ -375,59 +415,32 @@ class FilesManager(
 
     suspend fun delete(id: Long, deleteFromDisk: Boolean = true): Boolean = withContext(Dispatchers.IO) {
         val entity = repository.getById(id) ?: return@withContext false
-        if (deleteFromDisk) {
-            runCatching { getFile(entity).delete() }
-        }
+        if (entity.folder != FileFolders.UPLOAD || !FileProtection.validPath(entity.relativePath)) return@withContext false
+        if (deleteFromDisk && !deleteOwnedFile(entity.relativePath)) return@withContext false
+        if (!deleteFromDisk && synchronized(protectionGuard) { isLocked(entity.relativePath) }) return@withContext false
         repository.deleteById(id) > 0
     }
 
     suspend fun deleteAll(folder: String = FileFolders.UPLOAD): Boolean = withContext(Dispatchers.IO) {
-        val dir = File(context.filesDir, folder)
-        val entries = dir.listFiles()
-        if (dir.exists() && entries == null) {
-            return@withContext false
-        }
-
-        var allDeletedFromDisk = true
-        entries.orEmpty().forEach { entry ->
-            if (!runCatching { entry.deleteRecursively() }.getOrDefault(false)) {
-                allDeletedFromDisk = false
-            }
-        }
-
-        if (allDeletedFromDisk) {
-            repository.deleteByFolder(folder)
-            return@withContext true
-        }
-
+        require(folder == FileFolders.UPLOAD) { "Only flat chat attachments can be cleared here" }
+        syncFolder(folder)
+        var allDeleted = true
         repository.listByFolder(folder).first().forEach { entity ->
-            if (!getFile(entity).exists()) {
-                repository.deleteById(entity.id)
-            }
+            if (!synchronized(protectionGuard) { isLocked(entity.relativePath) } && !delete(entity.id)) allDeleted = false
         }
-        false
+        allDeleted
     }
 
     suspend fun deleteOlderThan(
         folder: String = FileFolders.UPLOAD,
         cutoffMillis: Long,
     ): Boolean = withContext(Dispatchers.IO) {
+        require(folder == FileFolders.UPLOAD) { "Only flat chat attachments can be cleared here" }
         var allDeleted = true
         repository.listByFolder(folder).first()
             .filter { it.createdAt < cutoffMillis }
             .forEach { entity ->
-                val file = getFile(entity)
-                val deletedFromDisk = !file.exists() || runCatching {
-                    file.deleteRecursively()
-                }.getOrDefault(false)
-
-                if (deletedFromDisk) {
-                    if (repository.deleteById(entity.id) == 0) {
-                        allDeleted = false
-                    }
-                } else {
-                    allDeleted = false
-                }
+                if (!synchronized(protectionGuard) { isLocked(entity.relativePath) } && !delete(entity.id)) allDeleted = false
             }
         allDeleted
     }

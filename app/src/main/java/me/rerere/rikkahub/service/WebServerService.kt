@@ -2,6 +2,7 @@ package me.rerere.rikkahub.service
 
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -17,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.RouteActivity
 import me.rerere.rikkahub.WEB_SERVER_NOTIFICATION_CHANNEL_ID
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.web.WebServerManager
@@ -25,6 +27,14 @@ import me.rerere.rikkahub.web.shouldFinishWebService
 import org.koin.android.ext.android.inject
 
 private const val TAG = "WebServerService"
+
+/** Return to the normal UI, never whichever of the two launcher entries sorts first. */
+internal fun webServerAppLaunchIntent(context: Context): Intent =
+    Intent(context, RouteActivity::class.java).apply {
+        action = Intent.ACTION_MAIN
+        addCategory(Intent.CATEGORY_LAUNCHER)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
 
 class WebServerService : Service() {
 
@@ -175,7 +185,7 @@ class WebServerService : Service() {
     private fun buildLaunchPendingIntent() = PendingIntent.getActivity(
         this,
         0,
-        packageManager.getLaunchIntentForPackage(packageName),
+        webServerAppLaunchIntent(this),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
     )
 

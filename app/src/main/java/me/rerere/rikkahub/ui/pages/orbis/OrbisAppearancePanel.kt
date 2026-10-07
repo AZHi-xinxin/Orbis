@@ -218,6 +218,12 @@ fun OrbisAppearancePanel(
             }
         }
         AppearanceCard("聊天背景") {
+            if (LocalOrbisSeason.current != OrbisSeason.NONE) {
+                Text("${LocalOrbisSeason.current.title} · 自带季节壁纸，自选图片仍可覆盖。", style = MaterialTheme.typography.bodySmall, color = colors.mutedInk)
+                TextButton(onClick = { updateAppearance { it.copy(backgroundEnabled = true, backgroundStyle = OrbisBackgroundStyle.PAPER, backgroundImage = null) } }) {
+                    Text("使用当前季节壁纸")
+                }
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OrbisBackgroundStyle.entries.forEach { style ->
                     BackgroundSwatch(style, appearance.backgroundEnabled && appearance.backgroundImage == null && appearance.backgroundStyle == style) {
@@ -246,7 +252,7 @@ fun OrbisAppearancePanel(
             }
         }
         AppearanceCard("星光与动效") {
-            AppearanceToggle("向上漂浮的星光", appearance.floatingStars) { checked ->
+            AppearanceToggle(if (LocalOrbisSeason.current == OrbisSeason.NONE) "向上漂浮的星光" else "季节漂浮物", appearance.floatingStars) { checked ->
                 updateAppearance { it.copy(floatingStars = checked) }
             }
             AppearanceToggle("减少动效", appearance.reduceMotion) { checked ->
@@ -282,6 +288,15 @@ fun OrbisAppearancePanel(
             Text("向左更通透，向右底色更实。文字与图标保持原有颜色；复杂背景建议提高不透明度。",
                 style = MaterialTheme.typography.bodySmall, color = colors.mutedInk)
         }
+        AppearanceCard("顶部导航底色") {
+            Text("背景不透明度 ${(appearance.headerOpacity * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
+            Slider(value = appearance.headerOpacity,
+                onValueChange = { value -> updateAppearance { it.copy(headerOpacity = value) } },
+                valueRange = 0f..1f, steps = 19,
+                modifier = Modifier.semantics { contentDescription = "顶部导航背景不透明度，百分之零到百分之一百" })
+            Text("调整名称、用量、列表和菜单的底色；文字、图标与描边保持主题配色。换壁纸不会切换日夜风格。",
+                style = MaterialTheme.typography.bodySmall, color = colors.mutedInk)
+        }
         AppearanceCard("日夜与主题") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ColorMode.entries.forEach { mode ->
@@ -300,9 +315,9 @@ fun OrbisAppearancePanel(
         TextButton(onClick = { onUpdateDisplay { it.withAppearanceForStyle(deepSeek) {
             if (deepSeek) deepSeekDefaultAppearance() else OrbisAppearance()
         } } }, modifier = Modifier.fillMaxWidth()) {
-            Text("恢复气泡、输入框与背景默认")
+            Text("恢复气泡、顶部导航、输入框与背景默认")
         }
-        Text("重置气泡、输入框底色、背景与星光；头像、字体和主题保持原样。", style = MaterialTheme.typography.bodySmall, color = colors.mutedInk)
+        Text("重置气泡、顶部导航与输入框底色、背景与星光；头像、字体和主题保持原样。", style = MaterialTheme.typography.bodySmall, color = colors.mutedInk)
         if (showDoneButton) Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text(if (embedded) "完成预览" else "完成，回到会话") }
     }
     }
@@ -474,9 +489,11 @@ fun OrbisChatBackdrop(
         OrbisBackgroundStyle.STARS -> listOf(Color(0xFF4C4166), Color(0xFF15192F))
     }
     val canAnimate = rememberStarAnimationAllowed(appearance, isVisible)
+    val season = LocalOrbisSeason.current
     Box(modifier) {
         if (drawBackground) {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(gradient)))
+            if (usesSeasonWallpaper(season, appearance)) OrbisSeasonWallpaper(season, dark, Modifier.fillMaxSize())
             if (appearance.backgroundEnabled && !appearance.backgroundImage.isNullOrBlank()) {
                 // Bounded decode; the preset remains visible if a missing/corrupt file cannot load.
                 val context = LocalContext.current
@@ -490,7 +507,12 @@ fun OrbisChatBackdrop(
         if (appearance.floatingStars) {
             val phase = if (canAnimate) animatedStarPhase() else 0f
             val starColor = if (deepSeek) OrbisTheme.colors.accent else if (dark || backgroundStyle == OrbisBackgroundStyle.STARS) Color(0xFFFFE5AD) else Color(0xFFA78A60)
+            val seasonalFloatColor = if (season == OrbisSeason.NONE) starColor else orbisSeasonColors(season, dark).accent
             Canvas(Modifier.fillMaxSize()) {
+                if (season != OrbisSeason.NONE) {
+                    drawSeasonFloat(season, phase, seasonalFloatColor)
+                    return@Canvas
+                }
                 repeat(23) { index ->
                     val x = (((index * 37 + 11) % 101) / 101f) * size.width
                     val initialY = ((index * 53 + 17) % 103) / 103f

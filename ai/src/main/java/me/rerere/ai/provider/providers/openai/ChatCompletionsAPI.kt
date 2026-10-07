@@ -367,10 +367,13 @@ class ChatCompletionsAPI(
                     }
 
                     else -> {
-                        // OpenAI 官方
-                        // 文档中，completions API 只支持 "low", "medium", "high"
+                        // Generic OpenAI-compatible routes (including ST aliases) must
+                        // preserve an explicit OFF. "low" still enables reasoning.
+                        // Do not guess a native provider dialect from a public model
+                        // alias; the relay knows its real upstream, customBody can
+                        // supply provider-specific overrides, and AUTO stays unset.
                         if (level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", if (level.effort == "none") "low" else level.effort)
+                            put("reasoning_effort", level.effort)
                         }
                     }
                 }

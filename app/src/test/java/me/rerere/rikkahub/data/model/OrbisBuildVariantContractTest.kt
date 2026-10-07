@@ -13,7 +13,7 @@ class OrbisBuildVariantContractTest {
     }
 
     @Test fun defaultThemeChoicesKeepTheOrbisAndDeepSeekViews() {
-        assertEquals(listOf("orbis", "deepseek"), selectablePresetThemes().map { it.id })
+        assertEquals(listOf("orbis", "deepseek", "orbis-spring", "orbis-summer", "orbis-autumn", "orbis-winter"), selectablePresetThemes().map { it.id })
     }
 
     @Test fun normalColdStartUsesTheFeatureFlagRatherThanDebuggability() {

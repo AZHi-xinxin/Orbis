@@ -10,10 +10,10 @@ import org.junit.Test
 
 /** Synthetic values only. Display policy must never rewrite saved appearance preferences. */
 class OrbisThemePolicyTest {
-    @Test fun onlyActiveOrbisAndDeepSeekPresetsAreSelectableButHistoricalCatalogRemainsReadable() {
-        assertEquals(listOf("orbis", "deepseek"), selectablePresetThemes(orbis = true).map { it.id })
+    @Test fun activeNativePresetsAreSelectableAndHistoricalCatalogRemainsReadable() {
+        assertEquals(listOf("orbis", "deepseek", "orbis-spring", "orbis-summer", "orbis-autumn", "orbis-winter"), selectablePresetThemes(orbis = true).map { it.id })
         assertSame(PresetThemes, selectablePresetThemes(orbis = false))
-        val legacy = PresetThemes.filter { it.id !in setOf("orbis", "deepseek") }
+        val legacy = PresetThemes.filter { it !in selectablePresetThemes(orbis = true) }
         assertTrue(legacy.isNotEmpty())
         legacy.forEach {
             assertSame(it, findPresetTheme(it.id))
@@ -25,7 +25,7 @@ class OrbisThemePolicyTest {
         val saved = Settings(themeId = "sakura", dynamicColor = true,
             customThemes = listOf(CustomTheme(id = "synthetic-custom", name = "Kept")))
         val before = saved.copy()
-        PresetThemes.filter { it.id !in setOf("orbis", "deepseek") }.forEach {
+        PresetThemes.filter { it !in selectablePresetThemes(orbis = true) }.forEach {
             assertSame(OrbisThemePreset, resolveThemeForAppearance(it.id, saved.customThemes, orbis = true))
         }
         assertSame(OrbisThemePreset, resolveThemeForAppearance(saved.themeId, saved.customThemes, orbis = true))

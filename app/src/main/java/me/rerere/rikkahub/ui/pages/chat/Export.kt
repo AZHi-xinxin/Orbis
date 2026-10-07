@@ -262,7 +262,8 @@ private fun exportToMarkdown(
                     }
 
                     is UIMessagePart.Image -> {
-                        append("![Image](${part.encodeBase64().getOrNull()?.base64})")
+                        if (part.url.startsWith("orbis-video-frame://")) append("[临时视频画面不随聊天导出；已保留的照片请从照片墙查看。]")
+                        else append("![Image](${part.encodeBase64().getOrNull()?.base64})")
                         appendLine()
                     }
 
@@ -318,7 +319,8 @@ private fun exportToMarkdown(
                                     }
 
                                     is UIMessagePart.Image -> {
-                                        append("![Tool Image](${outputPart.encodeBase64().getOrNull()?.base64})")
+                                        if (outputPart.url.startsWith("orbis-video-frame://")) append("[临时视频画面不随聊天导出；已保留的照片请从照片墙查看。]")
+                                        else append("![Tool Image](${outputPart.encodeBase64().getOrNull()?.base64})")
                                         appendLine()
                                     }
 
@@ -617,7 +619,8 @@ private fun ExportedChatMessage(
                             }
 
                             is UIMessagePart.Image -> {
-                                AsyncImage(
+                                if (part.url.startsWith("orbis-video-frame://")) Text("临时视频画面不随聊天导出")
+                                else AsyncImage(
                                     model = ImageRequest.Builder(context)
                                         .data(part.url)
                                         .allowHardware(false)

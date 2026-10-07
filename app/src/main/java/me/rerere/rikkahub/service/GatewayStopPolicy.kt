@@ -22,16 +22,19 @@ internal suspend fun <T> stopRememberedGatewayRequests(
     requests: List<T>,
     probe: suspend (T) -> GatewayStopProbe,
     retire: suspend (T) -> Boolean,
+    onConfirmed: (T) -> Unit = {},
 ): GatewayStopSummary {
     var result = GatewayStopSummary()
     for (request in requests.take(16)) {
         result = result.copy(checked = result.checked + 1)
         when (probe(request)) {
-            GatewayStopProbe.NOT_CURRENT -> Unit
+            GatewayStopProbe.NOT_CURRENT -> onConfirmed(request)
             GatewayStopProbe.UNSUPPORTED -> result = result.copy(unsupported = result.unsupported + 1)
             GatewayStopProbe.GENERATING, GatewayStopProbe.CLEANUP_PENDING -> result = result.copy(pending = result.pending + 1)
-            GatewayStopProbe.CAN_STOP -> result = if (retire(request)) result.copy(retired = result.retired + 1)
-                else result.copy(pending = result.pending + 1)
+            GatewayStopProbe.CAN_STOP -> result = if (retire(request)) {
+                onConfirmed(request)
+                result.copy(retired = result.retired + 1)
+            } else result.copy(pending = result.pending + 1)
         }
     }
     return result

@@ -56,6 +56,7 @@ private fun SoupPanelContent(repository: SoupRepository, onClose: () -> Unit) {
     var answer by remember { mutableStateOf("") }
     var draft by remember { mutableStateOf<SoupAction?>(null) }
     var hostOpen by remember { mutableStateOf(false) }
+    var resumeDraftAfterHost by remember { mutableStateOf<SoupAction?>(null) }
     var prepared by remember { mutableStateOf<SoupPreparedCall?>(null) }
     var confirmLocal by remember { mutableStateOf<String?>(null) }
     var archiveId by remember { mutableStateOf<String?>(null) }
@@ -72,10 +73,15 @@ private fun SoupPanelContent(repository: SoupRepository, onClose: () -> Unit) {
             finally { busy = false }
         }
     }
+    fun checkPreparation(action: SoupAction, text: String, player: SoupPlayer = SoupPlayer.HUMAN, retry: Boolean = false) = prepareSoupDraft {
+        val current = session ?: error("soup_stale_session")
+        controller.prepare(current.id, action, player, text.trim(), retry)
+    }
     fun prepare(action: SoupAction, text: String, player: SoupPlayer = SoupPlayer.HUMAN, retry: Boolean = false) {
-        val current = session ?: return
-        try { prepared = controller.prepare(current.id, action, player, text.trim(), retry); notice = null }
-        catch (error: Exception) { notice = soupErrorText(error) }
+        when (val result = checkPreparation(action, text, player, retry)) {
+            is SoupDraftPreparation.Ready -> { prepared = result.value; notice = null }
+            is SoupDraftPreparation.Blocked -> notice = result.message
+        }
     }
     val availableProviders = remember(settings) {
         settings.providers.map { provider -> provider.copyProvider(models = provider.models.filter { model ->
@@ -113,21 +119,22 @@ private fun SoupPanelContent(repository: SoupRepository, onClose: () -> Unit) {
         }
     })
 
-    if (hostOpen) OrbisSoupDmSettingsDialog(onDismiss = { hostOpen = false }, repository = repository)
+    if (hostOpen) OrbisSoupDmSettingsDialog(onDismiss = {
+        hostOpen = false
+        draft = resumeDraftAfterHost
+        resumeDraftAfterHost = null
+    }, repository = repository)
 
     draft?.let { action ->
         val isQuestion = action == SoupAction.ASK
-        AlertDialog(onDismissRequest = { draft = null }, title = { Text(if (isQuestion) "向主持提问" else "提交完整推理") },
-            text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (isQuestion) "问一个可以用是、否、是也不是或无关回答的问题。" else "先和伙伴讨论，再写下完整故事。提交后你的剩余提问机会结束，伙伴仍可继续。")
-                OutlinedTextField(value = if (isQuestion) question else answer,
-                    onValueChange = { value -> if (value.length <= if (isQuestion) 1000 else 6000) { if (isQuestion) question = value else answer = value } },
-                    label = { Text(if (isQuestion) "你的问题" else "你的推理") }, minLines = if (isQuestion) 3 else 6,
-                    modifier = Modifier.fillMaxWidth())
-                Text("下一步还会核对模型和费用，当前尚未发送。", style = MaterialTheme.typography.bodySmall)
-            } }, confirmButton = { TextButton(onClick = { draft = null; prepare(action, if (isQuestion) question else answer) },
-                enabled = controls && (if (isQuestion) question else answer).isNotBlank()) { Text("核对这次发送…") } },
-            dismissButton = { TextButton(onClick = { draft = null }) { Text("先不发") } })
+        OrbisSoupDraftDialog(
+            action = action, value = if (isQuestion) question else answer, enabled = controls,
+            onValueChange = { if (isQuestion) question = it else answer = it },
+            onPrepare = { checkPreparation(action, it) },
+            onPrepared = { approved -> prepared = approved; notice = null; draft = null },
+            onConfigureHost = { resumeDraftAfterHost = action; draft = null; hostOpen = true },
+            onDismiss = { draft = null },
+        )
     }
 
     prepared?.let { approved ->

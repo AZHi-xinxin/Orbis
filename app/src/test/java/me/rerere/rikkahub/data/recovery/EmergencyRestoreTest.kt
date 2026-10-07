@@ -6,6 +6,9 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
+import me.rerere.rikkahub.data.files.FileProtection
+import me.rerere.rikkahub.data.files.FileProtectionState
+import me.rerere.rikkahub.data.orbis.spaces.OrbisCompanionSpacesStore
 
 class EmergencyRestoreTest {
     @get:Rule val temporary = TemporaryFolder()
@@ -195,6 +198,95 @@ class EmergencyRestoreTest {
             "shared_prefs/anything.xml", "databases/androidx.work.workdb", "databases/rikka_hub-shm",
             "files/datastore/settings.preferences_pb.tmp", "files/upload/../../escape", "files/upload\\escape")
             .forEach { assertFalse(it, EmergencyRestore.isRestoredPath(it)) }
+    }
+
+    @Test fun savedCompanionSpacesAndAttachmentLocksRestoreButTemporaryVideoNeverDoes() {
+        val owner = "1c66025d-e84f-4c0e-9f08-b2ca044be81a"
+        val permanentImage = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 1, 2, 3)
+        val temporaryFrames = "no_backup/orbis-video-frames"
+        val nearbyPersistentPath = "no_backup/orbis-video-frames-other/keep.txt"
+        val f = fixture(beforeArchive = { roots ->
+            val repo = OrbisCompanionSpacesStore(File(roots.getValue("files"), "orbis-companion-spaces/$owner"))
+            repo.saveHumanStory("番外", "人类原文", "letter")
+            val media = repo.addMedia(permanentImage, "image/jpeg")
+            repo.addPhoto(media.id, "已保留的照片")
+            write(File(roots.getValue("files"), FileProtection.PATH), FileProtection.encode(FileProtectionState(automatic = setOf("upload/photo.jpg"))))
+            write(File(roots.getValue("no_backup"), "orbis-video-frames/call/frame.jpg"), "temporary frame")
+            write(File(roots.getValue("no_backup"), "orbis-video-frames-other/keep.txt"), "other persistent state")
+        })
+        val manifest = EmergencyArchive.verify(f.archive)
+        assertFalse(manifest.files.any { it.path == temporaryFrames || it.path.startsWith("$temporaryFrames/") })
+        assertFalse(manifest.directories.any { it == temporaryFrames || it.startsWith("$temporaryFrames/") })
+        assertTrue(manifest.files.any { it.path == nearbyPersistentPath })
+        val plan = prepare(f)
+        assertTrue(plan.selectedFiles.any { it.startsWith("files/orbis-companion-spaces/$owner/") })
+        assertTrue("files/${FileProtection.PATH}" in plan.selectedFiles)
+        assertFalse(plan.selectedFiles.any { it == temporaryFrames || it.startsWith("$temporaryFrames/") })
+        assertFalse(File(f.transaction, "raw/$temporaryFrames").exists())
+        assertFalse(File(f.transaction, "prepared/$temporaryFrames").exists())
+        assertEquals("other persistent state", File(f.transaction, "raw/$nearbyPersistentPath").readText())
+        assertEquals("approvals", File(f.transaction, "raw/no_backup/orbis-tool-approvals-v1.json").readText())
+        // Excluding the cache from export/restore never deletes the still-live source cache.
+        assertEquals("temporary frame", File(f.roots.getValue("no_backup"), "orbis-video-frames/call/frame.jpg").readText())
+        EmergencyRestore.commit(f.transaction, f.roots, {})
+        val saved = OrbisCompanionSpacesStore(File(f.roots.getValue("files"), "orbis-companion-spaces/$owner")).snapshot()
+        assertEquals("人类原文", saved.stories.single().prompt)
+        assertEquals("已保留的照片", saved.photos.single().note)
+        val savedMedia = saved.media.single { it.id == saved.photos.single().mediaId }
+        assertArrayEquals(permanentImage,
+            File(f.roots.getValue("files"), "orbis-companion-spaces/$owner/${savedMedia.filename}").readBytes())
+        assertTrue(FileProtection(File(f.roots.getValue("files"), FileProtection.PATH)).snapshot().isLocked("upload/photo.jpg"))
+        assertFalse(File(f.roots.getValue("no_backup"), "orbis-video-frames").exists())
+        assertFalse(File(f.transaction, "raw/$temporaryFrames").exists())
+        // Other no_backup data remains raw recovery evidence, not active runtime/approval state.
+        assertEquals("other persistent state", File(f.transaction, "raw/$nearbyPersistentPath").readText())
+        assertEquals("approvals", File(f.transaction, "raw/no_backup/orbis-tool-approvals-v1.json").readText())
+    }
+
+    @Test fun companionEmergencySelectionRejectsSidecarsExtraFilesAndBadLockState() {
+        val owner = "1c66025d-e84f-4c0e-9f08-b2ca044be81a"
+        listOf("files/orbis-companion-spaces/$owner/index.json.new", "files/orbis-companion-spaces/$owner/token.txt",
+            "files/orbis-companion-spaces/../../index.json", "files/orbis-file-protection/locks-v1.json.tmp", "no_backup/orbis-video-frames/index.json")
+            .forEach { assertFalse(it, EmergencyRestore.isRestoredPath(it)) }
+        val f = fixture(beforeArchive = { roots -> write(File(roots.getValue("files"), FileProtection.PATH), """{"version":1,"automatic":["../secret"]}""") })
+        assertThrows(IllegalArgumentException::class.java) { prepare(f) }
+        assertFalse(File(f.transaction, EmergencyRestore.JOURNAL).exists())
+        assertEquals("current database", File(f.roots.getValue("databases"), "rikka_hub").readText())
+    }
+
+    @Test fun emergencyOrphanMediaStaysInRawButIsNotRestoredOrCountedAsInstalled() {
+        val owner = "1c66025d-e84f-4c0e-9f08-b2ca044be81a"
+        val orphan = "dcc605c7-b98a-440b-bc57-a7c56f4a7908.image"
+        val relative = "files/orbis-companion-spaces/$owner/$orphan"
+        val f = fixture(beforeArchive = { roots ->
+            val shelf = File(roots.getValue("files"), "orbis-companion-spaces/$owner")
+            OrbisCompanionSpacesStore(shelf).saveHumanStory("番外", "已保存的故事", "letter")
+            write(File(shelf, orphan), "unpublished image after crash")
+        })
+        val liveOrphan = File(f.roots.getValue("files"), "orbis-companion-spaces/$owner/$orphan")
+        val plan = prepare(f)
+        assertFalse(relative in plan.selectedFiles)
+        assertFalse(File(f.transaction, "prepared/$relative").exists())
+        assertEquals("unpublished image after crash", File(f.transaction, "raw/$relative").readText())
+        assertTrue(liveOrphan.exists())
+        EmergencyRestore.commit(f.transaction, f.roots, {})
+        assertFalse(liveOrphan.exists())
+        assertTrue(File(f.transaction, "originals/$relative").exists())
+    }
+
+    @Test fun emergencyMissingReferencedMediaStillStopsBeforeJournalAndPreservesRawAndLive() {
+        val owner = "1c66025d-e84f-4c0e-9f08-b2ca044be81a"
+        val f = fixture(beforeArchive = { roots ->
+            val shelf = File(roots.getValue("files"), "orbis-companion-spaces/$owner")
+            val repo = OrbisCompanionSpacesStore(shelf)
+            val media = repo.addMedia(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 1, 2, 3), "image/jpeg")
+            repo.addPhoto(media.id, "不得静默丢失")
+            check(File(shelf, media.filename).delete())
+        })
+        assertThrows(Exception::class.java) { prepare(f) }
+        assertFalse(File(f.transaction, EmergencyRestore.JOURNAL).exists())
+        assertTrue(File(f.transaction, "raw/files/orbis-companion-spaces/$owner/index.json").exists())
+        assertEquals("current database", File(f.roots.getValue("databases"), "rikka_hub").readText())
     }
 
     @Test fun privateVaultSelectionOnlyAllowsCipherRecordsAndPointersNeverRecoveryCodesOrGrants() {

@@ -148,7 +148,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/21", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/22", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)
@@ -459,7 +459,7 @@ class OrbisHelpToolTest {
             "restore_system_default_available", "falls_back_to_available_system_sound", "no_cloud_music_search").forEach {
             assertTrue(it, ringtones.contains(it))
         }
-        assertTrue(limits.getValue("user_validation_notes").jsonPrimitive.content.contains("尚未真机验收"))
+        assertTrue(ringtones.contains("device_acceptance_not_verified_here"))
         assertFalse(run(help, topic("limits")).getValue("remote_health_checked").jsonPrimitive.boolean)
     }
 
@@ -505,7 +505,7 @@ class OrbisHelpToolTest {
         val tested = limits.getValue("user_validation_notes").jsonPrimitive.content
         listOf("日历提醒", "内置手机工具调用", "通话短停顿", "不读取实时状态",
             "2.6.2 起已修复受支持的 Operit 思考内容导入", "另存修正版副本", "不覆盖已有聊天",
-            "端到端自更新尚未真机验收").forEach { assertTrue(it, tested.contains(it)) }
+            "实际安装结果须核实当前版本", "不是新版本发布或真机验收通过声明").forEach { assertTrue(it, tested.contains(it)) }
         assertFalse(tested.contains("Operit 思考内容导入仍待修复"))
         assertFalse(content(help, "overview").getValue("not_integrated").jsonArray.any { it.jsonPrimitive.content == "哨兵" })
         assertFalse(run(help, topic("limits")).getValue("remote_health_checked").jsonPrimitive.boolean)

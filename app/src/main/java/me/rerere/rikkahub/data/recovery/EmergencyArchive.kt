@@ -27,6 +27,8 @@ import kotlinx.serialization.json.encodeToStream
  * decoding is used here. The caller must fence ALL application writers before calling create.
  * Hashes detect corruption/change, not authenticity. A valid archive may still contain a broken
  * database; preserving those original bytes is deliberate and is not a claim that it is repaired.
+ * The exact temporary video-frame cache is excluded so rescue cannot turn expiring camera data
+ * into a permanent copy. Saved photo-wall media and every other persistent path are unchanged.
  */
 @OptIn(ExperimentalSerializationApi::class)
 object EmergencyArchive {
@@ -225,6 +227,9 @@ object EmergencyArchive {
         fun walk(path: Path, name: String, root: Path, depth: Int) {
             if (Thread.currentThread().isInterrupted) throw IOException("Emergency archive operation was interrupted")
             validatePath(name, CURRENT_SCHEMA)
+            // Do not read contents/links, count, archive, or claim this ephemeral subtree.
+            // Its manifest/index also expires with the cache contract, not with a rescue ZIP.
+            if (name == "no_backup/orbis-video-frames") return
             if (++recordCount > MAX_RECORDS || depth > 128) throw IOException("Backup has too many entries or levels")
             val attrs = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
             onProgress(EmergencyArchiveProgress(phase, 0, 0, recordCount.toLong()))

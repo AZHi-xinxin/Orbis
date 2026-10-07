@@ -5,6 +5,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
 import me.rerere.rikkahub.data.orbis.privacy.validateEmergencyVaultCopy
+import me.rerere.rikkahub.data.orbis.spaces.CompanionSpacesBackup
+import me.rerere.rikkahub.data.files.FileProtection
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -109,14 +111,16 @@ internal object EmergencyRestore {
             }
         }
         assertQuiescent()
+        val excludedCompanionFiles = CompanionSpacesBackup.excludeEmergencyOrphans(prepared)
+        validateEmergencyCompanionLibraries(prepared)
         validatePrepared(prepared)
         assertQuiescent()
         return Journal(
             status = "PREPARED",
             targetPaths = roots.mapValues { it.value.canonicalPath },
             hadOriginal = roots.mapValues { it.value.exists() },
-            selectedFiles = selected,
-            retainedFiles = manifest.files.size - selected.size,
+            selectedFiles = selected.filterNot { it in excludedCompanionFiles },
+            retainedFiles = manifest.files.size - selected.size + excludedCompanionFiles.size,
             restoredPrivateVaults = usableVaultOwners.size,
             retainedPrivateVaults = vaultOwners.size - usableVaultOwners.size,
         ).also { writeJournal(transaction, it) }
@@ -213,6 +217,8 @@ internal object EmergencyRestore {
         !EmergencyArchivePaths.isMaterializable(path) -> false
         path in setOf("databases/rikka_hub", "databases/rikka_hub-wal", "databases/rikka_hub-journal") -> true
         path == "files/datastore/settings.preferences_pb" -> true
+        path == "files/${FileProtection.PATH}" -> true
+        path.startsWith("files/orbis-companion-spaces/") -> CompanionSpacesBackup.maxBytes(path.removePrefix("files/")) != null
         path.startsWith("$PRIVATE_VAULT_ROOT/") -> isPrivateVaultPayloadPath(path)
         path.startsWith("files/") -> path.split('/').let { it.size >= 3 && it[1] in libraryNames }
         else -> false
@@ -285,4 +291,11 @@ internal object EmergencyRestore {
         require(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs())
         Files.move(source.toPath(), target.toPath(), ATOMIC_MOVE)
     }
+}
+
+/** Only inert saved content and explicit attachment locks are restored, never temporary video state. */
+internal fun validateEmergencyCompanionLibraries(prepared: File) {
+    CompanionSpacesBackup.validateStaged(prepared)
+    val protection = File(prepared, "files/${FileProtection.PATH}")
+    if (protection.exists()) FileProtection(protection).snapshot()
 }

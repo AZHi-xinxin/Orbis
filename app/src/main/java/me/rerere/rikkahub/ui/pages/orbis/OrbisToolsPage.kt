@@ -1,7 +1,5 @@
 package me.rerere.rikkahub.ui.pages.orbis
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,13 +8,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -24,8 +20,17 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AiBrain01
+import me.rerere.hugeicons.stroke.Calendar03
+import me.rerere.hugeicons.stroke.Connect
+import me.rerere.hugeicons.stroke.Favourite
+import me.rerere.hugeicons.stroke.Files02
+import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.Package
+import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.orbis.spaces.CompanionSpaceSection
 import me.rerere.rikkahub.ui.components.ai.OrbisStickerPanel
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -43,6 +48,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
     var showCalls by rememberSaveable { mutableStateOf(false) }
     var showGallery by rememberSaveable { mutableStateOf(false) }
     var showPrivateRoom by rememberSaveable { mutableStateOf(false) }
+    var companionSpace by rememberSaveable(selected?.id?.toString()) { mutableStateOf<CompanionSpaceSection?>(null) }
     val context = LocalContext.current
     var galleryName by remember(selected?.id) { mutableStateOf("") }
     LaunchedEffect(selected?.id, showGallery) {
@@ -83,28 +89,43 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                             Text(if (group == OrbisToolGroup.WORK) "工作台" else "休息一下",
                                 color = colors.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.semantics { heading() })
-                            orbisToolEntries.filter { it.group == group }.chunked(3).forEach { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    row.forEach { item ->
-                                        val enabled = item.destination !in setOf(OrbisToolDestination.LOCAL_CAPABILITIES, OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM) || selected != null
-                                        val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
-                                        ToolsTile(tile, enabled, Modifier.weight(1f)) {
-                                            when (item.destination) {
-                                                OrbisToolDestination.WORKSPACE -> navigator.navigate(Screen.Workspaces)
-                                                OrbisToolDestination.ATTACHMENTS -> navigator.navigate(Screen.SettingFiles)
-                                                OrbisToolDestination.LOCAL_CAPABILITIES -> selected?.id?.toString()?.let {
-                                                    navigator.navigate(Screen.AssistantLocalTool(it))
+                            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                val columns = when {
+                                    maxWidth >= 330.dp && LocalDensity.current.fontScale <= 1.3f -> 3
+                                    maxWidth >= 220.dp -> 2
+                                    else -> 1
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    orbisToolEntries.filter { it.group == group }.chunked(columns).forEach { row ->
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            row.forEach { item ->
+                                                val enabled = item.destination !in setOf(OrbisToolDestination.LOCAL_CAPABILITIES,
+                                                    OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM,
+                                                    OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
+                                                    OrbisToolDestination.PHOTO_WALL) || selected != null
+                                                val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
+                                                ToolsTile(tile, enabled, Modifier.weight(1f)) {
+                                                    when (item.destination) {
+                                                        OrbisToolDestination.WORKSPACE -> navigator.navigate(Screen.Workspaces)
+                                                        OrbisToolDestination.ATTACHMENTS -> navigator.navigate(Screen.SettingFiles)
+                                                        OrbisToolDestination.LOCAL_CAPABILITIES -> selected?.id?.toString()?.let {
+                                                            navigator.navigate(Screen.AssistantLocalTool(it))
+                                                        }
+                                                        OrbisToolDestination.GAMES -> showGames = true
+                                                        OrbisToolDestination.STICKERS -> showStickers = true
+                                                        OrbisToolDestination.BLUETOOTH_TOY -> navigator.navigate(Screen.OrbisToy)
+                                                        OrbisToolDestination.GALLERY -> showGallery = true
+                                                        OrbisToolDestination.SCHEDULE -> navigator.navigate(Screen.OrbisSchedule)
+                                                        OrbisToolDestination.PRIVATE_ROOM -> showPrivateRoom = true
+                                                        OrbisToolDestination.SECRET_BASE -> companionSpace = CompanionSpaceSection.SECRET
+                                                        OrbisToolDestination.SHARED_SPACE -> companionSpace = CompanionSpaceSection.SOCIAL
+                                                        OrbisToolDestination.PHOTO_WALL -> companionSpace = CompanionSpaceSection.PHOTOS
+                                                    }
                                                 }
-                                                OrbisToolDestination.GAMES -> showGames = true
-                                                OrbisToolDestination.STICKERS -> showStickers = true
-                                                OrbisToolDestination.BLUETOOTH_TOY -> navigator.navigate(Screen.OrbisToy)
-                                                OrbisToolDestination.GALLERY -> showGallery = true
-                                                OrbisToolDestination.SCHEDULE -> navigator.navigate(Screen.OrbisSchedule)
-                                                OrbisToolDestination.PRIVATE_ROOM -> showPrivateRoom = true
                                             }
+                                            repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                                         }
                                     }
-                                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             }
                         }
@@ -122,6 +143,8 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
             }
         }
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
+        if (companionSpace != null && selected != null) OrbisCompanionSpacesPage(selected.id.toString(), selected.name,
+            companionSpace!!, onClose = { companionSpace = null })
         if (showPrivateRoom && selected != null) OrbisPrivateRoomPage(selected.id.toString(), selected.name,
             onClose = { showPrivateRoom = false })
         if (showGallery && selected != null) OrbisGalleryPage(selected.id.toString(), selected.name, onClose = { showGallery = false })
@@ -138,19 +161,33 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
 }
 
 @Composable
-private fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+internal fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val colors = OrbisTheme.colors
-    Surface(modifier.clip(RoundedCornerShape(18.dp)).clickable(enabled = enabled, role = Role.Button,
-        onClickLabel = "打开${item.title}", onClick = onClick),
-        shape = RoundedCornerShape(18.dp), color = colors.raisedPanel,
-        border = BorderStroke(1.dp, colors.border.copy(alpha = .7f))) {
-        Column(Modifier.heightIn(min = 106.dp).padding(horizontal = 6.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text(item.glyph, fontSize = 25.sp, lineHeight = 31.sp, color = colors.indigo)
-            Text(item.title, fontSize = 12.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold, color = colors.ink,
-                maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            Text(if (enabled) item.subtitle else "请先选择 AI 配置", fontSize = 10.sp, lineHeight = 15.sp,
-                textAlign = TextAlign.Center, color = colors.mutedInk)
-        }
+    val artwork = when (item.destination) {
+        OrbisToolDestination.GAMES -> OrbisEntryArtwork.ARCADE
+        OrbisToolDestination.SECRET_BASE -> OrbisEntryArtwork.SEALED_LETTER
+        OrbisToolDestination.PRIVATE_ROOM -> OrbisEntryArtwork.PRIVATE_ROOM
+        else -> null
+    }
+    if (artwork != null) {
+        OrbisDecorativeEntryCard(artwork, item.title, if (enabled) item.subtitle else "请先选择 AI 配置",
+            onClick, modifier, enabled, compact = true)
+        return
+    }
+    val icon = when (item.destination) {
+        OrbisToolDestination.WORKSPACE -> HugeIcons.Folder01
+        OrbisToolDestination.ATTACHMENTS -> HugeIcons.Files02
+        OrbisToolDestination.LOCAL_CAPABILITIES -> HugeIcons.AiBrain01
+        OrbisToolDestination.STICKERS -> HugeIcons.Sparkles
+        OrbisToolDestination.BLUETOOTH_TOY -> HugeIcons.Connect
+        OrbisToolDestination.GALLERY -> HugeIcons.Package
+        OrbisToolDestination.SCHEDULE -> HugeIcons.Calendar03
+        OrbisToolDestination.SHARED_SPACE -> HugeIcons.Favourite
+        OrbisToolDestination.PHOTO_WALL -> HugeIcons.Image02
+        else -> HugeIcons.Package
+    }
+    OrbisToolEntryCard(item.title, if (enabled) item.subtitle else "请先选择 AI 配置",
+        onClick, modifier, enabled) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(30.dp), tint = colors.indigo)
     }
 }

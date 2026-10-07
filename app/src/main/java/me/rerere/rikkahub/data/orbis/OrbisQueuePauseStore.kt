@@ -41,6 +41,15 @@ class OrbisQueuePauseStore(private val read: () -> String?, private val write: (
         }
     }
 
+    /** Strict read-only evidence. Null means verified absence, never an unreadable/uncertain hold. */
+    @Synchronized
+    fun pauseReason(conversationId: String): String? {
+        validateId(conversationId)
+        val state = load()
+        check(conversationId !in uncertain) { "queue_pause_state_uncertain" }
+        return state.pauses[conversationId]
+    }
+
     /** Existing conversations fail closed. UI/new-empty-conversation policy belongs to the caller. */
     @Synchronized
     fun isPaused(conversationId: String): Boolean = status(conversationId) != QueuePauseStatus.UNPAUSED
@@ -61,6 +70,16 @@ class OrbisQueuePauseStore(private val read: () -> String?, private val write: (
         val before = load()
         if (conversationId !in before.pauses && conversationId !in uncertain) return
         commit(before.copy(pauses = before.pauses - conversationId), setOf(conversationId))
+    }
+
+    /** Clear only a transport hold that this caller has proven resolved, not another safety hold. */
+    @Synchronized
+    fun resumeIfReason(conversationId: String, expectedReason: String): Boolean {
+        validateId(conversationId)
+        val before = load()
+        if (conversationId in uncertain || before.pauses[conversationId] != expectedReason) return false
+        commit(before.copy(pauses = before.pauses - conversationId), setOf(conversationId))
+        return true
     }
 
     /**

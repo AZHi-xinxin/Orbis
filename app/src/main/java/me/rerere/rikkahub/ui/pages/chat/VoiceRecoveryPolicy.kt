@@ -17,7 +17,7 @@ internal class VoiceSessionFailure(
     VoiceFailureStage.ASR_LISTEN -> if (hadSpeech) "识别连接中断；本句未发送，请重新说一次" else "语音识别连接中断"
     VoiceFailureStage.ASR_FINAL -> "未收到本句完整转写；本句未发送，请重新说一次"
     VoiceFailureStage.CONNECT -> "通话开始记录未能确认，未继续收音"
-    VoiceFailureStage.MODEL -> "本次回复未能完成，通话仍保留；收音与朗读已暂停，请回聊天核对后检查恢复"
+    VoiceFailureStage.MODEL -> "本次回复未能完成，通话仍保留；收音与朗读已暂停，请回聊天处理后点继续回复"
     VoiceFailureStage.TTS -> "本段朗读未完成；文字已保留，没有自动从头重播"
     VoiceFailureStage.AUDIO -> "音频输出暂不可用"
 } + " [$code]")

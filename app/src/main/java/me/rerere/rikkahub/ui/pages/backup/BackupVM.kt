@@ -71,12 +71,26 @@ class BackupVM(
         settings.value.assistantId
     }
 
+    val claudeImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        source = ChatArchiveSource.CLAUDE, assistantName = ::importAssistantName) {
+        check(!settings.value.init)
+        settings.value.assistantId
+    }
+
     override fun onCleared() {
+        chatGptImport.close()
+        claudeImport.close()
         polarisImport.close()
         kelivoImport.close()
         operitImport.close()
         deepSeekImport.close()
         super.onCleared()
+    }
+
+    val chatGptImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        source = ChatArchiveSource.CHATGPT, assistantName = ::importAssistantName) {
+        check(!settings.value.init)
+        settings.value.assistantId
     }
 
     // Opening local backup must not contact previously configured remote accounts.

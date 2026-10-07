@@ -24,6 +24,13 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.concurrent.Executors
 
+/** Returning from an app-lock overlay is a normal UI entry, not a request for rescue mode. */
+fun accessibilityHostLaunchIntent(context: Context): Intent = Intent(Intent.ACTION_MAIN).apply {
+    setClassName(context.packageName, "me.rerere.rikkahub.RouteActivity")
+    addCategory(Intent.CATEGORY_LAUNCHER)
+    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+}
+
 /**
  * Cross-device accessibility service.
  *
@@ -243,12 +250,7 @@ class LCAccessibilityService : AccessibilityService() {
 
     private fun launchRikkaOrHome() {
         if (interventionMode != DeviceCompatibility.AppInterventionMode.ACTIVE) return
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        if (launch == null) {
-            performGlobalAction(GLOBAL_ACTION_HOME)
-            return
-        }
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        val launch = accessibilityHostLaunchIntent(this)
         try {
             startActivity(launch)
         } catch (_: Exception) {

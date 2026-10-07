@@ -6,6 +6,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.orbis.OrbisKaomoji
 import me.rerere.rikkahub.data.orbis.OrbisKaomojiState
+import me.rerere.rikkahub.data.files.FileProtection
+import me.rerere.rikkahub.data.files.FileProtectionState
 import me.rerere.rikkahub.data.orbis.schedule.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -31,8 +33,8 @@ class OrbisLocalToolBackupTest {
         manager.publish(staging)
     }
 
-    @Test fun `archive allowlist contains only two exact documents not directories or sidecars`() {
-        assertEquals(setOf("orbis-schedule/schedule-v1.json", "orbis-kaomoji/library-v1.json"), OrbisLocalToolBackup.paths.toSet())
+    @Test fun `archive allowlist contains only exact local documents not directories or sidecars`() {
+        assertEquals(setOf("orbis-schedule/schedule-v1.json", "orbis-kaomoji/library-v1.json", FileProtection.PATH), OrbisLocalToolBackup.paths.toSet())
         listOf("orbis-schedule", "orbis-schedule/schedule-v1.json.bak", "orbis-schedule/schedule-v1.json.new", "orbis-kaomoji/token.json",
             "orbis-schedule/../secret", "orbis-consultation/runtime.json", "no_backup/config.json").forEach { assertNull(OrbisLocalToolBackup.maxBytes(it)) }
         assertTrue(OrbisLocalToolBackup.sidecarPaths(setOf("files/upload/photo")).isEmpty())
@@ -176,4 +178,40 @@ class OrbisLocalToolBackupTest {
     }
 
     private class SimulatedDeath : Error()
+
+    @Test fun `multiline emoji roundtrips through archive and staged restore unchanged`() = runBlocking {
+        val art = "  /\\_/\\\n ( o.o ) 🌟\n  > ^ < 👩‍💻"
+        val entry = kaomoji("unicode-art", art)
+        val bytes = kaomojiBytes(entry)
+        OrbisLocalToolBackup.validate(OrbisLocalToolBackup.KAOMOJI, bytes)
+        assertEquals(art, json.decodeFromString<OrbisKaomojiState>(bytes.toString(Charsets.UTF_8)).entries.single().text)
+        publish(OrbisLocalToolBackup.KAOMOJI to bytes)
+        assertTrue(restore().apply { })
+        assertArrayEquals(bytes, live(OrbisLocalToolBackup.KAOMOJI).readBytes())
+        assertArrayEquals(bytes, OrbisLocalToolBackup.merge(OrbisLocalToolBackup.KAOMOJI, bytes, bytes))
+    }
+
+    @Test fun `lock merge never downgrades a live or backup lock and preserves explicit unlock otherwise`() {
+        val before = FileProtectionState(automatic = setOf("upload/local-auto.png"),
+            overrides = mapOf("upload/manual.png" to true, "upload/unlocked.png" to false))
+        val backup = FileProtectionState(automatic = setOf("upload/backup-auto.png"),
+            overrides = mapOf("upload/manual.png" to false, "upload/from-backup.png" to true))
+        val incoming = FileProtection.encode(backup).toByteArray()
+        val mergedBytes = OrbisLocalToolBackup.merge(FileProtection.PATH, FileProtection.encode(before).toByteArray(), incoming)
+        val merged = FileProtection.decode(mergedBytes.toString(Charsets.UTF_8))
+        listOf("upload/local-auto.png", "upload/backup-auto.png", "upload/manual.png", "upload/from-backup.png")
+            .forEach { assertTrue(it, merged.isLocked(it)) }
+        assertFalse(merged.isLocked("upload/unlocked.png"))
+        assertArrayEquals(mergedBytes, OrbisLocalToolBackup.merge(FileProtection.PATH, mergedBytes, incoming))
+    }
+
+    @Test fun `lock manifest survives journal restore without touching unrelated files`() = runBlocking {
+        val bytes = FileProtection.encode(FileProtectionState(overrides = mapOf("upload/synthetic.png" to true))).toByteArray()
+        val sentinel = write(live("unrelated/sentinel.txt"), "keep".toByteArray())
+        publish(FileProtection.PATH to bytes)
+        assertTrue(restore().apply { })
+        assertTrue(FileProtection(live(FileProtection.PATH)).snapshot().isLocked("upload/synthetic.png"))
+        assertEquals("keep", sentinel.readText())
+        assertArrayEquals(bytes, live(FileProtection.PATH).readBytes())
+    }
 }

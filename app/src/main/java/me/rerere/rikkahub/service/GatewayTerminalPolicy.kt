@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.service
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Ending the local owner is not evidence that an external tool succeeded or was cancelled. */
@@ -31,6 +32,7 @@ internal suspend fun <T> finishTerminatedGatewayRequests(
     sameScope: (T, T) -> Boolean,
     probe: suspend (T) -> GatewayStopProbe,
     finish: suspend (request: T, capabilityEvidence: T) -> Boolean,
+    stillSafeCancelledVoice: (() -> Boolean)? = null,
 ): GatewayTerminalSummary {
     val evidence = requests.filter(advertised)
     val selected = requests.take(16).mapNotNull { request ->
@@ -46,7 +48,21 @@ internal suspend fun <T> finishTerminatedGatewayRequests(
         withTimeoutOrNull(4_000) {
             for ((request, proof) in selected) {
                 result = result.copy(checked = result.checked + 1)
-                when (probe(request)) {
+                // A normal speech interruption closes the HTTP producer first. Its
+                // disconnect watcher can still be unwinding when our first exact
+                // status read arrives. Wait only within this same bounded budget;
+                // neither a busy receipt nor a changed owner grants retirement.
+                var status = if (stillSafeCancelledVoice?.invoke() == false)
+                    GatewayStopProbe.UNSUPPORTED else probe(request)
+                while (stillSafeCancelledVoice != null &&
+                    status in setOf(GatewayStopProbe.GENERATING, GatewayStopProbe.CLEANUP_PENDING)) {
+                    if (!stillSafeCancelledVoice()) { status = GatewayStopProbe.UNSUPPORTED; break }
+                    delay(250)
+                    if (!stillSafeCancelledVoice()) { status = GatewayStopProbe.UNSUPPORTED; break }
+                    status = probe(request)
+                }
+                if (stillSafeCancelledVoice?.invoke() == false) status = GatewayStopProbe.UNSUPPORTED
+                when (status) {
                     GatewayStopProbe.NOT_CURRENT -> Unit
                     GatewayStopProbe.CAN_STOP -> {
                         result = if (finish(request, proof)) result.copy(retired = result.retired + 1)

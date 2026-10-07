@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -26,6 +27,7 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.core.Tool
@@ -36,6 +38,8 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
+import me.rerere.rikkahub.data.ai.transformers.OrbisVideoCallTransformer
+import me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages
 import me.rerere.rikkahub.data.ai.transformers.ThinkTagTransformer
 import me.rerere.rikkahub.data.ai.compaction.AppliedCompaction
 import me.rerere.rikkahub.data.ai.compaction.ConversationCompactionControl
@@ -50,9 +54,11 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.service.OrbisVideoCallRuntime
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -369,6 +375,140 @@ class GenerationLoopLoopbackTest {
     }
 
     @Test(timeout = 30_000)
+    fun nonVideoRequestsAndArchivedHandlesNeverInitializePrivateVideoStorage() = runBlocking<Unit> {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        check(instrumentation is IsolatedGenerationLoopRunner)
+        check(instrumentation.targetContext.applicationContext.javaClass == Application::class.java)
+        val context = NoPrivateStorageContext(instrumentation.context)
+        val existingRuntime = OrbisVideoCallRuntime.getIfInitialized()
+        val assistant = Assistant(name = "Synthetic video lazy admission")
+        val call = "11111111-1111-1111-1111-111111111111"
+        val frame = "22222222-2222-2222-2222-222222222222"
+        val image = UIMessagePart.Image("orbis-video-frame://$call/$frame")
+        val current = UIMessage.user("synthetic ordinary text")
+        val ordinaryImage = current.copy(parts = listOf(UIMessagePart.Image("https://example.invalid/ordinary.jpg")))
+        val receipt = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
+            UIMessagePart.Tool("synthetic-video-read", "orbis_video_frame_read", "{}", listOf(image))))
+        val cases = listOf(
+            "text" to listOf(current),
+            "ordinary image" to listOf(ordinaryImage),
+            "voice turn" to listOf(current.copy(orbisVoiceCallId = call, orbisVoiceCallKind = "turn")),
+            "voice opening" to listOf(current.copy(orbisVoiceCallId = call, orbisVoiceCallKind = "opening")),
+            "inactive automatic frame" to listOf(current.copy(parts = listOf(image),
+                orbisVoiceCallId = call, orbisVoiceCallKind = "visual")),
+            "archived frame" to listOf(current.copy(parts = listOf(image), orbisVoiceCallId = call,
+                orbisVoiceCallKind = "visual"), receipt, current),
+            "invalid handle" to listOf(current.copy(parts = listOf(UIMessagePart.Image("orbis-video-frame://invalid")))),
+        )
+        for (vision in listOf(false, true)) {
+            val model = Model(inputModalities = if (vision) listOf(Modality.TEXT, Modality.IMAGE) else listOf(Modality.TEXT))
+            val transformerContext = TransformerContext(context, model, assistant, Settings())
+            for ((name, source) in cases) {
+                val transformed = OrbisVideoCallTransformer.transform(transformerContext, source)
+                assertEquals("$name vision=$vision", source, transformed)
+                val projected = projectOrbisVideoRequestImages(context, assistant.id.toString(), transformed, vision)
+                if (name == "text" || name == "ordinary image") assertEquals(source, projected)
+                assertEquals("$name vision=$vision", 0, context.privateStorageAccesses.get())
+                assertSame(existingRuntime, OrbisVideoCallRuntime.getIfInitialized())
+            }
+        }
+        // Explicit tool reads still project independently of automatic-frame admission. A
+        // text-only model must reject the image before initializing its on-disk resolver.
+        val unsupported = projectOrbisVideoRequestImages(context, assistant.id.toString(), listOf(current, receipt), false)
+        assertTrue(unsupported.last().getTools().single().output.single() is UIMessagePart.Text)
+        assertEquals(0, context.privateStorageAccesses.get())
+        assertSame(existingRuntime, OrbisVideoCallRuntime.getIfInitialized())
+    }
+
+    @Test(timeout = 30_000)
+    fun hostTurnGateRevocationStopsActualProviderRetryForBothTransportModes() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1, busyFirst = true,
+                enableAutoRetry = true) { fixture ->
+                val gateChecks = AtomicInteger()
+                val failure = runCatching {
+                    fixture.collect(
+                        consultationBusyWaitUntilMillis = System.currentTimeMillis() + 10_000,
+                        requireActiveTurn = {
+                            gateChecks.incrementAndGet()
+                            // The first real loopback request is permitted. Its proven
+                            // pre-generation busy response would normally trigger a retry.
+                            if (fixture.server.requests.isNotEmpty()) {
+                                throw CancellationException("synthetic host turn revoked before retry")
+                            }
+                        },
+                    )
+                }.exceptionOrNull()
+                assertTrue("streaming=$streaming: $failure", failure is CancellationException)
+                assertEquals("synthetic host turn revoked before retry", failure?.message)
+                assertTrue(gateChecks.get() >= 3) // Loop start, first HTTP, retry admission.
+                assertEquals(1, fixture.server.requests.size)
+                assertTrue(fixture.executions.isEmpty())
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun hostTurnGateStopsToolDispatchAndSurvivesCompactionWithoutUserMessages() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            // Cover revocation after model output, while the durable pre-dispatch ACK is
+            // suspended, and between two tools from the same model response.
+            for (phase in listOf("after_response", "during_checkpoint", "after_first_tool")) {
+                fixture(streaming, approval = false, expectedRequests = 1,
+                    batchWithEmptyResult = true, enableAutoRetry = true) { fixture ->
+                    val active = AtomicBoolean(true)
+                    if (phase == "after_first_tool") fixture.afterToolExecution = { active.set(false) }
+                    val failure = runCatching {
+                        fixture.collect(durableCheckpoints = true,
+                            requireActiveTurn = {
+                                if (!active.get() || (phase == "after_response" && fixture.server.requests.isNotEmpty())) {
+                                    throw CancellationException("synthetic host turn revoked: $phase")
+                                }
+                            },
+                            onDurableBoundary = { boundary ->
+                                if (phase == "during_checkpoint" && boundary.toolCompleted == false) active.set(false)
+                                boundary.result.complete(Unit)
+                            },
+                        )
+                    }.exceptionOrNull()
+                    assertTrue("$phase streaming=$streaming: $failure", failure is CancellationException)
+                    assertEquals("synthetic host turn revoked: $phase", failure?.message)
+                    assertEquals(if (phase == "after_first_tool") listOf(1) else emptyList<Int>(), fixture.executions.toList())
+                    assertEquals(1, fixture.server.requests.size)
+                    assertEquals(0, fixture.context.privateStorageAccesses.get())
+                }
+            }
+            fixture(streaming, approval = false, expectedRequests = 1, compactionMode = "zero",
+                enableAutoRetry = true) { fixture ->
+                val active = AtomicBoolean(true)
+                val compacted = AtomicReference<List<UIMessage>>(emptyList())
+                val failure = runCatching {
+                    fixture.collect(contextLimit = 0,
+                        requireActiveTurn = {
+                            // Only the host closure owns admission. It must remain effective
+                            // when compaction has removed every original USER message.
+                            if (!active.get()) throw CancellationException("synthetic host turn revoked after compaction")
+                        },
+                        onCompactionCommitted = { messages ->
+                            compacted.set(messages)
+                            active.set(false)
+                        },
+                    )
+                }.exceptionOrNull()
+                assertTrue("compacted streaming=$streaming: $failure", failure is CancellationException)
+                assertEquals("synthetic host turn revoked after compaction", failure?.message)
+                assertEquals(1, fixture.compactionCommitAttempts.get())
+                assertTrue(compacted.get().first().isCompactionSummary())
+                assertTrue(compacted.get().none { it.role == MessageRole.USER })
+                assertEquals(listOf(1), fixture.executions.toList()) // The pre-revocation peer executed once.
+                assertEquals(1, fixture.server.requests.size) // No compacted continuation HTTP.
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
     fun consultationWaitsOnlyForProvenPreGenerationBusyWithoutRepeatingTools() = runBlocking<Unit> {
         for (streaming in listOf(true, false)) {
             fixture(streaming, approval = false, expectedRequests = 5, busyFirst = true) { fixture ->
@@ -518,6 +658,41 @@ class GenerationLoopLoopbackTest {
     @Test(timeout = 30_000)
     fun transportFailureAfterToolStartedLeavesUnknownWithoutReceiptContinuationOrRetry() = runBlocking<Unit> {
         interruptedToolResult(IOException("synthetic transport failed after external effect"))
+    }
+
+    @Test(timeout = 30_000)
+    fun prewriteRejectionCompletesDurableReceiptWithoutExternalEffectOrUnknownStop() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 2,
+                batchWithEmptyResult = true, enableAutoRetry = true) { fixture ->
+                fixture.beforeToolExecution = {
+                    throw ToolRejectedBeforeExecutionException("合成写前校验拒绝；未执行。")
+                }
+                val boundaries = mutableListOf<Pair<String?, Boolean?>>()
+                val final = fixture.collect(durableCheckpoints = true, onDurableBoundary = { chunk ->
+                    boundaries += chunk.toolCallId to chunk.toolCompleted
+                    chunk.result.complete(Unit)
+                })
+
+                assertEquals(listOf(
+                    "synthetic-call-1" to false, "synthetic-call-1" to true,
+                    "synthetic-call-2" to false, "synthetic-call-2" to true,
+                ), boundaries)
+                assertTrue(fixture.executions.isEmpty())
+                val results = final.last().getTools().map { tool ->
+                    Json.parseToJsonElement((tool.output.single() as UIMessagePart.Text).text).jsonObject
+                }
+                assertEquals(2, results.size)
+                results.forEach { result ->
+                    assertEquals("tool_rejected_before_execution", result["reason_code"]!!.jsonPrimitive.content)
+                    assertFalse(result["execution_performed"]!!.jsonPrimitive.boolean)
+                }
+                assertTrue(final.last().parts.filterIsInstance<UIMessagePart.Text>()
+                    .any { it.text.contains("synthetic final answer") })
+                assertEquals(2, fixture.server.requests.size)
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
     }
 
     private suspend fun interruptedToolResult(interruption: Exception) {
@@ -904,6 +1079,7 @@ class GenerationLoopLoopbackTest {
         privateMode: Boolean,
     ) {
         val executions = Collections.synchronizedList(mutableListOf<Int>())
+        var beforeToolExecution: suspend (Int) -> Unit = {}
         var afterToolExecution: suspend (Int) -> Unit = {}
         val transforms = AtomicInteger()
         val schemas = AtomicInteger()
@@ -936,6 +1112,7 @@ class GenerationLoopLoopbackTest {
             execute = { args ->
                 val step = args.jsonObject.getValue("step").jsonPrimitive.int
                 check(step in 1..3 && step !in executions) { "Synthetic tool repeated or out of range." }
+                beforeToolExecution(step)
                 executions.add(step)
                 afterToolExecution(step)
                 if (batchWithEmptyResult && step == 2) emptyList()
@@ -963,6 +1140,8 @@ class GenerationLoopLoopbackTest {
             outputTransformers: List<OutputMessageTransformer> = emptyList(),
             onDurableBoundary: suspend (GenerationChunk.DurableBoundary) -> Unit = { it.result.complete(Unit) },
             admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
+            requireActiveTurn: () -> Unit = {},
+            onCompactionCommitted: (List<UIMessage>) -> Unit = {},
             onMessages: (List<UIMessage>) -> Unit = {},
         ): List<UIMessage> {
             terminalEvidence.clear() // Evidence belongs to this collection, never an approval retry.
@@ -978,6 +1157,7 @@ class GenerationLoopLoopbackTest {
                     assertEquals(final, before)
                     check(compactionMode != "commit_failure") { "synthetic disk full" }
                     final = replacement.messages
+                    onCompactionCommitted(final)
                     AppliedCompaction(replacement.messages, 1)
                 },
             ) else null
@@ -992,6 +1172,7 @@ class GenerationLoopLoopbackTest {
                 consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis,
                 emitTerminalEvidence = emitTerminalEvidence,
                 admitOutput = admitOutput,
+                requireActiveTurn = requireActiveTurn,
             ).collect { chunk ->
                 if (collectorDelayMs > 0) delay(collectorDelayMs)
                 if (compaction != null) delay(15)

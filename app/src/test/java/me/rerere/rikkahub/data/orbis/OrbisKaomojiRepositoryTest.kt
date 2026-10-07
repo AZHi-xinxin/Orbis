@@ -52,13 +52,30 @@ class OrbisKaomojiRepositoryTest {
     @Test fun `invalid content and duplicate update leave original storage unchanged`() {
         val storage = MemoryStorage()
         val repository = OrbisKaomojiRepository(storage)
-        for (text in listOf("", "a\nb", "x".repeat(161), "\uD83D\uDE00")) {
+        for (text in listOf("", " \n ", "x".repeat(1201), "\u0000", "\uD83D")) {
             assertThrows(IllegalArgumentException::class.java) { repository.add("label", text) }
         }
         assertThrows(IllegalArgumentException::class.java) { repository.add("label", "(x)", List(9) { "tag$it" }) }
         val entries = repository.readSnapshot().entries
         assertThrows(IllegalArgumentException::class.java) { repository.update(entries[1].id, 1, "duplicate", entries[0].text) }
         assertNull(storage.raw)
+    }
+
+    @Test fun `multi line art and emoji preserve indentation through save reload and update`() {
+        val storage = MemoryStorage()
+        val repository = OrbisKaomojiRepository(storage)
+        val art = "  /\\_/\\\n ( o.o ) 🌟\n  > ^ < 👩‍💻"
+        val entry = repository.add("文字画", art)
+        assertEquals(art, entry.text)
+        assertEquals(entry, OrbisKaomojiRepository(storage).readSnapshot().entries.last())
+        assertEquals("  x\n    y", repository.update(entry.id, entry.revision, "换行", "  x\r\n\ty").text)
+    }
+
+    @Test fun `unicode supplementary characters count once rather than bytes or UTF16 units`() {
+        val repository = OrbisKaomojiRepository(MemoryStorage())
+        assertEquals(1, OrbisKaomojiRepository.characterCount("😀"))
+        assertEquals(1200, OrbisKaomojiRepository.characterCount(repository.add("emoji", "😀".repeat(1200)).text))
+        assertThrows(IllegalArgumentException::class.java) { repository.add("too long", "😀".repeat(1201)) }
     }
 
     @Test fun `uncertain writes block followups until explicit reload`() {

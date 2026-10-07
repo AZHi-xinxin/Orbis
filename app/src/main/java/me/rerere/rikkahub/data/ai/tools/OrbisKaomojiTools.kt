@@ -45,7 +45,7 @@ internal fun createOrbisKaomojiTools(open: suspend () -> OrbisKaomojiRepository)
 private fun kaomojiWriteTool(action: String, open: suspend () -> OrbisKaomojiRepository) = Tool(
     name = "orbis_kaomoji_$action",
     description = if (action == "add")
-        "新增一个文字颜文字到本机人类与AI共用库，须经宿主写入授权。相同正文返回已有条目。保存不发送消息，不修改聊天草稿，不联网。label是短名称，text只放可复制的颜文字正文。"
+        "新增一个文字颜文字到本机人类与AI共用库，须经宿主写入授权。支持多行文字画与emoji，保留缩进，正文最多1200个Unicode字符（不是字节）。相同正文返回已有条目。保存不发送消息，不修改聊天草稿，不联网。label是短名称，text只放可复制的颜文字正文。"
     else "修订本机共用库已有颜文字，须经宿主写入授权。先查目录获取真实id与当前revision，作为expected_revision提交；不猜ID、不覆盖别人更新。保存不发送消息，不修改聊天或草稿。",
     parameters = { InputSchema.Obj(buildJsonObject {
         if (action == "update") {
@@ -53,7 +53,7 @@ private fun kaomojiWriteTool(action: String, open: suspend () -> OrbisKaomojiRep
             put("expected_revision", buildJsonObject { put("type", "integer"); put("minimum", 1) })
         }
         put("label", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 40) })
-        put("text", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", 160) })
+        put("text", buildJsonObject { put("type", "string"); put("minLength", 1); put("maxLength", OrbisKaomojiRepository.MAX_TEXT_CHARACTERS) })
         put("tags", buildJsonObject {
             put("type", "array"); put("maxItems", 8)
             put("items", buildJsonObject { put("type", "string"); put("maxLength", 20) })

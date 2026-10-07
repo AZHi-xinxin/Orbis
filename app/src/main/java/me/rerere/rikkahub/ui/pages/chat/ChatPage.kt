@@ -10,8 +10,6 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
@@ -94,11 +92,11 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.ui.pages.orbis.OrbisCompactionUiState
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.rikkahub.ui.pages.orbis.OrbisHeaderIconButton
+import me.rerere.rikkahub.ui.pages.orbis.OrbisHeaderControlSurface
 import me.rerere.rikkahub.ui.pages.orbis.OrbisChatBackdrop
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 import me.rerere.rikkahub.ui.pages.orbis.OrbisVisualTheme
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
-import me.rerere.rikkahub.data.model.orbisChatUsesLightHeader
 import me.rerere.rikkahub.data.model.orbisChatDrawerVisible
 import me.rerere.rikkahub.ui.hooks.rememberSharedPreferenceBoolean
 import androidx.compose.runtime.CompositionLocalProvider
@@ -239,6 +237,7 @@ fun ChatPage(
     }
 
     val startVoiceMode = rememberVoiceModeStarter(vm, setting)
+    val startVideoMode = rememberVoiceModeStarter(vm, setting, video = true)
     me.rerere.rikkahub.ui.pages.orbis.OrbisVoiceCallOverlay(vm.voiceRuntime,
         setting.getAssistantById(conversation.assistantId), vm.voiceCalls,
         currentConversationId = conversation.id,
@@ -311,6 +310,7 @@ fun ChatPage(
             ) {
                 ChatPageContent(
                     onStartVoiceMode = startVoiceMode,
+                    onStartVideoMode = startVideoMode,
                     onManualContext = { vm.resetManualContext(); manualContextOpen = true },
                     inputState = inputState,
                     loadingJob = loadingJob,
@@ -359,6 +359,7 @@ fun ChatPage(
                 CompositionLocalProvider(LocalLayoutDirection provides contentDirection) {
                 ChatPageContent(
                     onStartVoiceMode = startVoiceMode,
+                    onStartVideoMode = startVideoMode,
                     onManualContext = { vm.resetManualContext(); manualContextOpen = true },
                     inputState = inputState,
                     loadingJob = loadingJob,
@@ -391,6 +392,7 @@ fun ChatPage(
 @Composable
 private fun ChatPageContent(
     onStartVoiceMode: () -> Unit,
+    onStartVideoMode: () -> Unit,
     onManualContext: () -> Unit,
     inputState: ChatInputState,
     loadingJob: Job?,
@@ -484,14 +486,9 @@ private fun ChatPageContent(
                 onImageSettled = imageSettled)
             OrbisChatBackdrop(appearance = appearance, drawBackground = !inheritBackground,
                 modifier = Modifier.fillMaxSize().hazeSource(hazeState), onImageSettled = imageSettled)
-            // A translucent status-area scrim protects white system icons on arbitrary photos;
-            // neither it nor the floating controls forms an opaque title/status bar.
-            val variableBackground = inheritBackground ||
-                (appearance.backgroundEnabled && !appearance.backgroundImage.isNullOrBlank())
-            OrbisStatusBarScrim(
-                visible = variableBackground &&
-                    orbisChatUsesLightHeader(appearance, LocalDarkMode.current, inheritBackground),
-            )
+            // Let the wallpaper continue through the system status area without a
+            // separate tinted strip. The top bar still reserves its existing insets;
+            // RouteActivity/Theme own icon contrast, independently of debug labels.
         } else AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState),
             onImageSettled = imageSettled)
         Scaffold(
@@ -523,10 +520,12 @@ private fun ChatPageContent(
             bottomBar = {
                 val messageQueue by vm.messageQueue.collectAsStateWithLifecycle()
                 val gatewayStopNotice by vm.gatewayStopNotice.collectAsStateWithLifecycle()
+                val queueRecovery by vm.messageQueueRecovery.collectAsStateWithLifecycle()
                 val voiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
                 Column(if (BuildConfig.ORBIS_ENABLED) Modifier.navigationBarsPadding().imePadding() else Modifier) {
                 ChatInput(
                     onStartVoiceMode = onStartVoiceMode,
+                    onStartVideoMode = onStartVideoMode,
                     voiceState = voiceState,
                     onStopVoiceMode = vm.voiceRuntime::hangUp,
                     state = inputState,
@@ -537,6 +536,8 @@ private fun ChatPageContent(
                     onResumeMessageQueue = vm::resumeMessageQueue,
                     onStopGatewayWait = vm::stopGeneration,
                     gatewayStopNotice = gatewayStopNotice,
+                    queueRecovery = queueRecovery,
+                    onDismissQueueRecoveryResult = vm::dismissQueueRecoveryResult,
                     loading = loadingJob != null,
                     settings = setting,
                     hazeState = hazeState,
@@ -820,6 +821,7 @@ private fun ChatPageContent(
                 vm = vm,
                 attachmentPickerActions = attachmentPickerActions,
                 onStartVoiceMode = onStartVoiceMode,
+                onStartVideoMode = onStartVideoMode,
                 onDismiss = { showFilesSheet = false },
             )
         }
@@ -835,6 +837,7 @@ private fun ChatFilesPickerSheet(
     vm: ChatVM,
     attachmentPickerActions: ChatAttachmentPickerActions,
     onStartVoiceMode: () -> Unit,
+    onStartVideoMode: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val voiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
@@ -904,6 +907,14 @@ private fun ChatFilesPickerSheet(
                     onStartVoiceMode()
                 }
             } else null,
+            onStartVideoMode = if (BuildConfig.ORBIS_ENABLED && voiceState.phase == VoicePhase.Off) {
+                {
+                    dismissAll()
+                    focusManager.clearFocus(force = true)
+                    keyboardController?.hide()
+                    onStartVideoMode()
+                }
+            } else null,
         )
     }
 }
@@ -958,22 +969,23 @@ private fun TopBar(
                 currentEstimatePending = !isGenerating && estimate == null,
             )
         }
-        val lightHeader = orbisChatUsesLightHeader(settings.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current),
-            LocalDarkMode.current, assistant.background != null || assistant.useGradientBackground)
-        OrbisVisualTheme(darkTheme = lightHeader) {
+        val headerOpacity = settings.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current).headerOpacity
+        // Photos affect system status-icon contrast, not the selected day/night control palette.
+        OrbisVisualTheme {
         Column {
             Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 52.dp)
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).heightIn(min = 48.dp)
                     .clickable { titleState.open(conversation.title) }, contentAlignment = Alignment.CenterStart) {
-                    Text(conversation.title.ifBlank { "和${assistant.name.ifBlank { "AI" }}说话" },
-                        modifier = Modifier.background(OrbisTheme.colors.raisedPanel.copy(alpha = .72f), RoundedCornerShape(12.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1,
-                        color = OrbisTheme.colors.ink, overflow = TextOverflow.Ellipsis)
+                    OrbisHeaderControlSurface(headerOpacity) {
+                        Text(conversation.title.ifBlank { "和${assistant.name.ifBlank { "AI" }}说话" },
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1,
+                            color = OrbisTheme.colors.ink, overflow = TextOverflow.Ellipsis)
+                    }
                 }
-                Surface(color = OrbisTheme.colors.raisedPanel.copy(alpha = .72f), shape = CircleShape) {
+                OrbisHeaderControlSurface(headerOpacity, shape = CircleShape) {
                     OrbisContextBudgetButton(
                         budget = budget,
                         modelLabel = model?.let { it.displayName.ifBlank { it.modelId } } ?: "未选择",
@@ -985,11 +997,12 @@ private fun TopBar(
                         onManualContext = onManualContext.takeIf { conversation.messageNodes.isNotEmpty() },
                     )
                 }
-                OrbisHeaderIconButton(onClick = onClickMenu) {
+                OrbisHeaderIconButton(onClick = onClickMenu, backgroundOpacity = headerOpacity) {
                     Icon(if (previewMode) HugeIcons.Cancel01 else HugeIcons.LeftToRightListBullet,
                         "切换对话目录")
                 }
-                if (!bigScreen) OrbisHeaderIconButton(onClick = { scope.launch { drawerState.open() } }) {
+                if (!bigScreen) OrbisHeaderIconButton(onClick = { scope.launch { drawerState.open() } },
+                    backgroundOpacity = headerOpacity) {
                     Icon(HugeIcons.Menu03, "打开右侧会话栏")
                 }
             }

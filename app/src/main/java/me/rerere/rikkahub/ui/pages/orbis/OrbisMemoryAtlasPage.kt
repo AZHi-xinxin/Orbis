@@ -43,6 +43,7 @@ import me.rerere.rikkahub.data.orbis.integration.*
 import org.koin.compose.koinInject
 import me.rerere.rikkahub.data.orbis.OrbisMemoryAtlas as Atlas
 import me.rerere.rikkahub.data.orbis.OrbisAtlasGalaxy as Galaxy
+import me.rerere.rikkahub.data.orbis.OrbisAtlasDisplayMode
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalSettings
 import java.time.Instant
@@ -55,6 +56,9 @@ internal val AtlasGold = Color(0xFFD4B77C)
 /** Explicit demo or authenticated ST metadata, never private memory prose or a write endpoint. */
 @Composable
 fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
+    val context = LocalContext.current.applicationContext
+    val displayPreferences = remember(context) { context.getSharedPreferences("orbis-atlas-presentation", android.content.Context.MODE_PRIVATE) }
+    var displayMode by remember { mutableStateOf(OrbisAtlasDisplayMode.fromStored(displayPreferences.getString("display-mode", null))) }
     val connections = koinInject<OrbisIntegrationConnections>()
     val store = connections[OrbisIntegration.ST_ATLAS]
     val bootstrap by connections.atlasBootstrap.state.collectAsStateWithLifecycle()
@@ -108,7 +112,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
     fun camera() = Atlas.Camera(yaw, pitch, zoom)
     fun updateCamera(value: Atlas.Camera) { yaw = value.yaw; pitch = value.pitch; zoom = value.zoom }
     fun reset() { updateCamera(Atlas.Camera()); selected = null }
-    val animate = graph != null && hostVisible && resumed && !paused && !reducedMotion && selected == null && !dragging
+    val animate = displayMode == OrbisAtlasDisplayMode.LIGHTWEIGHT && graph != null && hostVisible && resumed && !paused && !reducedMotion && selected == null && !dragging
     LaunchedEffect(animate) {
         if (!animate) return@LaunchedEffect
         // A composition-owned frame loop: cancelled on pause, selection, touch, background or exit.
@@ -125,6 +129,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
         }
     }
     val motionLabel = when {
+        displayMode == OrbisAtlasDisplayMode.GALAXY -> "银河静览 · 拖动旋转 · 双指缩放 · 轻触记忆星点"
         reducedMotion -> "减小动效已开启 · 可手动旋转"
         selected != null -> "已聚焦星点 · 关闭卡片继续漫游"
         paused -> "自转已暂停 · 可手动旋转"
@@ -146,10 +151,11 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                 val constrained = maxHeight < 440.dp || LocalDensity.current.fontScale > 1.4f
                 if (graph != null) OrbisMemoryAtlasCanvas(
                     demo = graph, camera = { camera() }, clock = { clock }, selected = selected,
-                    motionLabel = motionLabel, motionAllowed = hostVisible && resumed && !paused && !reducedMotion,
+                    motionLabel = motionLabel, motionAllowed = displayMode == OrbisAtlasDisplayMode.LIGHTWEIGHT && hostVisible && resumed && !paused && !reducedMotion,
                     onCamera = ::updateCamera, onSelected = { selected = it },
                     onDragging = { dragging = it }, onReset = ::reset,
-                    onToggleMotion = { paused = !paused }, modifier = Modifier.fillMaxSize(),
+                    onToggleMotion = { if (displayMode == OrbisAtlasDisplayMode.LIGHTWEIGHT) paused = !paused }, modifier = Modifier.fillMaxSize(),
+                    displayMode = displayMode,
                 )
                 Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(top = if (compact) 16.dp else 25.dp)) {
                     Column(Modifier.padding(horizontal = 22.dp)) {
@@ -176,9 +182,16 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                             TextButton(onClick = { showDemo = !showDemo; selected = null }) { Text(if (showDemo) "返回真实 ST" else "查看演示", color = AtlasInk) }
                         }
                     }
-                    Row(Modifier.align(Alignment.End).padding(end = 10.dp, top = 6.dp)) {
+                    Row(Modifier.align(Alignment.End).padding(end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = {
+                            displayMode = if (displayMode == OrbisAtlasDisplayMode.LIGHTWEIGHT) OrbisAtlasDisplayMode.GALAXY else OrbisAtlasDisplayMode.LIGHTWEIGHT
+                            displayPreferences.edit().putString("display-mode", displayMode.storedValue).apply()
+                            reset()
+                        }, modifier = Modifier.semantics { contentDescription = "切换星图外观，当前${if (displayMode == OrbisAtlasDisplayMode.GALAXY) "银河" else "轻量"}" }) {
+                            Text(if (displayMode == OrbisAtlasDisplayMode.GALAXY) "银河 ▾" else "轻量 ▾", color = AtlasInk)
+                        }
                         AtlasControl(if (paused) "▷" else "Ⅱ", if (paused) "继续星盘自转" else "暂停星盘自转",
-                            enabled = !reducedMotion, onClick = { paused = !paused })
+                            enabled = !reducedMotion && displayMode == OrbisAtlasDisplayMode.LIGHTWEIGHT, onClick = { paused = !paused })
                         AtlasControl("⌂", "重置星盘视角", onClick = ::reset)
                         AtlasControl("+", "放大星盘", enabled = zoom < Atlas.MAX_ZOOM,
                             onClick = { updateCamera(Atlas.zoomTo(camera(), zoom + .15)) })

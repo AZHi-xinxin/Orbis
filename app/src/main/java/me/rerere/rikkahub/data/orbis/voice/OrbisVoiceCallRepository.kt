@@ -257,7 +257,7 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
 
     private fun validateUpdate(before: OrbisVoiceCallRecord, after: OrbisVoiceCallRecord) {
         require(after.id == before.id && after.conversationId == before.conversationId &&
-            after.assistantId == before.assistantId && after.startedAtMs == before.startedAtMs) {
+            after.assistantId == before.assistantId && after.startedAtMs == before.startedAtMs && after.video == before.video) {
             "voice_call_identity_changed"
         }
         require(after.transcript.size >= before.transcript.size &&

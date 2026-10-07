@@ -163,7 +163,10 @@ fun ChatInput(
     onResumeMessageQueue: () -> Unit = {},
     onStopGatewayWait: () -> Unit = {},
     gatewayStopNotice: String? = null,
+    queueRecovery: me.rerere.rikkahub.service.QueueRecoveryState = me.rerere.rikkahub.service.QueueRecoveryState(),
+    onDismissQueueRecoveryResult: (me.rerere.rikkahub.service.QueueRecoveryState) -> Unit = {},
     onStartVoiceMode: (() -> Unit)? = null,
+    onStartVideoMode: (() -> Unit)? = null,
     voiceState: VoiceSessionState = VoiceSessionState(),
     onStopVoiceMode: () -> Unit = {},
     onOrbisCapability: ((OrbisComposerAction) -> Unit)? = null,
@@ -226,11 +229,18 @@ fun ChatInput(
         asrState.isRecording || asrState.status == ASRStatus.Connecting || asrState.status == ASRStatus.Stopping ->
             "请先结束当前录音或识别，再发起通话。"
         messageQueue.paused -> "消息队列已暂停，请先检查并恢复队列。"
-        messageQueue.messages.isNotEmpty() -> "消息队列尚未处理完，请稍后再发起通话。"
+        messageQueue.messages.any { it.recoveryHeldReason == null } -> "消息队列尚未处理完，请稍后再发起通话。"
         onStartVoiceMode == null -> "当前页面暂不能发起通话，请回到聊天页面。"
         else -> OrbisVoiceCallPreflight.firstFailure(settings, assistant)?.explanation
     }
     val asrCorrectionNotice by asr.correctionNotice.collectAsState()
+    val videoUnavailableReason = when {
+        voiceUnavailableReason != null -> voiceUnavailableReason
+        onStartVideoMode == null -> "当前页面暂不能发起视频，请回到聊天页面。"
+        me.rerere.ai.provider.Modality.IMAGE !in settings.getCurrentChatModel()?.inputModalities.orEmpty() ->
+            "请先选择支持图片输入的模型。"
+        else -> null
+    }
     val hapticFeedback = LocalHapticFeedback.current
     val soundEffectPlayer: SoundEffectPlayer = koinInject()
     LaunchedEffect(Unit) {
@@ -319,8 +329,10 @@ fun ChatInput(
                 onResume = onResumeMessageQueue,
                 onStopGatewayWait = onStopGatewayWait,
                 gatewayStopNotice = gatewayStopNotice,
+                recovery = queueRecovery,
+                onDismissRecoveryResult = onDismissQueueRecoveryResult,
             )
-            Surface(
+            ChatComposerSurface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(containerShape)
@@ -332,8 +344,7 @@ fun ChatInput(
                         else Modifier
                     ),
                 shape = containerShape,
-                tonalElevation = 0.dp,
-                shadowElevation = if (orbis) 6.dp else 0.dp,
+                orbis = orbis,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 color = composerColor,
                 contentColor = if (orbis) OrbisTheme.colors.ink else contentColorFor(composerColor),
@@ -534,7 +545,8 @@ fun ChatInput(
                                 onSendImage = onOrbisSendSticker,
                                 onSendText = onOrbisSendTextEmotion,
                                 sendEnabled = !loading && !state.isEditing() && !voiceState.isActive &&
-                                    !asrState.isRecording && messageQueue.messages.isEmpty(),
+                                    !asrState.isRecording && !messageQueue.paused &&
+                                    messageQueue.messages.none { it.recoveryHeldReason == null },
                             )
                             OrbisComposerPanel.VOICE -> OrbisVoicePanel(
                                 canRecognize = asrState.isAvailable || asrState.isRecording,
@@ -542,6 +554,8 @@ fun ChatInput(
                                 busy = asrState.status == ASRStatus.Connecting || asrState.status == ASRStatus.Stopping,
                                 canStartVoice = voiceUnavailableReason == null,
                                 voiceUnavailableReason = voiceUnavailableReason,
+                                canStartVideo = videoUnavailableReason == null,
+                                videoUnavailableReason = videoUnavailableReason,
                                 batchVoiceMode = settings.getSelectedASRProvider().let {
                                     it is ASRProviderSetting.MiMo || it is ASRProviderSetting.Step
                                 },
@@ -552,6 +566,12 @@ fun ChatInput(
                                 onStartVoice = {
                                     closeManualDictation()
                                     onStartVoiceMode?.invoke()
+                                },
+                                onStartVideo = {
+                                    closeManualDictation()
+                                    focusManager.clearFocus(force = true)
+                                    keyboardController?.hide()
+                                    onStartVideoMode?.invoke()
                                 },
                                 onStopVoice = onStopVoiceMode,
                                 voiceActive = voiceState.isActive,
@@ -810,12 +830,7 @@ private fun TextInputRow(
                     onSendMessage()
                 }
             },
-            colors = TextFieldDefaults.colors().copy(
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-            ),
+            colors = chatInputFieldColors(),
             trailingIcon = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

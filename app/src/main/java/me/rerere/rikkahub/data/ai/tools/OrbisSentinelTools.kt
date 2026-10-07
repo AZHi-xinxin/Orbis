@@ -7,6 +7,7 @@ import kotlinx.serialization.json.*
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.ToolRejectedBeforeExecutionException
 import me.rerere.rikkahub.data.orbis.sentinel.*
 
 /** Trusted caller scope, never IDs supplied by the model. Opening this factory does not start observation. */
@@ -60,9 +61,9 @@ internal fun createOrbisSentinelTools(
         validate: (OrbisSentinelRule) -> Unit = {},
         edit: (OrbisSentinelRule) -> OrbisSentinelRule?,
     ): OrbisSentinelRule? {
-        val old = owned(id)
+        val old = sentinelOwnedPrewrite { owned(id) }
         // Reject malformed configuration before settling any pending occurrence.
-        validate(old)
+        sentinelPrewrite("哨兵配置校验未通过；未修改任何配置。") { validate(old) }
         return editRule(id, old.binding) { edit(owned(id)) }
     }
 
@@ -150,9 +151,11 @@ internal fun createOrbisSentinelTools(
             parameters = { sentinelSchema(buildJsonObject {
                 put("rule_id", sentinelString()); sentinelConfigurationProperties().forEach { (key, value) -> put(key, value) }
             }, listOf("rule_id")) }, needsApproval = { false }, execute = { args ->
-                val obj = sentinelArgs(args, SENTINEL_CONFIGURATION_KEYS + "rule_id")
-                require(obj.keys.any { it != "rule_id" }) { "请至少提供一个要修改的规则字段。" }
-                val id = obj.sentinelRequiredString("rule_id")
+                val (obj, id) = sentinelPrewrite("哨兵更新参数无效；未修改任何配置。") {
+                    val parsed = sentinelArgs(args, SENTINEL_CONFIGURATION_KEYS + "rule_id")
+                    require(parsed.keys.any { it != "rule_id" }) { "请至少提供一个要修改的规则字段。" }
+                    parsed to parsed.sentinelRequiredString("rule_id")
+                }
                 val updated = try {
                     editOwned(id, validate = { it.withSentinelConfiguration(obj) }) { current ->
                         store.update(id, current.binding, now()) { it.withSentinelConfiguration(obj) }
@@ -187,6 +190,28 @@ private val SENTINEL_CONFIGURATION_KEYS = setOf("name", "type", "prompt", "enabl
     "timezone", "probability_percent", "quiet_enabled", "quiet_start_local", "quiet_end_local", "window_start_local", "window_end_local",
     "escalation_after", "escalation_prompt")
 
+private inline fun <T> sentinelPrewrite(publicReason: String, block: () -> T): T = try {
+    block()
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
+    // Never promote an arbitrary storage/parser exception message to model-visible text.
+    throw ToolRejectedBeforeExecutionException(publicReason, failure)
+}
+
+private inline fun <T> sentinelOwnedPrewrite(block: () -> T): T = try {
+    block()
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
+    val publicReason = when (failure.message) {
+        "invalid_sentinel_rule_id" -> "rule_id 格式无效；未修改任何配置。"
+        "该哨兵不存在或不属于当前 AI。" -> "该哨兵不存在或不属于当前 AI；未修改任何配置。"
+        else -> "暂时无法安全读取该哨兵规则；未修改任何配置。"
+    }
+    throw ToolRejectedBeforeExecutionException(publicReason, failure)
+}
+
 private fun sentinelSchema(properties: JsonObject, required: List<String>? = null) = InputSchema.Obj(properties, required)
 private fun sentinelRuleIdSchema() = sentinelSchema(buildJsonObject { put("rule_id", sentinelString()) }, listOf("rule_id"))
 private fun sentinelString(values: List<String>? = null) = buildJsonObject {
@@ -211,7 +236,13 @@ private fun sentinelConfigurationProperties() = buildJsonObject {
     put("daily_at_local", buildJsonObject { put("type", "string"); put("description", "ritual必填每日时间 HH:mm，例如07:30；不因午夜过期。") })
     put("daily_window_end_local", buildJsonObject { put("type", "string"); put("description", "ritual可选随机窗口结束 HH:mm或24:00；空字符串恢复定点，不填维持原值。") })
     put("timezone", buildJsonObject { put("type", "string"); put("description", "IANA时区如Asia/Shanghai；默认手机本地，空字符串恢复随手机。") })
-    put("probability_percent", buildJsonObject { put("type", "integer"); put("enum", buildJsonArray { listOf(10,30,50,70,90,100).forEach { add(it) } }); put("description", "仅agreement/low_battery；约定默认50，低电量默认100。") })
+    // Some OpenAI-compatible relays copy JSON Schema enums into Google's string-only
+    // enum field. Keep the argument numeric without that wire-format ambiguity; the
+    // discrete values are still checked by withSentinelConfiguration before any write.
+    put("probability_percent", buildJsonObject {
+        put("type", "integer"); put("minimum", 10); put("maximum", 100)
+        put("description", "仅agreement/low_battery；整数档位只可选10、30、50、70、90、100，不接受其他值；约定默认50，低电量默认100。")
+    })
     put("quiet_enabled", buildJsonObject { put("type", "boolean"); put("description", "仅agreement；false关闭静默，true默认23:30–07:30或沿用指定时间。") })
     put("quiet_start_local", sentinelString()); put("quiet_end_local", sentinelString())
     put("window_start_local", buildJsonObject { put("type", "string"); put("description", "night_usage开始HH:mm，默认00:00") })
