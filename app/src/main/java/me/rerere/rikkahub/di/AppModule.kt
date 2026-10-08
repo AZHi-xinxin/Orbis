@@ -101,6 +101,7 @@ val appModule = module {
             context = get(),
             cloudTools = get(),
             settingsStore = get(),
+            orbisMemoryRepository = get(),
         )
     }
 

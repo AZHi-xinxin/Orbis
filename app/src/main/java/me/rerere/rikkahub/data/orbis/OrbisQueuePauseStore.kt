@@ -82,6 +82,19 @@ class OrbisQueuePauseStore(private val read: () -> String?, private val write: (
         return true
     }
 
+    /** Replace one verified hold in a single durable commit; never expose a resumed interval. */
+    @Synchronized
+    fun replaceReasonIfExpected(conversationId: String, expectedReason: String, replacementReason: String): Boolean {
+        validateId(conversationId)
+        require(expectedReason.matches(Regex("[a-z0-9_]{1,80}"))) { "invalid_queue_pause_reason" }
+        require(replacementReason.matches(Regex("[a-z0-9_]{1,80}"))) { "invalid_queue_pause_reason" }
+        val before = load()
+        if (conversationId in uncertain || before.pauses[conversationId] != expectedReason) return false
+        if (expectedReason == replacementReason) return true
+        commit(before.copy(pauses = before.pauses + (conversationId to replacementReason)), setOf(conversationId))
+        return true
+    }
+
     /**
      * One-time migration of pre-store queued receipts. Infer only the last actually dispatched
      * receipt and only if later undispatched input remains. Do not repeatedly reinterpret newer

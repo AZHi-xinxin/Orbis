@@ -10,7 +10,8 @@ import java.io.File
  * Chat-only projection of a foreign RikkaHub backup, NOT an Orbis Room database.
  * The caller checkpoints a private staging copy first. This reader never migrates the source,
  * edits its identity hash, opens app settings, or installs source triggers/FTS in the target.
- * Versions 16..26 use the supported message_node / UIMessage layout; other layouts fail closed.
+ * Compatibility is determined by the required chat projection, not a foreign app's database
+ * version number or Room identity hash. Unknown table/column layouts still fail closed.
  */
 internal class RikkaChatSnapshotReader private constructor(private val database: SQLiteDatabase,
     private val checkCancelled: () -> Unit) : RikkaChatSource {
@@ -52,10 +53,8 @@ internal class RikkaChatSnapshotReader private constructor(private val database:
 
     private fun validate() {
         checkCancelled()
-        val version = database.query("PRAGMA user_version").use { it.moveToFirst(); it.getInt(0) }
-        require(version in 16..26) {
-            "暂不支持此备份的数据库版本（$version）；请保留原 ZIP，使用受支持版本重新导出或等待导入器适配"
-        }
+        // user_version belongs to the exporting app's entire database, including tables that
+        // chat-only import never reads. A number alone neither proves nor disproves compatibility.
         requireTable("ConversationEntity", mapOf("id" to "TEXT", "title" to "TEXT", "create_at" to "INTEGER", "update_at" to "INTEGER"))
         requireTable("message_node", mapOf("id" to "TEXT", "conversation_id" to "TEXT", "node_index" to "INTEGER", "messages" to "TEXT", "select_index" to "INTEGER"))
         val chats = scalar("SELECT COUNT(*) FROM ConversationEntity")
@@ -110,7 +109,7 @@ internal class RikkaChatSnapshotReader private constructor(private val database:
         }
         if (name == "ConversationEntity" && "nodes" in columns) {
             require(columns["nodes"] == ("TEXT" to 0)) { "备份含未知旧消息格式；原聊天未更改" }
-            // Upstream 16+ keeps this obsolete column as []. Never silently drop unconverted history.
+            // Some exports retain this obsolete column as []. Never silently drop unconverted history.
             requireNoRows("SELECT 1 FROM ConversationEntity WHERE nodes IS NOT NULL AND trim(nodes) NOT IN ('', '[]') LIMIT 1")
         }
     }

@@ -1,10 +1,14 @@
 package me.rerere.rikkahub.ui.pages.backup
 
 import android.util.Log
+import android.util.AtomicFile
+import android.net.Uri
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -24,6 +28,7 @@ import me.rerere.rikkahub.data.sync.S3BackupItem
 import me.rerere.rikkahub.data.sync.S3Sync
 import me.rerere.rikkahub.utils.UiState
 import java.io.File
+import java.io.FileNotFoundException
 
 private const val TAG = "BackupVM"
 
@@ -93,10 +98,36 @@ class BackupVM(
         settings.value.assistantId
     }
 
-    // Opening local backup must not contact previously configured remote accounts.
-    suspend fun importRikkaChats(file: File) =
+    private val rikkaReceipts = rikkaReceiptOwner(context)
+    val rikkaImportState = rikkaReceipts.state
+
+    suspend fun dismissRikkaImportReceipt() = rikkaReceipts.dismiss()
+
+    // Opening local backup must not contact previously configured remote accounts. URI staging is
+    // inside the receipt boundary too, so leaving during the copy cannot resurrect an old success.
+    suspend fun importRikkaChats(uri: Uri) = rikkaReceipts.import { progress ->
+        val target = settingsStore.settingsFlow.value.let { check(!it.init); it.assistantId }
+        val temp = File.createTempFile("orbis-rikka-import-", ".zip", context.cacheDir)
+        try {
+            val coroutine = currentCoroutineContext()
+            requireNotNull(context.contentResolver.openInputStream(uri)).use { input ->
+                temp.outputStream().use { output ->
+                    me.rerere.rikkahub.data.sync.importer.RikkaChatArchive.copyLimited(input, output,
+                        me.rerere.rikkahub.data.sync.importer.RikkaChatArchive.MAX_ARCHIVE_BYTES,
+                        { coroutine.ensureActive() },
+                        { count -> me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.requireSpace(context.cacheDir.usableSpace, count.toLong()) })
+                }
+            }
+            me.rerere.rikkahub.data.sync.importer.RikkaChatImporter(context, conversationRepository, filesManager)
+                .import(temp, target, progress)
+        } finally { temp.delete() }
+    }
+
+    suspend fun importRikkaChats(file: File) = rikkaReceipts.import { progress ->
+        val target = settingsStore.settingsFlow.value.let { check(!it.init); it.assistantId }
         me.rerere.rikkahub.data.sync.importer.RikkaChatImporter(context, conversationRepository, filesManager)
-            .import(file, settings.value.assistantId)
+            .import(file, target, progress)
+    }
 
     fun updateSettings(settings: Settings) {
         viewModelScope.launch {
@@ -278,6 +309,42 @@ class BackupVM(
                 )
             )
         }
+    }
+
+    companion object {
+        @Volatile private var phoneRikkaReceipts: RikkaPhoneImportReceiptOwner? = null
+
+        // Shared across replacement BackupVMs in this process; the small no-backup receipt also
+        // survives Activity/process recreation. It contains no source filename or conversation text.
+        @Synchronized private fun rikkaReceiptOwner(context: android.content.Context): RikkaPhoneImportReceiptOwner =
+            phoneRikkaReceipts ?: run {
+                val file = AtomicFile(File(context.applicationContext.noBackupFilesDir, "rikka-phone-import-receipt-v1.json"))
+                RikkaPhoneImportReceiptOwner(read = {
+                    try {
+                        file.openRead().use { input ->
+                            val bytes = ByteArray(RikkaPhoneImportReceiptOwner.MAX_BYTES + 1)
+                            var size = 0
+                            while (size < bytes.size) {
+                                val count = input.read(bytes, size, bytes.size - size)
+                                if (count < 0) break
+                                size += count
+                            }
+                            require(size <= RikkaPhoneImportReceiptOwner.MAX_BYTES)
+                            bytes.decodeToString(0, size, throwOnInvalidSequence = true)
+                        }
+                    } catch (failure: FileNotFoundException) {
+                        if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists() ||
+                            File(file.baseFile.path + ".new").exists()) throw failure
+                        null
+                    }
+                }, write = { raw ->
+                    val output = file.startWrite()
+                    try {
+                        output.write(raw.toByteArray(Charsets.UTF_8)); output.fd.sync()
+                        file.finishWrite(output)
+                    } catch (failure: Throwable) { file.failWrite(output); throw failure }
+                }).also { phoneRikkaReceipts = it }
+            }
     }
 }
 

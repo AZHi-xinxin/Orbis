@@ -338,6 +338,8 @@ class OrbisGroupChatsTest {
         val f = Fixture(this); val room = f.room(1)
         val privatePreset = UIMessage.user("PRIVATE_PRESET_SENTINEL")
         val original = f.assistants[0].copy(enableMemory = true, useGlobalMemory = true, enableRecentChatsReference = true,
+            orbisMemoryMode = me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode.INDEPENDENT,
+            orbisMemoryAutoInject = true,
             presetMessages = listOf(privatePreset), mcpServers = setOf(Uuid.random()), workspaceId = Uuid.random(),
             enableWebSearch = true, enableTimeReminder = true, enabledSkills = setOf("private-skill"),
             modeInjectionIds = setOf(Uuid.random()), lorebookIds = setOf(Uuid.random()), maxTokens = 999999,
@@ -348,6 +350,10 @@ class OrbisGroupChatsTest {
         f.chats.send(room, "本群公开文字"); runCurrent()
         val input = f.reply.calls.single(); val safe = input.participant.assistant
         assertFalse(safe.enableMemory); assertFalse(safe.useGlobalMemory); assertFalse(safe.enableRecentChatsReference)
+        assertEquals(me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode.LIGHT, safe.orbisMemoryMode)
+        assertFalse(safe.orbisMemoryAutoInject)
+        assertTrue(original.orbisMemoryAutoInject)
+        assertEquals(me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode.INDEPENDENT, original.orbisMemoryMode)
         assertTrue(safe.presetMessages.isEmpty()); assertTrue(safe.mcpServers.isEmpty()); assertTrue(safe.localTools.isEmpty())
         assertNull(safe.workspaceId); assertFalse(safe.enableWebSearch); assertFalse(safe.enableTimeReminder)
         assertTrue(safe.modeInjectionIds.isEmpty()); assertTrue(safe.lorebookIds.isEmpty()); assertTrue(safe.enabledSkills.isEmpty())

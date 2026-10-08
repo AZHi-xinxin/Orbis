@@ -37,7 +37,7 @@ data class OrbisSentinelRuntimeState(val running: Boolean = false, val error: St
 class OrbisSentinels private constructor(private val context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "orbis-sentinel-rules-v1.json"))
     val rules = OrbisSentinelRuleStore(
-        read = { if (file.baseFile.exists()) file.openRead().bufferedReader().use { it.readText() } else null },
+        read = { readSentinelAtomicText(file.baseFile) { file.openRead() } },
         write = { writeAtomic(file, it.toByteArray(Charsets.UTF_8)) },
     )
     private val mutableRuntime = MutableStateFlow(OrbisSentinelRuntimeState())
@@ -56,7 +56,7 @@ class OrbisSentinels private constructor(private val context: Context) {
 
     private fun <T> atomicStore(name: String, factory: (() -> String?, (String) -> Unit) -> T): T {
         val target = AtomicFile(File(context.noBackupFilesDir, name))
-        return factory({ if (target.baseFile.exists()) target.openRead().bufferedReader().use { it.readText() } else null },
+        return factory({ readSentinelAtomicText(target.baseFile) { target.openRead() } },
             { writeAtomic(target, it.toByteArray(Charsets.UTF_8)) })
     }
 

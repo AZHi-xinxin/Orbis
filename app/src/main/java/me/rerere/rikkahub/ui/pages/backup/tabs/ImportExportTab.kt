@@ -58,6 +58,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     val polarisState by vm.polarisImport.state.collectAsStateWithLifecycle()
     val claudeState by vm.claudeImport.state.collectAsStateWithLifecycle()
     val chatGptState by vm.chatGptImport.state.collectAsStateWithLifecycle()
+    val rikkaState by vm.rikkaImportState.collectAsStateWithLifecycle()
     val openChatGpt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.chatGptImport.preview(uri)
     }
@@ -76,15 +77,20 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     val openDeepSeek = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.deepSeekImport.preview(uri)
     }
-    var busy by remember { mutableStateOf(false) }
+    var localBusy by remember { mutableStateOf(false) }
+    val busy = localBusy || rikkaState.busy
     var action by remember { mutableStateOf("rikka") }
     var confirm by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<String?>(null) }
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val selectedAction = action
         if (uri != null) scope.launch {
-            busy = true
+            localBusy = true
             try {
-                val summary = withContext(Dispatchers.IO) {
+                val summary = if (selectedAction == "rikka") {
+                    vm.importRikkaChats(uri)
+                    "" // The process-owned, durable receipt is shown below, not a page-local popup.
+                } else withContext(Dispatchers.IO) {
                     val temp = File.createTempFile("orbis-import-", ".zip", context.cacheDir)
                     try {
                         requireNotNull(context.contentResolver.openInputStream(uri)).use { input ->
@@ -93,25 +99,22 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
                                 RikkaChatArchive.MAX_ARCHIVE_BYTES, { coroutine.ensureActive() },
                                 { count -> ArchiveCapacity.requireSpace(context.cacheDir.usableSpace, count.toLong()) }) }
                         }
-                        when (action) {
-                            "rikka" -> vm.importRikkaChats(temp).let {
-                                "已导入 ${it.imported} 个聊天窗口，跳过 ${it.skipped} 个已有窗口。\n恢复 ${it.attachments} 个附件，${it.missingAttachments} 处附件不在原备份中。\n没有导入模型、密钥、提示词设置、技能或工具授权。"
-                            }
+                        when (selectedAction) {
                             "chatbox" -> vm.restoreFromChatBox(temp).let { "已导入 ${it.importedConversations} 个 ChatBox 聊天；跳过 ${it.skippedExistingConversations} 个已有窗口。" }
                             else -> { vm.restoreFromLocalFile(temp); "本地恢复已就绪，重启后生效。" }
                         }
                     } finally { temp.delete() }
                 }
-                if (action == "local") onShowRestartDialog() else result = summary
+                if (selectedAction == "local") onShowRestartDialog() else if (selectedAction != "rikka") result = summary
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) { result = if (e is RikkaPartialImportException || e is ChatboxPartialImportException) e.message
                 else "导入未完成：${ArchiveCapacity.publicError(e)}" }
-            finally { busy = false }
+            finally { localBusy = false }
         }
     }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) scope.launch {
-            busy = true
+            localBusy = true
             try {
                 withContext(Dispatchers.IO) {
                     val file = vm.exportToFile()
@@ -122,7 +125,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
                 result = "本地备份已保存。备份含模型连接配置，请私密保管，不要公开分享。"
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) { result = "导出未完成：${e.message ?: "文件无法写入"}" }
-            finally { busy = false }
+            finally { localBusy = false }
         }
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -131,6 +134,16 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
             Text("导入聊天是追加；恢复 Orbis 备份是替换。两件事分开做。", color = OrbisTheme.colors.mutedInk, fontSize = 12.sp)
         }
         if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在处理，请稍候…") }
+        rikkaState.receipt?.let { receipt -> item {
+            LocalCard {
+                Text("RikkaHub 导入回执", fontWeight = FontWeight.Bold)
+                Text(receipt.summary(), fontSize = 12.sp)
+                if (!rikkaState.busy) TextButton(onClick = { scope.launch { vm.dismissRikkaImportReceipt() } }) { Text("知道了") }
+            }
+        } }
+        if (rikkaState.storageWarning) item {
+            Text("本机导入回执未确认保存，重新打开后显示的计数可能不完整；已导入的聊天不会因此撤销。可重新选择原包，已有窗口会跳过。", fontSize = 12.sp)
+        }
         item { ConversationRescueEntry(!busy && !deepSeekState.busy && !operitState.busy && !kelivoState.busy && !polarisState.busy && !claudeState.busy && !chatGptState.busy) }
         item { BackupCard("ChatGPT 聊天记录", "选择官方导出包解压后的 conversations.json 或 conversations-NNN.json，分片逐个选择。先预览并选择完整路径，各分支另建窗口；全选保留全部可见分支，公共前文会重复。不导入系统设置，历史工具仅作文字，媒体仅留未恢复说明，不下载附件。请保留全部原始资料。", !busy && !chatGptState.busy, "选择 ChatGPT JSON") {
             openChatGpt.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
@@ -147,7 +160,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         item { BackupCard("北极星聊天记录", "支持北极星导出 ZIP。先预览并选择窗口，再按原顺序追加聊天；思考过程单独保留。图片只显示历史引用说明，不导入附件或配置、密钥、人格与工具授权。重复导入自动跳过。", !busy && !polarisState.busy, "选择北极星备份") {
             openPolaris.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         } }
-        item { BackupCard("RikkaHub 聊天记录", "在 RikkaHub 导出含“聊天记录”的本地 ZIP，建议同时勾选附件。合并到当前身份下，不覆盖现有窗口，不导入账号或模型配置。重复导入自动跳过。", !busy, "选择 RikkaHub 备份") { confirm = "rikka" } }
+        item { BackupCard("RikkaHub 聊天记录", "在 RikkaHub 导出含“聊天记录”的本地 ZIP，建议同时勾选附件。按聊天结构提取正文、分支和附件，不要求版本号一致；工具仅作历史文字。不覆盖现有窗口，不导入账号或模型配置。重复导入自动跳过。", !busy, "选择 RikkaHub 备份") { confirm = "rikka" } }
         item { BackupCard("DeepSeek 官方聊天记录", "选择官方导出 ZIP，先预览窗口和分支路径。支持长记录逐会话导入；保留正文、思考和时间，不执行历史工具或下载附件。不会改变现有聊天或连接设置。", !busy && !deepSeekState.busy, "选择 DeepSeek 导出包") {
             openDeepSeek.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         } }
@@ -175,7 +188,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     confirm?.let { kind ->
         AlertDialog(onDismissRequest = { confirm = null }, title = { Text(if (kind == "local") "确认恢复并替换" else "确认导入聊天") },
             text = { Text(when (kind) {
-                "rikka" -> "只追加聊天到当前身份。不运行导入的工具、不启用导入的提示词、不更改模型或密钥。不支持的 RikkaHub 备份版本会停止，而不是覆盖你的数据。"
+                "rikka" -> "只追加聊天到当前身份。不运行导入的工具、不启用导入的提示词、不更改模型或密钥。不会仅因版本号不同而拒绝；无法安全识别的聊天结构会停止导入，未知内容类型会保留文字或标明无法提取，不会覆盖原数据。"
                 "chatbox" -> "使用既有 ChatBox 导入规则，可能更新模型映射与会话系统提示词。请仅选自己的备份。"
                 else -> "这会替换连接设置及勾选的数据。课表和颜文字按编号合并，同编号不同内容会停止恢复，旧包无这两项则不动本机两库。请确保已有备份；要合并 RikkaHub 聊天请取消并使用第一个入口。"
             }) }, confirmButton = { TextButton(onClick = { action = kind; confirm = null; open.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text("选择文件") } },

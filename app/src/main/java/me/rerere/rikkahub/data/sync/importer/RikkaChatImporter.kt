@@ -22,11 +22,6 @@ import java.nio.file.Files
 import java.util.UUID
 import kotlin.uuid.Uuid
 
-data class RikkaChatImportResult(val imported: Int, val skipped: Int, val attachments: Int, val missingAttachments: Int)
-
-class RikkaPartialImportException(val imported: Int, val skipped: Int, detail: String) : IllegalArgumentException(
-    "已保留 $imported 个已导入窗口，跳过 $skipped 个已有窗口；其余未完成。$detail 可重新选择原包继续，已有窗口会跳过。")
-
 internal fun rikkaImportId(kind: String, source: String): Uuid =
     Uuid.parse(UUID.nameUUIDFromBytes("orbis-rikka-chat-v1/$kind/$source".toByteArray(Charsets.UTF_8)).toString())
 
@@ -85,44 +80,32 @@ class RikkaChatImporter(private val context: Context, private val repository: Co
 
     // Phone import validates every window first, then commits one window at a time. It must not
     // retain the entire archive in RAM. A later failure reports retained progress explicitly.
-    suspend fun import(archive: File, assistantId: Uuid): RikkaChatImportResult = withContext(Dispatchers.IO) {
+    suspend fun import(archive: File, assistantId: Uuid,
+        onProgress: (RikkaChatImportResult) -> Unit = {}): RikkaChatImportResult = accountRikkaWholeImport(onProgress = onProgress) { accounting ->
         importMutex.withLock {
             val coroutine = currentCoroutineContext()
             val checkCancelled = { coroutine.ensureActive() }
             withSnapshot(archive, null, checkCancelled) { incoming, staging, _ ->
                 inspectRikkaSource(incoming, "local-phone-preflight", checkCancelled)
-                var imported = 0
-                var skipped = 0
-                var copiedAttachments = 0
-                var missingAttachments = 0
-                try {
-                    for (chat in incoming.conversations()) {
-                        checkCancelled()
-                        if (repository.existsConversationById(rikkaImportId("conversation", chat.id))) skipped++
-                        else {
-                            val attachments = AttachmentSession(staging)
-                            var committed = false
-                            try {
-                                ArchiveCapacity.requireSpace(context.filesDir.usableSpace, RikkaChatLimits.MAX_WINDOW_BYTES)
-                                val conversation = convertRikkaChat(incoming, chat, assistantId, attachments::mapPart, checkCancelled)
-                                withContext(NonCancellable) {
-                                    if (repository.insertImportedConversations(listOf(conversation)) == 1) {
-                                        committed = true
-                                        imported++
-                                        copiedAttachments += attachments.createdFiles.size
-                                        missingAttachments += attachments.missing
-                                    } else skipped++
-                                }
-                            } finally {
-                                if (!committed) withContext(NonCancellable) { attachments.rollback() }
+                for (chat in incoming.conversations()) {
+                    checkCancelled()
+                    if (repository.existsConversationById(rikkaImportId("conversation", chat.id))) accounting.skipped()
+                    else {
+                        val attachments = AttachmentSession(staging)
+                        var committed = false
+                        try {
+                            ArchiveCapacity.requireSpace(context.filesDir.usableSpace, RikkaChatLimits.MAX_WINDOW_BYTES)
+                            val conversation = convertRikkaChat(incoming, chat, assistantId, attachments::mapPart, checkCancelled)
+                            withContext(NonCancellable) {
+                                if (repository.insertImportedConversations(listOf(conversation)) == 1) {
+                                    committed = true
+                                    accounting.imported(attachments.createdFiles.size, attachments.missing)
+                                } else accounting.skipped()
                             }
+                        } finally {
+                            if (!committed) withContext(NonCancellable) { attachments.rollback() }
                         }
                     }
-                    RikkaChatImportResult(imported, skipped, copiedAttachments, missingAttachments)
-                } catch (_: CancellationException) {
-                    throw DeepSeekImportCancelledException(DeepSeekImportResult(imported = imported, skipped = skipped))
-                } catch (failure: Exception) {
-                    throw RikkaPartialImportException(imported, skipped, ArchiveCapacity.publicError(failure))
                 }
             }
         }
@@ -134,14 +117,18 @@ class RikkaChatImporter(private val context: Context, private val repository: Co
         require(expectedFingerprint == null || expectedFingerprint == fingerprint) { "Rikka 源文件已变化，请重新预览" }
         val staging = Files.createTempDirectory(context.cacheDir.toPath(), "rikka-chats-").toFile()
         try {
-            val snapshot = RikkaChatArchive.extract(archive, staging, checkCancelled)
+            val snapshot = readRikkaStage(RikkaChatReadStage.ARCHIVE) {
+                RikkaChatArchive.extract(archive, staging, checkCancelled)
+            }
             checkCancelled()
             val normalizationReserve = snapshot.length() + File(staging, "rikka_hub.db-wal").length()
             ArchiveCapacity.requireSpace(staging.usableSpace, normalizationReserve)
-            DatabaseBackup.normalize(context, snapshot)
+            readRikkaStage(RikkaChatReadStage.DATABASE) { DatabaseBackup.normalize(context, snapshot) }
             checkCancelled()
             require(fingerprint == rikkaArchiveFingerprint(archive, checkCancelled)) { "Rikka 源文件已变化，请重新预览" }
-            return RikkaChatSnapshotReader.open(context, snapshot, checkCancelled).use { incoming ->
+            return readRikkaStage(RikkaChatReadStage.SCHEMA) {
+                RikkaChatSnapshotReader.open(context, snapshot, checkCancelled)
+            }.use { incoming ->
                 block(incoming, staging, fingerprint)
             }
         } finally {
@@ -176,10 +163,10 @@ class RikkaChatImporter(private val context: Context, private val repository: Co
                 is UIMessagePart.Document -> part.url
                 else -> return part
             }
-            if (url.startsWith("https://") || url.startsWith("http://")) return part
+            RikkaChatContentDecoder.remoteAttachmentReference(url, part.metadata)?.let { return it }
             val name = RikkaChatArchive.uploadName(url)
             val source = name?.let { File(staging, "upload/$it") }?.takeIf { it.isFile }
-            if (source == null) { missing++; return UIMessagePart.Text("[原备份未包含可恢复附件]") }
+            if (source == null) { missing++; return UIMessagePart.Text("[原备份未包含可恢复附件]", metadata = part.metadata) }
             // Separate uploads per conversation; deleting one imported window cannot break another.
             val key = "$conversationKey/${requireNotNull(name)}"
             val local = attachments[key] ?: run {

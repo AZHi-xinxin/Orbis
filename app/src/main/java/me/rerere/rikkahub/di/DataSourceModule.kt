@@ -112,11 +112,14 @@ val dataSourceModule = module {
 
     single { McpManager(settingsStore = get(), appScope = get(), filesManager = get()) }
 
+    single { me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime(get(), get(), get()) }
+
     single {
         GenerationLoop(
             context = get(),
             providerManager = get(),
             json = get(),
+            localMemory = get(),
         )
     }
 

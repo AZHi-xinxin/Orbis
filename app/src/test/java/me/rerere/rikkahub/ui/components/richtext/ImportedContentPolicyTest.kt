@@ -9,7 +9,7 @@ import org.junit.Test
 
 class ImportedContentPolicyTest {
     @Test fun allInertImportersDisableAutomaticHistoricalMedia() {
-        listOf("deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1", "claude_export_v1", "chatgpt_export_v1").forEach { source ->
+        listOf("deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1", "claude_export_v1", "chatgpt_export_v1", "rikka_chat_v1").forEach { source ->
             assertTrue(listOf(UIMessagePart.Text("synthetic", metadata = buildJsonObject {
                 put("import_source", source)
             })).isDeepSeekHistory())
@@ -18,8 +18,14 @@ class ImportedContentPolicyTest {
         assertFalse(emptyList<UIMessagePart>().isDeepSeekHistory())
     }
 
+    @Test fun importedMediaOnlyMessageStillUsesHistoryGuard() {
+        assertTrue(listOf(UIMessagePart.Image("https://invalid.example/historical.jpg",
+            metadata = buildJsonObject { put("import_source", "rikka_chat_v1") })).isDeepSeekHistory())
+        assertFalse(listOf(UIMessagePart.Image("https://invalid.example/new.jpg")).isDeepSeekHistory())
+    }
+
     @Test fun historicalDiagramsNeverAutoRenderWhileOrdinaryCompletedMermaidStillDoes() {
-        listOf("deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1", "claude_export_v1", "chatgpt_export_v1").forEach { source ->
+        listOf("deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1", "claude_export_v1", "chatgpt_export_v1", "rikka_chat_v1").forEach { source ->
             val imported = listOf(UIMessagePart.Text(
                 "```mermaid\nflowchart LR\n A@{ img: \"https://invalid.example/archive.png\", label: \"synthetic\", h: 60 }\n```",
                 metadata = buildJsonObject { put("import_source", source) },

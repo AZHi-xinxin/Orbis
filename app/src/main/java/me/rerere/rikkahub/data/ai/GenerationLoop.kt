@@ -145,6 +145,7 @@ class GenerationLoop(
     private val context: Context,
     private val providerManager: ProviderManager,
     private val json: Json,
+    private val localMemory: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime? = null,
 ) {
     fun generateText(
         settings: Settings,
@@ -171,6 +172,8 @@ class GenerationLoop(
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
         emitTerminalEvidence: Boolean = false,
+        // Group and AI-to-AI invocations must neither inject private notes nor advance human turns.
+        allowLocalMemory: Boolean = true,
         admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
         requireActiveTurn: () -> Unit = {},
@@ -181,6 +184,8 @@ class GenerationLoop(
         // One snapshot per collected generation, not per conversation. A new human wake (or the
         // existing approval-resume path) reevaluates current settings, memory and input transforms.
         val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime)
+        val localMemoryTurn = if (allowLocalMemory && me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
+            localMemory?.begin(assistant, conversationId, messages) else null
         val tools = snapshotGenerationTools(tools)
         val privatePresentation = PrivateRoomGenerationPresentation(
             enabled = tools.any { it.name == "orbis_private_room_write" },
@@ -301,6 +306,7 @@ class GenerationLoop(
                     orbisPrompt = orbisPrompt,
                     compactionControl = compactionControl,
                     includeCompactionReminder = includeCompactionReminder,
+                    localMemoryTurn = localMemoryTurn,
                     maxAutomaticContinuations = maxAutomaticContinuations,
                     consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis.takeIf {
                         stepIndex == 0 && messages.lastOrNull()?.role == MessageRole.USER
@@ -487,13 +493,14 @@ class GenerationLoop(
                                 durableBoundary(withCurrentToolResults(), tool, completed = false)
                                 requireActiveTurn()
                                 executionStarted = true
-                                val result = if (cloudNative) {
+                                val result = if (cloudNative || toolDef.name == me.rerere.rikkahub.data.ai.tools.ORBIS_MEMORY_TOOL) {
                                     withContext(CloudToolInvocationContext(tool.toolCallId, messages.last().id.toString(), conversationId?.toString())) { toolDef.execute(args) }
                                 } else toolDef.execute(args)
                                 val hasShellAccess = tools.any { it.name == "workspace_shell" }
                                 val completed = tool.withGenerationToolOutput(
                                     // Private results must not be spilled as ordinary workspace files.
-                                    output = if (me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName(toolDef.name)) result
+                                    output = if (me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName(toolDef.name) ||
+                                        toolDef.name == me.rerere.rikkahub.data.ai.tools.ORBIS_MEMORY_TOOL) result
                                         else maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                                 )
                                 val previous = withCurrentToolResults()
@@ -584,7 +591,8 @@ class GenerationLoop(
                 val response = responseForContinuation
                 val uiMessageId = messages.last().id
                 try {
-                    val replacement = buildCompactionReplacement(requested.second, messages, requested.first.toolCallId)
+                    val replacement = buildCompactionReplacement(requested.second, messages, requested.first.toolCallId,
+                        captureLocalMemory = allowLocalMemory && localMemory != null && me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
                     val finalTools = replacement.messages.last().getTools().filter { result ->
                         executedTools.any { it.toolCallId == result.toolCallId }
                     }
@@ -654,6 +662,7 @@ class GenerationLoop(
         orbisPrompt: OrbisConversationPrompt = OrbisConversationPrompt(),
         compactionControl: ConversationCompactionControl? = null,
         includeCompactionReminder: Boolean = false,
+        localMemoryTurn: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryTurn? = null,
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
@@ -707,7 +716,7 @@ class GenerationLoop(
                 conversationLorebookIds = conversationLorebookIds,
                 processingStatus = processingStatus,
                 workspaceCwd = workspaceCwd,
-            ).also { projected ->
+            ).let { projected -> localMemoryTurn?.project(projected) ?: projected }.also { projected ->
                 // A reversible local pruning projection must not retain the old, larger usage
                 // anchor. The snapshot will estimate its actual bounded request plus tools.
                 if (shouldResetProjectedUsageEstimate(messages, projected)) initialEstimate = null
@@ -730,7 +739,7 @@ class GenerationLoop(
             // Host-bound identity survives in-turn compaction and message-count projection.
             requireActiveTurn()
             return me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages(
-                context, assistant.id.toString(), internalMessages,
+                context, assistant.id.toString(), localMemoryTurn?.project(internalMessages) ?: internalMessages,
                 modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE))
         }
         // Publish once per new invocation, not on tool continuations. Counts remain local, never

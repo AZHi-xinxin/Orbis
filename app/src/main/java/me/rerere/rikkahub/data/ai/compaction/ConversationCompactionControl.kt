@@ -218,6 +218,7 @@ fun buildCompactionReplacement(
     request: PreparedCompaction,
     completedMessages: List<UIMessage>,
     compactCallId: String,
+    captureLocalMemory: Boolean = false,
 ): CompactionReplacement {
     require(request.keepRecent <= completedMessages.size) { "活动上下文已改变，请重试。" }
     var start = completedMessages.size - request.keepRecent
@@ -248,6 +249,12 @@ fun buildCompactionReplacement(
         put("summary_role", "assistant")
         put("continuation", "continue this same run using the summary, retained original messages, and this complete tool receipt")
         put("note", "摘要直接来自你写的普通正文；未调用其他模型。原文整理记录可查看或撤销。若摘要与工具共处一条保留原文，正文可能同时出现在摘要与原文中。")
+        if (captureLocalMemory) {
+            val reason = me.rerere.rikkahub.data.orbis.memory.OrbisMemoryBudget.compactionCapacityError(request.summary.toText())
+            put("local_memory_saved", reason == null)
+            put("local_memory_note", if (reason == null) "已自动存入本机便签（仅存），可自行补摘要／标签，也可改删。"
+                else "摘要未另存本机便签：超出单条保存容量；完整摘要仍保留在当前上下文。无需为此补调工具或停止对话。")
+        }
     }.toString()
     fun withReceipt(afterTokens: Long) = kept.mapIndexed { index, message -> message.copy(
         // The next model response merges into this same bubble. A no-usage response must not

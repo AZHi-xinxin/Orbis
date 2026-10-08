@@ -7,6 +7,7 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -38,7 +39,16 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.db.AppDatabase
+import me.rerere.rikkahub.data.orbis.OrbisLocalMemoryAtlas
+import me.rerere.rikkahub.data.orbis.localMemoryAtlas
+import me.rerere.rikkahub.data.orbis.localMemoryAtlasStates
+import me.rerere.rikkahub.data.orbis.localMemoryStateLabel
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMetadata
 import me.rerere.rikkahub.data.orbis.integration.*
 import org.koin.compose.koinInject
 import me.rerere.rikkahub.data.orbis.OrbisMemoryAtlas as Atlas
@@ -52,11 +62,27 @@ import java.time.format.DateTimeFormatter
 
 internal val AtlasInk = Color(0xFFEDDFC8)
 internal val AtlasGold = Color(0xFFD4B77C)
+internal enum class OrbisAtlasSource(val label: String) { LOCAL("本机"), ST("ST"), DEMO("演示") }
 
-/** Explicit demo or authenticated ST metadata, never private memory prose or a write endpoint. */
+internal fun localMemoryAtlasColor(state: String): Color = when (state) {
+    "pinned" -> Color(0xFFFFBF69)
+    "conditional" -> Color(0xFF52D6C7)
+    "static" -> Color(0xFFB6D4EF)
+    "paused" -> Color(0xFF9296A5)
+    else -> Color(0xFF9296A5)
+}
+
+/** Independent local/ST/demo metadata sources; no prose or content controls enter this page. */
 @Composable
-fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
+fun OrbisMemoryAtlasPage(hostVisible: Boolean = true, assistantIdOverride: String? = null,
+    onNavigateBack: (() -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
+    BackHandler(enabled = onNavigateBack != null) { onNavigateBack?.invoke() }
+    val settings = LocalSettings.current
+    val owner = assistantIdOverride ?: settings.assistantId.toString()
+    val knownOwner = settings.assistants.any { it.id.toString() == owner }
+    val database = koinInject<AppDatabase>()
+    val memories = remember(database) { OrbisMemoryRepository(database) }
     val displayPreferences = remember(context) { context.getSharedPreferences("orbis-atlas-presentation", android.content.Context.MODE_PRIVATE) }
     var displayMode by remember { mutableStateOf(OrbisAtlasDisplayMode.fromStored(displayPreferences.getString("display-mode", null))) }
     val connections = koinInject<OrbisIntegrationConnections>()
@@ -65,14 +91,22 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
     val connection by store.state.collectAsStateWithLifecycle()
     val canRead = connection.available && bootstrap.readAllowed
     val client = remember { OrbisAtlasClient() }
-    var showDemo by rememberSaveable { mutableStateOf(false) }
+    var source by rememberSaveable { mutableStateOf(OrbisAtlasSource.LOCAL) }
+    val showDemo = source == OrbisAtlasSource.DEMO
     var configure by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
     var snapshot by remember(connection.revision, bootstrap.phase) { mutableStateOf<Atlas.Snapshot?>(null) }
     var error by remember(connection.revision) { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var localSnapshot by remember(owner) { mutableStateOf<OrbisLocalMemoryAtlas?>(null) }
+    var localError by remember(owner) { mutableStateOf<String?>(null) }
+    var localLoading by remember(owner) { mutableStateOf(false) }
     val example = remember { Atlas.demo() }
-    val graph: Atlas.Graph? = if (showDemo) example else snapshot.takeIf { canRead }
+    val graph: Atlas.Graph? = when (source) {
+        OrbisAtlasSource.LOCAL -> localSnapshot.takeIf { knownOwner }
+        OrbisAtlasSource.ST -> snapshot.takeIf { canRead }
+        OrbisAtlasSource.DEMO -> example
+    }
     val composition = remember(graph) { graph?.let(Galaxy::profile) }
     var yaw by rememberSaveable { mutableDoubleStateOf(-.3) }
     var pitch by rememberSaveable { mutableDoubleStateOf(-.62) }
@@ -90,9 +124,9 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(connection.revision, canRead, showDemo, refresh, resumed, hostVisible) {
+    LaunchedEffect(connection.revision, canRead, source, refresh, resumed, hostVisible) {
         selected = null
-        if (!resumed || !hostVisible || showDemo || !canRead) { loading = false; return@LaunchedEffect }
+        if (!resumed || !hostVisible || source != OrbisAtlasSource.ST || !canRead) { loading = false; return@LaunchedEffect }
         loading = true; error = null
         try {
             val credential = store.readCredential() ?: return@LaunchedEffect
@@ -108,6 +142,23 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                 else -> "暂时无法连接 ST，可稍后刷新；不会改用演示数据。"
             }
         } finally { loading = false }
+    }
+    LaunchedEffect(owner, knownOwner, source, refresh, resumed, hostVisible) {
+        selected = null
+        if (!resumed || !hostVisible || source != OrbisAtlasSource.LOCAL || !knownOwner) {
+            localLoading = false
+            return@LaunchedEffect
+        }
+        localLoading = true; localError = null
+        try {
+            localSnapshot = withContext(Dispatchers.IO) {
+                val rows = memories.metadataSnapshot(owner, limit = 500)
+                val counts = memories.stats(owner)
+                localMemoryAtlas(rows, (counts.total - counts.deleted).coerceAtLeast(0))
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { localError = "本机元信息暂未读完；原记忆未改动。" }
+        finally { localLoading = false }
     }
     fun camera() = Atlas.Camera(yaw, pitch, zoom)
     fun updateCamera(value: Atlas.Camera) { yaw = value.yaw; pitch = value.pitch; zoom = value.zoom }
@@ -138,8 +189,11 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
     OrbisVisualTheme {
         Scaffold(containerColor = Color(0xFF080A17),
             topBar = {
-                OrbisPageHeader(title = "记忆星盘", subtitle = "ST · 时间、类型与关联",
-                    avatar = { Text("✦", fontSize = 21.sp) }, navigationIcon = { BackButton() },
+                OrbisPageHeader(title = "记忆星盘", subtitle = if (source == OrbisAtlasSource.LOCAL) "本机 · 状态、时间与标签族" else "${source.label} · 时间、类型与关联",
+                    avatar = { Text("✦", fontSize = 21.sp) }, navigationIcon = {
+                        if (onNavigateBack == null) BackButton()
+                        else TextButton(onClick = onNavigateBack) { Text("返回", color = AtlasInk) }
+                    },
                     modifier = Modifier.background(OrbisTheme.colors.page).statusBarsPadding())
             },
             bottomBar = { OrbisChatDock(currentLabel = "当前 星盘") },
@@ -156,16 +210,30 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                     onDragging = { dragging = it }, onReset = ::reset,
                     onToggleMotion = { if (displayMode == OrbisAtlasDisplayMode.LIGHTWEIGHT) paused = !paused }, modifier = Modifier.fillMaxSize(),
                     displayMode = displayMode,
+                    sourceDescription = if (source == OrbisAtlasSource.LOCAL) "本机助手记忆，只读元信息，不含正文或摘要" else null,
+                    typeColor = if (source == OrbisAtlasSource.LOCAL) ::localMemoryAtlasColor else null,
                 )
                 Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(top = if (compact) 16.dp else 25.dp)) {
                     Column(Modifier.padding(horizontal = 22.dp)) {
-                        Text("ST · MEMORY ATLAS", color = Color(0xFFBAA484), fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 2.sp)
+                        Text("${source.label} · MEMORY ATLAS", color = Color(0xFFBAA484), fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 2.sp)
                         if (!constrained) Text("记忆星盘", color = AtlasInk, fontSize = if (compact) 25.sp else 28.sp,
                             fontFamily = FontFamily.Serif, lineHeight = 36.sp, letterSpacing = 6.sp,
                             modifier = Modifier.padding(top = 9.dp, bottom = 7.dp).semantics { heading() })
-                        Text(if (showDemo) "本地演示 · 非真实记忆" else "真实 ST · 只读元信息", color = Color(0xFFB6ACB2), fontSize = 12.sp, lineHeight = 17.sp)
+                        Text(when (source) {
+                            OrbisAtlasSource.LOCAL -> "本机助手记忆 · 仅当前 AI · 不含正文或摘要"
+                            OrbisAtlasSource.ST -> "真实 ST · 只读元信息"
+                            OrbisAtlasSource.DEMO -> "合成演示 · 非真实记忆"
+                        }, color = Color(0xFFB6ACB2), fontSize = 12.sp, lineHeight = 17.sp)
                         Text(when {
                             showDemo -> "56 个合成示例星点，不代表你的记忆"
+                            source == OrbisAtlasSource.LOCAL && !knownOwner -> "此 AI 已不存在，未读取其他 AI 的记忆"
+                            source == OrbisAtlasSource.LOCAL && localLoading -> "正在读取本机元信息快照…"
+                            source == OrbisAtlasSource.LOCAL && localError != null ->
+                                (if (localSnapshot != null) "保留上次快照 · " else "") + localError
+                            source == OrbisAtlasSource.LOCAL -> localSnapshot?.let {
+                                "${it.stars.size} 个星点 · ${it.edges.size} 条同标签连线" +
+                                    if (it.truncated) " · 仅显示部分快照" else ""
+                            } ?: "等待读取本机元信息"
                             connection.error != null -> "本机授权读取失败，请进入连接设置"
                             !bootstrap.readAllowed -> "授权待确认或已撤销 · 读取已暂停，请进入连接设置"
                             !connection.available -> "尚未启用连接 · 请配置星盘专用服务"
@@ -176,10 +244,18 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                             else -> "等待连接"
                         }, color = Color(0xFFB6ACB2), fontSize = 11.sp, lineHeight = 16.sp,
                             modifier = Modifier.padding(top = 3.dp))
-                        Row {
-                            TextButton(onClick = { configure = true }) { Text("连接设置", color = AtlasInk) }
-                            TextButton(onClick = { refresh++ }, enabled = canRead && !showDemo && !loading) { Text("刷新", color = AtlasInk) }
-                            TextButton(onClick = { showDemo = !showDemo; selected = null }) { Text(if (showDemo) "返回真实 ST" else "查看演示", color = AtlasInk) }
+                        FlowRow {
+                            OrbisAtlasSource.entries.forEach { target ->
+                                TextButton(onClick = { source = target; selected = null }) {
+                                    Text((if (source == target) "● " else "") + target.label, color = AtlasInk)
+                                }
+                            }
+                            if (source == OrbisAtlasSource.ST) TextButton(onClick = { configure = true }) { Text("连接设置", color = AtlasInk) }
+                            TextButton(onClick = { refresh++ }, enabled = when (source) {
+                                OrbisAtlasSource.LOCAL -> knownOwner && !localLoading
+                                OrbisAtlasSource.ST -> canRead && !loading
+                                OrbisAtlasSource.DEMO -> false
+                            }) { Text("刷新", color = AtlasInk) }
                         }
                     }
                     Row(Modifier.align(Alignment.End).padding(end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -202,34 +278,40 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true) {
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     selected?.let { index -> graph?.stars?.getOrNull(index)?.let { star ->
-                        if (!constrained) AtlasMetadata(star, showDemo, onClose = { selected = null }, modifier = Modifier
+                        if (!constrained) AtlasMetadata(star, showDemo, onClose = { selected = null },
+                            local = if (source == OrbisAtlasSource.LOCAL) localSnapshot?.metadata?.getOrNull(index) else null, modifier = Modifier
                             .padding(start = 18.dp, end = 18.dp, bottom = 10.dp))
                     } }
                     composition?.takeIf { it.hasMemories }?.let { profile ->
-                        Text(if (showDemo) "演示配色 · 星云微光为装饰" else
+                        Text(if (source == OrbisAtlasSource.LOCAL) "按当前快照状态配色 · 连线仅为同标签示意，不作语义推断" else if (showDemo) "演示配色 · 星云微光为装饰" else
                             if (profile.sampled) "按已显示记忆配色 · 非全库占比 · 星云微光为装饰" else "按当前快照的记忆类别配色 · 星云微光为装饰",
                             color = Color(0xFFB6ACB2), fontSize = 10.sp, lineHeight = 15.sp,
                             modifier = Modifier.padding(horizontal = 18.dp))
                     }
                     FlowRow(Modifier.padding(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
                         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Atlas.SUPPORTED_TYPES.filter { (composition?.counts?.get(it) ?: 0) > 0 }.forEach { name ->
+                        (if (source == OrbisAtlasSource.LOCAL) localMemoryAtlasStates else Atlas.SUPPORTED_TYPES)
+                            .filter { (composition?.counts?.get(it) ?: 0) > 0 }.forEach { name ->
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Box(Modifier.size(5.dp).background(Galaxy.tintForType(name).color(), CircleShape))
-                                Text("$name ${composition?.counts?.get(name) ?: 0}", color = Color(0xFFCFBEC4), fontSize = 11.sp, lineHeight = 16.sp)
+                                Box(Modifier.size(5.dp).background(if (source == OrbisAtlasSource.LOCAL) localMemoryAtlasColor(name) else Galaxy.tintForType(name).color(), CircleShape))
+                                Text("${if (source == OrbisAtlasSource.LOCAL) localMemoryStateLabel(name) else name} ${composition?.counts?.get(name) ?: 0}", color = Color(0xFFCFBEC4), fontSize = 11.sp, lineHeight = 16.sp)
                             }
                         }
                     }
                     Text(motionLabel, color = Color(0xFFB09E92), fontSize = 10.sp, lineHeight = 15.sp,
                         modifier = Modifier.padding(horizontal = 14.dp))
                 }
-                if (!showDemo && snapshot?.stars?.isEmpty() == true && error == null && !loading) {
+                if (source == OrbisAtlasSource.LOCAL && localSnapshot?.stars?.isEmpty() == true && localError == null && !localLoading) {
+                    Text("此 AI 暂无本机记忆星点", color = AtlasInk, modifier = Modifier.align(Alignment.Center))
+                }
+                if (source == OrbisAtlasSource.ST && snapshot?.stars?.isEmpty() == true && error == null && !loading) {
                     Text("此 ST 范围暂无可显示的记忆", color = AtlasInk, modifier = Modifier.align(Alignment.Center))
                 }
                 if (constrained) selected?.let { index -> graph?.stars?.getOrNull(index)?.let { star ->
                     Dialog(onDismissRequest = { selected = null }) {
                         Column(Modifier.verticalScroll(rememberScrollState())) {
-                            AtlasMetadata(star, showDemo, onClose = { selected = null })
+                            AtlasMetadata(star, showDemo, onClose = { selected = null },
+                                local = if (source == OrbisAtlasSource.LOCAL) localSnapshot?.metadata?.getOrNull(index) else null)
                         }
                     }
                 } }
@@ -253,7 +335,8 @@ private fun AtlasControl(symbol: String, label: String, enabled: Boolean = true,
 }
 
 @Composable
-private fun AtlasMetadata(star: Atlas.Star, demo: Boolean, onClose: () -> Unit, modifier: Modifier = Modifier) {
+private fun AtlasMetadata(star: Atlas.Star, demo: Boolean, onClose: () -> Unit, modifier: Modifier = Modifier,
+    local: OrbisMemoryMetadata? = null) {
     val localTime = remember(star.storedAt) {
         DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(star.storedAt))
     }
@@ -261,14 +344,25 @@ private fun AtlasMetadata(star: Atlas.Star, demo: Boolean, onClose: () -> Unit, 
         border = BorderStroke(1.dp, AtlasGold.copy(alpha = .34f))) {
         Box(Modifier.padding(start = 18.dp, end = 6.dp, top = 10.dp, bottom = 15.dp)) {
             Column(Modifier.padding(end = 42.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(if (demo) "演示星点" else "ST 记忆元信息 · 不含正文", fontSize = 10.sp, lineHeight = 14.sp, color = Color(0xFFB6A78F))
+                Text(if (local != null) "本机记忆元信息 · 不含正文或摘要" else if (demo) "演示星点" else "ST 记忆元信息 · 不含正文", fontSize = 10.sp, lineHeight = 14.sp, color = Color(0xFFB6A78F))
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("记录时间", color = Color(0xFFB6A78F), fontSize = 13.sp, lineHeight = 19.sp)
                     Text(localTime, color = AtlasInk, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("记忆类型", color = Color(0xFFB6A78F), fontSize = 13.sp, lineHeight = 19.sp)
-                    Text(star.type, color = AtlasInk, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
+                    Text(if (local != null) "浮现状态" else "记忆类型", color = Color(0xFFB6A78F), fontSize = 13.sp, lineHeight = 19.sp)
+                    Text(if (local != null) localMemoryStateLabel(local.state) else star.type, color = AtlasInk, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
+                }
+                if (local != null) {
+                    val modifiedTime = remember(local.updatedAt) {
+                        DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm").withZone(ZoneId.systemDefault())
+                            .format(Instant.ofEpochMilli(local.updatedAt))
+                    }
+                    Text("修改时间 $modifiedTime", color = AtlasInk, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text("星点 ${local.id.take(8)} · 修订 ${local.revision}", color = AtlasInk, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text("标签族：${local.tags.distinct().joinToString(" · ").ifEmpty { "尚无标签" }}",
+                        color = AtlasInk, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 3,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
             }
             IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).size(48.dp)

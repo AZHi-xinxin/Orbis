@@ -29,6 +29,13 @@ import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.db.migrations.Migration_16_17
 import me.rerere.rikkahub.data.db.migrations.Migration_22_23
 import me.rerere.rikkahub.data.db.migrations.Migration_8_9
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryDAO
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryEntity
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRevisionEntity
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryOperationEntity
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryTurnDAO
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryTurnEntity
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemorySurfacingEntity
 import me.rerere.rikkahub.utils.JsonInstant
 
 @Database(
@@ -44,8 +51,13 @@ import me.rerere.rikkahub.utils.JsonInstant
         OrbisCompactionEventEntity::class,
         OrbisCompactionRollbackEntity::class,
         OrbisCompactionBackupNodeEntity::class,
+        OrbisMemoryEntity::class,
+        OrbisMemoryRevisionEntity::class,
+        OrbisMemoryOperationEntity::class,
+        OrbisMemoryTurnEntity::class,
+        OrbisMemorySurfacingEntity::class,
     ],
-    version = 27,
+    version = 28,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -68,6 +80,7 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 24, to = 25),
         AutoMigration(from = 25, to = 26),
         AutoMigration(from = 26, to = 27),
+        AutoMigration(from = 27, to = 28),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
@@ -89,6 +102,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun folderDao(): FolderDAO
 
     abstract fun orbisCompactionDao(): OrbisCompactionDAO
+
+    abstract fun orbisMemoryDao(): OrbisMemoryDAO
+
+    abstract fun orbisMemoryTurnDao(): OrbisMemoryTurnDAO
 }
 
 object TokenUsageConverter {

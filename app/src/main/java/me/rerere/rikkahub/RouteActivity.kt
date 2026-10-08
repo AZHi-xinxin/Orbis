@@ -12,6 +12,9 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
+import me.rerere.rikkahub.service.dispatchChatVolumeKey
+import me.rerere.rikkahub.ui.components.ai.BindVoiceCallVolumeStream
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -186,7 +189,11 @@ class RouteActivity : ComponentActivity() {
                 KeyEvent.KEYCODE_VOLUME_DOWN -> false
                 else -> return super.dispatchKeyEvent(event)
             }
-            if (volumeKeyListeners.lastOrNull()?.invoke(isVolumeUp) == true) return true
+            if (dispatchChatVolumeKey(
+                    callActive = BuildConfig.ORBIS_ENABLED && OrbisVoiceCallRuntime.get(this).callState.value.isActive,
+                    down = true, volumeUp = isVolumeUp,
+                    chatHandler = { volumeKeyListeners.lastOrNull()?.invoke(it) == true },
+                )) return true
         }
         return super.dispatchKeyEvent(event)
     }
@@ -207,6 +214,10 @@ class RouteActivity : ComponentActivity() {
             (intent.action == Intent.ACTION_MAIN || intent.action == null) &&
                 !intent.hasExtra("conversationId"), firstActivity)
         setContent {
+            if (BuildConfig.ORBIS_ENABLED) {
+                val call by OrbisVoiceCallRuntime.get(this).callState.collectAsStateWithLifecycle()
+                BindVoiceCallVolumeStream(window, active = call.isActive)
+            }
             RikkahubTheme {
                 setSingletonImageLoaderFactory { context ->
                     ImageLoader.Builder(context)

@@ -61,6 +61,7 @@ class ChatToolFactory(
     private val context: Context,
     private val cloudTools: CloudToolsEngine? = null,
     private val settingsStore: SettingsStore? = null,
+    private val orbisMemoryRepository: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository? = null,
 ) {
     private val stImageAttachments = StMemoryImageAttachmentRegistry()
 
@@ -75,6 +76,12 @@ class ChatToolFactory(
         consultationReferenceOnly: Boolean = false,
         imageSourceMessageIds: Set<kotlin.uuid.Uuid>? = null,
     ): List<Tool> = buildList {
+        if (BuildConfig.ORBIS_ENABLED && orbisMemoryRepository != null) {
+            add(buildOrbisMemoryTool(assistant.id.toString(),
+                assistantExists = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
+                readOnly = consultationReferenceOnly,
+                executeMemory = orbisMemoryRepository::execute))
+        }
         if (me.rerere.rikkahub.data.ai.legacyMemoryEnabled(assistant.enableMemory)) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
                 MemoryRepository.GLOBAL_MEMORY_ID
@@ -288,6 +295,7 @@ class ChatToolFactory(
             val guarded = tool.copy(isApprovalCurrent = {
                 val live = settingsStore?.settingsFlow?.value?.getAssistantById(assistant.id)
                 val selectionCurrent = settingsStore == null || (live != null && when {
+                    tool.name == ORBIS_MEMORY_TOOL -> true // stopping injection must not disable store/query
                     tool.name.startsWith("companion_") || tool.name.startsWith("toy_bluetooth_") ->
                         live.localTools == assistant.localTools
                     tool.name.startsWith("calendar_") -> LocalToolOption.Calendar in live.localTools

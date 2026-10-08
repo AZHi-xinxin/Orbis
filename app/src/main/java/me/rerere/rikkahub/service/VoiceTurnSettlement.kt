@@ -9,6 +9,7 @@ import kotlinx.coroutines.withContext
 internal class VoiceTurnSettlement {
     private var generationEntered = false
     private var generationReturned = false
+    val hasNotEnteredGeneration: Boolean get() = !generationEntered
     var independentFailureSaved: Boolean = false
         private set
 

@@ -132,11 +132,11 @@ fun AssistantDetailPage(id: String) {
                         headlineContent = { Text(stringResource(R.string.assistant_page_tab_extensions)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
-                    if (!BuildConfig.ORBIS_ENABLED) item(
+                    item(
                         onClick = { navController.navigate(Screen.AssistantMemory(id)) },
                         leadingContent = { Icon(HugeIcons.Brain02, null) },
-                        supportingContent = { Text(stringResource(R.string.assistant_detail_memory_desc)) },
-                        headlineContent = { Text(stringResource(R.string.assistant_page_tab_memory)) },
+                        supportingContent = { Text(if (BuildConfig.ORBIS_ENABLED) "资源档位、匿名数量、元信息星图与导出保全" else stringResource(R.string.assistant_detail_memory_desc)) },
+                        headlineContent = { Text(if (BuildConfig.ORBIS_ENABLED) "本机助手记忆" else stringResource(R.string.assistant_page_tab_memory)) },
                         trailingContent = { Icon(HugeIcons.ArrowRight01, null) },
                     )
                     item(

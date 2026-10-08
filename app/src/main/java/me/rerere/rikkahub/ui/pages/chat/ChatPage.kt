@@ -534,6 +534,7 @@ private fun ChatPageContent(
                     onBeginEditQueuedMessage = vm::beginEditQueuedMessage,
                     onFinishEditQueuedMessage = vm::finishEditQueuedMessage,
                     onResumeMessageQueue = vm::resumeMessageQueue,
+                    onContinueFreshInput = vm::dismissPauseAndContinueFreshInput,
                     onStopGatewayWait = vm::stopGeneration,
                     gatewayStopNotice = gatewayStopNotice,
                     queueRecovery = queueRecovery,

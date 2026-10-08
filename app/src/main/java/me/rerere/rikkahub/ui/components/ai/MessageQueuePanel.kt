@@ -46,27 +46,27 @@ internal fun MessageQueuePanel(
     onBeginEdit: (Uuid) -> QueuedMessage?,
     onFinishEdit: (Uuid, List<UIMessagePart>?) -> Unit,
     onResume: () -> Unit,
+    onContinueFreshInput: () -> Unit = {},
     onStopGatewayWait: () -> Unit = {},
     gatewayStopNotice: String? = null,
     recovery: QueueRecoveryState = QueueRecoveryState(),
     onDismissRecoveryResult: (QueueRecoveryState) -> Unit = {},
 ) {
     var editing by remember { mutableStateOf<QueuedMessage?>(null) }
-    var confirmResume by remember { mutableStateOf(false) }
-    var confirmStop by remember { mutableStateOf(false) }
     var showManagement by remember { mutableStateOf(false) }
     var rawMessage by remember { mutableStateOf<QueuedMessage?>(null) }
     val needsRecovery = state.paused
-    val recovering = recovery.isRunning
-    val unresolvedResult = recovery.phase == QueueRecoveryPhase.PENDING ||
-        recovery.phase == QueueRecoveryPhase.FAILURE
     // Old success is presentation, not a reason to keep a card over the conversation.
     // A voice-only pause or historical receipt is not a paused chat queue.
-    val resultMessage = recovery.message.takeUnless { needsRecovery && recovery.phase == QueueRecoveryPhase.SUCCESS }
+    val resultMessage = recovery.message.takeUnless { needsRecovery }
     fun closeManagement() {
+        // The window closes immediately, including Back/outside dismissal. A repeated platform
+        // dismissal after the button click must not request a second continuation.
+        if (!showManagement) return
         showManagement = false
+        if (state.paused) onContinueFreshInput()
         if (!recovery.isRunning && recovery.phase != QueueRecoveryPhase.IDLE)
-            onDismissRecoveryResult(recovery) // Consume presentation only; never release a safety hold.
+            onDismissRecoveryResult(recovery)
     }
     if (state.messages.isNotEmpty() || needsRecovery) {
         Surface(
@@ -77,7 +77,6 @@ internal fun MessageQueuePanel(
             Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = when {
-                        recovering -> "正在核对连接"
                         state.paused -> "消息已暂停 · ${state.messages.size} 条待发"
                         state.messages.isNotEmpty() && state.messages.all { it.recoveryHeldReason != null } ->
                             "保留待核对 · ${state.messages.size}"
@@ -88,6 +87,9 @@ internal fun MessageQueuePanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                 )
+                if (state.paused) TextButton(onClick = {
+                    onContinueFreshInput()
+                }, modifier = Modifier.testTag("chat_queue_continue_fresh")) { Text("继续聊天") }
                 TextButton(onClick = { showManagement = true },
                     modifier = Modifier.testTag("chat_queue_manage")) { Text("管理") }
             }
@@ -98,28 +100,15 @@ internal fun MessageQueuePanel(
         title = { Text("待发消息与暂停处理") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("这里是尚未发送的内容，不是历史聊天。关闭此窗口不会发送消息、结束通话或解除安全暂停。",
+                Text(if (state.paused)
+                    "本次回复已中断，已保存内容保留。关闭后可发送新消息；旧待发消息不会自动重发，旧工具不会重试。"
+                    else "这里是尚未发送的内容，不是历史聊天。关闭此窗口不会发送消息或打断当前回复。",
                     style = MaterialTheme.typography.bodySmall)
                 if (!resultMessage.isNullOrBlank()) Text(resultMessage,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("chat_queue_recovery_result"))
                 if (state.messages.any { it.isEditing }) Text("请先保存或取消正在编辑的待发消息。",
                     style = MaterialTheme.typography.bodySmall)
-                if (state.paused || unresolvedResult) {
-                    TextButton(onClick = { confirmResume = true },
-                        enabled = !recovering && state.messages.none { it.isEditing },
-                        modifier = Modifier.testTag("chat_queue_recover")) {
-                        Text(if (recovering) "正在核对…" else "检查后续消息")
-                    }
-                }
-                if (needsRecovery || unresolvedResult || gatewayStopNotice != null) {
-                    TextButton(onClick = { confirmStop = true }, enabled = !recovering,
-                        modifier = Modifier.testTag("chat_queue_stop_gateway")) {
-                        Text("停止旧轮并核对连接")
-                    }
-                    gatewayStopNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("chat_gateway_stop_notice")) }
-                }
                 if (state.messages.isEmpty()) Text("当前没有待发消息。",
                     style = MaterialTheme.typography.bodySmall)
                 LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
@@ -153,13 +142,13 @@ internal fun MessageQueuePanel(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             if (queuedMessageCanBecomeHumanInput(message)) TextButton(
-                                enabled = !message.isEditing && !recovering,
+                                enabled = !message.isEditing && !recovery.isRunning,
                                 onClick = { editing = onBeginEdit(message.id) },
                             ) { Text(if (message.isEditing) stringResource(R.string.chat_page_queue_editing)
                                 else if (message.recoveryHeldReason != null) "编辑为新消息" else stringResource(R.string.edit)) }
                             else TextButton(onClick = { rawMessage = message }) { Text("原文") }
                             TextButton(
-                                enabled = !message.isEditing && !recovering,
+                                enabled = !message.isEditing && !recovery.isRunning,
                                 onClick = { onRemove(message.id) },
                             ) { Text(stringResource(R.string.chat_page_queue_remove)) }
                         }
@@ -170,21 +159,6 @@ internal fun MessageQueuePanel(
         confirmButton = { TextButton(onClick = ::closeManagement,
             modifier = Modifier.testTag("chat_queue_close_management")) { Text("关闭") } },
     )
-
-    if (confirmResume) AlertDialog(onDismissRequest = { confirmResume = false },
-        title = { Text("继续后续排队消息？") },
-        text = { Text("先检查当前回复、工具和连接状态。确认安全后才继续尚未发送的普通消息，可能调用模型；不会重做旧工具或自动恢复通话收音。仍有未解决状态时保持暂停。") },
-        confirmButton = { TextButton(onClick = { confirmResume = false; onResume() },
-            enabled = !recovering && state.messages.none { it.isEditing },
-            modifier = Modifier.testTag("chat_queue_confirm_resume")) { Text("检查并继续") } },
-        dismissButton = { TextButton(onClick = { confirmResume = false }) { Text("取消") } })
-
-    if (confirmStop) AlertDialog(onDismissRequest = { confirmStop = false },
-        title = { Text("停止旧轮并核对？") },
-        text = { Text("先停止本地生成，再向同一模型服务核对本次运行记录的精确请求。仅支持此接口的网关会在确认旧轮已收尾后结束等待，不会重发消息或工具，也不代表已取消外部工具的实际操作。队列仍保留，需你另外确认恢复。") },
-        confirmButton = { TextButton(onClick = { confirmStop = false; onStopGatewayWait() },
-            enabled = !recovering) { Text("停止并核对") } },
-        dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("取消") } })
 
     rawMessage?.let { message -> AlertDialog(onDismissRequest = { rawMessage = null },
         title = { Text(queuedCallLabel(message) ?: "待发消息原文") },

@@ -39,6 +39,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.orbis.voice.VIDEO_FRAME_MAX_BYTES
 import me.rerere.rikkahub.service.OrbisVideoCallRuntime
 import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
+import me.rerere.rikkahub.ui.components.ai.BindVoiceCallDialogVolumeStream
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -71,6 +72,7 @@ fun OrbisVideoCallOverlay(voice: OrbisVoiceCallRuntime, video: OrbisVideoCallRun
     }
     Dialog(onDismissRequest = { minimized = true }, properties = DialogProperties(
         usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false)) {
+        BindVoiceCallDialogVolumeStream()
         Box(Modifier.fillMaxSize().background(Color(0xFF111522))) {
             VideoCameraPreview(video, id, state.frontCamera, state.cameraEnabled, Modifier.fillMaxSize())
             Column(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {

@@ -73,6 +73,72 @@ class OrbisQueuePauseStoreTest {
         assertFalse(store.isPaused(first))
     }
 
+    @Test fun `reason replacement commits once while keeping both conversations paused`() {
+        val disk = Disk()
+        val store = disk.open()
+        store.pause(first, "old_reason")
+        store.pause(second, "other_reason")
+        val writes = disk.writes
+        assertTrue(store.replaceReasonIfExpected(first, "old_reason", "new_reason"))
+        assertEquals(writes + 1, disk.writes)
+        assertEquals("new_reason", disk.open().pauseReason(first))
+        assertEquals("other_reason", disk.open().pauseReason(second))
+        assertTrue(store.isPaused(first))
+        assertTrue(store.replaceReasonIfExpected(first, "new_reason", "new_reason"))
+        assertEquals(writes + 1, disk.writes)
+    }
+
+    @Test fun `reason replacement never overwrites missing or different holds`() {
+        val disk = Disk()
+        val store = disk.open()
+        store.pause(first, "another_owner")
+        val bytes = disk.contents
+        val writes = disk.writes
+        assertFalse(store.replaceReasonIfExpected(first, "expected_owner", "new_reason"))
+        assertFalse(store.replaceReasonIfExpected(second, "expected_owner", "new_reason"))
+        assertEquals(bytes, disk.contents)
+        assertEquals(writes, disk.writes)
+    }
+
+    @Test fun `failed or dropped replacement keeps old durable hold and refuses uncertain retries`() {
+        for (drop in listOf(false, true)) {
+            val disk = Disk()
+            val store = disk.open()
+            store.pause(first, "old_reason")
+            val bytes = disk.contents
+            disk.dropWrites = drop
+            disk.writesFail = !drop
+            assertNotNull(runCatching {
+                store.replaceReasonIfExpected(first, "old_reason", "new_reason")
+            }.exceptionOrNull())
+            assertEquals(bytes, disk.contents)
+            assertTrue(store.isPaused(first))
+            assertEquals("old_reason", disk.open().pauseReason(first))
+            disk.dropWrites = false
+            disk.writesFail = false
+            val writes = disk.writes
+            assertFalse(store.replaceReasonIfExpected(first, "old_reason", "new_reason"))
+            assertEquals(writes, disk.writes)
+        }
+    }
+
+    @Test fun `replacement rejects invalid identity and reason without changing storage`() {
+        val disk = Disk()
+        val store = disk.open()
+        store.pause(first, "old_reason")
+        val bytes = disk.contents
+        val writes = disk.writes
+        for ((id, old, replacement) in listOf(
+            Triple("invalid", "old_reason", "new_reason"),
+            Triple(first, "old_reason", "invalid reason"),
+            Triple(first, "invalid reason", "new_reason"),
+        )) {
+            assertNotNull(runCatching { store.replaceReasonIfExpected(id, old, replacement) }.exceptionOrNull())
+        }
+        assertEquals(bytes, disk.contents)
+        assertEquals(writes, disk.writes)
+    }
+
     @Test fun `failed first pause quarantines this conversation in memory but not another`() {
         val disk = Disk()
         val store = disk.open()

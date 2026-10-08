@@ -30,6 +30,10 @@ data class Assistant(
     val compactionThresholdTokens: Int = 0,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
+    // Orbis notes are independent of legacy/global RikkaHub memory. Light never injects.
+    val orbisMemoryMode: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode =
+        me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode.LIGHT,
+    val orbisMemoryAutoInject: Boolean = true,
     val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
     val enableRecentChatsReference: Boolean = false,
     val messageTemplate: String = "{{ message }}",

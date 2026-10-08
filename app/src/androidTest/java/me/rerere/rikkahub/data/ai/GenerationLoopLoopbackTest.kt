@@ -89,6 +89,27 @@ import kotlin.uuid.Uuid
 @RunWith(AndroidJUnit4::class)
 class GenerationLoopLoopbackTest {
     @Test(timeout = 30_000)
+    fun localMemoryToolsReceiveHostReplayIdentityInTheRealGenerationLoop() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 4, memoryMode = true) { fixture ->
+                val conversationId = Uuid.random()
+                val identities = mutableListOf<String>()
+                fixture.beforeToolExecution = { step ->
+                    val invocation = checkNotNull(kotlinx.coroutines.currentCoroutineContext()[
+                        me.rerere.rikkahub.data.orbis.cloudtools.CloudToolInvocationContext])
+                    assertEquals(conversationId.toString(), invocation.conversationId)
+                    assertEquals("synthetic-call-$step", invocation.toolCallId)
+                    assertTrue(invocation.messageId.isNotBlank())
+                    identities += invocation.toolCallId
+                }
+                fixture.collect(conversationId = conversationId)
+                assertEquals(3, identities.distinct().size)
+                assertEquals(listOf(1, 2, 3), fixture.executions.toList())
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
     fun privateToolsHideOnlyDetailsAndKeepPublicReplyAndNextWakeRealHistory() = runBlocking<Unit> {
         for (streaming in listOf(true, false)) {
             fixture(streaming, approval = false, expectedRequests = 5, privateMode = true) { fixture ->
@@ -988,6 +1009,7 @@ class GenerationLoopLoopbackTest {
         busyFirst: Boolean = false,
         finalText: String = "synthetic final answer",
         privateMode: Boolean = false,
+        memoryMode: Boolean = false,
         block: suspend (Fixture) -> Unit,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -996,7 +1018,7 @@ class GenerationLoopLoopbackTest {
             "Synthetic fixture must not start the real application."
         }
         val context = NoPrivateStorageContext(instrumentation.context)
-        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, busyFirst, finalText, privateMode)
+        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, busyFirst, finalText, privateMode, memoryMode)
         val requestBudget = AtomicInteger()
         val client = OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
@@ -1051,7 +1073,7 @@ class GenerationLoopLoopbackTest {
                 searchServices = emptyList(), ttsProviders = emptyList(),
             )
             val fixture = Fixture(context, server, client, settings, assistant, model, approval, batchWithEmptyResult,
-                mixedApprovalBatch, revokeBeforeExecution, compactionMode, reminderOnly, privateMode)
+                mixedApprovalBatch, revokeBeforeExecution, compactionMode, reminderOnly, privateMode, memoryMode)
             withTimeout(20_000) { block(fixture) }
             server.assertHealthy()
             assertEquals(expectedRequests, requestBudget.get())
@@ -1077,6 +1099,7 @@ class GenerationLoopLoopbackTest {
         private val compactionMode: String?,
         private val reminderOnly: Boolean,
         privateMode: Boolean,
+        memoryMode: Boolean,
     ) {
         val executions = Collections.synchronizedList(mutableListOf<Int>())
         var beforeToolExecution: suspend (Int) -> Unit = {}
@@ -1098,7 +1121,7 @@ class GenerationLoopLoopbackTest {
         private val manager = ProviderManager(client, context)
         private val loop = GenerationLoop(context, manager, Json)
         private val tool = Tool(
-            name = if (privateMode) "orbis_private_room_write" else "synthetic_tool", description = "Synthetic local counter only.",
+            name = if (privateMode) "orbis_private_room_write" else if (memoryMode) "orbis_memory" else "synthetic_tool", description = "Synthetic local counter only.",
             parameters = {
                 schemas.incrementAndGet()
                 InputSchema.Obj(JsonObject(mapOf("step" to JsonObject(mapOf("type" to JsonPrimitive("integer"))))), listOf("step"))
@@ -1232,6 +1255,7 @@ class GenerationLoopLoopbackTest {
         private val busyFirst: Boolean,
         private val finalText: String,
         private val privateMode: Boolean,
+        private val memoryMode: Boolean,
     ) : Closeable {
         private val listener = ServerSocket().apply {
             bind(InetSocketAddress(LOOPBACK, 0), 4)
@@ -1357,7 +1381,7 @@ class GenerationLoopLoopbackTest {
                             put("id", "synthetic-call-$toolStep")
                             put("type", "function")
                             put("function", buildJsonObject {
-                                put("name", if (privateMode) "orbis_private_room_write" else "synthetic_tool")
+                                put("name", if (privateMode) "orbis_private_room_write" else if (memoryMode) "orbis_memory" else "synthetic_tool")
                                 put("arguments", "{\"step\":$toolStep}")
                             })
                         }

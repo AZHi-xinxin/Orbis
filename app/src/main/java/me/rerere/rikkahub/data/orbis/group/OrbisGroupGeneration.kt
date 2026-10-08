@@ -61,6 +61,8 @@ internal fun resolveGroupParticipant(settings: Settings, member: OrbisGroupMembe
     val assistant = original.copy(
         chatModelId = member.modelId, systemPrompt = original.systemPrompt + "\n" + scopePrompt,
         enableMemory = false, useGlobalMemory = false, enableRecentChatsReference = false,
+        orbisMemoryMode = me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode.LIGHT,
+        orbisMemoryAutoInject = false,
         presetMessages = emptyList(), messageTemplate = "{{ message }}", regexes = emptyList(),
         modeInjectionIds = emptySet(), lorebookIds = emptySet(), enabledSkills = emptySet(),
         mcpServers = emptySet(), localTools = emptyList(), cloudTools = CloudToolSelection(),
@@ -192,6 +194,9 @@ internal class GenerationLoopGroupResponder(private val loop: GenerationLoop) : 
             inputTransformers = emptyList(), outputTransformers = emptyList(), maxSteps = 1,
             conversationId = groupGenerationSessionId(input.roomId, participant.member.id), durableCheckpoints = true,
             outputFrozenPrefixCount = input.messages.size, includeCompactionReminder = false,
+            // This public group scope never reads private notes or advances their human-turn clock.
+            // It has no ChatToolFactory catalogue: even explicit orbis_memory calls are unavailable.
+            allowLocalMemory = false,
             maxAutomaticContinuations = 0,
         ).collect { chunk ->
             when (chunk) {

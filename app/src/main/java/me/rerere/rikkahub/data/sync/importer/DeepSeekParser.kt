@@ -51,11 +51,18 @@ data class DeepSeekFragment(val type: String, val raw: JsonObject) {
     val content: String? get() = (raw["content"] as? JsonPrimitive)?.takeIf { it.isString }?.content
 }
 
+/** Never include the unknown type or source text: either may contain private data. */
+internal class DeepSeekUnsupportedFragmentException : IllegalArgumentException(
+    "DeepSeek 导出包包含尚未支持的消息片段类型；已停止导入，没有忽略记录。请保留原文件以便适配。"
+)
+
 /** Parser consumes only data. It never creates assistants, tools, providers or remote attachment requests. */
 object DeepSeekParser {
     private const val MAX_CONVERSATIONS = 2_000
     private const val MAX_NODES = 100_000
-    private val TYPES = setOf("REQUEST", "RESPONSE", "THINK", "FILE", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN")
+    private val USER_TYPES = setOf("REQUEST", "FILE")
+    private val ASSISTANT_TYPES = setOf("RESPONSE", "THINK", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN", "TOOL_FIND")
+    private val TYPES = USER_TYPES + ASSISTANT_TYPES
 
     fun parse(root: JsonElement, checkCancelled: () -> Unit = {}): DeepSeekExport {
         try {
@@ -113,7 +120,7 @@ object DeepSeekParser {
                         val fragments = content.getValue("fragments").array().map { fragment ->
                             val objectValue = fragment.obj()
                             val type = objectValue.string("type")
-                            require(type in TYPES) { "deepseek_unknown_fragment" }
+                            if (type !in TYPES) throw DeepSeekUnsupportedFragmentException()
                             objectValue["content"]?.let { require(it is JsonPrimitive && it.isString) { "deepseek_content_type" } }
                             if (type in setOf("REQUEST", "RESPONSE", "THINK")) objectValue.string("content")
                             objectValue["files"]?.array()?.forEach { file ->
@@ -126,8 +133,8 @@ object DeepSeekParser {
                             }
                             DeepSeekFragment(type, objectValue)
                         }
-                        val user = fragments.any { it.type == "REQUEST" || it.type == "FILE" }
-                        val assistant = fragments.any { it.type in setOf("RESPONSE", "THINK", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN") }
+                        val user = fragments.any { it.type in USER_TYPES }
+                        val assistant = fragments.any { it.type in ASSISTANT_TYPES }
                         require(!(user && assistant)) { "deepseek_mixed_roles" }
                         // Official exports have no role field. Keep even the empty interrupted message.
                         val role = when {
@@ -153,6 +160,8 @@ object DeepSeekParser {
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: ArchiveReadException) {
+            throw failure
+        } catch (failure: DeepSeekUnsupportedFragmentException) {
             throw failure
         } catch (_: RuntimeException) {
             throw IllegalArgumentException("DeepSeek 聊天结构不兼容或已损坏；现有聊天未更改")

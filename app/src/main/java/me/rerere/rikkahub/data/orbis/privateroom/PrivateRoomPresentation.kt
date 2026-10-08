@@ -23,6 +23,21 @@ private val PRIVATE_ROOM_TOOL_NAMES = setOf(
 )
 
 const val PRIVATE_ROOM_CONTENT_HIDDEN = "隐私室操作记录与思考已隐藏"
+const val LOCAL_MEMORY_CONTENT_HIDDEN = "本机记忆操作记录与相关思考已隐藏"
+
+/** Human presentation only: local memory is NOT a private-room execution or authorization scope. */
+fun isLocalMemoryToolName(name: String): Boolean = name == "orbis_memory"
+
+/** Streamed prefixes (including an unnamed call) hide records until resolved; MCP suffixes never match. */
+fun isPotentialLocalMemoryToolName(name: String): Boolean = "orbis_memory".startsWith(name)
+
+@Suppress("DEPRECATION")
+fun UIMessagePart.isLocalMemoryToolPart(): Boolean = when (this) {
+    is UIMessagePart.Tool -> isPotentialLocalMemoryToolName(toolName)
+    is UIMessagePart.ToolCall -> isPotentialLocalMemoryToolName(toolName)
+    is UIMessagePart.ToolResult -> isPotentialLocalMemoryToolName(toolName)
+    else -> false
+}
 
 @Suppress("DEPRECATION")
 fun UIMessagePart.isPrivateRoomToolPart(): Boolean = when (this) {
@@ -40,11 +55,11 @@ fun UIMessagePart.isPotentialPrivateRoomToolPart(): Boolean = when (this) {
     else -> false
 }
 
-/** Includes local undo history so deleting a private tool cannot reveal its reasoning or records. */
+/** Human-only boundary, including local memory and undo history. Never use for tool authorization. */
 fun UIMessage.hasPrivateRoomToolContent(): Boolean = privateRoomContentHidden ||
     (privateRoomPendingPresentation && parts.any { it.isPotentialPrivateRoomToolPart() }) ||
-    parts.any { it.isPrivateRoomToolPart() } ||
-    deletedToolRecords.any { isPrivateRoomToolName(it.tool.toolName) }
+    parts.any { it.isPrivateRoomToolPart() || it.isLocalMemoryToolPart() } ||
+    deletedToolRecords.any { isPrivateRoomToolName(it.tool.toolName) || it.tool.isLocalMemoryToolPart() }
 
 /**
  * Human-facing projection ONLY. Never persist this value, pass it to a provider, or use it to edit
@@ -52,6 +67,7 @@ fun UIMessage.hasPrivateRoomToolContent(): Boolean = privateRoomContentHidden ||
  * Text is the assistant's public reply, including errors and instructions, and must remain visible.
  * The original flags identify sensitive operation records, not a prohibition on showing the reply.
  * Clear flags only on this disposable presentation so downstream renderers do not hide it again.
+ * This is a display boundary, not an encryption/secrecy promise; full original records remain stored.
  */
 fun UIMessage.privateRoomSafePresentation(): UIMessage = if (!hasPrivateRoomToolContent()) this else copy(
     privateRoomContentHidden = false,
@@ -62,7 +78,9 @@ fun UIMessage.privateRoomSafePresentation(): UIMessage = if (!hasPrivateRoomTool
     translation = null,
     orbisEvent = null,
     orbisQuote = null,
-    deletedToolRecords = deletedToolRecords.filterNot { isPotentialPrivateRoomToolName(it.tool.toolName) },
+    deletedToolRecords = deletedToolRecords.filterNot {
+        isPotentialPrivateRoomToolName(it.tool.toolName) || it.tool.isLocalMemoryToolPart()
+    },
 )
 
 /**
@@ -74,15 +92,18 @@ fun UIMessage.privateRoomSafePresentation(): UIMessage = if (!hasPrivateRoomTool
  */
 fun privateRoomPublicParts(parts: List<UIMessagePart>, includePlaceholder: Boolean = true): List<UIMessagePart> =
     projectPublicParts(parts, includePlaceholder,
-        parts.indexOfFirst { it.isPotentialPrivateRoomToolPart() }.takeIf { it >= 0 } ?: 0, source = null)
+        parts.indexOfFirst { it.isPotentialPrivateRoomToolPart() || it.isLocalMemoryToolPart() }
+            .takeIf { it >= 0 } ?: 0, source = null)
 
 private fun UIMessage.privateReasoningBoundary(): Int {
-    val first = parts.indexOfFirst { it.isPrivateRoomToolPart() ||
+    val first = parts.indexOfFirst { it.isPrivateRoomToolPart() || it.isLocalMemoryToolPart() ||
         (privateRoomPendingPresentation && it.isPotentialPrivateRoomToolPart()) }
     if (first >= 0) return first
     // A marked continuation has already entered the room. A deleted private tool has no safe
     // current-list position: do not guess its conceptual undo index in potentially edited parts.
-    return if (privateRoomContentHidden || deletedToolRecords.any { isPrivateRoomToolName(it.tool.toolName) }) 0
+    return if (privateRoomContentHidden || deletedToolRecords.any {
+        isPrivateRoomToolName(it.tool.toolName) || it.tool.isLocalMemoryToolPart()
+    }) 0
         else parts.size
 }
 
@@ -92,7 +113,7 @@ private fun projectPublicParts(
     reasoningHiddenFromIndex: Int,
     source: UIMessage?,
 ): List<UIMessagePart> = parts.flatMapIndexed { index, part ->
-    if (part.isPotentialPrivateRoomToolPart()) return@flatMapIndexed emptyList()
+    if (part.isPotentialPrivateRoomToolPart() || part.isLocalMemoryToolPart()) return@flatMapIndexed emptyList()
     when (part) {
         is UIMessagePart.Text -> publicReplyParts(part, source).filterNot {
             it is UIMessagePart.Reasoning && index >= reasoningHiddenFromIndex
@@ -106,7 +127,19 @@ private fun projectPublicParts(
     }
 }.let { visible ->
     if (includePlaceholder && (visible.isEmpty() || visible.all { it is UIMessagePart.Text && it.text.isBlank() }))
-        listOf(UIMessagePart.Text(PRIVATE_ROOM_CONTENT_HIDDEN)) else visible
+        listOf(UIMessagePart.Text(hiddenOperationNotice(parts, source))) else visible
+}
+
+private fun hiddenOperationNotice(parts: List<UIMessagePart>, source: UIMessage?): String {
+    val localMemory = parts.any { it.isLocalMemoryToolPart() } ||
+        source?.deletedToolRecords?.any { it.tool.isLocalMemoryToolPart() } == true
+    val privateRoom = source?.privateRoomContentHidden == true || parts.any { it.isPrivateRoomToolPart() } ||
+        source?.deletedToolRecords?.any { isPrivateRoomToolName(it.tool.toolName) } == true
+    return when {
+        localMemory && privateRoom -> "本机记忆与隐私室操作记录及相关思考已隐藏"
+        localMemory -> LOCAL_MEMORY_CONTENT_HIDDEN
+        else -> PRIVATE_ROOM_CONTENT_HIDDEN
+    }
 }
 
 private fun publicReplyParts(part: UIMessagePart.Text, source: UIMessage?): List<UIMessagePart> {

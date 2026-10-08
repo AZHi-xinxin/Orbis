@@ -109,7 +109,8 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
         var connectedElapsedMillis: Long? = null
         var ending = false
         var focus: AudioFocusRequest? = null
-        var previousAudioMode: Int? = null
+        var audioRouting: AndroidVoiceCallAudioRouting? = null
+        var audioResumeJob: Job? = null
         var focusState = VoiceAudioFocusState.AVAILABLE
     }
 
@@ -168,8 +169,29 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                     }.build()
                 check(audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "暂时无法取得通话音频" }
                 session.focus = focus
-                session.previousAudioMode = audio.mode
-                audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                session.audioRouting = AndroidVoiceCallAudioRouting(audio, scope,
+                    mayUpdate = { current === session && !session.ending && session.focusState == VoiceAudioFocusState.AVAILABLE },
+                    onWaiting = {
+                        if (current === session && !session.ending) {
+                            voiceSession.setAudioFocusSuspended(true)
+                            mutableCallState.value = mutableCallState.value.copy(
+                                audioInterruption = "正在确认通话音频输出，收音与朗读暂时暂停。", canResumeAudio = false)
+                        }
+                    },
+                    onReady = {
+                        if (current === session && !session.ending && session.focusState == VoiceAudioFocusState.AVAILABLE) {
+                            publishConfirmedAudio(session)
+                        }
+                    },
+                    onUnavailable = {
+                        publishFocusPause(session, "音频路由未能切换，收音与朗读已暂停，请检查耳机后恢复。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
+                    },
+                )
+                check(session.audioRouting?.start() == true) { "Audio route unavailable" }
+                check(current === session && !session.ending) { "Voice call has ended" }
+                // Route confirmation suspends. A focus-loss callback may have paused this
+                // owner while it waited; never open ASR from that stale startup continuation.
+                check(session.focusState == VoiceAudioFocusState.AVAILABLE) { "Audio focus lost during startup" }
                 voiceSession.start(
                     createAsr = createAsr,
                     speak = speak,
@@ -278,7 +300,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
     @MainThread
     fun resumeAudio(callId: String): Boolean {
         val session = current?.takeIf { it.callId == callId && !it.ending &&
-            it.focusState != VoiceAudioFocusState.AVAILABLE } ?: return false
+            it.focusState != VoiceAudioFocusState.AVAILABLE && it.audioResumeJob?.isActive != true } ?: return false
         val audio = context.getSystemService(AudioManager::class.java)
         if (!safeToResumeAudio(audio)) {
             publishFocusPause(session, "其他通话或录音仍在使用音频，请结束后再点击恢复。[AUDIO_BUSY]", manual = true)
@@ -290,7 +312,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
             return false
         }
         if (current !== session || session.ending) return false
-        return resumeGrantedAudio(session, audio)
+        return resumeGrantedAudio(session)
     }
 
     private fun safeToResumeAudio(audio: AudioManager): Boolean = runCatching {
@@ -300,26 +322,37 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
             audio.activeRecordingConfigurations.isEmpty()
     }.getOrDefault(false)
 
-    private fun resumeGrantedAudio(session: Session, audio: AudioManager): Boolean {
+    private fun resumeGrantedAudio(session: Session): Boolean {
         if (current !== session || session.ending) return false
-        if (!runCatching {
-                if (audio.mode == AudioManager.MODE_NORMAL) audio.mode = AudioManager.MODE_IN_COMMUNICATION
-                true
-            }.getOrDefault(false)) {
-            publishFocusPause(session, "音频模式未能恢复，麦克风保持暂停。请稍后重试。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
-            return false
-        }
+        session.audioResumeJob?.cancel()
+        voiceSession.setAudioFocusSuspended(true)
+        mutableCallState.value = mutableCallState.value.copy(
+            audioInterruption = "正在确认通话音频输出，收音与朗读暂时暂停。", canResumeAudio = false)
+        session.audioResumeJob = scope.launch(start = CoroutineStart.LAZY) {
+            val confirmed = session.audioRouting?.resume() == true
+            if (current !== session || session.ending) return@launch
+            if (confirmed) publishConfirmedAudio(session)
+            else publishFocusPause(session, "音频输出未能确认，收音与朗读保持暂停。请检查耳机后重试。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
+        }.also { it.start() }
+        // Only the attempt was accepted. Capture/playback stays paused until actual readback.
+        return true
+    }
+
+    private fun publishConfirmedAudio(session: Session) {
+        if (current !== session || session.ending) return
         session.focusState = VoiceAudioFocusState.AVAILABLE
         mutableCallState.value = mutableCallState.value.copy(audioInterruption = null, canResumeAudio = false)
         voiceSession.setAudioFocusSuspended(false)
         session.service?.refresh(session.token)
-        return true
     }
 
     private fun publishFocusPause(session: Session, message: String, manual: Boolean) {
         if (current !== session || session.ending) return
         if (manual) session.focusState = VoiceAudioFocusState.MANUAL_PAUSE
+        session.audioResumeJob?.cancel()
+        session.audioResumeJob = null
         voiceSession.setAudioFocusSuspended(true)
+        session.audioRouting?.suspendRouting()
         mutableCallState.value = mutableCallState.value.copy(audioInterruption = message, canResumeAudio = manual)
         session.service?.refresh(session.token)
     }
@@ -348,7 +381,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
             return
         }
         // The system granted focus; never request it again to compete with another application.
-        resumeGrantedAudio(session, audio)
+        resumeGrantedAudio(session)
     }
 
     @MainThread
@@ -392,10 +425,12 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
         // This is deliberately synchronous: summary/archive work never keeps the microphone open.
         voiceSession.stop()
         OrbisVideoCallRuntime.get(context).end(session.callId)
+        session.audioResumeJob?.cancel()
+        session.audioResumeJob = null
         val audio = context.getSystemService(AudioManager::class.java)
-        session.previousAudioMode?.let { previous -> runCatching { if (audio.mode == AudioManager.MODE_IN_COMMUNICATION) audio.mode = previous } }
+        session.audioRouting?.close()
         session.focus?.let { runCatching { audio.abandonAudioFocusRequest(it) } }
-        session.focus = null; session.previousAudioMode = null
+        session.focus = null; session.audioRouting = null
         session.service?.stopForCall(session.token)
         session.service = null
         // Publish the return-screen state only after capture and playback have stopped.

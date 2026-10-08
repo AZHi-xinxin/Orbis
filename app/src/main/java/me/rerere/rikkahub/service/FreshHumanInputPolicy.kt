@@ -9,6 +9,13 @@ import me.rerere.rikkahub.data.orbis.FreshHumanRecoveryStatus
 internal fun freshHumanModeAllowsDerivedRequests(status: FreshHumanRecoveryStatus): Boolean =
     status == FreshHumanRecoveryStatus.NONE
 
+/** Detaching an old turn allows ordinary new input, not replay or automatic work from that turn. */
+internal fun FreshHumanRecoveryStatus.requiresFreshPermit(): Boolean = when (this) {
+    FreshHumanRecoveryStatus.NONE, FreshHumanRecoveryStatus.DETACHED -> false
+    FreshHumanRecoveryStatus.ACTIVE, FreshHumanRecoveryStatus.OWNER_CHANGED,
+    FreshHumanRecoveryStatus.UNAVAILABLE -> true
+}
+
 /** RAM-only routing snapshot. Full providers also bind a live call's pinned model. Never log it. */
 internal data class FreshHumanInputScope(
     val conversationId: Uuid,

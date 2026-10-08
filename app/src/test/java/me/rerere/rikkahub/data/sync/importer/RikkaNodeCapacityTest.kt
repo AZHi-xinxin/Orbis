@@ -34,7 +34,9 @@ class RikkaNodeCapacityTest {
 
     private fun exactAsciiMessage(bytes: Int): UIMessage {
         val empty = UIMessage.assistant("")
-        val overhead = MessageNodeBudget.measureNode(listOf(empty))
+        val projected = decodeRikkaNode(RikkaChatSnapshotReader.Node(Uuid.random().toString(),
+            JsonInstant.encodeToString(listOf(empty)), 0))
+        val overhead = MessageNodeBudget.measureNode(projected)
         return empty.copy(parts = listOf(UIMessagePart.Text("x".repeat(bytes - overhead))))
     }
 
@@ -42,7 +44,8 @@ class RikkaNodeCapacityTest {
         val message = exactAsciiMessage(MessageNodeBudget.MAX_NODE_BYTES)
         val imported = convert(source(listOf(message))).messageNodes.single().messages
         assertEquals(MessageNodeBudget.MAX_NODE_BYTES, MessageNodeBudget.measureNode(imported))
-        assertEquals(message.parts, imported.single().parts)
+        assertEquals(message.toText(), imported.single().toText())
+        assertEquals(RikkaChatContentDecoder.marker(), imported.single().parts.single().metadata)
     }
 
     @Test fun `source below one MiB but one byte over target is classified as node capacity`() = runBlocking {

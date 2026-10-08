@@ -322,6 +322,8 @@ class ChatVM(
 
     fun resumeMessageQueue() = chatService.resumeMessageQueue(_conversationId)
 
+    fun dismissPauseAndContinueFreshInput() = chatService.dismissPauseAndContinueFreshInput(_conversationId)
+
     fun saveVoiceNotePlayed(edit: me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit) {
         viewModelScope.launch {
             try { chatService.saveVoiceNotePlayed(_conversationId, edit) }

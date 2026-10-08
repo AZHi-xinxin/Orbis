@@ -3,20 +3,19 @@ package me.rerere.rikkahub.data.datastore
 import android.content.Context
 import android.util.Log
 import androidx.datastore.core.DataStore
-import androidx.datastore.core.IOException
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.pebbletemplates.pebble.PebbleEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -80,6 +79,7 @@ class SettingsStore(
     companion object {
         // 版本号
         val VERSION = intPreferencesKey("data_version")
+        internal val SETTINGS_WRITE_REVISION = longPreferencesKey("settings_write_revision")
 
         // UI设置
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
@@ -169,7 +169,42 @@ class SettingsStore(
         }
 
         private suspend fun persistSettings(dataStore: DataStore<Preferences>, settings: Settings) {
-            dataStore.edit { preferences ->
+            editPersistedSettings(dataStore) { preferences -> writeSettings(preferences, settings) }
+        }
+
+        /** Every local writer, including narrow edits, advances the same durable source version. */
+        internal suspend fun editPersistedSettings(
+            dataStore: DataStore<Preferences>,
+            transform: suspend (MutablePreferences) -> Unit,
+        ): Preferences = dataStore.edit { preferences ->
+            val revision = preferences[SETTINGS_WRITE_REVISION] ?: 0L
+            check(revision >= 0) { "settings_revision_invalid" }
+            val nextRevision = Math.addExact(revision, 1L)
+            transform(preferences)
+            preferences[SETTINGS_WRITE_REVISION] = nextRevision
+        }
+
+        internal suspend fun updatePersistedSettings(
+            dataStore: DataStore<Preferences>,
+            transform: (Settings) -> Settings,
+            beforeWrite: suspend (Settings, Settings) -> Unit = { _, _ -> },
+        ): Settings {
+            val persisted = editPersistedSettings(dataStore) { preferences ->
+                val previous = readSettings(preferences)
+                val updated = transform(previous)
+                check(!updated.init) { "settings_not_ready_or_read_failed" }
+                beforeWrite(previous, updated)
+                writeSettings(preferences, updated)
+            }
+            return readSettings(persisted)
+        }
+
+        internal fun replaceFreshSnapshot(latest: Settings, snapshot: Settings): Settings {
+            if (snapshot.readRevision != latest.readRevision) throw StaleSettingsSnapshotException()
+            return snapshot
+        }
+
+        private fun writeSettings(preferences: MutablePreferences, settings: Settings) {
                 preferences[DYNAMIC_COLOR] = settings.dynamicColor
                 preferences[THEME_ID] = settings.themeId
                 preferences[CUSTOM_THEMES] = JsonInstant.encodeToString(settings.customThemes)
@@ -232,21 +267,12 @@ class SettingsStore(
                 preferences[BACKUP_REMINDER_CONFIG] = JsonInstant.encodeToString(settings.backupReminderConfig)
                 preferences[LAUNCH_COUNT] = settings.launchCount
                 preferences[SPONSOR_ALERT_DISMISSED_AT] = settings.sponsorAlertDismissedAt
-            }
         }
-    }
 
-    private val dataStore = context.settingsStore
-
-    val settingsFlowRaw = dataStore.data
-        .catch { exception ->
-            if (exception is IOException) {
-                emit(emptyPreferences())
-            } else {
-                throw exception
-            }
-        }.map { preferences ->
+        /** Shared decoder for source publication and transactions; never substitutes failed reads. */
+        internal fun readSettings(preferences: Preferences): Settings =
             Settings(
+                readRevision = preferences[SETTINGS_WRITE_REVISION] ?: 0L,
                 favoriteModels = preferences[FAVORITE_MODELS]?.let {
                     JsonInstant.decodeFromString(it)
                 } ?: emptyList(),
@@ -335,8 +361,7 @@ class SettingsStore(
                 launchCount = preferences[LAUNCH_COUNT] ?: 0,
                 sponsorAlertDismissedAt = preferences[SPONSOR_ALERT_DISMISSED_AT] ?: 0,
             )
-        }
-        .map {
+        .let {
             var providers = it.providers.ifEmpty { DEFAULT_PROVIDERS }.toMutableList()
             DEFAULT_PROVIDERS.forEach { defaultProvider ->
                 if (providers.none { it.id == defaultProvider.id }) {
@@ -371,7 +396,7 @@ class SettingsStore(
                 ttsProviders = ttsProviders,
             )
         }
-        .map { settings ->
+        .let { settings ->
             // 去重并清理无效引用
             val validMcpServerIds = settings.mcpServers.map { it.id }.toSet()
             val validModeInjectionIds = settings.modeInjections.map { it.id }.toSet()
@@ -427,34 +452,51 @@ class SettingsStore(
                 quickMessages = settings.quickMessages.distinctBy { it.id },
             )
         }
+    }
+
+    private val dataStore = context.settingsStore
+    private val settingsReadProtection = SettingsReadProtection()
+
+    val settingsFlowRaw = settingsReadProtection.protect(dataStore.data
+        .map { readSettings(it) }
         .onEach {
             get<PebbleEngine>().templateCache.invalidateAll()
-        }
+        })
 
     val settingsFlow = settingsFlowRaw
         .distinctUntilChanged()
         .toMutableStateFlow(scope, Settings.dummy())
 
-    suspend fun update(settings: Settings) {
+    suspend fun update(settings: Settings): Boolean {
         if(settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
-            return
+            return false
         }
-        // Retain old and newly selected artwork before publishing the new setting. A fast
-        // avatar change must not race asynchronous attachment cleanup or StateFlow conflation.
-        val beforeArtwork = me.rerere.rikkahub.data.files.protectedAppearancePaths(context.filesDir, settingsFlow.value)
-        val afterArtwork = me.rerere.rikkahub.data.files.protectedAppearancePaths(context.filesDir, settings)
-        if (beforeArtwork != afterArtwork) withContext(Dispatchers.IO) {
-            me.rerere.rikkahub.data.files.FileProtection(java.io.File(context.filesDir.canonicalFile,
-                me.rerere.rikkahub.data.files.FileProtection.PATH))
-                .protectAppearanceChange(context.filesDir, beforeArtwork, afterArtwork)
+        return update { latest ->
+            replaceFreshSnapshot(latest, settings)
         }
-        settingsFlow.value = settings
-        persistSettings(dataStore, settings)
     }
 
-    suspend fun update(fn: (Settings) -> Settings) {
-        update(fn(settingsFlow.value))
+    suspend fun update(fn: (Settings) -> Settings): Boolean {
+        val saved = settingsReadProtection.update(
+            transform = fn,
+            transaction = { transform ->
+                updatePersistedSettings(dataStore, transform) { previous, settings ->
+                    // Retain old and newly selected artwork before publishing the new setting. A fast
+                    // avatar change must not race asynchronous attachment cleanup or StateFlow conflation.
+                    val beforeArtwork = me.rerere.rikkahub.data.files.protectedAppearancePaths(context.filesDir, previous)
+                    val afterArtwork = me.rerere.rikkahub.data.files.protectedAppearancePaths(context.filesDir, settings)
+                    if (beforeArtwork != afterArtwork) withContext(Dispatchers.IO) {
+                        me.rerere.rikkahub.data.files.FileProtection(java.io.File(context.filesDir.canonicalFile,
+                            me.rerere.rikkahub.data.files.FileProtection.PATH))
+                            .protectAppearanceChange(context.filesDir, beforeArtwork, afterArtwork)
+                    }
+                }
+            },
+            publish = { settingsFlow.value = it },
+        )
+        if (!saved) Log.w(TAG, "Ignored stale settings snapshot; current settings retained")
+        return saved
     }
 
     /** Human-confirmed ST model alias only; persisted revision check and two-field merge. */
@@ -463,7 +505,7 @@ class SettingsStore(
         alias: String,
     ) {
         binding.checkCurrent(settingsFlow.value)
-        dataStore.edit { preferences ->
+        editPersistedSettings(dataStore) { preferences ->
             me.rerere.rikkahub.ui.pages.orbis.applyOrbisGatewayBinding(preferences, binding, alias)
         }
         // Do not publish an optimistic Settings snapshot or overwrite unrelated preferences.
@@ -472,7 +514,7 @@ class SettingsStore(
     /** Merge only contact choices against persisted data, never a stale page-wide Settings copy. */
     suspend fun updateOrbisContact(transform: (OrbisContactPreferences) -> OrbisContactPreferences) {
         check(!settingsFlow.value.init) { "settings_not_ready" }
-        dataStore.edit { preferences ->
+        editPersistedSettings(dataStore) { preferences ->
             val latest = JsonInstant.decodeFromString<OrbisContactPreferences>(preferences[ORBIS_CONTACT] ?: "{}").normalized()
             preferences[ORBIS_CONTACT] = JsonInstant.encodeToString(transform(latest).normalized())
         }
@@ -481,7 +523,7 @@ class SettingsStore(
     /** A nickname edit must not persist a stale full Settings snapshot from either client. */
     suspend fun updateUserNickname(nickname: String) {
         check(!settingsFlow.value.init) { "settings_not_ready" }
-        dataStore.edit { preferences ->
+        editPersistedSettings(dataStore) { preferences ->
             val latest = JsonInstant.decodeFromString<DisplaySetting>(preferences[DISPLAY_SETTING] ?: "{}")
             preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(latest.withValidatedUserNickname(nickname))
         }
@@ -491,7 +533,7 @@ class SettingsStore(
     /** A narrow persisted update: do not overwrite a concurrently changed assistant or appearance. */
     suspend fun updateOrbisEventOpacity(opacity: Float, deepSeek: Boolean = false) {
         check(!settingsFlow.value.init) { "settings_not_ready" }
-        dataStore.edit { preferences ->
+        editPersistedSettings(dataStore) { preferences ->
             val latest = JsonInstant.decodeFromString<DisplaySetting>(preferences[DISPLAY_SETTING] ?: "{}")
             preferences[DISPLAY_SETTING] = JsonInstant.encodeToString(
                 if (deepSeek) latest.copy(deepSeekAppearance = latest.deepSeekAppearance.copy(eventOpacity = opacity).normalized())
@@ -501,7 +543,7 @@ class SettingsStore(
     }
 
     suspend fun updateAssistant(assistantId: Uuid) {
-        dataStore.edit { preferences ->
+        editPersistedSettings(dataStore) { preferences ->
             preferences[SELECT_ASSISTANT] = assistantId.toString()
         }
     }
@@ -524,7 +566,7 @@ class SettingsStore(
     suspend fun updateCompactionThreshold(assistantId: Uuid, tokens: Int) {
         require(tokens in 0..1_000_000) { "提醒阈值须在 0～1,000,000 tokens 之间。" }
         check(!settingsFlow.value.init) { "设置尚未加载，请稍后重试。" }
-        dataStore.edit { preferences ->
+        editPersistedSettings(dataStore) { preferences ->
             val assistants = JsonInstant.decodeFromString<List<Assistant>>(preferences[ASSISTANTS] ?: "[]")
             check(assistants.any { it.id == assistantId }) { "当前 AI 已不存在，请重新打开对话。" }
             preferences[ASSISTANTS] = JsonInstant.encodeToString(assistants.map { assistant ->
@@ -603,6 +645,9 @@ class SettingsStore(
 data class Settings(
     @Transient
     val init: Boolean = false,
+    /** Local source identity only: not serialized into backups, providers or assistant payloads. */
+    @Transient
+    val readRevision: Long = 0L,
     val dynamicColor: Boolean = true,
     val themeId: String = PresetThemes[0].id,
     val customThemes: List<CustomTheme> = emptyList(),

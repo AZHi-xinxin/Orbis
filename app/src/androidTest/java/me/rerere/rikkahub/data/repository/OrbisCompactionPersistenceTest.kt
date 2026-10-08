@@ -60,10 +60,47 @@ class OrbisCompactionPersistenceTest {
         messageNodes = (0 until count).map { i ->
             (if (i % 2 == 0) UIMessage.user("synthetic original $i") else UIMessage.assistant("synthetic reply $i")).toMessageNode()
         })
-    private suspend fun compact(f: Fixture, before: Conversation, summary: String = "I wrote this synthetic summary", keep: Int = 2): OrbisCompactionCommit {
+    private suspend fun compact(f: Fixture, before: Conversation, summary: String = "I wrote this synthetic summary", keep: Int = 2,
+        captureLocalMemory: Boolean = false): OrbisCompactionCommit {
         val start = UIMessage.assistant(summary).toMessageNode()
         return f.repository.commit(before, listOf(start) + before.messageNodes.takeLast(keep),
-            OrbisCompactionMetadata(start.currentMessage.id, summary, keep, 350_000, 2_000, "synthetic estimate", "synthetic estimate"))
+            OrbisCompactionMetadata(start.currentMessage.id, summary, keep, 350_000, 2_000, "synthetic estimate", "synthetic estimate",
+                captureLocalMemory = captureLocalMemory))
+    }
+
+    @Test fun aiCompactionSavesFullSummaryAsStaticAndManualDefaultDoesNot() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            val text = "完整原文".repeat(200)
+            val result = compact(f, before, text, captureLocalMemory = true)
+            val notes = f.db.orbisMemoryDao().search(before.assistantId.toString(), "", false, 10, 0)
+            assertEquals(1, notes.size)
+            assertEquals(text, notes.single().body)
+            assertEquals("static", notes.single().state)
+            assertEquals("", notes.single().summary)
+            compact(f, result.conversation, "manual synthetic summary", keep = 1)
+            assertEquals(1, f.db.orbisMemoryDao().stats(before.assistantId.toString()).total)
+        }
+    }
+
+    @Test fun failedCompactionRollsBackMemoryCaptureToo() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            f.db.openHelper.writableDatabase.execSQL("CREATE TRIGGER synthetic_fail_fts BEFORE INSERT ON message_fts BEGIN SELECT RAISE(ABORT, 'synthetic storage failure'); END")
+            assertTrue(runCatching { compact(f, before, captureLocalMemory = true) }.isFailure)
+            assertEquals(0, f.db.orbisMemoryDao().stats(before.assistantId.toString()).total)
+            assertStored(before, f.load(before.id))
+        }
+    }
+
+    @Test fun memoryWriteFailureKeepsWholeOriginalConversation() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            f.db.openHelper.writableDatabase.execSQL("CREATE TRIGGER synthetic_fail_memory BEFORE INSERT ON orbis_memory_note BEGIN SELECT RAISE(ABORT, 'synthetic memory failure'); END")
+            assertTrue(runCatching { compact(f, before, captureLocalMemory = true) }.isFailure)
+            assertStored(before, f.load(before.id))
+            assertTrue(f.repository.listHistory(before.assistantId).isEmpty())
+        }
     }
 
     @Test fun atomicCommitKeepsAssistantAuthorshipAndIndependentFields() = runBlocking {

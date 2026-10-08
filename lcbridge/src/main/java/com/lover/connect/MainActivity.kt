@@ -693,7 +693,7 @@ fun MainScreen(
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = {
-                exportLauncher.launch("lc_memory.json")
+                exportLauncher.launch("Orbis-memory.json")
             }) {
                 Text("导出记忆库")
             }

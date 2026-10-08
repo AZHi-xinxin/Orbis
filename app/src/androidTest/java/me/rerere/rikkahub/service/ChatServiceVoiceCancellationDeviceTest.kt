@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.SharedPreferences
+import android.util.AtomicFile
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -22,6 +23,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import me.rerere.ai.provider.Modality
@@ -51,6 +53,10 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.orbis.FreshHumanInputRecoveryStore
+import me.rerere.rikkahub.data.orbis.FreshHumanRecoveryStatus
+import me.rerere.rikkahub.data.orbis.OrbisQueuePauseStore
+import me.rerere.rikkahub.data.orbis.QueuePauseStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStorage
@@ -92,10 +98,134 @@ import kotlin.uuid.Uuid
  * Unlike policy-only tests, these never write partialSafelySaved or call settlement helpers.
  * Requires the isolated runner: only fixture-owned FilesManager/SettingsStore bindings; no app modules,
  * user DB/settings, camera, mic, UI, ST or external requests. Run this class in its own process.
- * Only persistence gates are decorated; their underlying implementations remain real.
+ * Persistence gates and the actual ingress mutex only delay work; their implementations remain real.
+ * A legacy hold fixture writes a real restriction, never a successful remote ACK or settlement.
  */
 @RunWith(AndroidJUnit4::class)
 class ChatServiceVoiceCancellationDeviceTest {
+    @Test fun dismissNoticeInvalidatesAnOldUtteranceWaitingForIngressButKeepsItsTranscript() = runBlocking {
+        fixture { f ->
+            val original = "synthetic accepted speech still waiting for ingress"
+            val ingress = f.voiceIngressMutex()
+            lateinit var oldReply: Deferred<String?>
+            ingress.lock()
+            try {
+                oldReply = f.utterance(original)
+                assertFalse(oldReply.isCompleted)
+                assertEquals(0, checkNotNull(f.service.voiceCalls.get(f.callId)).transcript.count { it.content == original })
+                f.dismissPausedNotice()
+                assertFalse(f.paused())
+                assertFalse("Dismissal must finish without waiting for old ingress", oldReply.isCompleted)
+                assertEquals(0, f.peer.requests.get())
+            } finally {
+                ingress.unlock()
+            }
+            assertNull(oldReply.await())
+            assertEquals(1, checkNotNull(f.service.voiceCalls.get(f.callId)).transcript.count { it.content == original })
+            f.assertAbsentFromChatAndQueue(original)
+            assertEquals(0, f.peer.requests.get())
+            assertFalse(f.paused())
+            f.assertFreshInputCanDrain()
+            f.assertAbsentFromChatAndQueue(original)
+            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
+    @Test fun detachedLegacyHoldAllowsNewReplyCallAndPreflightBargeInWithoutClearingOldEvidence() = runBlocking {
+        fixture(maxRequests = 2) { f ->
+            val originalHold = f.installLegacyGatewayHold()
+            f.dismissPausedNotice()
+            assertEquals(FreshHumanRecoveryStatus.DETACHED, f.persistedFreshRecoveryStatus())
+            f.assertLegacyGatewayHoldUnchanged(originalHold)
+            val newCallId = f.assertNewReplyAndNewCallWork()
+            f.assertLegacyGatewayHoldUnchanged(originalHold)
+
+            val interrupted = "synthetic detached new call preflight interruption"
+            f.pauseNextHistorySave.set(true)
+            val reply = f.utterance(interrupted, newCallId)
+            f.beforeHistorySave.await()
+            assertEquals("The new call has not submitted its interrupted input", 1, f.peer.requests.get())
+            val job = f.currentJob()
+            f.cancel(reply, newCallId)
+            job.join()
+            assertNull(reply.await())
+            assertFalse("Old detached evidence must not poison a new pre-model barge-in", f.paused())
+            assertEquals(1, checkNotNull(f.service.voiceCalls.get(newCallId)).transcript.count { it.content == interrupted })
+            f.assertLegacyGatewayHoldUnchanged(originalHold)
+
+            val following = "synthetic genuinely new spoken input after detached barge-in"
+            val nextReply = f.utterance(following, newCallId)
+            assertEquals(ANSWER, nextReply.await())
+            withContext(Dispatchers.Main) {
+                f.service.getGenerationJobStateFlow(f.conversationId).first { it == null }
+            }
+            f.assertRetainedExactlyOnce(following, substring = true)
+            assertEquals(2, f.peer.requests.get())
+            assertFalse(f.paused())
+            assertEquals(FreshHumanRecoveryStatus.DETACHED, f.persistedFreshRecoveryStatus())
+            f.assertLegacyGatewayHoldUnchanged(originalHold)
+            assertFalse(f.service.mayAcceptPeriodicVideoFrame(f.conversationId, f.callId))
+            assertTrue(f.service.mayAcceptPeriodicVideoFrame(f.conversationId, newCallId))
+        }
+    }
+
+    @Test fun dismissNoticeRetainsOrdinaryInputCancelledBeforeHistoryAndAllowsANewReply() = runBlocking {
+        fixture { f ->
+            val original = "synthetic unsaved ordinary input"
+            f.pauseNextHistorySave.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text(original))))
+            }
+            f.beforeHistorySave.await()
+            val oldJob = f.currentJob()
+            f.dismissPausedNotice()
+            assertTrue(oldJob.isCompleted)
+            assertFalse(f.paused())
+            assertEquals(0, f.peer.requests.get())
+            f.assertRetainedExactlyOnce(original)
+            f.assertNewReplyAndNewCallWork()
+            f.assertRetainedExactlyOnce(original)
+        }
+    }
+
+    @Test fun dismissNoticeRetainsSpokenInputCancelledBeforeHistoryWithoutReplayingIt() = runBlocking {
+        fixture { f ->
+            val original = "synthetic unsaved dictated input"
+            f.pauseNextHistorySave.set(true)
+            val reply = f.utterance(original)
+            f.beforeHistorySave.await()
+            val oldJob = f.currentJob()
+            f.dismissPausedNotice()
+            assertTrue(oldJob.isCompleted)
+            assertFalse(f.paused())
+            assertEquals(0, f.peer.requests.get())
+            assertTrue(reply.isCompleted)
+            f.assertRetainedExactlyOnce(original, substring = true)
+            f.assertFreshInputCanDrain()
+            f.assertRetainedExactlyOnce(original, substring = true)
+            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
+    @Test fun dismissNoticeFinishesAnAttemptedInputSaveOnlyOnceWithoutSendingIt() = runBlocking {
+        fixture { f ->
+            val original = "synthetic input with interrupted history save"
+            f.historyChecksBeforeGate.set(1)
+            f.pauseNextHistorySave.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text(original))))
+            }
+            f.beforeHistorySave.await()
+            assertEquals(0, f.peer.requests.get())
+            f.dismissPausedNotice()
+            assertFalse(f.paused())
+            f.assertRetainedExactlyOnce(original)
+            f.assertFreshInputCanDrain()
+            f.assertRetainedExactlyOnce(original)
+            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
     @Test fun bargeInWhileFirstHistorySaveIsSuspendedDoesNotPauseTheQueue() = runBlocking {
         fixture { f ->
             f.pauseNextHistorySave.set(true)
@@ -140,13 +270,13 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
     }
 
-    private suspend fun fixture(block: suspend (Fixture) -> Unit) {
-        val f = Fixture()
+    private suspend fun fixture(maxRequests: Int = 1, block: suspend (Fixture) -> Unit) {
+        val f = Fixture(maxRequests)
         try { withTimeout(30_000) { f.prepare(); block(f); f.peer.assertHealthy() } }
         finally { withContext(NonCancellable) { f.close() } }
     }
 
-    private class Fixture {
+    private class Fixture(maxRequests: Int) {
         private val instrumentation = InstrumentationRegistry.getInstrumentation().also {
             check(it is IsolatedGenerationLoopRunner)
             check(it.targetContext.applicationContext.javaClass == Application::class.java)
@@ -162,7 +292,7 @@ class ChatServiceVoiceCancellationDeviceTest {
         private val cache = instrumentation.targetContext.cacheDir.canonicalFile
         val directory = Files.createTempDirectory(cache.toPath(), "service-voice-cancellation-").toFile()
         val context = StorageOnlyApplication(instrumentation.targetContext, directory)
-        val peer = OneAnswerPeer()
+        val peer = OneAnswerPeer(maxRequests)
         private val client = OkHttpClient.Builder().proxy(Proxy.NO_PROXY).retryOnConnectionFailure(false)
             .followRedirects(false).followSslRedirects(false).callTimeout(8, TimeUnit.SECONDS)
             .dns { name -> check(name == "127.0.0.1"); listOf(LOOPBACK) }
@@ -194,12 +324,14 @@ class ChatServiceVoiceCancellationDeviceTest {
                 }
             }).build()
         val pauseNextHistorySave = AtomicBoolean(false)
+        val historyChecksBeforeGate = AtomicInteger(0)
         val beforeHistorySave = CompletableDeferred<Unit>()
         private val allowHistorySave = CompletableDeferred<Unit>()
         private val actualDao = database.conversationDao()
         private val gatedDao = object : ConversationDAO by actualDao {
             override suspend fun existsById(id: String): Boolean {
-                if (pauseNextHistorySave.compareAndSet(true, false)) {
+                if (pauseNextHistorySave.get() && historyChecksBeforeGate.getAndDecrement() <= 0 &&
+                    pauseNextHistorySave.compareAndSet(true, false)) {
                     beforeHistorySave.complete(Unit)
                     allowHistorySave.await() // Cancellable actual service pre-save suspension.
                 }
@@ -246,12 +378,12 @@ class ChatServiceVoiceCancellationDeviceTest {
             }
         }
 
-        suspend fun utterance(text: String): Deferred<String?> = withContext(Dispatchers.Main) {
-            service.enqueueVoiceCallUtterance(conversationId, callId, text)
+        suspend fun utterance(text: String, targetCallId: String = callId): Deferred<String?> = withContext(Dispatchers.Main) {
+            service.enqueueVoiceCallUtterance(conversationId, targetCallId, text)
         }
 
-        suspend fun cancel(reply: Deferred<String?>) = withContext(Dispatchers.Main) {
-            service.cancelVoiceCallReply(conversationId, callId, reply)
+        suspend fun cancel(reply: Deferred<String?>, targetCallId: String = callId) = withContext(Dispatchers.Main) {
+            service.cancelVoiceCallReply(conversationId, targetCallId, reply)
         }
 
         suspend fun currentJob(): Job = withContext(Dispatchers.Main) {
@@ -259,6 +391,96 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
 
         fun paused(): Boolean = service.getMessageQueueFlow(conversationId).value.paused
+
+        fun voiceIngressMutex(): Mutex = ChatService::class.java.getDeclaredField("voiceIngressMutex")
+            .apply { isAccessible = true }.get(service) as Mutex
+
+        private fun session(): ConversationSession {
+            val field = ChatService::class.java.getDeclaredField("sessions").apply { isAccessible = true }
+            return (field.get(service) as Map<*, *>)[conversationId] as ConversationSession
+        }
+
+        private fun readPauseBytes(name: String): String? {
+            val file = AtomicFile(File(context.noBackupFilesDir, name))
+            return if (file.baseFile.exists() || File(file.baseFile.path + ".bak").exists())
+                file.openRead().bufferedReader(Charsets.UTF_8).use { it.readText() } else null
+        }
+
+        private fun readOnlyPauseStore(name: String) = OrbisQueuePauseStore(
+            read = { readPauseBytes(name) }, write = { error("Assertion must not modify durable restrictions") })
+
+        suspend fun installLegacyGatewayHold(): String = withContext(Dispatchers.Main) {
+            // Reproduce an unresolved hold from a previous process using the service's actual
+            // AtomicFile writer. This is only a restriction, never a fake remote ACK/idle result.
+            val field = ChatService::class.java.getDeclaredField("gatewayRecoveryHoldStore\$delegate")
+                .apply { isAccessible = true }
+            val store = (field.get(service) as Lazy<*>).value as OrbisQueuePauseStore
+            store.pause(conversationId.toString(), "gateway_terminal_unconfirmed")
+            session().gatewayRecoveryBlocked = true
+            assertEquals(QueuePauseStatus.PAUSED, store.status(conversationId.toString()))
+            checkNotNull(readPauseBytes(GATEWAY_HOLD_FILE))
+        }
+
+        fun persistedFreshRecoveryStatus(): FreshHumanRecoveryStatus = FreshHumanInputRecoveryStore(
+            readOnlyPauseStore(FreshHumanInputRecoveryStore.FILE_NAME)
+        ).status(conversationId.toString(), assistant.id.toString())
+
+        fun assertLegacyGatewayHoldUnchanged(expectedBytes: String) {
+            assertEquals(expectedBytes, readPauseBytes(GATEWAY_HOLD_FILE))
+            assertEquals("gateway_terminal_unconfirmed", readOnlyPauseStore(GATEWAY_HOLD_FILE)
+                .pauseReason(conversationId.toString()))
+            assertTrue(session().gatewayRecoveryBlocked)
+        }
+
+        suspend fun dismissPausedNotice() {
+            val reset = withContext(Dispatchers.Main) {
+                // Reproduce a host error pause while input persistence is suspended. This does
+                // not fake an ACK, checkpoint result, permit, or any part of the recovery action.
+                session().messageQueue.pause()
+                service.dismissPauseAndContinueFreshInput(conversationId)
+            }
+            reset.join()
+            assertEquals(QueueRecoveryPhase.SUCCESS, service.messageQueueRecoveryState(conversationId).first().phase)
+        }
+
+        suspend fun assertRetainedExactlyOnce(text: String, substring: Boolean = false) {
+            fun List<UIMessagePart>.matches() = filterIsInstance<UIMessagePart.Text>().any {
+                if (substring) text in it.text else text == it.text
+            }
+            val stored = checkNotNull(repository.getConversationById(conversationId))
+            val queued = service.getMessageQueueFlow(conversationId).value.messages.filter { it.parts.matches() }
+            assertEquals(1, stored.currentMessages.count { it.parts.matches() } + queued.size)
+            assertTrue(queued.all { it.recoveryHeldReason != null })
+        }
+
+        suspend fun assertAbsentFromChatAndQueue(text: String) {
+            fun List<UIMessagePart>.containsText() = filterIsInstance<UIMessagePart.Text>().any { text in it.text }
+            assertFalse(checkNotNull(repository.getConversationById(conversationId)).currentMessages.any { it.parts.containsText() })
+            assertFalse(service.getMessageQueueFlow(conversationId).value.messages.any { it.parts.containsText() })
+        }
+
+        suspend fun assertNewReplyAndNewCallWork(): String {
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("synthetic genuinely new request"))))
+                service.getGenerationJobStateFlow(conversationId).first { it == null }
+            }
+            assertEquals(1, peer.requests.get())
+            assertFalse(paused())
+            assertTrue(checkNotNull(repository.getConversationById(conversationId)).currentMessages.any {
+                it.parts.any { part -> part is UIMessagePart.Text && part.text == ANSWER }
+            })
+            assertFalse(service.mayAcceptPeriodicVideoFrame(conversationId, callId))
+            val newCallId = withContext(Dispatchers.Main) {
+                val next = service.prepareVoiceCall(conversationId, video = true)
+                service.connectVoiceCall(next.id, System.currentTimeMillis())
+                service.getGenerationJobStateFlow(conversationId).first { it == null }
+                assertTrue(service.mayAcceptPeriodicVideoFrame(conversationId, next.id))
+                assertFalse(service.mayAcceptPeriodicVideoFrame(conversationId, callId))
+                next.id
+            }
+            assertEquals("New call connection must not replay any previous model request", 1, peer.requests.get())
+            return newCallId
+        }
 
         fun installFinalSnapshotGate() {
             // Decorate only this fixture's repository storage, not service completion/ACK logic.
@@ -348,7 +570,7 @@ class ChatServiceVoiceCancellationDeviceTest {
         override fun sendBroadcast(intent: Intent, receiverPermission: String?) { error("Fixture does not broadcast") }
     }
 
-    private class OneAnswerPeer : Closeable {
+    private class OneAnswerPeer(private val maxRequests: Int) : Closeable {
         private val socket = ServerSocket(0, 1, LOOPBACK)
         val port = socket.localPort
         val requests = AtomicInteger()
@@ -375,7 +597,7 @@ class ChatServiceVoiceCancellationDeviceTest {
                     var left = count
                     val scratch = ByteArray(4096)
                     while (left > 0) { val n = input.read(scratch, 0, minOf(left, scratch.size)); check(n > 0); left -= n }
-                    check(requests.incrementAndGet() == 1) { "Unexpected replay/derived request" }
+                    check(requests.incrementAndGet() <= maxRequests) { "Unexpected replay/derived request" }
                     val body = """{"id":"synthetic","object":"chat.completion","created":1,"model":"synthetic-service-voice","choices":[{"index":0,"message":{"role":"assistant","content":"$ANSWER"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""".toByteArray()
                     connection.getOutputStream().apply {
                         write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
@@ -392,6 +614,7 @@ class ChatServiceVoiceCancellationDeviceTest {
 
     private companion object {
         const val ANSWER = "synthetic fully committed reply"
+        const val GATEWAY_HOLD_FILE = "orbis-gateway-recovery-holds-v1.json"
         val LOOPBACK: InetAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
     }
 }

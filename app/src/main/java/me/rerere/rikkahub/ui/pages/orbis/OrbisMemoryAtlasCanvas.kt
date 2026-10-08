@@ -49,6 +49,8 @@ internal fun OrbisMemoryAtlasCanvas(
     onToggleMotion: () -> Unit,
     modifier: Modifier = Modifier,
     displayMode: OrbisAtlasDisplayMode = OrbisAtlasDisplayMode.LIGHTWEIGHT,
+    sourceDescription: String? = null,
+    typeColor: ((String) -> Color)? = null,
 ) {
     val density = LocalDensity.current.density
     val galaxy = remember(demo) { Galaxy.layout(demo) }
@@ -57,8 +59,15 @@ internal fun OrbisMemoryAtlasCanvas(
         else MilkyWay.Layout(emptyList(), emptyList(), emptyList())
     }
     val milkyWayCache = remember(milkyWay) { MilkyWayFrameCache(milkyWay) }
-    val tint = remember(galaxy) { galaxy.profile.tint.color() }
-    val starColors = remember(demo) { demo.stars.map { Galaxy.tintForType(it.type).color() } }
+    val starColors = remember(demo, typeColor) {
+        demo.stars.map { typeColor?.invoke(it.type) ?: Galaxy.tintForType(it.type).color() }
+    }
+    val tint = remember(galaxy, starColors, typeColor) {
+        if (typeColor == null || starColors.isEmpty()) galaxy.profile.tint.color()
+        else Color(starColors.sumOf { it.red.toDouble() }.toFloat() / starColors.size,
+            starColors.sumOf { it.green.toDouble() }.toFloat() / starColors.size,
+            starColors.sumOf { it.blue.toDouble() }.toFloat() / starColors.size)
+    }
     val related = remember(demo, selected) { Atlas.relatedIndices(demo, selected) }
     val relatedEdges = remember(demo, selected) { demo.edges.filter { it.a == selected || it.b == selected } }
     val readCamera by rememberUpdatedState(camera)
@@ -88,7 +97,7 @@ internal fun OrbisMemoryAtlasCanvas(
     }
     Canvas(modifier.clipToBounds()
         .semantics {
-            contentDescription = "记忆星系，${if (demo.isDemo) "本地演示" else "ST 只读元信息"}，${demo.stars.size} 个记忆星点。星云和微光为装饰，不代表额外记忆。拖动轻牵星云并旋转、双指缩放、轻触星点查看时间与类型。"
+            contentDescription = "记忆星系，${sourceDescription ?: if (demo.isDemo) "本地演示" else "ST 只读元信息"}，${demo.stars.size} 个记忆星点。星云和微光为装饰，不代表额外记忆。拖动轻牵星云并旋转、双指缩放、轻触星点查看${if (sourceDescription == null) "时间与类型" else "元信息"}。"
             stateDescription = motionLabel
             customActions = listOf(
                 CustomAccessibilityAction("下一个星点") { next(1) },

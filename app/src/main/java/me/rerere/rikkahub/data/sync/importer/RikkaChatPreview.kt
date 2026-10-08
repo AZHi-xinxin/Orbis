@@ -12,7 +12,6 @@ import me.rerere.rikkahub.data.db.MessageNodeBudget
 import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.utils.JsonInstant
 import java.io.Closeable
 import java.io.File
 import java.security.MessageDigest
@@ -41,17 +40,15 @@ internal fun requireRikkaSourceId(id: String) {
     require(id.length == 36 && runCatching { Uuid.parse(id) }.isSuccess) { "备份聊天或消息标识格式异常；原聊天未更改" }
 }
 
-internal fun decodeRikkaNode(node: RikkaChatSnapshotReader.Node): List<UIMessage> {
+internal fun decodeRikkaNode(node: RikkaChatSnapshotReader.Node): List<UIMessage> = readRikkaStage(RikkaChatReadStage.MESSAGE) {
     requireRikkaSourceId(node.id)
-    require(node.messages.toByteArray(Charsets.UTF_8).size <= RikkaChatLimits.MAX_NODE_BYTES) { "备份单条消息过大；原文未截断" }
-    val messages = try { JsonInstant.decodeFromString<List<UIMessage>>(node.messages) }
-    catch (_: kotlinx.serialization.SerializationException) {
-        throw IllegalArgumentException("备份中的消息格式暂不兼容或已损坏；原聊天未更改")
-    }
-    require(messages.size <= RikkaChatLimits.MAX_NODE_BRANCHES) { "备份单条消息的分支过多" }
+    if (node.messages.toByteArray(Charsets.UTF_8).size > RikkaChatLimits.MAX_NODE_BYTES)
+        throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
+    val messages = RikkaChatContentDecoder.decode(node.id, node.messages)
+    if (messages.size > RikkaChatLimits.MAX_NODE_BRANCHES) throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
     require(if (messages.isEmpty()) node.selectIndex == 0 else node.selectIndex in messages.indices) { "备份消息分支索引无效" }
     require(messages.map { it.id }.distinct().size == messages.size) { "备份含重复消息分支标识" }
-    return messages
+    messages
 }
 
 /** Decode one bounded node at a time; no Conversation or whole-window JSON tree survives preview. */
@@ -71,13 +68,13 @@ internal suspend fun inspectRikkaSource(source: RikkaChatSource, fingerprint: St
         source.visitNodes(chat.id) { row ->
             checkCancelled()
             bytes += row.messages.toByteArray(Charsets.UTF_8).size
-            require(++nodes <= RikkaChatLimits.MAX_WINDOW_NODES && bytes <= RikkaChatLimits.MAX_WINDOW_BYTES) {
-                "单个聊天窗口超过安全导入上限；请拆分备份，原文未截断"
-            }
+            if (++nodes > RikkaChatLimits.MAX_WINDOW_NODES || bytes > RikkaChatLimits.MAX_WINDOW_BYTES)
+                throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
             val branches = decodeRikkaNode(row)
             messages += branches.size
-            require(messages <= RikkaChatLimits.MAX_WINDOW_MESSAGES && branches.all { messageIds.add(it.id) }) {
-                "单窗消息过多或消息标识重复；原文未截断"
+            if (messages > RikkaChatLimits.MAX_WINDOW_MESSAGES) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
+            readRikkaStage(RikkaChatReadStage.MESSAGE) {
+                require(branches.all { messageIds.add(it.id) }) { "备份含重复消息标识；原聊天未更改" }
             }
             if (branches.size > 1) branching++
         }
@@ -104,7 +101,8 @@ internal suspend fun convertRikkaChat(source: RikkaChatSource, chat: RikkaChatSn
                 message.copy(id = rikkaImportId("message", "${chat.id}/${message.id}"),
                     role = if (message.role == MessageRole.SYSTEM) MessageRole.ASSISTANT else message.role,
                     parts = if (message.role == MessageRole.SYSTEM)
-                        listOf(UIMessagePart.Text("[此处为原备份的系统设定；仅聊天导入未包含其正文]"))
+                        listOf(UIMessagePart.Text(RikkaChatContentDecoder.SYSTEM_PLACEHOLDER,
+                            message.parts.firstOrNull()?.metadata ?: RikkaChatContentDecoder.marker()))
                     else message.parts.map { mapPart(it, chat.id) })
             }
             try { MessageNodeBudget.measureNode(converted) }

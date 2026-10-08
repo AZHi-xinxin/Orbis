@@ -53,6 +53,108 @@ class FreshHumanInputRecoveryStoreTest {
         assertEquals(FreshHumanRecoveryStatus.ACTIVE, store.status(conversation, assistant))
     }
 
+    @Test fun `detachment from none survives restart for only its exact conversation and owner`() {
+        val disk = Disk()
+        disk.open().detachPreviousTurn(conversation, assistant)
+        assertEquals(FreshHumanRecoveryStatus.DETACHED, disk.open().status(conversation, assistant))
+        assertEquals(FreshHumanRecoveryStatus.NONE, disk.open().status(otherConversation, assistant))
+        assertEquals(FreshHumanRecoveryStatus.OWNER_CHANGED, disk.open().status(conversation, otherAssistant))
+        assertTrue(disk.bytes!!.contains("fresh_human_detached_"))
+        assertFalse(disk.bytes!!.contains("fresh_human_only_"))
+    }
+
+    @Test fun `detachment replaces active in one write and cannot be downgraded by authorization`() {
+        val disk = Disk()
+        val store = disk.open()
+        store.authorize(conversation, assistant)
+        val writes = disk.writes
+        store.detachPreviousTurn(conversation, assistant)
+        assertEquals(writes + 1, disk.writes)
+        assertEquals(FreshHumanRecoveryStatus.DETACHED, disk.open().status(conversation, assistant))
+        val bytes = disk.bytes
+        store.detachPreviousTurn(conversation, assistant)
+        assertTrue(runCatching { store.authorize(conversation, assistant) }.isFailure)
+        assertEquals(writes + 1, disk.writes)
+        assertEquals(bytes, disk.bytes)
+        assertEquals(FreshHumanRecoveryStatus.DETACHED, store.status(conversation, assistant))
+    }
+
+    @Test fun `changed owner cannot detach authorize or clear active and detached recovery`() {
+        for (detached in listOf(false, true)) {
+            val disk = Disk()
+            val store = disk.open()
+            if (detached) store.detachPreviousTurn(conversation, assistant)
+            else store.authorize(conversation, assistant)
+            val bytes = disk.bytes
+            val writes = disk.writes
+            assertEquals(FreshHumanRecoveryStatus.OWNER_CHANGED, store.status(conversation, otherAssistant))
+            assertTrue(runCatching { store.detachPreviousTurn(conversation, otherAssistant) }.isFailure)
+            assertTrue(runCatching { store.authorize(conversation, otherAssistant) }.isFailure)
+            assertTrue(runCatching { store.clearAfterConfirmedIdle(conversation, otherAssistant) }.isFailure)
+            assertEquals(bytes, disk.bytes)
+            assertEquals(writes, disk.writes)
+        }
+    }
+
+    @Test fun `confirmed idle clears either exact recovery reason without clearing another conversation`() {
+        for (detached in listOf(false, true)) {
+            val disk = Disk()
+            val store = disk.open()
+            store.detachPreviousTurn(otherConversation, otherAssistant)
+            if (detached) store.detachPreviousTurn(conversation, assistant)
+            else store.authorize(conversation, assistant)
+            store.clearAfterConfirmedIdle(conversation, assistant)
+            assertEquals(FreshHumanRecoveryStatus.NONE, disk.open().status(conversation, assistant))
+            assertEquals(FreshHumanRecoveryStatus.DETACHED, disk.open().status(otherConversation, otherAssistant))
+            val writes = disk.writes
+            store.clearAfterConfirmedIdle(conversation, assistant)
+            assertEquals(writes, disk.writes)
+        }
+    }
+
+    @Test fun `dropped detachment never removes an active durable restriction`() {
+        val disk = Disk()
+        val store = disk.open()
+        store.authorize(conversation, assistant)
+        val bytes = disk.bytes
+        disk.dropWrite = true
+        assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
+        assertEquals(bytes, disk.bytes)
+        assertEquals(FreshHumanRecoveryStatus.UNAVAILABLE, store.status(conversation, assistant))
+        assertEquals(FreshHumanRecoveryStatus.ACTIVE, disk.open().status(conversation, assistant))
+        val writes = disk.writes
+        disk.dropWrite = false
+        assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
+        assertEquals(writes, disk.writes)
+    }
+
+    @Test fun `dropped first detachment fails closed and cannot repair itself`() {
+        val disk = Disk().also { it.dropWrite = true }
+        val store = disk.open()
+        assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
+        assertEquals(FreshHumanRecoveryStatus.UNAVAILABLE, store.status(conversation, assistant))
+        val writes = disk.writes
+        assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
+        assertEquals(writes, disk.writes)
+        assertNull(disk.bytes)
+    }
+
+    @Test fun `failed detached release does not publish idle or permit a retry over uncertain storage`() {
+        val disk = Disk()
+        val store = disk.open()
+        store.detachPreviousTurn(conversation, assistant)
+        val bytes = disk.bytes
+        disk.dropWrite = true
+        assertTrue(runCatching { store.clearAfterConfirmedIdle(conversation, assistant) }.isFailure)
+        assertEquals(bytes, disk.bytes)
+        assertEquals(FreshHumanRecoveryStatus.UNAVAILABLE, store.status(conversation, assistant))
+        assertEquals(FreshHumanRecoveryStatus.DETACHED, disk.open().status(conversation, assistant))
+        val writes = disk.writes
+        disk.dropWrite = false
+        assertTrue(runCatching { store.clearAfterConfirmedIdle(conversation, assistant) }.isFailure)
+        assertEquals(writes, disk.writes)
+    }
+
     @Test fun `fresh authorization never changes separate gateway and automatic hold facts`() {
         val gateway = Disk()
         val automatic = Disk()
@@ -60,7 +162,9 @@ class FreshHumanInputRecoveryStoreTest {
         automatic.raw().pause(conversation, "unknown_tool_result")
         val gatewayBytes = gateway.bytes
         val automaticBytes = automatic.bytes
-        Disk().open().authorize(conversation, assistant)
+        val recovery = Disk().open()
+        recovery.authorize(conversation, assistant)
+        recovery.detachPreviousTurn(conversation, assistant)
         assertEquals(gatewayBytes, gateway.bytes)
         assertEquals(automaticBytes, automatic.bytes)
         assertEquals(QueuePauseStatus.PAUSED, gateway.raw().status(conversation))
@@ -86,6 +190,8 @@ class FreshHumanInputRecoveryStoreTest {
             val store = disk.open()
             assertEquals(bytes, FreshHumanRecoveryStatus.UNAVAILABLE, store.status(conversation, assistant))
             assertTrue(runCatching { store.authorize(conversation, assistant) }.isFailure)
+            assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
+            assertTrue(runCatching { store.clearAfterConfirmedIdle(conversation, assistant) }.isFailure)
             assertEquals(bytes, disk.bytes)
             assertEquals(0, disk.writes)
         }
@@ -99,6 +205,7 @@ class FreshHumanInputRecoveryStoreTest {
         disk.bytes = null
         assertEquals(FreshHumanRecoveryStatus.UNAVAILABLE, store.status(conversation, assistant))
         assertTrue(runCatching { store.authorize(conversation, assistant) }.isFailure)
+        assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
         assertEquals(writes, disk.writes)
     }
 
@@ -109,6 +216,7 @@ class FreshHumanInputRecoveryStoreTest {
         disk.failRead = false
         assertEquals(FreshHumanRecoveryStatus.UNAVAILABLE, store.status(conversation, assistant))
         assertTrue(runCatching { store.authorize(conversation, assistant) }.isFailure)
+        assertTrue(runCatching { store.detachPreviousTurn(conversation, assistant) }.isFailure)
         assertEquals(0, disk.writes)
     }
 
@@ -118,6 +226,7 @@ class FreshHumanInputRecoveryStoreTest {
         for ((c, a) in listOf("invalid" to assistant, conversation to "invalid", conversation to "1-1-1-1-1")) {
             assertEquals(FreshHumanRecoveryStatus.UNAVAILABLE, store.status(c, a))
             assertTrue(runCatching { store.authorize(c, a) }.isFailure)
+            assertTrue(runCatching { store.detachPreviousTurn(c, a) }.isFailure)
         }
         assertNull(disk.bytes)
         assertEquals(0, disk.writes)

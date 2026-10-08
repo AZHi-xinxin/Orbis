@@ -49,6 +49,7 @@ import me.rerere.rikkahub.data.orbis.voice.*
 import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.components.ai.AsrCorrectionReview
+import me.rerere.rikkahub.ui.components.ai.BindVoiceCallDialogVolumeStream
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -100,6 +101,7 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
     Dialog(onDismissRequest = { minimized = true }, properties = DialogProperties(
         usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false,
     )) {
+        BindVoiceCallDialogVolumeStream()
         OrbisVisualTheme {
             val colors = OrbisTheme.colors
             val cream = colors.onDock

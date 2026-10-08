@@ -204,7 +204,7 @@ fun OrbisChatDock(currentLabel: String = "当前 聊天") {
                     { menuOpen = false; openHome() }),
                 OrbisNavigationItem("hub", "群聊", "AI 群聊 · 可选 TechHub", HugeIcons.UserGroup,
                     { go(Screen.OrbisGroups) }),
-                OrbisNavigationItem("memory", "记忆星图", "ST 只读连接 · 时间、类型与关联", HugeIcons.Sparkles,
+                OrbisNavigationItem("memory", "记忆星图", "本机与 ST · 只读元信息", HugeIcons.Sparkles,
                     { go(Screen.OrbisMemoryAtlas) }),
                 OrbisNavigationItem("tools", "工具娱乐", "工作区、文件与本地工具", HugeIcons.Command,
                     { go(Screen.OrbisTools) }),

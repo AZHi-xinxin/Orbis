@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.BufferedInputStream
@@ -24,6 +25,7 @@ import kotlin.concurrent.thread
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.BuiltInTools
@@ -35,11 +37,17 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.NetworkSetting
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository
+import me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime
 import okhttp3.OkHttpClient
 import org.junit.Assert.*
 import org.junit.Test
@@ -49,7 +57,8 @@ import org.junit.runner.RunWith
  * Real group adapter -> GenerationLoop -> ProviderManager -> on-device loopback HTTP.
  * Uses IsolatedGenerationLoopRunner, a plain Application, blank synthetic API keys and a
  * context that rejects private storage. Persistence callbacks capture synthetic text in
- * memory; the separate storage device suite covers SQLite. No real settings, model or DB.
+ * memory; the optional memory fixture is an isolated in-memory Room database. No real settings,
+ * model, application database or external endpoint is used.
  */
 @RunWith(AndroidJUnit4::class)
 class OrbisGroupGenerationDeviceTest {
@@ -114,13 +123,35 @@ class OrbisGroupGenerationDeviceTest {
         }
     }
 
+    @Test(timeout = 30_000) fun actualGroupWithNativeMemoryRuntimeDoesNotInjectOfferToolsOrAdvanceHumanFrequency() = runBlocking<Unit> {
+        fixture(claude = false, streaming = false, answer = "synthetic group without memory", withMemory = true) { fixture ->
+            val db = checkNotNull(fixture.memoryDatabase)
+            val owner = fixture.participant.assistant.id.toString()
+            assertEquals(1, OrbisMemoryRepository(db).stats(owner).pinned)
+            assertEquals(0L, db.orbisMemoryTurnDao().latestOrdinal(owner))
+            val saved = mutableListOf<String>()
+            assertEquals("synthetic group without memory", fixture.responder.generate(fixture.input()) { saved += it })
+            val request = fixture.server.request()
+            assertToolsAbsent(request)
+            assertFalse(request.toString().contains("orbis_memory"))
+            assertFalse(request.toString().contains(PRIVATE_MARKER))
+            assertFalse(request.toString().contains("本机助手记忆；历史资料"))
+            // Merely forcing LIGHT would still create an empty turn snapshot. The explicit
+            // request-scope gate must bypass begin(), not just produce an empty prompt.
+            assertEquals(0L, db.orbisMemoryTurnDao().latestOrdinal(owner))
+            assertEquals(1, OrbisMemoryRepository(db).stats(owner).pinned)
+            assertEquals(listOf("synthetic group without memory"), saved.distinct())
+            assertEquals(0, fixture.context.privateStorageAccesses.get())
+        }
+    }
+
     private fun assertToolsAbsent(request: JsonObject) {
         val tools = request["tools"]
         assertTrue(tools == null || tools == JsonNull || tools == JsonArray(emptyList()))
         assertFalse(request.toString().contains("synthetic_tool_override"))
     }
 
-    private suspend fun fixture(claude: Boolean, streaming: Boolean, answer: String,
+    private suspend fun fixture(claude: Boolean, streaming: Boolean, answer: String, withMemory: Boolean = false,
         block: suspend (Fixture) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         check(instrumentation is IsolatedGenerationLoopRunner) { "Select the isolated generation-loop runner." }
@@ -146,6 +177,8 @@ class OrbisGroupGenerationDeviceTest {
                 ) throw IOException("Synthetic group endpoint/request budget violation.")
                 chain.proceed(request)
             }.build()
+        var memoryDatabase: AppDatabase? = null
+        val dormantMemoryScope = AppScope().also { it.cancel() }
         try {
             val model = Model(modelId = "synthetic-group-model", displayName = "Synthetic only",
                 abilities = listOf(ModelAbility.TOOL), tools = setOf(BuiltInTools.Search),
@@ -156,6 +189,7 @@ class OrbisGroupGenerationDeviceTest {
             val assistant = Assistant(chatModelId = model.id, name = "Synthetic member",
                 systemPrompt = "Synthetic isolated group persona.", streamOutput = streaming, maxTokens = 128,
                 enableMemory = true, useGlobalMemory = true, enableRecentChatsReference = true,
+                orbisMemoryMode = OrbisMemoryMode.INDEPENDENT, orbisMemoryAutoInject = true,
                 presetMessages = listOf(UIMessage.user(PRIVATE_MARKER)),
                 messageTemplate = PRIVATE_MARKER + " {{ message }}", lorebookIds = setOf(lorebook.id),
                 enableWebSearch = true, enableTimeReminder = true,
@@ -176,19 +210,31 @@ class OrbisGroupGenerationDeviceTest {
             val member = OrbisGroupMember(Uuid.random().toString(), assistant.id, model.id, provider.id,
                 "Synthetic member", joinedAt = 1)
             val participant = resolveGroupParticipant(settings, member)
-            val responder = GenerationLoopGroupResponder(GenerationLoop(context, ProviderManager(client, context), Json))
-            withTimeout(15_000) { block(Fixture(context, server, requestBudget, participant, responder)) }
+            val memory = if (withMemory) {
+                val db = Room.inMemoryDatabaseBuilder(instrumentation.targetContext, AppDatabase::class.java).build()
+                memoryDatabase = db
+                val repo = OrbisMemoryRepository(db)
+                val receipt = repo.execute(assistant.id.toString(), buildJsonObject {
+                    put("action", "store"); put("body", PRIVATE_MARKER); put("state", "pinned")
+                }, "synthetic-group-memory")
+                assertEquals(JsonPrimitive(true), receipt["ok"])
+                val live = SettingsStore(context, dormantMemoryScope).also { it.settingsFlow.value = settings }
+                OrbisMemoryRuntime(db, repo, live)
+            } else null
+            val responder = GenerationLoopGroupResponder(GenerationLoop(context, ProviderManager(client, context), Json, memory))
+            withTimeout(15_000) { block(Fixture(context, server, requestBudget, participant, responder, memoryDatabase)) }
             server.assertHealthy()
             assertEquals(1, requestBudget.get())
         } finally {
             client.dispatcher.cancelAll(); client.connectionPool.evictAll()
             client.dispatcher.executorService.shutdownNow(); server.close()
+            memoryDatabase?.close(); dormantMemoryScope.cancel()
         }
     }
 
     private class Fixture(val context: NoPrivateStorageContext, val server: LoopbackServer,
         val requestBudget: AtomicInteger, val participant: GroupParticipant,
-        val responder: GenerationLoopGroupResponder) {
+        val responder: GenerationLoopGroupResponder, val memoryDatabase: AppDatabase? = null) {
         private val roomId = Uuid.random().toString()
         fun input(ownPartial: String? = null): GroupGenerationInput {
             val roundId = Uuid.random().toString()

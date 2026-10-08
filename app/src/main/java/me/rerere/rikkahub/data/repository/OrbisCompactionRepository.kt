@@ -138,6 +138,17 @@ class OrbisCompactionRepository(
                 encodeMessageNodeMessages(node.messages), node.selectIndex)
         })
         dao.insertEvent(event)
+        if (metadata.captureLocalMemory) {
+            val memories = me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository(database)
+            // Capacity refusal does not prevent compaction; the complete summary remains on the
+            // conversation page. A real DB failure rolls back BOTH writes and preserves originals.
+            if (memories.compactionCapacityError(metadata.summaryText) == null) {
+                val receipt = memories.storeCompaction(stored.assistantId, event.id, metadata.summaryText)
+                check(receipt["ok"] == kotlinx.serialization.json.JsonPrimitive(true)) {
+                    "compaction_memory_save_unconfirmed_originals_preserved"
+                }
+            }
+        }
         replacePage(updated)
         OrbisCompactionCommit(updated, event.toModel(rollbackAvailable = true))
     }

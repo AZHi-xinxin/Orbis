@@ -117,6 +117,23 @@ class ModelRegistryTest {
     }
 
     @Test
+    fun testCurrentDeepseekFlashOfficialMetadata() {
+        assertEquals(listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+            ModelRegistry.MODEL_ABILITIES.getData("deepseek-flash"))
+        assertEquals(listOf(Modality.TEXT, Modality.IMAGE),
+            ModelRegistry.MODEL_INPUT_MODALITIES.getData("deepseek-flash"))
+        assertEquals(listOf(Modality.TEXT),
+            ModelRegistry.MODEL_OUTPUT_MODALITIES.getData("deepseek-flash"))
+        assertEquals(1_048_576, ModelRegistry.MODEL_CONTEXT_LENGTH.getData("deepseek-flash"))
+        // Do not infer a native upstream from a display name or an unknown relay alias.
+        listOf("flash", "my-deepseek-flash-alias", "deepseek-flash-custom").forEach { alias ->
+            assertEquals(emptyList<ModelAbility>(), ModelRegistry.MODEL_ABILITIES.getData(alias))
+            assertEquals(listOf(Modality.TEXT), ModelRegistry.MODEL_INPUT_MODALITIES.getData(alias))
+            assertEquals(null, ModelRegistry.MODEL_CONTEXT_LENGTH.getData(alias))
+        }
+    }
+
+    @Test
     fun testDeepseekV4() {
         val reasonerAbilities = ModelRegistry.MODEL_ABILITIES.getData("deepseek-reasoner")
         assertEquals(

@@ -56,18 +56,9 @@ import org.koin.core.parameter.parametersOf
 
 @Composable
 fun AssistantMemoryPage(id: String) {
-    // Old restored navigation may still point here. Do not construct the legacy VM or expose
-    // a switch that would falsely promise an available tool; retain original rows for backup.
+    // Keep Orbis separate: never construct the legacy content-list VM for this metadata-only UI.
     if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) {
-        Scaffold(topBar = {
-            LargeFlexibleTopAppBar(title = { Text("记忆入口已更新") }, navigationIcon = { BackButton() })
-        }) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("请使用后花园或现有记忆库。")
-                Text("离线记忆工具在「手机与陪伴 → 给当前 AI 的原生工具 → 离线记忆·读与保存」。已有旧记录未被删除，也不会自动送入模型。")
-            }
-        }
+        OrbisAssistantMemoryPage(id)
         return
     }
     val vm: AssistantDetailVM = koinViewModel(

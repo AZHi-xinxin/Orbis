@@ -8,8 +8,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
@@ -83,9 +88,21 @@ class RikkaChatImporterTest {
         try {
             source.conversationDao().insert(encodeConversationEntity(Conversation(sourceId, Uuid.random(), "imported-title", emptyList(),
                 customSystemPrompt = "must-not-import", workspaceCwd = "/danger", lorebookIds = setOf(Uuid.random()))))
+            val sourceMetadata = JsonObject(mapOf(
+                "import_source" to JsonPrimitive("untrusted-source-marker"),
+                "orbis_control" to JsonPrimitive("source-only-metadata"),
+            ))
             val messages = listOf(UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
-                UIMessagePart.Text("synthetic history"), UIMessagePart.Image("file:///old/files/upload/test.png"),
-                UIMessagePart.Tool("synthetic-call", "never_execute", "{}"))))
+                UIMessagePart.Text("synthetic history", metadata = sourceMetadata),
+                UIMessagePart.Image("file:///old/files/upload/test.png", metadata = sourceMetadata),
+                UIMessagePart.Tool("synthetic-call", "never_execute", "{\"query\":\"synthetic tool input\"}",
+                    output = listOf(UIMessagePart.Text("synthetic tool output", metadata = sourceMetadata)),
+                    approvalState = ToolApprovalState.Approved, metadata = sourceMetadata)),
+                modelId = Uuid.random(), usage = TokenUsage(promptTokens = 123, completionTokens = 45),
+                annotations = listOf(UIMessageAnnotation.UrlCitation("source-only annotation", "https://example.invalid/source")),
+                translation = "source-only translation", privateRoomContentHidden = true,
+                privateRoomPendingPresentation = true, orbisVoiceCallId = "synthetic-source-call",
+                orbisVoiceCallKind = "video", toolRecordRevision = 7))
             source.messageNodeDao().insert(MessageNodeEntity(Uuid.random().toString(), sourceId.toString(), 0,
                 if (invalidMessage) "invalid-json" else JsonInstant.encodeToString(messages), 0))
             source.messageNodeDao().insert(MessageNodeEntity(Uuid.random().toString(), sourceId.toString(), 1,
@@ -121,7 +138,27 @@ class RikkaChatImporterTest {
         val part = imported.currentMessages.first().parts.filterIsInstance<UIMessagePart.Image>().single()
         assertTrue(part.url.contains("/upload/"))
         assertFalse(part.url.contains("/old/"))
-        assertTrue(imported.currentMessages.first().getTools().single().isExecuted)
+        val importedMessage = imported.currentMessages.first()
+        assertTrue(importedMessage.getTools().isEmpty())
+        assertTrue("Historical tools must be inert text, never executable parts",
+            importedMessage.parts.all { it is UIMessagePart.Text || it is UIMessagePart.Image })
+        val historicalText = importedMessage.toText()
+        assertTrue(historicalText.contains("never_execute"))
+        assertTrue(historicalText.contains("synthetic tool input"))
+        assertTrue(historicalText.contains("synthetic tool output"))
+        assertFalse(historicalText.contains("source-only-metadata"))
+        val expectedMetadata = JsonObject(mapOf("import_source" to JsonPrimitive("rikka_chat_v1")))
+        assertTrue("Only the locally assigned read-only marker may survive on imported parts",
+            importedMessage.parts.all { it.metadata == expectedMetadata })
+        assertNull(importedMessage.modelId)
+        assertNull(importedMessage.usage)
+        assertTrue(importedMessage.annotations.isEmpty())
+        assertNull(importedMessage.translation)
+        assertFalse(importedMessage.privateRoomContentHidden)
+        assertFalse(importedMessage.privateRoomPendingPresentation)
+        assertNull(importedMessage.orbisVoiceCallId)
+        assertNull(importedMessage.orbisVoiceCallKind)
+        assertEquals(0L, importedMessage.toolRecordRevision)
         assertEquals(0, importer.import(zip, targetAssistant).imported)
         assertEquals(2, repository.countConversations())
         assertEquals("existing-kept", repository.getConversationById(existingId)?.title)
@@ -212,6 +249,7 @@ class RikkaChatImporterTest {
 
     private suspend fun assertNativeRejected(label: String, source: NativeArchive) {
         val archiveBytes = source.zip.readBytes()
+        val databaseBytes = source.databaseFile.readBytes()
         val beforeCount = repository.countConversations()
         val beforeFiles = syntheticFiles()
         val beforeManagedRows = managedRows()
@@ -224,12 +262,13 @@ class RikkaChatImporterTest {
         assertEquals("existing-kept", repository.getConversationById(existingId)?.title)
         assertEquals("unchanged", File(context.filesDir, "private-marker").readText())
         assertArrayEquals("$label must not change the original ZIP", archiveBytes, source.zip.readBytes())
+        assertArrayEquals("$label must not migrate the original database", databaseBytes, source.databaseFile.readBytes())
     }
 
     @Test fun nativeV25DifferentRoomHashWithoutOrbisColumnAppendsOnceAndKeepsSourceBytes() = runBlocking {
         val source = nativeArchive()
         SQLiteDatabase.openDatabase(source.databaseFile.path, null, SQLiteDatabase.OPEN_READONLY).use { raw ->
-            assertEquals(26, raw.version)
+            assertEquals(25, raw.version)
             raw.rawQuery("SELECT identity_hash FROM room_master_table WHERE id=42", null).use {
                 assertTrue(it.moveToFirst())
                 assertEquals("049f05fd92fc292b92c652743f056693", it.getString(0))
@@ -285,7 +324,7 @@ class RikkaChatImporterTest {
         assertArrayEquals(zipBytes, source.zip.readBytes())
     }
 
-    @Test fun nativeV16LowerBoundaryAcceptsModernNodesAndLegacyEmptyZeroBranch() = runBlocking {
+    @Test fun nativeV16ProjectionAcceptsModernNodesAndLegacyEmptyZeroBranch() = runBlocking {
         val source = nativeArchive(version = 16) { db, sourceId, _ ->
             db.execSQL("INSERT INTO message_node VALUES (?, ?, 1, '[]', 0)",
                 arrayOf(Uuid.random().toString(), sourceId))
@@ -296,10 +335,46 @@ class RikkaChatImporterTest {
         assertEquals(2, repository.countConversations())
     }
 
-    @Test fun nativeUnsupportedVersionsFailClosedWithoutChangingExistingState() = runBlocking {
-        listOf(15, 26).forEach { version ->
-            assertNativeRejected("unsupported version $version", nativeArchive(version = version))
+    @Test fun nativeCompatibleProjectionDoesNotDependOnDatabaseVersionNumbers() = runBlocking {
+        val versions = listOf(0, 15, 26, 27, Int.MAX_VALUE)
+        versions.forEach { version ->
+            val source = nativeArchive(version = version)
+            val archiveBytes = source.zip.readBytes()
+            val databaseBytes = source.databaseFile.readBytes()
+            val result = importer.import(source.zip, targetAssistant)
+            assertEquals("compatible projection at version $version", 1, result.imported)
+            assertEquals(1, result.attachments)
+            val imported = requireNotNull(repository.getConversationById(rikkaImportId("conversation", source.sourceId)))
+            assertEquals(targetAssistant, imported.assistantId)
+            assertEquals("native-import-title", imported.title)
+            assertEquals("native synthetic history", imported.currentMessages.single().parts
+                .filterIsInstance<UIMessagePart.Text>().single().text)
+            val image = imported.currentMessages.single().parts.filterIsInstance<UIMessagePart.Image>().single()
+            assertArrayEquals(byteArrayOf(1, 2, 3), File(java.net.URI(image.url)).readBytes())
+            assertArrayEquals("source ZIP at version $version", archiveBytes, source.zip.readBytes())
+            assertArrayEquals("source database at version $version", databaseBytes, source.databaseFile.readBytes())
+            SQLiteDatabase.openDatabase(source.databaseFile.path, null, SQLiteDatabase.OPEN_READONLY).use { raw ->
+                assertEquals("version must not be rewritten", version, raw.version)
+            }
         }
+        assertEquals(1 + versions.size, repository.countConversations())
+        assertEquals("existing-kept", repository.getConversationById(existingId)?.title)
+        assertEquals("unchanged", File(context.filesDir, "private-marker").readText())
+    }
+
+    @Test fun nativeFutureVersionDoesNotAuthorizeUnknownOrLossyChatProjection() = runBlocking {
+        listOf("DROP TABLE message_node",
+            "ALTER TABLE message_node RENAME COLUMN messages TO unsupported_payload").forEach { sql ->
+            assertNativeRejected("future version with incompatible structure", nativeArchive(version = Int.MAX_VALUE) { db, _, _ ->
+                db.execSQL(sql)
+            })
+        }
+        assertNativeRejected("future version with wrong messages type", nativeArchive(version = Int.MAX_VALUE,
+            nodeColumns = "id TEXT, conversation_id TEXT, node_index INTEGER, messages BLOB, select_index INTEGER"))
+        assertNativeRejected("future version with nonempty legacy history", nativeArchive(version = Int.MAX_VALUE) { db, _, _ ->
+            db.execSQL("ALTER TABLE ConversationEntity ADD COLUMN nodes TEXT")
+            db.execSQL("UPDATE ConversationEntity SET nodes='[{\"legacy\":\"history\"}]'")
+        })
     }
 
     @Test fun nativeMissingTablesAndRequiredColumnsAreRejected() = runBlocking {

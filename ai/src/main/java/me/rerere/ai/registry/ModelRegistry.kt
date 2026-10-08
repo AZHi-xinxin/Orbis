@@ -294,6 +294,16 @@ object ModelRegistry {
         toolReasoningAbility()
     }
 
+    private val DEEPSEEK_FLASH = defineModel {
+        // Official current model metadata: https://api-docs.deepseek.com/api/list-models/
+        // Exact ID only: an arbitrary relay alias containing "flash" does not declare
+        // these capabilities. Existing user-edited model capabilities stay untouched.
+        exact("deepseek-flash")
+        visionInput()
+        toolReasoningAbility()
+        contextLength(1_048_576)
+    }
+
     private val DEEPSEEK_V4_FLASH = defineModel {
         tokens("deepseek", "v", "4", "flash")
         toolReasoningAbility()
@@ -623,6 +633,7 @@ object ModelRegistry {
         DEEPSEEK_CHAT,
         DEEPSEEK_R1_MODEL,
         DEEPSEEK_REASONER,
+        DEEPSEEK_FLASH,
         DEEPSEEK_V4_FLASH,
         DEEPSEEK_V4_FLASH_VISION_EXP,
         DEEPSEEK_V4_PRO,

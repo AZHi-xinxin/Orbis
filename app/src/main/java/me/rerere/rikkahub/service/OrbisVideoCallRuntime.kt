@@ -82,7 +82,7 @@ class OrbisVideoCallRuntime private constructor(private val context: Context) {
                     // Fresh-human-only recovery does not renew automatic camera work.
                     // Check before capture and again after its suspension, before admission.
                     val frame = capturePeriodicFrameIfAllowed(
-                        allowed = { chat.mayAcceptPeriodicVideoFrame(chatId) },
+                        allowed = { chat.mayAcceptPeriodicVideoFrame(chatId, callId) },
                         capture = { captureNow(assistantId, conversationId, callId) },
                     ) ?: continue
                     val reply = voice.voiceSession.enqueueSupplementaryReply(
@@ -92,7 +92,7 @@ class OrbisVideoCallRuntime private constructor(private val context: Context) {
                                 latest.intervalSeconds != 0 && !latest.samplingPaused &&
                                 latest.foreground && latest.cameraEnabled &&
                                 voice.callState.value.callId == callId && voice.callState.value.isActive &&
-                                chat.mayAcceptPeriodicVideoFrame(chatId)
+                                chat.mayAcceptPeriodicVideoFrame(chatId, callId)
                         },
                         createReply = { chat.enqueueVideoCallFrame(chatId, callId, frame.id) },
                     ) ?: continue

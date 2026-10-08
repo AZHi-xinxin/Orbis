@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { isImportedHistory } from "../app/lib/imported-history";
 
 test("every inert chat importer uses the remote-media history guard", () => {
-  for (const source of ["deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1", "claude_export_v1", "chatgpt_export_v1"]) {
+  for (const source of ["deepseek", "operit_json_v2", "kelivo_sqlite_v2", "polaris_export_v1", "claude_export_v1", "chatgpt_export_v1", "rikka_chat_v1"]) {
     assert.equal(isImportedHistory([{}, { metadata: { import_source: source } }]), true);
   }
   for (const parts of [[], [{}], [{ metadata: null }], [{ metadata: { import_source: "unknown" } }]]) {

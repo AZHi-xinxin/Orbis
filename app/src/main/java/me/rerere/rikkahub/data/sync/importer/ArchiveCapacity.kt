@@ -70,6 +70,7 @@ object ArchiveCapacity {
 
     fun reasonOf(failure: Throwable): ArchiveFailure? = when (failure) {
         is ArchiveReadException -> failure.reason
+        is DeepSeekUnsupportedFragmentException -> ArchiveFailure.FORMAT
         is CharacterCodingException -> ArchiveFailure.INVALID_UTF8
         is ZipException -> ArchiveFailure.CHECKSUM
         is IOException -> ArchiveFailure.READ_WRITE
@@ -77,7 +78,9 @@ object ArchiveCapacity {
     }
 
     fun publicError(failure: Throwable): String = when (failure) {
+        is RikkaChatReadException -> failure.message!!
         is ArchiveReadException -> failure.message!!
+        is DeepSeekUnsupportedFragmentException -> failure.message!!
         is CharacterCodingException -> message(ArchiveFailure.INVALID_UTF8)
         is ZipException -> message(ArchiveFailure.CHECKSUM)
         is IOException -> message(ArchiveFailure.READ_WRITE)

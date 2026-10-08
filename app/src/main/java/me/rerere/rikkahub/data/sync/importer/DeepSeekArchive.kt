@@ -131,6 +131,7 @@ object DeepSeekArchive {
     internal inline fun <T> safeRead(block: () -> T): T = try { block() }
     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
     catch (failure: ArchiveReadException) { throw failure }
+    catch (failure: DeepSeekUnsupportedFragmentException) { throw failure }
     catch (_: java.nio.charset.CharacterCodingException) { throw ArchiveReadException(ArchiveFailure.INVALID_UTF8) }
     catch (_: java.util.zip.ZipException) { throw ArchiveReadException(ArchiveFailure.CHECKSUM) }
     catch (_: java.io.IOException) { throw ArchiveReadException(ArchiveFailure.READ_WRITE) }
