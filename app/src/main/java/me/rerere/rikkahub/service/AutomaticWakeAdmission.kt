@@ -3,6 +3,17 @@ package me.rerere.rikkahub.service
 import me.rerere.rikkahub.data.orbis.FreshHumanRecoveryStatus
 import me.rerere.rikkahub.data.orbis.QueuePauseStatus
 import me.rerere.rikkahub.data.orbis.GatewayRecoveryScopeStatus
+import me.rerere.rikkahub.data.orbis.OrbisInboxEvent
+
+/** New-event authority is independent of historical pause/gateway evidence, not authority
+ * to retry a prior event, approve an old tool, or deliver to a different conversation/AI.
+ */
+internal fun permitsIndependentEvent(event: OrbisInboxEvent, inputId: String,
+    conversationId: String, assistantId: String, bindingMatches: Boolean, masterAllows: Boolean): Boolean =
+    event.independentDelivery && event.attemptStarted && event.id == inputId &&
+        event.conversationId == conversationId && event.assistantId == assistantId &&
+        event.state in setOf("queued", "displayed", "generating", "pending_tool") &&
+        bindingMatches && masterAllows
 
 /** A reason, not a waiting list. Never use a human pause as an automatic master switch. */
 internal data class AutomaticWakeReadiness(

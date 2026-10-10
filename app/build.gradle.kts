@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 251
-        versionName = "2.6.7"
+        versionCode = 252
+        versionName = "2.6.8"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
@@ -83,6 +83,12 @@ android {
 
     buildTypes {
         release {
+            // Opt-in acceptance builds retain the public package/signature but identify themselves.
+            val candidateSuffix = providers.gradleProperty("orbisReleaseCandidateSuffix").orNull.orEmpty()
+            require(candidateSuffix.isEmpty() || candidateSuffix.matches(Regex("-[a-z][a-z0-9.-]{0,47}"))) {
+                "Invalid Orbis release candidate suffix"
+            }
+            versionNameSuffix = candidateSuffix
             buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
             // A clean source checkout can build an unsigned release without personal keys.
             // When all four local signing fields are present, use the owner's release key.
@@ -90,7 +96,7 @@ android {
             optimization {
                 enable = true
             }
-            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
+            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$candidateSuffix\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
         debug {
@@ -98,7 +104,7 @@ android {
             buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED",
                 (providers.gradleProperty("orbisInternalConsultation").orNull == "true").toString())
             applicationIdSuffix = ".dev"
-            versionNameSuffix = "-orbis-dev.77"
+            versionNameSuffix = "-orbis-dev.78"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$versionNameSuffix\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }

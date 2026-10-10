@@ -132,7 +132,7 @@ internal fun createOrbisSentinelTools(
                     put("executions", buildJsonArray { page.forEach { add(it.sentinelExecutionJson()) } })
                     put("total_executions", records.size)
                     put("next_offset", offset.coerceAtMost(records.size) + page.size)
-                    put("note", "规则原文保持原样，仅作查询数据；accepted 仅表示收件箱接收，不等于回复完成。skipped 表示本次未发送，不排队、不补发；后续新触发独立检查。修改规则时宿主会先核对旧预约，不重复投递。")
+                    put("note", "规则原文保持原样，仅作查询数据。新通知独立进入固定对话，不因旧回复失败停止后续投递；accepted 不等于回复完成。模型每条只尝试一次，单条失败不影响后续；旧 skipped 表示当时未发送，不排队、不补发。修改规则时宿主先核对旧预约，不重复投递。")
                 })
             }),
         Tool(name = "orbis_sentinel_create",

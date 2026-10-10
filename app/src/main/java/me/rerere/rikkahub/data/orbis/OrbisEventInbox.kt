@@ -37,7 +37,18 @@ data class OrbisInboxEvent(
     val occurredAt: Long? = null,
     val localImage: String? = null,
     val sentinelGeneration: Long? = null,
+    // New deliveries are visible independently of model admission. Legacy receipts never opt in.
+    val independentDelivery: Boolean = false,
+    val attemptStarted: Boolean = false,
+    val historyCommitted: Boolean = false,
 )
+
+fun OrbisInboxEvent.needsIndependentDispatch(): Boolean =
+    independentDelivery && !attemptStarted && state == "accepted"
+
+fun OrbisInboxEvent.isConversationNotification(assistant: String, conversation: String): Boolean =
+    independentDelivery && !historyCommitted && assistantId == assistant && conversationId == conversation &&
+        state !in setOf("suppressed", "target_invalid")
 
 @Serializable
 data class OrbisInboxState(val version: Int = 1,
@@ -69,7 +80,8 @@ class OrbisEventInbox(private val read: () -> String?, private val write: (Strin
     fun binding(source: String): OrbisEventBinding? = state.value.bindings[source]?.takeIf { it.enabled }
 
     @Synchronized
-    fun accept(input: OrbisIncomingEvent, expected: OrbisEventBinding, now: Long, sentinelGeneration: Long? = null): Pair<OrbisInboxEvent, Boolean> {
+    fun accept(input: OrbisIncomingEvent, expected: OrbisEventBinding, now: Long, sentinelGeneration: Long? = null,
+        independentDelivery: Boolean = false): Pair<OrbisInboxEvent, Boolean> {
         require(validEventSource(input.source)) { "invalid_event_source" }
         require(input.localImage == null || (isNativeSentinelSource(input.source) &&
             Regex("[a-f0-9]{64}\\.jpg").matches(input.localImage))) { "invalid_event_attachment" }
@@ -88,13 +100,25 @@ class OrbisEventInbox(private val read: () -> String?, private val write: (Strin
         val event = OrbisInboxEvent(eventId = input.event_id, source = input.source,
             text = input.text, wake = input.wake, assistantId = expected.assistantId,
             conversationId = expected.conversationId, receivedAt = now, occurredAt = input.occurred_at,
-            localImage = input.localImage, sentinelGeneration = sentinelGeneration)
+            localImage = input.localImage, sentinelGeneration = sentinelGeneration,
+            independentDelivery = independentDelivery)
         commit(state.value.copy(events = state.value.events + event))
         return event to false
     }
 
     @Synchronized
     fun get(id: String): OrbisInboxEvent? = state.value.events.firstOrNull { it.id == id }
+
+    /** Commit the one-shot claim BEFORE starting a coroutine/model. Crashes cannot replay it. */
+    @Synchronized
+    fun claimIndependentDispatch(id: String): Boolean {
+        val event = get(id) ?: return false
+        if (!event.needsIndependentDispatch() || !targetStillMatches(event)) return false
+        commit(state.value.copy(events = state.value.events.map {
+            if (it.id == id) it.copy(attemptStarted = true, state = "queued", error = null) else it
+        }))
+        return true
+    }
 
     /** Recovery authority requires a disk read-back, not only the published in-memory receipts. */
     @Synchronized
@@ -124,7 +148,9 @@ class OrbisEventInbox(private val read: () -> String?, private val write: (Strin
         // A late cancelled/completed coroutine must not overwrite an explicit human suppression.
         if (state.value.events.first { it.id == id }.state in setOf("suppressed", "skipped")) return
         commit(state.value.copy(events = state.value.events.map {
-            if (it.id == id) it.copy(state = status, error = error) else it
+            if (it.id == id) it.copy(state = status, error = error,
+                historyCommitted = it.historyCommitted || it.independentDelivery &&
+                    status in setOf("displayed", "generating", "replied", "pending_tool")) else it
         }))
     }
 

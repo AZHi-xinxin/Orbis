@@ -125,7 +125,7 @@ class OrbisSentinelPanelTest {
         show(recoveryConversationIds = setOf(rule.conversationId))
         compose.onNodeWithTag("sentinel-recover-future-${rule.conversationId}")
             .performScrollTo().assertIsEnabled()
-        compose.onNodeWithText("旧轮的保护仍在阻止自动投递。恢复仅允许之后的新事件；积压提醒保留记录但不补发，未知工具不重做，旧通话不重连。")
+        compose.onNodeWithText("这里保留旧轮的保护记录，供你核对；新通知已独立投递，不需要先点恢复。旧积压提醒不补发，未知工具不重做，旧通话不重连。")
             .assertExists()
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState)).assertCountEquals(1)
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.EditableText)).assertCountEquals(0)

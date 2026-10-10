@@ -98,10 +98,10 @@ internal fun OrbisSentinelPanel(
             (recoveryConversationIds + recoveryNotices.keys).forEach { conversationId ->
                 Column(Modifier.fillMaxWidth().testTag("sentinel-recovery-$conversationId"),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${conversationNames[conversationId] ?: "固定会话"} · 自动投递恢复",
+                    Text("${conversationNames[conversationId] ?: "固定会话"} · 旧状态核对",
                         style = MaterialTheme.typography.titleSmall)
                     if (conversationId in recoveryConversationIds) {
-                        Text("旧轮的保护仍在阻止自动投递。恢复仅允许之后的新事件；积压提醒保留记录但不补发，未知工具不重做，旧通话不重连。",
+                        Text("这里保留旧轮的保护记录，供你核对；新通知已独立投递，不需要先点恢复。旧积压提醒不补发，未知工具不重做，旧通话不重连。",
                             style = MaterialTheme.typography.bodySmall)
                         TextButton(onClick = { onRecoverFutureAutomaticWakes(conversationId) },
                             enabled = !saving && recoveringConversationId == null,
@@ -180,6 +180,9 @@ internal fun OrbisSentinelPanel(
                     "${orbisEventSourceLabel(receipt.source)} · ${orbisSentinelReceiptStateLabel(receipt.state)} · ${orbisEventReceivedTime(receipt.receivedAt)}") {
                     SentinelTarget(receipt.assistantId, receipt.conversationId, assistantNames, conversationNames)
                     SentinelReadOnlyField("事件标识", receipt.eventId)
+                    if (receipt.independentDelivery && receipt.state !in setOf("suppressed", "target_invalid")) {
+                        Text("通知已进入固定对话；AI 回复单独处理。本条失败不阻止后续通知。", style = MaterialTheme.typography.bodySmall)
+                    }
                     receipt.error?.let { SentinelReadOnlyField("结果说明", orbisWakeReasonLabel(it)) }
                     if (receipt.state == "skipped") Text("本次未发送，原文留在这里，不会补发；之后的新事件单独检查。",
                         style = MaterialTheme.typography.bodySmall)

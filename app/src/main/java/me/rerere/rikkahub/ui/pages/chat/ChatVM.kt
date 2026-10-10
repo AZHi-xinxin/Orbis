@@ -83,6 +83,7 @@ class ChatVM(
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val eventInbox = chatService.orbisEvents.inbox.state
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
     internal var initialLoadSettled by mutableStateOf(false)
         private set

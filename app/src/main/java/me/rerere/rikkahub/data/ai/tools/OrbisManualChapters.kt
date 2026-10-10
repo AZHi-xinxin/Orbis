@@ -86,7 +86,7 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("怎么核对", "先确认实际使用的模型/连接与工具名，然后依据明确回执或用户授权的诊断信息区分存储、检索、注入三步。不要要求导出思考链或私人脑正文来证明连接。未确认时说明证据不足，不创建测试记忆污染生活记录。"),
     )),
     OrbisManualChapter("automation", "哨兵、通知、日历提醒与设备", "手机与陪伴 → 哨兵与自我唤醒 / 权限；工具设置", listOf("orbis_sentinel_guide", "orbis_sentinel_list", "orbis_sentinel_read", "orbis_sentinel_create", "orbis_sentinel_update", "orbis_sentinel_pause", "orbis_sentinel_resume", "orbis_sentinel_delete", "calendar_query", "calendar_create", "toy_bluetooth_status", "toy_bluetooth_set", "toy_bluetooth_stop"), listOf(
-        OrbisManualSection("哨兵", "先按需 orbis_sentinel_guide 读对应类别，再 list/read 核对已有规则，避免重复创建。create/update/pause/resume/delete 操作本 AI 固定目标规则；人类管理总开关。每次触发只尝试一次，忙碌、待审批或连接未确认时记为 skipped（本次已跳过）及原因，不排队、不补发；后续新事件独立检查，仍遵守冷却。accepted 不等于已回复，skipped 表示未发给模型。不要为补发重建一次性规则。旧网关仅在同一连接已确认空闲时解除等待；未知工具结果不等于失败，不重做。恢复总开关不补发历史任务。"),
+        OrbisManualSection("哨兵", "按需用 orbis_sentinel_guide 读对应类别，list/read 核对已有规则，避免重复创建。create/update/pause/resume/delete 操作本 AI 固定目标规则；人类管理总开关。新通知先持久进入固定对话，不再被旧回复失败、旧网关等待或仅人类输入状态挡住。当前本地回复或保存结束后独立尝试一次；本条模型失败不自动重试，不影响下一条。accepted 不等于 AI 已回复，通知卡会显示待处理或本条未完成。旧 skipped 记录仍表示当时未发给模型，不批量复活，不要重建旧一次性规则补发。旧工具不重做，总开关关闭和规则暂停仍有效。人类原有恢复入口在后台设置→手机与陪伴→哨兵与自我唤醒→恢复后续哨兵，但新通知不依赖这个按钮。"),
         OrbisManualSection("真正提醒", "本地课表本身不会响。calendar_query/calendar_create 使用系统日历权限，reminder_minutes 可省略，0为开始时、15为提前15分钟，创建需批准。companion_get_alarms 仅读应用台账；set_alarm 是一次性，同HH:mm可替换，要核对完整日期回执。系统接收调度不保证实际响铃或被听见。"),
         OrbisManualSection("设备边界", "companion_* 以当轮 schema 和现有授权为准；观察、无障碍、麦克风、通知权限分别管理。toy_bluetooth_* 只操作人类手选且已连设备，AI 不扫描连接，stop 不需批准；断线不证明物理停止。通知朗读默认关闭，锁屏另选，不读第三方或旧通知。不要为排障自动扩大权限。"),
     )),

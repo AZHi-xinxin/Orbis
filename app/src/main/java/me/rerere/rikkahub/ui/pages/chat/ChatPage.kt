@@ -411,6 +411,7 @@ private fun ChatPageContent(
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val batchVoiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
+    val eventInbox by vm.eventInbox.collectAsStateWithLifecycle()
     val assistant = setting.getCurrentAssistant()
     val startupAppearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val startupInheritBackground = !startupAppearance.backgroundEnabled &&
@@ -663,6 +664,7 @@ private fun ChatPageContent(
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
+                notifications = orbisPendingConversationNotifications(eventInbox.events, conversation),
                 state = chatListState,
                 bottomFollowState = bottomFollowState,
                 loading = loadingJob != null,

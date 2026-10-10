@@ -9,6 +9,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Deferred
@@ -341,6 +342,9 @@ class ChatService(
     private fun gatewaySubmissionBlocked(id: Uuid, input: QueuedMessage? = null): Boolean {
         if (gatewayStopInFlight.contains(id) || queueControls.isResetting(id)) return true
         val session = sessions[id] ?: return false
+        // A newly claimed sentinel input has its own request identity. Old remote/tool failure
+        // evidence remains intact, but cannot veto every later notification/model attempt.
+        if (independentEventPermitted(session, input)) return false
         val status = freshHumanStatus(session)
         // An explicit local detach is not a remote-idle receipt. Old evidence remains, but
         // may no longer veto a NEW human turn, its new approvals, or a newly connected call.
@@ -853,6 +857,53 @@ class ChatService(
     }
     private val orbisEventDispatchMutex = Mutex()
     private val orbisEventsAtStartup = orbisEvents.inbox.state.value.events.toList()
+    private var independentEventDispatcher: Job? = null
+
+    private fun independentEventPermitted(session: ConversationSession, input: QueuedMessage?): Boolean {
+        val event = input?.orbisEventId?.let(orbisEvents.inbox::get) ?: return false
+        return permitsIndependentEvent(event, input.id.toString(), session.id.toString(),
+            session.state.value.assistantId.toString(), orbisEvents.inbox.targetStillMatches(event),
+            nativeSentinels.mayDeliver(event))
+    }
+
+    /** Human approval may continue only this new event's tool, never an old failed turn. */
+    private fun independentEventApprovalInput(session: ConversationSession, toolCallId: String): QueuedMessage? {
+        val messages = session.state.value.currentMessages
+        val userIndex = messages.indexOfLast { it.role == MessageRole.USER }
+        val user = messages.getOrNull(userIndex) ?: return null
+        val event = user.orbisEvent?.recordId?.let(orbisEvents.inbox::get) ?: return null
+        if (!event.independentDelivery || event.state != "pending_tool" ||
+            messages.drop(userIndex + 1).none { it.getTools().any { tool -> tool.toolCallId == toolCallId && tool.isPending } }) return null
+        return QueuedMessage(id = user.id, parts = user.parts, orbisEventId = event.id,
+            acknowledgeSafetyHold = false).takeIf { independentEventPermitted(session, it) }
+    }
+
+    /** Only local serialization waits. No old human pause, gateway hold or recovery button is
+     * a prerequisite. Different conversations progress independently; a failed claim is not retried.
+     */
+    private fun startIndependentEventDispatcher() {
+        if (independentEventDispatcher?.isActive == true) return
+        independentEventDispatcher = appScope.launch(Dispatchers.Main.immediate) {
+            while (true) {
+                val pending = orbisEvents.inbox.state.value.events.filter {
+                    it.independentDelivery && !it.attemptStarted && it.state == "accepted"
+                }
+                if (pending.isEmpty()) break
+                for (event in pending) {
+                    try { orbisEventDispatchMutex.withLock { queueOrbisEvent(event) } }
+                    catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) {
+                        // The accepted notification stays visible, even if this single model
+                        // preflight fails. A failure receipt never gates other event identities.
+                        withContext(Dispatchers.IO) {
+                            orbisEvents.inbox.mark(event.id, "failed", "wake_preflight_failed")
+                        }
+                    }
+                }
+                delay(1_000)
+            }
+        }
+    }
     private val queuePauseStore by lazy { openPauseStore(OrbisQueuePauseStore.FILE_NAME) }
     // Separate hard holds: an ordinary human stop / provider failure must not disable future wakes.
     private val automaticWakeHoldStore by lazy { openPauseStore("orbis-automatic-wake-holds-v1.json") }
@@ -984,8 +1035,15 @@ class ChatService(
         require(target != null && target.assistantId.toString() == binding.assistantId) { "event_target_invalid" }
         require(settingsStore.settingsFlow.first { !it.init }.assistants.any { it.id.toString() == binding.assistantId }) { "event_assistant_missing" }
         val accepted = withContext(Dispatchers.IO) { orbisEvents.inbox.accept(input, binding, System.currentTimeMillis(),
-            expectedSentinelGeneration ?: nativeSentinels.rules.refresh().masterGeneration) }
-        if (!accepted.second && accepted.first.state == "accepted") {
+            expectedSentinelGeneration ?: nativeSentinels.rules.refresh().masterGeneration,
+            independentDelivery = true) }
+        if (accepted.first.independentDelivery) {
+            if (!nativeSentinels.mayDeliver(accepted.first)) withContext(Dispatchers.IO) {
+                orbisEvents.inbox.mark(accepted.first.id, "suppressed", "sentinel_paused_no_replay")
+            }
+            startIndependentEventDispatcher()
+        }
+        if (!accepted.first.independentDelivery && !accepted.second && accepted.first.state == "accepted") {
             try { queueOrbisEvent(accepted.first) }
             catch (error: Exception) {
                 // Durable acceptance is not undone by a queue failure. Return its receipt.
@@ -1006,13 +1064,16 @@ class ChatService(
         orbisEventsAtStartup.forEach { event ->
             if (event.state == "generating") {
                 withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "unknown", "interrupted_generation_no_auto_retry") }
-            } else if (event.state in setOf("accepted", "queued")) {
+            } else if (event.independentDelivery && event.attemptStarted && event.state == "queued") {
+                withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "unknown", "interrupted_before_dispatch_no_auto_retry") }
+            } else if (!event.independentDelivery && event.state in setOf("accepted", "queued")) {
                 // Re-read: an event may already have been reconciled after startup.
                 if (orbisEvents.inbox.get(event.id)?.state in setOf("accepted", "queued")) {
                     withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "skipped", "wake_restart_no_replay") }
                 }
             }
         }
+        startIndependentEventDispatcher()
       }
     }
 
@@ -1036,6 +1097,29 @@ class ChatService(
             return
         }
         if (session.submittingMessage?.id == messageId) return
+        if (event.independentDelivery) {
+            synchronized(session) {
+                // The card is already durably delivered. Wait only for an active local writer,
+                // not for the previous reply to succeed or its historical hold to be cleared.
+                if (session.hasUnfinishedJobs() || session.submittingMessage != null ||
+                    session.manualContextWriteInProgress || queueControls.isResetting(id) ||
+                    gatewayStopInFlight.contains(id)) return
+                val parts = buildList {
+                    add(UIMessagePart.Text(event.text))
+                    event.localImage?.let { name ->
+                        val image = nativeSentinels.imageFile(name)
+                        check(image.isFile) { "event_image_missing" }
+                        add(UIMessagePart.Image(android.net.Uri.fromFile(image).toString()))
+                    }
+                }
+                if (!orbisEvents.inbox.claimIndependentDispatch(event.id)) return
+                val input = QueuedMessage(id = messageId, parts = parts, answer = event.wake,
+                    orbisEventId = event.id, acknowledgeSafetyHold = false)
+                session.submittingMessage = input
+                sendQueuedMessage(session, input, requireImageInput = parts.any { it is UIMessagePart.Image })
+            }
+            return
+        }
         // A stale transport hold may outlive a failed turn even though the same gateway is now
         // idle. A bounded read-only probe may reconcile it; never stop or retry remote work.
         if (session.gatewayRecoveryBlocked && queueControls.beginLocalResetIfIdle(id)) {
@@ -1678,7 +1762,7 @@ class ChatService(
                         if (checkpointPresent) return@history false
                         synchronized(session) {
                             val previousIds = orbisEvents.inbox.state.value.events.filter {
-                                it.conversationId == id && it.state in setOf("accepted", "queued")
+                                !it.independentDelivery && it.conversationId == id && it.state in setOf("accepted", "queued")
                             }.map { it.id }.toSet()
                             commitFutureAutomaticWakeRecovery(
                                 stillOwner = ::stillOwner,
@@ -1744,7 +1828,7 @@ class ChatService(
         session.acquire()
         val assistantId = session.state.value.assistantId
         val oldAutomaticEventIds = orbisEvents.inbox.state.value.events.filter {
-            it.conversationId == conversationId.toString() && it.state in setOf("accepted", "queued")
+            !it.independentDelivery && it.conversationId == conversationId.toString() && it.state in setOf("accepted", "queued")
         }.map { it.id }.toSet()
         queueRecoveries.update { it + (conversationId to QueueRecoveryState(
             QueueRecoveryPhase.RUNNING, "正在保存已完成内容；不会重发旧消息。")) }
@@ -1845,7 +1929,7 @@ class ChatService(
                         ?: QueueRecoveryState(QueueRecoveryPhase.PENDING, "旧轮正在核对，请稍候。")
             }
             val oldAutomaticEventIds = orbisEvents.inbox.state.value.events.filter {
-                it.conversationId == conversationId.toString() && it.state in setOf("accepted", "queued")
+                !it.independentDelivery && it.conversationId == conversationId.toString() && it.state in setOf("accepted", "queued")
             }.map { it.id }.toSet()
             var dispatch = false
             session.acquire()
@@ -2729,7 +2813,7 @@ class ChatService(
                         "新输入授权或工具状态已变化，原输入保留，未继续旧操作。"
                     }
                 }
-                if (queued.orbisEventId != null && !automaticWakeAllowed(session)) {
+                if (queued.orbisEventId != null && !independentEventPermitted(session, queued) && !automaticWakeAllowed(session)) {
                     // Admission may change while local recovery suspends. End this one event,
                     // never requeue it and never let it become a permanent predecessor.
                     withContext(Dispatchers.IO) {
@@ -2965,8 +3049,9 @@ class ChatService(
                     withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                         if (!eventInputCommitted && !inputSaveAttempted) {
                             recordAutomaticReceiptSafely(session) {
-                                orbisEvents.inbox.mark(id, "skipped",
-                                    automaticWakeRestriction(session) ?: "wake_preflight_failed")
+                                val independent = orbisEvents.inbox.get(id)?.independentDelivery == true
+                                orbisEvents.inbox.mark(id, if (independent) "failed" else "skipped",
+                                    if (independent) "wake_preflight_failed" else automaticWakeRestriction(session) ?: "wake_preflight_failed")
                             }
                         } else {
                             recordAutomaticReceiptSafely(session) {
@@ -3165,7 +3250,8 @@ class ChatService(
         expectedAssistantId: Uuid? = null,
     ) = synchronized(getOrCreateSession(conversationId)) {
         val session = getOrCreateSession(conversationId)
-        if (gatewaySubmissionBlocked(conversationId)) {
+        val independentInput = independentEventApprovalInput(session, toolCallId)
+        if (gatewaySubmissionBlocked(conversationId, independentInput)) {
             addError(IllegalStateException("旧轮正在核对，本次审批未保存或执行。"), conversationId)
             return@synchronized
         }
@@ -3181,10 +3267,14 @@ class ChatService(
         val job = launchGenerationJob(
             conversationId = conversationId,
             keepAliveInBackground = !hasOtherPendingTools,
+            freshHumanInput = independentInput,
         ) {
             try {
                 afterPreviousGeneration(previousJob) {
-                    check(!gatewaySubmissionBlocked(conversationId)) { "旧轮正在核对，本次审批未保存或执行。" }
+                    check(independentInput == null || independentEventApprovalInput(session, toolCallId)?.id == independentInput.id) {
+                        "本条哨兵的工具已结束或会话已变化，未继续旧工具。"
+                    }
+                    check(!gatewaySubmissionBlocked(conversationId, independentInput)) { "旧轮正在核对，本次审批未保存或执行。" }
                     expectedAssistantId?.let { requireGardenQuickChatTarget(conversationId, it) }
                     if (session.state.value.isConsultation) consultationFeature.requireEnabled()
                     settlePreviousGeneration(session)
@@ -3263,6 +3353,7 @@ class ChatService(
                             if (event != null) withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "generating") }
                             var terminalProof: Pair<String, GenerationTerminalEvidence>? = null
                             val completed = handleMessageComplete(conversationId, realWake = true,
+                                freshHumanInput = independentInput,
                                 voiceCallId = voiceBinding.callId, voiceCallKind = voiceBinding.kind,
                                 allowAmbientCallBinding = voiceBinding.allowAmbientCallBinding,
                                 expectedAssistantId = expectedAssistantId,
