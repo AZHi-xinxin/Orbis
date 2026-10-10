@@ -6,6 +6,11 @@ enum class GatewayRecoveryScopeStatus { LEGACY, MATCH, MISMATCH, UNAVAILABLE }
 
 /** Hashes only: no endpoint, credential, request nonce, chat content or remote-idle receipt. */
 class GatewayRecoveryScopeStore(private val storage: OrbisQueuePauseStore) {
+    /** Read-only absence check; null is unreadable, never permission to clear a transport hold. */
+    fun hasUnresolvedScope(conversationId: String): Boolean? = try {
+        storage.pauseReason(conversationId) != null || storage.pauseReason(conflictId(conversationId)) != null
+    } catch (_: Exception) { null }
+
     fun status(conversationId: String, fingerprint: String): GatewayRecoveryScopeStatus = try {
         validate(fingerprint)
         if (storage.pauseReason(conflictId(conversationId)) != null) GatewayRecoveryScopeStatus.MISMATCH

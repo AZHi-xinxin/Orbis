@@ -274,12 +274,14 @@ class OrbisSentinelRuleStore(
     }
 
     /** Acknowledge only after an event inbox has durably accepted this exact event ID. */
-    fun completeFire(id: String, eventId: String, now: Long): OrbisSentinelRule = synchronized(lock) {
+    fun completeFire(id: String, eventId: String, now: Long, skippedReason: String? = null): OrbisSentinelRule = synchronized(lock) {
         validateTime(now)
+        require(skippedReason == null || ERROR_CODE.matches(skippedReason)) { "invalid_sentinel_error_code" }
         val before = current()
         val existing = before.rules.firstOrNull { it.id == id }
         if (existing != null && existing.pendingEventId == null && before.executions.any {
-                it.ruleId == id && it.eventId == eventId && it.status == OrbisSentinelExecutionStatus.ACCEPTED
+                it.ruleId == id && it.eventId == eventId && it.status in setOf(
+                    OrbisSentinelExecutionStatus.ACCEPTED, OrbisSentinelExecutionStatus.CANCELLED)
             }) return@synchronized existing
         val old = pending(before, id, eventId)
         require(old.pendingText != null) { "sentinel_event_not_staged" }
@@ -291,12 +293,13 @@ class OrbisSentinelRuleStore(
                 (old.type in SENTINEL_PERIODIC_TYPES || old.rearm == OrbisSentinelRearm.AFTER_COOLDOWN),
             lastFiredAtMs = now, pendingEventId = null, pendingSinceMs = null, pendingText = null,
             pendingMasterGeneration = null,
-            pendingBlocked = false, updatedAtMs = now, lastError = null,
+            pendingBlocked = false, updatedAtMs = now, lastError = skippedReason,
             policy = old.policy.copy(consecutiveCount = if (old.type == OrbisSentinelType.AGREEMENT)
                 old.policy.pendingOrdinal ?: old.policy.consecutiveCount else old.policy.consecutiveCount, pendingOrdinal = null),
         )
         replace(before.copy(executions = before.executions.map {
-            if (it.eventId == eventId) it.copy(status = OrbisSentinelExecutionStatus.ACCEPTED, updatedAtMs = now, detail = null) else it
+            if (it.eventId == eventId) it.copy(status = if (skippedReason == null) OrbisSentinelExecutionStatus.ACCEPTED
+                else OrbisSentinelExecutionStatus.CANCELLED, updatedAtMs = now, detail = skippedReason) else it
         }), updated)
         updated
     }

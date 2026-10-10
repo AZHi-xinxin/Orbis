@@ -609,6 +609,40 @@ class ChatService(
         }
     }
 
+    /** Snapshot only: no model call, queue dispatch, recovery mutation or session creation. */
+    private fun screenShareChatAdmission(conversationId: Uuid, assistantId: Uuid): ScreenShareChatAdmission {
+        val session = sessions[conversationId] ?: return ScreenShareChatAdmission(ready = false)
+        return synchronized(session) {
+            ScreenShareChatAdmission(
+                ready = session.isInitialized && sessions[conversationId] === session,
+                ownerMatches = session.state.value.assistantId == assistantId &&
+                    settingsStore.settingsFlow.value.assistantId == assistantId,
+                busy = session.hasUnfinishedJobs() || session.submittingMessage != null ||
+                    gatewayStopInFlight.contains(conversationId) || queueControls.isResetting(conversationId),
+                saving = session.manualContextWriteInProgress,
+                queuePaused = session.messageQueue.state.value.paused,
+                pendingTools = session.state.value.currentMessages.hasUnfinishedVoiceReplyTools(),
+                recoveryBlocked = session.generationRecoveryBlocked,
+                gatewayBlocked = gatewaySubmissionBlocked(conversationId) && !freshHumanReady(session),
+            )
+        }
+    }
+
+    internal fun screenShareChatBlockReason(conversationId: Uuid, assistantId: Uuid): String? = try {
+        screenShareChatAdmission(conversationId, assistantId).blockReason
+    } catch (_: Exception) { "unavailable" }
+
+    /** Human tapped the overlay retry. Never uses legacy recovery that dispatches old backlog. */
+    internal suspend fun resumeScreenShareNewInput(conversationId: Uuid, assistantId: Uuid): Boolean =
+        withContext(Dispatchers.Main.immediate) {
+            val before = try { screenShareChatAdmission(conversationId, assistantId) }
+                catch (_: Exception) { return@withContext false }
+            if (before.blockReason == null) return@withContext true
+            if (!before.mayDismissForFreshInput) return@withContext false
+            dismissPauseAndContinueFreshInput(conversationId).join()
+            screenShareChatBlockReason(conversationId, assistantId) == null
+        }
+
     /** The call UI checks readiness explicitly; this never dispatches or acknowledges old input. */
     suspend fun canResumeVoiceCallReplies(conversationId: Uuid, callId: String): Boolean =
         withContext(Dispatchers.Main.immediate) {
@@ -822,8 +856,11 @@ class ChatService(
     private val queuePauseStore by lazy { openPauseStore(OrbisQueuePauseStore.FILE_NAME) }
     // Separate hard holds: an ordinary human stop / provider failure must not disable future wakes.
     private val automaticWakeHoldStore by lazy { openPauseStore("orbis-automatic-wake-holds-v1.json") }
+    // A failed future-only acknowledgement must stay closed across partial writes and restarts.
+    private val futureAutomaticWakeRecoveryGuard by lazy { openPauseStore("orbis-future-wake-recovery-v1.json") }
     private val gatewayRecoveryHoldStore by lazy { openPauseStore("orbis-gateway-recovery-holds-v1.json") }
-    private val freshHumanRecoveryStore by lazy { FreshHumanInputRecoveryStore(openPauseStore(FreshHumanInputRecoveryStore.FILE_NAME)) }
+    private val freshHumanRecoveryStorage by lazy { openPauseStore(FreshHumanInputRecoveryStore.FILE_NAME) }
+    private val freshHumanRecoveryStore by lazy { FreshHumanInputRecoveryStore(freshHumanRecoveryStorage) }
     private val gatewayRecoveryScopeStore by lazy { GatewayRecoveryScopeStore(openPauseStore(GatewayRecoveryScopeStore.FILE_NAME)) }
     // PAUSED here means "legacy migration complete", never a live dispatch/pause decision.
     // Separate from active holds so a durable human ACK cannot be undone by old host markers.
@@ -850,11 +887,31 @@ class ChatService(
     }
     @Volatile private var queuePauseRecoveryReady = false
 
-    private fun automaticWakeAllowed(session: ConversationSession): Boolean =
-        !queueControls.isResetting(session.id) && !session.generationRecoveryBlocked && !session.gatewayRecoveryBlocked &&
-            freshHumanStatus(session) == FreshHumanRecoveryStatus.NONE && ensureQueuePauseRecovery() &&
-            queuePauseStore.status(session.id.toString()) != QueuePauseStatus.UNAVAILABLE &&
-            automaticWakeHoldStore.status(session.id.toString()) == QueuePauseStatus.UNPAUSED
+    private fun automaticWakeRestriction(session: ConversationSession): String? {
+        val id = session.id.toString()
+        return AutomaticWakeReadiness(
+            resetting = queueControls.isResetting(session.id) || gatewayStopInFlight.contains(session.id),
+            localRecoveryBlocked = session.generationRecoveryBlocked,
+            gatewayRecoveryBlocked = session.gatewayRecoveryBlocked,
+            freshStatus = freshHumanStatus(session),
+            pauseStorageReady = ensureQueuePauseRecovery(),
+            queueStatus = queuePauseStore.status(id),
+            recoveryGuard = futureAutomaticWakeRecoveryGuard.status(id),
+            automaticHold = automaticWakeHoldStore.status(id),
+            automaticHoldReason = runCatching { automaticWakeHoldStore.pauseReason(id) }.getOrNull(),
+        ).restriction()
+    }
+
+    private fun automaticWakeAllowed(session: ConversationSession): Boolean = automaticWakeRestriction(session) == null
+
+    private fun automaticWakeAdmissionReason(session: ConversationSession): String? = automaticWakeAdmissionReason(
+        restriction = automaticWakeRestriction(session),
+        busy = session.hasUnfinishedJobs() || session.submittingMessage != null,
+        saving = session.manualContextWriteInProgress,
+        pendingApproval = session.state.value.currentMessages.any { it.getTools().any { tool -> !tool.isExecuted } },
+        readyHumanInput = !session.messageQueue.state.value.paused && session.messageQueue.state.value.messages
+            .firstOrNull { it.recoveryHeldReason == null }?.isEditing == false,
+    )
 
     private fun holdAutomaticWakes(session: ConversationSession, reason: String): Boolean =
         try {
@@ -942,7 +999,7 @@ class ChatService(
       }
     }
 
-    /** Only safely undispatched receipts resume; uncertain model work never auto-replays after a crash. */
+    /** Old automatic inputs expire on restart; neither undispatched nor uncertain work replays. */
     suspend fun restoreOrbisEvents() = withContext(Dispatchers.Main.immediate) {
       orbisEventDispatchMutex.withLock {
         settingsStore.settingsFlow.first { !it.init }
@@ -950,9 +1007,9 @@ class ChatService(
             if (event.state == "generating") {
                 withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "unknown", "interrupted_generation_no_auto_retry") }
             } else if (event.state in setOf("accepted", "queued")) {
-                runCatching { queueOrbisEvent(event) }.onFailure {
-                    if (it is CancellationException) throw it
-                    withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "target_invalid", "restore_target_unavailable") }
+                // Re-read: an event may already have been reconciled after startup.
+                if (orbisEvents.inbox.get(event.id)?.state in setOf("accepted", "queued")) {
+                    withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "skipped", "wake_restart_no_replay") }
                 }
             }
         }
@@ -979,7 +1036,12 @@ class ChatService(
             return
         }
         if (session.submittingMessage?.id == messageId) return
-        withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "queued") }
+        // A stale transport hold may outlive a failed turn even though the same gateway is now
+        // idle. A bounded read-only probe may reconcile it; never stop or retry remote work.
+        if (session.gatewayRecoveryBlocked && queueControls.beginLocalResetIfIdle(id)) {
+            try { refreshIdleGatewayForAutomaticWake(session, explicitHuman = false) }
+            finally { queueControls.endLocalReset(id) }
+        }
         synchronized(session) {
             val eventParts = buildList {
                 add(UIMessagePart.Text(event.text))
@@ -989,9 +1051,15 @@ class ChatService(
                     add(UIMessagePart.Image(android.net.Uri.fromFile(image).toString()))
                 }
             }
-            session.automaticWakeQueue.enqueue(eventParts, event.wake,
-                id = messageId, eventId = event.id)
-            dispatchNextQueuedMessage(id)
+            dispatchAutomaticWakeOnce(automaticWakeAdmissionReason(session), skip = { reason ->
+                recordAutomaticReceiptSafely(session) { orbisEvents.inbox.mark(event.id, "skipped", reason) }
+            }, dispatch = {
+                // Reserve exactly this fresh input. There is no automatic backlog to strand or replay.
+                val input = QueuedMessage(id = messageId, parts = eventParts, answer = event.wake,
+                    orbisEventId = event.id, acknowledgeSafetyHold = false)
+                session.submittingMessage = input
+                sendQueuedMessage(session, input, requireImageInput = eventParts.any { it is UIMessagePart.Image })
+            })
         }
     }
     /** A human stop applies to legacy and native events, never to a human-authored conversation. */
@@ -1419,6 +1487,254 @@ class ChatService(
         // Legacy callers share the same safety path; a plain unpause is no longer an escape hatch.
         appScope.launch { recoverMessageQueue(conversationId) }
     }
+
+    /** Presentation only. Do not create an uninitialized session with the current UI's assistant. */
+    fun futureAutomaticWakeRecoveryNeeded(conversationId: Uuid): Boolean = try {
+        val id = conversationId.toString()
+        freshHumanRecoveryStorage.pauseReason(id) != null ||
+            automaticWakeHoldStore.status(id) != QueuePauseStatus.UNPAUSED ||
+            futureAutomaticWakeRecoveryGuard.status(id) != QueuePauseStatus.UNPAUSED ||
+            gatewayRecoveryHoldStore.status(id) != QueuePauseStatus.UNPAUSED ||
+            gatewayRecoveryScopeStore.hasUnresolvedScope(id) != false ||
+            sessions[conversationId]?.gatewayRecoveryBlocked == true
+    } catch (_: Exception) { true }
+
+    /** Caller owns a local admission barrier. Only fresh authenticated IDLE evidence is accepted.
+     * No legacy queue recovery, stop endpoint, human queue resume, model or tool is called here.
+     */
+    private suspend fun refreshIdleGatewayForAutomaticWake(session: ConversationSession, explicitHuman: Boolean): Boolean {
+        val id = session.id.toString()
+        val before = session.state.value
+        val settingsBefore = settingsStore.settingsFlow.value
+        val assistant = settingsBefore.getAssistantById(before.assistantId) ?: return false
+        val model = settingsBefore.findModelById(assistant.chatModelId ?: settingsBefore.chatModelId) ?: return false
+        val provider = model.findProvider(settingsBefore.providers)?.copyProvider(models = emptyList()) ?: return false
+        val fingerprint = threadRecoveryFingerprint(session.id, assistant, model, provider) ?: return false
+        val scopeBefore = gatewayRecoveryScopeStore.status(id, fingerprint)
+        val freshBefore = freshHumanStatus(session)
+        val gatewayBefore = gatewayRecoveryHoldStore.status(id)
+        val automaticBefore = runCatching { automaticWakeHoldStore.pauseReason(id) }.getOrElse { return false }
+        val guardBefore = futureAutomaticWakeRecoveryGuard.status(id)
+        val endedBefore = endedGatewayRecoveries[session.id]
+        val humanBefore = session.messageQueue.state.value
+        val voiceRevision = voiceCalls.revision.value
+        val calls = voiceCalls.list(conversationId = id, limit = 1000)
+        fun capturedOwnersMatch(): Boolean = gatewayRecoveryOwnersMatch(
+            currentSession = session, currentAssistantId = before.assistantId,
+            expectedModel = model, currentModel = model,
+            expectedProvider = provider, currentProvider = provider,
+            capturedOwners = endedBefore.orEmpty().map { ended ->
+                GatewayRecoveryCapturedOwner(ended.session, ended.assistantId,
+                    ended.model, ended.provider, ended.settled)
+            },
+        )
+        fun localReady(): Boolean = sessions[session.id] === session && session.isInitialized &&
+            !before.isConsultation && capturedOwnersMatch() &&
+            queueControls.isResetting(session.id) && !gatewayStopInFlight.contains(session.id) &&
+            !session.hasUnfinishedJobs() && session.submittingMessage == null && !session.manualContextWriteInProgress &&
+            !session.generationRecoveryBlocked && voiceRecovery.isCompleted &&
+            calls.size < 1000 && calls.none { it.status in setOf(OrbisVoiceCallStatus.CONNECTING, OrbisVoiceCallStatus.ACTIVE) ||
+                it.archiveStatus == OrbisVoiceArchiveStatus.GENERATING } && voiceCalls.revision.value == voiceRevision &&
+            before.currentMessages.none { it.getTools().any { tool -> !tool.isExecuted } } &&
+            gatewayBefore != QueuePauseStatus.UNAVAILABLE && guardBefore == QueuePauseStatus.UNPAUSED &&
+            queuePauseStore.status(id) != QueuePauseStatus.UNAVAILABLE
+        fun stillOwner(): Boolean = localReady() && session.state.value == before &&
+            settingsStore.settingsFlow.value == settingsBefore && session.messageQueue.state.value == humanBefore &&
+            gatewayRecoveryScopeStore.status(id, fingerprint) == scopeBefore &&
+            freshHumanStatus(session) == freshBefore && gatewayRecoveryHoldStore.status(id) == gatewayBefore &&
+            automaticWakeHoldStore.pauseReason(id) == automaticBefore &&
+            futureAutomaticWakeRecoveryGuard.status(id) == guardBefore && endedGatewayRecoveries[session.id] === endedBefore
+        if (!mayRefreshAutomaticWakeTransport(scopeBefore, explicitHuman, localReady(), freshBefore, automaticBefore) ||
+            !stillOwner() || withContext(Dispatchers.IO) { generationJournal.hasCheckpoint(session.id) }) return false
+        val idle = try {
+            kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                gatewayThreadControl.probe(provider, model, id).state == OrbisGatewayThreadState.IDLE
+            } == true
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+        if (!idle || !stillOwner()) return false
+        return session.orbisPromptEditMutex.withLock {
+            if (withContext(Dispatchers.IO) { generationJournal.hasCheckpoint(session.id) }) return@withLock false
+            synchronized(session) {
+                commitRecoveredGatewayLane(stillOwner = ::stillOwner,
+                    establishTransportGuard = {
+                        session.gatewayRecoveryBlocked = true
+                        gatewayRecoveryHoldStore.pause(id, "gateway_terminal_unconfirmed")
+                        check(gatewayRecoveryHoldStore.status(id) == QueuePauseStatus.PAUSED)
+                    }, preservePreviousInputs = {
+                        session.messageQueue.holdAllInputsForFreshRecovery()
+                        session.automaticWakeQueue.holdAllForRecovery()
+                    }, reconcileAutomaticHold = {
+                        automaticWakeHoldStore.resumeIfReason(id, "gateway_terminal_unconfirmed")
+                    }, clearScope = { gatewayRecoveryScopeStore.clearAfterConfirmedIdle(id, fingerprint) },
+                    clearFreshRestriction = { freshHumanRecoveryStore.clearAfterConfirmedIdle(id, before.assistantId.toString()) },
+                    resumeHumanQueue = {}, // A sentinel must never start old human backlog.
+                    clearTransportGuard = {
+                        gatewayRecoveryHoldStore.resume(id)
+                        check(gatewayRecoveryHoldStore.status(id) == QueuePauseStatus.UNPAUSED)
+                    }, releaseMemory = {
+                        session.gatewayRecoveryBlocked = false
+                        freshHumanInputGates.remove(session.id)
+                        endedGatewayRecoveries.remove(session.id)
+                    })
+            }
+        }
+    }
+
+    /**
+     * Explicit future-only acknowledgement. Never calls the legacy queue recovery (which may
+     * send human backlog), remote stop, a model, or a tool. Unknown old tool receipts stay unknown.
+     */
+    suspend fun recoverFutureAutomaticWakes(conversationId: Uuid): QueueRecoveryResult =
+        withContext(Dispatchers.Main.immediate) {
+            fun result(phase: QueueRecoveryPhase, text: String) = QueueRecoveryState(phase, text)
+            if (gatewayStopInFlight.contains(conversationId) || !queueControls.beginLocalResetIfIdle(conversationId))
+                return@withContext result(QueueRecoveryPhase.PENDING,
+                    "已有连接核对或回复收尾正在进行，请稍后再试；没有中断它或补发旧消息。")
+            var acquiredSession: ConversationSession? = null
+            try {
+                val session = getOrCreateSession(conversationId)
+                session.acquire()
+                acquiredSession = session
+                // Do not cancel a live reply or call just because the recovery button was tapped.
+                if (session.hasUnfinishedJobs() || session.submittingMessage != null || session.manualContextWriteInProgress)
+                    return@withContext result(QueueRecoveryPhase.PENDING, "请等待当前回复或保存结束，再恢复今后的哨兵。")
+                queueControls.awaitInterrupted(conversationId)
+                voiceRecovery.join()
+                initializeConversation(conversationId, selectAssistant = false)
+                if (session.gatewayRecoveryBlocked || gatewayRecoveryHoldStore.status(conversationId.toString()) == QueuePauseStatus.PAUSED ||
+                    gatewayRecoveryScopeStore.hasUnresolvedScope(conversationId.toString()) == true) {
+                    refreshIdleGatewayForAutomaticWake(session, explicitHuman = true)
+                }
+                val id = conversationId.toString()
+                val before = session.state.value
+                val settingsBefore = settingsStore.settingsFlow.value
+                val assistant = settingsBefore.getAssistantById(before.assistantId)
+                if (assistant == null || before.isConsultation || freshHumanScope(session) == null)
+                    return@withContext result(QueueRecoveryPhase.PENDING, "当前会话或模型设置尚未就绪，未改变哨兵保护。")
+                val freshBefore = freshHumanStatus(session)
+                val automaticBefore = automaticWakeHoldStore.pauseReason(id)
+                val guardReason = "future_wake_" + before.assistantId.toString().replace("-", "")
+                val guardBefore = futureAutomaticWakeRecoveryGuard.pauseReason(id)
+                if (guardBefore != null && guardBefore != guardReason)
+                    return@withContext result(QueueRecoveryPhase.PENDING, "恢复记录属于其他助手，未解除保护。")
+                val voiceRevision = voiceCalls.revision.value
+                val calls = voiceCalls.list(conversationId = id, limit = 1000)
+                val activeCall = calls.size == 1000 || calls.any {
+                    it.status in setOf(OrbisVoiceCallStatus.CONNECTING, OrbisVoiceCallStatus.ACTIVE) ||
+                        it.archiveStatus == OrbisVoiceArchiveStatus.GENERATING
+                }
+                if (activeCall) return@withContext result(QueueRecoveryPhase.PENDING,
+                    if (calls.size == 1000) "通话记录超出本次安全核对范围，未解除保护，请联系技术支持。"
+                    else "请先结束当前通话，并等待通话整理完成；本次没有挂断或重做通话。")
+                if (before.currentMessages.any { it.getTools().any { tool -> !tool.isExecuted } })
+                    return@withContext result(QueueRecoveryPhase.PENDING,
+                        "有工具仍待审批或执行中，请先处理当前工具；本次没有批准或重做工具。")
+                if (queuePauseStore.status(id) == QueuePauseStatus.UNAVAILABLE)
+                    return@withContext result(QueueRecoveryPhase.PENDING,
+                        "本地队列保护记录暂时不可读，未解除保护；请检查存储，勿清除数据。")
+                var expectedHumanQueue = session.messageQueue.state.value
+                var expectedFresh = freshBefore
+                var expectedAutomatic = automaticBefore
+                var expectedGuard = guardBefore
+                fun transportClear(): Boolean = !session.gatewayRecoveryBlocked &&
+                    gatewayRecoveryHoldStore.status(id) == QueuePauseStatus.UNPAUSED &&
+                    gatewayRecoveryScopeStore.hasUnresolvedScope(id) == false &&
+                    endedGatewayRecoveries[conversationId].orEmpty().all { it.settled }
+                if (!transportClear()) return@withContext result(QueueRecoveryPhase.PENDING,
+                    "仍有旧连接未确认结束或连接保护记录不可读，请先核对连接；本次不会强行停止远端请求。")
+                fun stillOwner(): Boolean =
+                    sessions[conversationId] === session && session.isInitialized &&
+                        session.state.value == before && settingsStore.settingsFlow.value == settingsBefore &&
+                        session.messageQueue.state.value == expectedHumanQueue &&
+                        voiceCalls.revision.value == voiceRevision && !activeCall &&
+                        queueControls.isResetting(conversationId) && !gatewayStopInFlight.contains(conversationId) &&
+                        !session.hasUnfinishedJobs() && session.submittingMessage == null &&
+                        !session.manualContextWriteInProgress && !session.generationRecoveryBlocked &&
+                        before.currentMessages.none { it.getTools().any { tool -> !tool.isExecuted } } &&
+                        freshHumanStatus(session) == expectedFresh &&
+                        automaticWakeHoldStore.pauseReason(id) == expectedAutomatic &&
+                        futureAutomaticWakeRecoveryGuard.pauseReason(id) == expectedGuard &&
+                        queuePauseStore.status(id) != QueuePauseStatus.UNAVAILABLE && transportClear()
+                if (!mayRecoverFutureAutomaticWakes(freshBefore, automaticBefore,
+                        localReady = stillOwner(), transportClear = transportClear(), activeCall = activeCall))
+                    return@withContext result(QueueRecoveryPhase.PENDING,
+                        when {
+                            freshBefore !in setOf(FreshHumanRecoveryStatus.NONE, FreshHumanRecoveryStatus.DETACHED) ->
+                                "旧轮授权或助手归属尚待核对，不能只凭此按钮解除保护。"
+                            automaticBefore !in setOf(null, "unknown_tool_result", "legacy_unknown_tool_result") ->
+                                "自动事件仍有未确认保存的回执或其他保护原因，请先核对记录；不会补发。"
+                            else -> "会话、模型设置或本地保存状态已变化，请等待完成后再试；未解除保护。"
+                        })
+                if (freshBefore == FreshHumanRecoveryStatus.NONE && automaticBefore == null && guardBefore == null)
+                    return@withContext result(QueueRecoveryPhase.SUCCESS, "今后的哨兵没有被此保护暂停，无需恢复；未补发旧消息。")
+
+                // This lock order matches event admission: inbox -> session history. Events arriving
+                // after this boundary wait outside the transaction and retain their own identities.
+                var checkpointPresent = false
+                val restored = orbisEventDispatchMutex.withLock {
+                    session.orbisPromptEditMutex.withLock history@{
+                        checkpointPresent = withContext(Dispatchers.IO) { generationJournal.hasCheckpoint(conversationId) }
+                        if (checkpointPresent) return@history false
+                        synchronized(session) {
+                            val previousIds = orbisEvents.inbox.state.value.events.filter {
+                                it.conversationId == id && it.state in setOf("accepted", "queued")
+                            }.map { it.id }.toSet()
+                            commitFutureAutomaticWakeRecovery(
+                                stillOwner = ::stillOwner,
+                                establishGuard = {
+                                    futureAutomaticWakeRecoveryGuard.pause(id, guardReason)
+                                    check(futureAutomaticWakeRecoveryGuard.pauseReason(id) == guardReason)
+                                    expectedGuard = guardReason
+                                },
+                                preservePreviousInputs = {
+                                    session.messageQueue.holdAllInputsForFreshRecovery()
+                                    expectedHumanQueue = session.messageQueue.state.value
+                                    session.automaticWakeQueue.holdAllForRecovery()
+                                },
+                                suppressPreviousEvents = { previousIds.forEach {
+                                    orbisEvents.inbox.mark(it, "suppressed", "held_by_future_wake_recovery")
+                                } },
+                                verifyPreviousEvents = { orbisEvents.inbox.verifySuppressed(id, previousIds) },
+                                clearFreshRestriction = {
+                                    check(stillOwner())
+                                    // No unresolved transport exists on this deliberately local-only path.
+                                    freshHumanRecoveryStore.clearAfterConfirmedIdle(id, before.assistantId.toString())
+                                    expectedFresh = FreshHumanRecoveryStatus.NONE
+                                },
+                                acknowledgeAutomaticHold = {
+                                    check(stillOwner())
+                                    if (automaticBefore != null) check(automaticWakeHoldStore.resumeIfReason(id, automaticBefore))
+                                    expectedAutomatic = null
+                                    check(automaticWakeHoldStore.status(id) == QueuePauseStatus.UNPAUSED)
+                                },
+                                releaseGuard = {
+                                    check(stillOwner())
+                                    check(futureAutomaticWakeRecoveryGuard.resumeIfReason(id, guardReason))
+                                    check(futureAutomaticWakeRecoveryGuard.status(id) == QueuePauseStatus.UNPAUSED)
+                                },
+                            )
+                        }
+                    }
+                }
+                if (!restored) return@withContext result(QueueRecoveryPhase.PENDING,
+                    if (checkpointPresent) "本地回复恢复记录仍在收尾，保护保留；请等待保存完成后重试。"
+                    else "核对期间会话或配置有变化，保护保留，请稍后再试。")
+                freshHumanInputGates.remove(conversationId)
+                result(QueueRecoveryPhase.SUCCESS,
+                    "已恢复今后的哨兵。旧积压事件已保留为不再补发；旧消息、工具和通话均未重做。")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The durable guard, once established, is intentionally not cleared here.
+                // Its final removal might already have committed before a read-back failure.
+                result(QueueRecoveryPhase.FAILURE, "恢复保存结果尚未确认，未补发旧消息；请重新检查投递状态，勿清除数据。")
+            } finally {
+                queueControls.endLocalReset(conversationId)
+                acquiredSession?.release()
+                // No dispatch: only a subsequently accepted event may wake the automatic lane.
+            }
+        }
 
     /** Dismissing a failed-turn notice permits NEW input, not a replay or a remote-idle claim. */
     fun dismissPauseAndContinueFreshInput(conversationId: Uuid) = appScope.launch(Dispatchers.Main.immediate) {
@@ -2322,14 +2638,12 @@ class ChatService(
                 if (session.hasUnfinishedJobs() || session.state.value.currentMessages.any { it.getTools().any { tool -> !tool.isExecuted } })
                     return null
                 session.messageQueue.takeNext { freshHumanPermitted(session, it) }
-            } else takeNextConversationInput(
-                human = session.messageQueue, automatic = session.automaticWakeQueue,
-                busy = session.hasUnfinishedJobs(),
-                pendingApproval = session.state.value.currentMessages.any { message ->
-                    message.parts.any { it is UIMessagePart.Tool && it.isPending }
-                },
-                automaticAllowed = automaticWakeAllowed(session),
-            )) ?: return null
+            } else {
+                if (session.hasUnfinishedJobs() || session.state.value.currentMessages.any { message ->
+                        message.parts.any { it is UIMessagePart.Tool && it.isPending }
+                    }) null else session.messageQueue.takeNext()
+                // Automatic events use one-shot admission; this dispatcher never replays them.
+            }) ?: return null
             session.submittingMessage = next
             return sendQueuedMessage(session, next, requireImageInput =
                 next.voiceCallKind == "visual" || next.orbisEventId != null && next.parts.any { it is UIMessagePart.Image })
@@ -2416,11 +2730,13 @@ class ChatService(
                     }
                 }
                 if (queued.orbisEventId != null && !automaticWakeAllowed(session)) {
-                    // Recovery can discover an unresolved external write AFTER selection. Keep the
-                    // undispatched wake in its own lane; do not label it sent or spin/retry a model.
-                    session.automaticWakeQueue.enqueue(content, answer, queued.id, queued.orbisEventId)
+                    // Admission may change while local recovery suspends. End this one event,
+                    // never requeue it and never let it become a permanent predecessor.
                     withContext(Dispatchers.IO) {
-                        orbisEvents.inbox.mark(queued.orbisEventId, "queued", "automatic_safety_hold")
+                        recordAutomaticReceiptSafely(session) {
+                            orbisEvents.inbox.mark(queued.orbisEventId, "skipped",
+                                automaticWakeRestriction(session) ?: "wake_admission_changed")
+                        }
                     }
                     return@launchGenerationJob
                 }
@@ -2647,10 +2963,10 @@ class ChatService(
                 }
                 queued.orbisEventId?.let { id ->
                     withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                        if (!eventInputCommitted && session.generationRecoveryBlocked) {
-                            session.automaticWakeQueue.enqueue(content, answer, queued.id, id)
+                        if (!eventInputCommitted && !inputSaveAttempted) {
                             recordAutomaticReceiptSafely(session) {
-                                orbisEvents.inbox.mark(id, "queued", "automatic_safety_hold")
+                                orbisEvents.inbox.mark(id, "skipped",
+                                    automaticWakeRestriction(session) ?: "wake_preflight_failed")
                             }
                         } else {
                             recordAutomaticReceiptSafely(session) {
@@ -3504,10 +3820,16 @@ class ChatService(
 
             if (it is CancellationException) throw it
 
-            it.printStackTrace()
-            addError(it, conversationId, title = context.getString(R.string.error_title_generation))
-            Logging.log(TAG, "handleMessageComplete: $it")
-            Logging.log(TAG, it.stackTraceToString())
+            if (it is me.rerere.rikkahub.data.ai.transformers.ScreenShareFrameRevokedException && mayContinue) {
+                // Turning off sharing is a normal privacy control, not a modal model failure.
+                // Do not retry this generation or its tools; following independent input is safe.
+                OrbisScreenShareRuntime.getIfInitialized()?.setNotice("画面已关闭，本轮未继续发送图片；可直接打字或说话继续。")
+            } else {
+                it.printStackTrace()
+                addError(it, conversationId, title = context.getString(R.string.error_title_generation))
+                Logging.log(TAG, "handleMessageComplete: $it")
+                Logging.log(TAG, it.stackTraceToString())
+            }
             if (consultationTurn != null) throw it
         }.onSuccess {
             val finalConversation = getConversationFlow(conversationId).value

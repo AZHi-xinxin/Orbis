@@ -46,7 +46,8 @@ import me.rerere.rikkahub.ui.components.message.orbisEventReceivedTime
 import me.rerere.rikkahub.ui.components.message.orbisEventSourceLabel
 
 /**
- * Human-facing read-only inspection. The only configuration callback is the human master switch.
+ * Human-facing inspection. Only the master switch changes rule configuration; explicit recovery
+ * acknowledges old undelivered events without changing rules or replaying them.
  * No service/store lookup, permission request, rule editor or prompt transformation lives here.
  */
 @Composable
@@ -61,6 +62,10 @@ internal fun OrbisSentinelPanel(
     legacyOwned: Boolean = false,
     saving: Boolean = false,
     notice: String? = null,
+    recoveryConversationIds: Set<String> = emptySet(),
+    recoveryNotices: Map<String, String> = emptyMap(),
+    recoveringConversationId: String? = null,
+    onRecoverFutureAutomaticWakes: (String) -> Unit = {},
     onHumanMasterChange: (Boolean) -> Unit,
 ) {
     var recordLimit by rememberSaveable { mutableIntStateOf(10) }
@@ -72,7 +77,7 @@ internal fun OrbisSentinelPanel(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("哨兵与自我唤醒", style = MaterialTheme.typography.titleMedium)
-            Text("AI 自由选择类别、时间和内容；人类只设置总开关。以下均可展开查看，没有分项修改开关。",
+            Text("AI 自由选择类别、时间和内容；人类控制总开关，也可处理投递暂停。以下均可展开查看，没有分项修改开关。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -82,7 +87,7 @@ internal fun OrbisSentinelPanel(
                         else "自动唤醒已暂停；规则和历史保留，重新开启不补发暂停期间的事件。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                StarSwitch(checked = state.enabled, enabled = !saving,
+                StarSwitch(checked = state.enabled, enabled = !saving && recoveringConversationId == null,
                     onCheckedChange = onHumanMasterChange,
                     modifier = Modifier.testTag("sentinel-human-master").semantics {
                         contentDescription = "自动唤醒总开关，仅人类可修改"
@@ -90,6 +95,26 @@ internal fun OrbisSentinelPanel(
             }
             if (saving) Text("正在保存总开关…", style = MaterialTheme.typography.bodySmall)
             if (notice != null) Text(notice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            (recoveryConversationIds + recoveryNotices.keys).forEach { conversationId ->
+                Column(Modifier.fillMaxWidth().testTag("sentinel-recovery-$conversationId"),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${conversationNames[conversationId] ?: "固定会话"} · 自动投递恢复",
+                        style = MaterialTheme.typography.titleSmall)
+                    if (conversationId in recoveryConversationIds) {
+                        Text("旧轮的保护仍在阻止自动投递。恢复仅允许之后的新事件；积压提醒保留记录但不补发，未知工具不重做，旧通话不重连。",
+                            style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { onRecoverFutureAutomaticWakes(conversationId) },
+                            enabled = !saving && recoveringConversationId == null,
+                            modifier = Modifier.testTag("sentinel-recover-future-$conversationId")) {
+                            Text(if (recoveringConversationId == conversationId) "正在检查并保存…" else "恢复后续哨兵")
+                        }
+                    }
+                    recoveryNotices[conversationId]?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("sentinel-recovery-result-$conversationId"))
+                    }
+                }
+            }
             orbisSentinelCategories.forEach { category ->
                 val matching = state.rules.filter { it.type in category.types }
                 SentinelReadOnlyDisclosure("sentinel-category-${category.id}", category.title,
@@ -120,7 +145,7 @@ internal fun OrbisSentinelPanel(
                 Text("总开关同时控制本机哨兵和旧来源的自动唤醒；关闭会停止仍在生成的哨兵回复，已执行的工具不会被撤回。", style = MaterialTheme.typography.bodySmall)
                 Text("每次事件自动附带宿主的真实日期、时间和时区。规则长期保存；后台、省电、权限、网络和模型服务仍影响执行，不保证到点出声。打开此页不创建规则、不发送测试。", style = MaterialTheme.typography.bodySmall)
                 Text(if (legacyOwned) "旧链路归属已核对。"
-                    else "旧链路迁移中：发送端归属尚未核实。收到事件不代表旧发送端已关闭，也不代表迁移完成。",
+                    else "本机哨兵直接投递到固定对话。旧外部发送端是否停用尚未核实，这不代表本机哨兵未连接；请查看下方送达记录。",
                     modifier = Modifier.testTag("sentinel-legacy-status"), style = MaterialTheme.typography.bodySmall)
             }
             SentinelReadOnlyDisclosure("sentinel-executions", "本机执行记录 · ${records.size} 条") {
@@ -155,7 +180,9 @@ internal fun OrbisSentinelPanel(
                     "${orbisEventSourceLabel(receipt.source)} · ${orbisSentinelReceiptStateLabel(receipt.state)} · ${orbisEventReceivedTime(receipt.receivedAt)}") {
                     SentinelTarget(receipt.assistantId, receipt.conversationId, assistantNames, conversationNames)
                     SentinelReadOnlyField("事件标识", receipt.eventId)
-                    receipt.error?.let { SentinelReadOnlyField("结果说明", it) }
+                    receipt.error?.let { SentinelReadOnlyField("结果说明", orbisWakeReasonLabel(it)) }
+                    if (receipt.state == "skipped") Text("本次未发送，原文留在这里，不会补发；之后的新事件单独检查。",
+                        style = MaterialTheme.typography.bodySmall)
                     if (receipt.state == "unknown") Text("无法确认是否完成；请先查看固定会话，避免重复唤醒。",
                         style = MaterialTheme.typography.bodySmall)
                     SentinelReadOnlyField("收到的原文", receipt.text)
@@ -305,4 +332,24 @@ internal fun orbisSentinelExecutionStatusLabel(status: OrbisSentinelExecutionSta
 internal fun orbisSentinelReceiptStateLabel(state: String): String = when (state) {
     "suppressed" -> "已暂停，未唤醒"
     else -> orbisReceiptStateLabel(state)
+}
+
+internal fun orbisWakeReasonLabel(reason: String): String = when (reason) {
+    "wake_reply_in_progress" -> "触发时正在处理另一条回复或保存其结果。"
+    "wake_save_in_progress" -> "触发时正在保存会话。"
+    "wake_tool_pending" -> "当前有工具仍待审批或执行结束，没有替你批准或重做工具。"
+    "wake_human_input_first" -> "触发时有新的用户消息待发送，优先处理用户消息。"
+    "wake_gateway_unconfirmed" -> "旧连接尚未确认结束；这不是本条提醒在排队。可检查并恢复后续哨兵。"
+    "wake_fresh_input_only" -> "此前中断后仅恢复了新的人类输入，自动投递还未恢复。"
+    "wake_unknown_tool_result" -> "旧工具结果未知，自动投递需要确认；不会重新执行旧工具。"
+    "wake_storage_unavailable" -> "保护记录暂时不可读，请检查手机存储，勿清除应用数据。"
+    "wake_local_recovery_unconfirmed" -> "旧回复的本地恢复尚未确认，原记录保留。"
+    "wake_receipt_unconfirmed" -> "先前的回复或执行回执尚未确认保存，请检查存储。"
+    "wake_recovery_in_progress" -> "触发时正在核对连接或恢复本地记录。"
+    "wake_recovery_commit_unconfirmed" -> "上次恢复操作尚未确认保存，可重新检查恢复。"
+    "wake_owner_changed" -> "原连接的助手归属已变化，未把提醒送给其他助手。"
+    "wake_restart_no_replay" -> "这是重启前未发送的旧提醒，已结束本次，不再补发。"
+    "wake_preflight_failed" -> "本次发送准备未完成，尚未调用模型或工具。"
+    "wake_admission_changed" -> "发送前状态发生变化，本次未发送。"
+    else -> reason
 }

@@ -118,7 +118,8 @@ class OrbisSentinels private constructor(private val context: Context) {
         val chat = GlobalContext.get().get<ChatService>()
         val receipt = chat.orbisEvents.inbox.receipt("native_sentinel.${rule.id}", pending)
         if (receipt != null && receipt.state != "suppressed" && rule.pendingText != null) {
-            rules.completeFire(rule.id, pending, System.currentTimeMillis())
+            rules.completeFire(rule.id, pending, System.currentTimeMillis(),
+                skippedReason = if (receipt.state == "skipped") receipt.error ?: "wake_admission_changed" else null)
         } else {
             rules.abandonPending(rule.id, pending, System.currentTimeMillis(), "pending_cancelled_without_replay")
             rules.rearm(rule.id, System.currentTimeMillis())
@@ -178,7 +179,7 @@ class OrbisSentinels private constructor(private val context: Context) {
                         (it.orbisVoiceCallKind == null || it.orbisVoiceCallKind == "turn")
                 }?.createdAt?.toInstant(TimeZone.currentSystemDefault())?.toEpochMilliseconds() ?: conversation.createAt.toEpochMilli()
                 val lastWake = chat.orbisEvents.inbox.state.value.events.asSequence().filter {
-                    it.conversationId == rule.conversationId && it.state !in setOf("suppressed", "failed", "target_invalid")
+                    it.conversationId == rule.conversationId && it.state !in setOf("suppressed", "skipped", "failed", "target_invalid")
                 }.maxOfOrNull { it.receivedAt } ?: 0L
                 val lastMessage = conversation.currentMessages.maxOfOrNull {
                     (it.finishedAt ?: it.createdAt).toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
@@ -273,7 +274,8 @@ class OrbisSentinels private constructor(private val context: Context) {
             if (receipt.state == "suppressed") {
                 rules.abandonPending(initial.id, id, System.currentTimeMillis(), "human_master_paused")
                 rules.rearm(initial.id, System.currentTimeMillis())
-            } else if (initial.pendingText != null) rules.completeFire(initial.id, id, System.currentTimeMillis())
+            } else if (initial.pendingText != null) rules.completeFire(initial.id, id, System.currentTimeMillis(),
+                skippedReason = if (receipt.state == "skipped") receipt.error ?: "wake_admission_changed" else null)
             return // A durable/uncertain receipt is never a reason to generate again.
         }
         var rule = initial
@@ -310,8 +312,10 @@ class OrbisSentinels private constructor(private val context: Context) {
         ), expectedSentinelGeneration = rule.pendingMasterGeneration ?: 0L)
         if (accepted.first.state == "suppressed") rules.abandonPending(rule.id, id, System.currentTimeMillis(), "human_master_paused")
         else {
-            rules.completeFire(rule.id, id, System.currentTimeMillis())
-            if (!accepted.second && mayDeliver(accepted.first)) notifySentinelAccepted(context, rule, accepted.first)
+            rules.completeFire(rule.id, id, System.currentTimeMillis(),
+                skippedReason = if (accepted.first.state == "skipped") accepted.first.error ?: "wake_admission_changed" else null)
+            if (!accepted.second && accepted.first.state != "skipped" && mayDeliver(accepted.first))
+                notifySentinelAccepted(context, rule, accepted.first)
         }
     }
 
@@ -348,7 +352,7 @@ class OrbisSentinels private constructor(private val context: Context) {
                 val reservation = rules.evaluateAndReserve(rule.id, id, facts,
                     expectedUpdatedAtMs = rule.updatedAtMs, expectedMasterGeneration = state.masterGeneration) ?: return@forEach
                 deliver(reservation.rule, chat)
-                if (chat.orbisEvents.inbox.receipt("native_sentinel.${rule.id}", id)?.state !in setOf(null, "suppressed")) delivered++
+                if (chat.orbisEvents.inbox.receipt("native_sentinel.${rule.id}", id)?.state !in setOf(null, "suppressed", "skipped")) delivered++
             }
             ingress.finish("touch", eventId, if (delivered > 0) "accepted" else "suppressed", delivered) to false
         } catch (cancel: CancellationException) {
@@ -410,7 +414,7 @@ class OrbisSentinels private constructor(private val context: Context) {
             val existing = chat.orbisEvents.inbox.receipt("native_sentinel.${rule.id}", job.eventId)
             if (existing != null) {
                 if (rule.pendingEventId == job.eventId) settlePending(rule)
-                locations.mark(job, if (existing.state == "suppressed") "cancelled" else "accepted", now)
+                locations.mark(job, if (existing.state in setOf("suppressed", "skipped")) "cancelled" else "accepted", now)
                 continue
             }
             val reservation = rules.evaluateAndReserve(rule.id, job.eventId,
@@ -418,7 +422,7 @@ class OrbisSentinels private constructor(private val context: Context) {
                 expectedUpdatedAtMs = rule.updatedAtMs, expectedMasterGeneration = state.masterGeneration) ?: continue
             deliver(reservation.rule, chat, sentinelLocationFacts(job, trip))
             val receipt = chat.orbisEvents.inbox.receipt("native_sentinel.${rule.id}", job.eventId)
-            locations.mark(job, if (receipt == null) "unknown" else if (receipt.state == "suppressed") "cancelled" else "accepted", now)
+            locations.mark(job, if (receipt == null) "unknown" else if (receipt.state in setOf("suppressed", "skipped")) "cancelled" else "accepted", now)
           } catch (cancel: CancellationException) { throw cancel }
           catch (_: Exception) {
               retryAfter[job.ruleId] = now + 60_000

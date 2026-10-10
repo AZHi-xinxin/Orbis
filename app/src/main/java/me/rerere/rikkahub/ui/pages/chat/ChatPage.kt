@@ -57,6 +57,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,12 +122,14 @@ import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.importSystemSharedAttachments
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatInput
+import me.rerere.rikkahub.ui.activity.OrbisScreenShareActivity
 import me.rerere.rikkahub.ui.components.ai.FilesPicker
 import me.rerere.rikkahub.ui.components.ai.InjectionQuickConfigSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
@@ -160,6 +163,7 @@ fun ChatPage(
         }
     )
     val filesManager: FilesManager = koinInject()
+    val sharedAttachmentToaster = LocalToaster.current
     val navController = LocalNavController.current
     val scope = rememberCoroutineScope()
 
@@ -251,25 +255,13 @@ fun ChatPage(
     }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
-    LaunchedEffect(files, text) {
+    LaunchedEffect(id, files, text) {
         if (files.isNotEmpty()) {
-            val localFiles = filesManager.createChatFilesByContents(files)
-            val contentTypes = files.mapNotNull { file ->
-                filesManager.getFileMimeType(file)
+            val parts = importSystemSharedAttachments(files, filesManager) { notice ->
+                sharedAttachmentToaster.show(notice, type = ToastType.Error)
             }
-            val parts = buildList {
-                localFiles.forEachIndexed { index, file ->
-                    val type = contentTypes.getOrNull(index)
-                    if (type?.startsWith("image/") == true) {
-                        add(UIMessagePart.Image(url = file.toString()))
-                    } else if (type?.startsWith("video/") == true) {
-                        add(UIMessagePart.Video(url = file.toString()))
-                    } else if (type?.startsWith("audio/") == true) {
-                        add(UIMessagePart.Audio(url = file.toString()))
-                    }
-                }
-            }
-            inputState.messageContent = parts
+            // Keep an existing draft if every imported item failed; never send automatically.
+            if (parts.isNotEmpty()) inputState.messageContent = inputState.messageContent + parts
         }
         text?.base64Decode()?.let { decodedText ->
             if (decodedText.isNotEmpty()) {
@@ -414,6 +406,7 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val screenShareContext = LocalContext.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
@@ -653,6 +646,12 @@ private fun ChatPageContent(
                             openMcpSettings = { navController.navigate(Screen.OrbisMcpSettings) { launchSingleTop = true } },
                             openContext = onManualContext,
                             openExtensions = { showOrbisExtensions = true },
+                            openScreenShare = {
+                                // Use this conversation's owner, never a global selected-assistant
+                                // preference which may have changed in another window.
+                                screenShareContext.startActivity(OrbisScreenShareActivity.intent(
+                                    screenShareContext, conversation.assistantId.toString(), conversation.id.toString()))
+                            },
                         )
                     },
                 )

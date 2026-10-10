@@ -59,6 +59,7 @@ private val ALLOWED_FILE_EXTENSIONS = setOf(
 )
 
 fun isAllowedFileType(fileName: String, mime: String): Boolean {
+    if (me.rerere.rikkahub.data.files.ZipAttachmentArchive.isZip(fileName, mime)) return true
     if (mime in ALLOWED_MIME_TYPES || mime.startsWith("text/")) return true
     val extension = fileName.substringAfterLast('.', "").lowercase()
     return extension in ALLOWED_FILE_EXTENSIONS

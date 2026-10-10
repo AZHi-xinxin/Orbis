@@ -20,6 +20,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.orbis.sentinel.OrbisSentinels
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.QueueRecoveryPhase
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
@@ -47,7 +48,19 @@ internal fun OrbisSentinelSettingsPanel() {
     var conversationNames by remember { mutableStateOf(emptyMap<String, String>()) }
     var saving by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var recoveryConversationIds by remember { mutableStateOf(emptySet<String>()) }
+    var recoveryNotices by remember { mutableStateOf(emptyMap<String, String>()) }
+    var recoveringConversationId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(targetIds, inbox.events, recoveringConversationId) {
+        if (recoveringConversationId == null) {
+            recoveryConversationIds = withContext(Dispatchers.IO) {
+                targetIds.filter { id ->
+                    runCatching { chat.futureAutomaticWakeRecoveryNeeded(Uuid.parse(id)) }.getOrDefault(true)
+                }.toSet()
+            }
+        }
+    }
     LaunchedEffect(targetIds) {
         conversationNames = withContext(Dispatchers.IO) {
             targetIds.mapNotNull { id ->
@@ -69,8 +82,32 @@ internal fun OrbisSentinelSettingsPanel() {
         legacyOwned = false,
         saving = saving,
         notice = notice,
+        recoveryConversationIds = recoveryConversationIds,
+        recoveryNotices = recoveryNotices,
+        recoveringConversationId = recoveringConversationId,
+        onRecoverFutureAutomaticWakes = { id ->
+            if (!saving && recoveringConversationId == null && id in recoveryConversationIds) {
+                recoveringConversationId = id
+                recoveryNotices = recoveryNotices - id
+                scope.launch {
+                    try {
+                        // A deliberate one-tap acknowledgement must finish even if the page closes.
+                        val result = withContext(NonCancellable) {
+                            chat.recoverFutureAutomaticWakes(Uuid.parse(id))
+                        }
+                        recoveryNotices = recoveryNotices + (id to result.message)
+                        if (result.phase == QueueRecoveryPhase.SUCCESS) {
+                            recoveryConversationIds = recoveryConversationIds - id
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) {
+                        recoveryNotices = recoveryNotices + (id to "恢复结果尚未确认，原记录仍保留；没有补发旧提醒。请稍后重新检查。")
+                    } finally { recoveringConversationId = null }
+                }
+            }
+        },
         onHumanMasterChange = { enabled ->
-            if (!saving) {
+            if (!saving && recoveringConversationId == null) {
                 saving = true
                 notice = null
                 scope.launch {

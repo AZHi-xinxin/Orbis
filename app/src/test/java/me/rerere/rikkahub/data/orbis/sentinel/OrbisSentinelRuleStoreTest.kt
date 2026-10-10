@@ -12,6 +12,33 @@ import org.junit.Test
 
 /** In-memory synthetic storage only; never starts observation, delivery, or Android services. */
 class OrbisSentinelRuleStoreTest {
+    @Test fun `skipped wake finishes one occurrence and preserves next periodic wake`() {
+        val disk = Storage(); val store = disk.open()
+        store.create(rule())
+        store.reserveFire("rule-1", "skip-first", 200)
+        store.stageEventText("rule-1", "skip-first", "synthetic skipped content")
+        store.completeFire("rule-1", "skip-first", 300, skippedReason = "wake_reply_in_progress")
+        val reopened = disk.open()
+        assertNull(reopened.get("rule-1")!!.pendingEventId)
+        assertTrue(reopened.get("rule-1")!!.enabled)
+        assertTrue(reopened.get("rule-1")!!.armed)
+        assertEquals(300L, reopened.get("rule-1")!!.lastFiredAtMs)
+        assertEquals(OrbisSentinelExecutionStatus.CANCELLED, reopened.executions().single().status)
+        assertEquals("wake_reply_in_progress", reopened.executions().single().detail)
+        assertNull(reopened.reserveFire("rule-1", "too-early", 400))
+        assertNotNull(reopened.reserveFire("rule-1", "fresh-next", 1300))
+    }
+
+    @Test fun `skipped once notification is not repeatedly rearmed`() {
+        val store = Storage().open()
+        store.create(rule().copy(type = OrbisSentinelType.ONCE, intervalMs = null, dueAtMs = 200))
+        store.reserveFire("rule-1", "skip-once", 200)
+        store.stageEventText("rule-1", "skip-once", "synthetic once content")
+        store.completeFire("rule-1", "skip-once", 300, skippedReason = "wake_gateway_unconfirmed")
+        assertFalse(store.get("rule-1")!!.enabled)
+        assertNull(store.reserveFire("rule-1", "must-not-retry", 3000))
+    }
+
     @Test fun `observation failure reason remains valid and survives storage restart`() {
         val disk = Storage(); val store = disk.open()
         store.create(rule())

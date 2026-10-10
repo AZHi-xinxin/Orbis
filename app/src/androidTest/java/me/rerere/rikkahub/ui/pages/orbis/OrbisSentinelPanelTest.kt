@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -50,10 +51,16 @@ class OrbisSentinelPanelTest {
 
     private fun show(state: OrbisSentinelState = OrbisSentinelState(enabled = true, rules = listOf(rule)),
         inbox: OrbisInboxState = OrbisInboxState(), saving: Boolean = false, runtimeRunning: Boolean = false,
-        runtimeError: String? = null, legacyOwned: Boolean = false, onChange: (Boolean) -> Unit = { error("Opening must not mutate") }) {
+        runtimeError: String? = null, legacyOwned: Boolean = false,
+        recoveryConversationIds: Set<String> = emptySet(), recoveryNotices: Map<String, String> = emptyMap(),
+        recoveringConversationId: String? = null,
+        onRecover: (String) -> Unit = { error("Opening must not recover") },
+        onChange: (Boolean) -> Unit = { error("Opening must not mutate") }) {
         compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
             OrbisSentinelPanel(state = state, assistantNames = mapOf(rule.assistantId to "合成 AI"), inbox = inbox,
                 runtimeRunning = runtimeRunning, runtimeError = runtimeError, saving = saving, legacyOwned = legacyOwned,
+                recoveryConversationIds = recoveryConversationIds, recoveryNotices = recoveryNotices,
+                recoveringConversationId = recoveringConversationId, onRecoverFutureAutomaticWakes = onRecover,
                 onHumanMasterChange = onChange)
         } } }
     }
@@ -110,8 +117,55 @@ class OrbisSentinelPanelTest {
         compose.onNodeWithTag("sentinel-diagnostics").performScrollTo().performClick()
         compose.onNodeWithText("本地哨兵调度：当前未运行").assertExists()
         compose.onNodeWithText("本机状态提示：synthetic_background_blocked").assertExists()
-        compose.onNodeWithText("旧链路迁移中：发送端归属尚未核实。收到事件不代表旧发送端已关闭，也不代表迁移完成。").assertExists()
+        compose.onNodeWithText("本机哨兵直接投递到固定对话。旧外部发送端是否停用尚未核实，这不代表本机哨兵未连接；请查看下方送达记录。").assertExists()
         compose.onNodeWithText("旧链路归属已核对。").assertDoesNotExist()
+    }
+
+    @Test fun openingRecoveryDoesNotSubmitOrAddRuleControlsAndExplainsNoReplay() {
+        show(recoveryConversationIds = setOf(rule.conversationId))
+        compose.onNodeWithTag("sentinel-recover-future-${rule.conversationId}")
+            .performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("旧轮的保护仍在阻止自动投递。恢复仅允许之后的新事件；积压提醒保留记录但不补发，未知工具不重做，旧通话不重连。")
+            .assertExists()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState)).assertCountEquals(1)
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.EditableText)).assertCountEquals(0)
+        compose.onNodeWithText("恢复后续哨兵").assertExists()
+        compose.onNodeWithText("重发积压提醒").assertDoesNotExist()
+    }
+
+    @Test fun oneRecoveryTapTargetsExactConversationAndDisablesAllConcurrentControls() {
+        val other = "synthetic-other-chat"
+        val requested = mutableListOf<String>()
+        var recovering by mutableStateOf<String?>(null)
+        compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
+            OrbisSentinelPanel(state = OrbisSentinelState(enabled = true, rules = listOf(rule)),
+                recoveryConversationIds = linkedSetOf(rule.conversationId, other),
+                recoveringConversationId = recovering,
+                onRecoverFutureAutomaticWakes = { requested += it; recovering = it },
+                onHumanMasterChange = { error("Recovery must not change the master") })
+        } } }
+        compose.runOnIdle { assertEquals(emptyList<String>(), requested) }
+        compose.onNodeWithTag("sentinel-recover-future-$other").performScrollTo().performClick().assertIsNotEnabled()
+        compose.onNodeWithTag("sentinel-recover-future-${rule.conversationId}").assertIsNotEnabled()
+        compose.onNodeWithTag("sentinel-human-master").assertIsNotEnabled().assertIsOn()
+        compose.onNodeWithText("正在检查并保存…").assertExists()
+        compose.runOnIdle { assertEquals(listOf(other), requested) }
+    }
+
+    @Test fun savingMasterAlsoPreventsRecoverySubmission() {
+        show(saving = true, recoveryConversationIds = setOf(rule.conversationId))
+        compose.onNodeWithTag("sentinel-recover-future-${rule.conversationId}").assertIsNotEnabled()
+        compose.onNodeWithTag("sentinel-human-master").assertIsNotEnabled()
+    }
+
+    @Test fun completedRecoveryKeepsResultWithoutOfferingReplayOrClaimingAiReplied() {
+        val notice = "合成结果：已允许之后的新事件，旧积压未补发。"
+        show(recoveryNotices = mapOf(rule.conversationId to notice))
+        compose.onNodeWithTag("sentinel-recovery-result-${rule.conversationId}").performScrollTo().assertExists()
+        compose.onNodeWithText(notice).assertExists()
+        compose.onNodeWithTag("sentinel-recover-future-${rule.conversationId}").assertDoesNotExist()
+        compose.onNodeWithText("已回复").assertDoesNotExist()
+        compose.onNodeWithTag("sentinel-human-master").assertIsEnabled().assertIsOn()
     }
 
     @Test fun acceptedExecutionIsNotPresentedAsAnAiReply() {

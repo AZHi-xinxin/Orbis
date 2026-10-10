@@ -8,6 +8,8 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.hostToolFailure
+import me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 
@@ -83,6 +85,14 @@ internal fun orbisCallFiles(nodes: List<MessageNode>): List<OrbisCallFile> {
 }
 
 private val workspaceWriteKeys = setOf("path", "name", "isDirectory", "sizeBytes", "updatedAt")
+
+/** Structured, successful tool attachments stay visible even if the tool's details are collapsed. */
+internal fun orbisToolDocuments(parts: List<UIMessagePart>, messageId: String): List<OrbisCallFile.Document> =
+    parts.filterIsInstance<UIMessagePart.Tool>()
+        .filter { it.isExecuted && it.approvalState !is ToolApprovalState.Denied &&
+            !isPrivateRoomToolName(it.toolName) && it.hostToolFailure() == null }
+        .flatMap { it.output.filterIsInstance<UIMessagePart.Document>() }
+        .mapNotNull { safeCallDocument(it, messageId) }.distinctBy { it.key }
 private val workspaceEditKeys = setOf("path", "replacements", "matchStrategy", "sizeBytes", "updatedAt")
 private val receiptJson = Json { isLenient = false }
 

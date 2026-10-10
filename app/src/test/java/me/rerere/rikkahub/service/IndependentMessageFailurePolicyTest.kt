@@ -51,4 +51,23 @@ class IndependentMessageFailurePolicyTest {
         val previous = listOf(UIMessage.assistant("").copy(parts = listOf(tool))) + before
         assertFalse(canContinueAfterIndependentModelFailure(http(503), previous, previous + UIMessage.assistant("text"), false))
     }
+
+    @Test fun `local picture revocation releases independent input even after completed tools without replay`() {
+        val error = me.rerere.rikkahub.data.ai.transformers.ScreenShareFrameRevokedException()
+        val tool = UIMessagePart.Tool(toolCallId = "synthetic", toolName = "toy", input = "{}", output = listOf(UIMessagePart.Text("done")))
+        val completed = before + UIMessage.assistant("").copy(parts = listOf(tool))
+        assertTrue(allowed(error, completed))
+        assertEquals("done", completed.last().getTools().single().output.filterIsInstance<UIMessagePart.Text>().single().text)
+        assertFalse(allowed(error, completed, blocked = true))
+    }
+
+    @Test fun `picture revocation never bypasses uncertain tool execution`() {
+        val error = me.rerere.rikkahub.data.ai.transformers.ScreenShareFrameRevokedException()
+        val pending = UIMessagePart.Tool(toolCallId = "synthetic", toolName = "toy", input = "{}")
+        listOf(pending, pending.withHostToolFailure(HostToolFailure.INTERRUPTED)).forEach {
+            assertFalse(allowed(error, before + UIMessage.assistant("").copy(parts = listOf(it))))
+        }
+        val server = UIMessagePart.ServerTool("server-call", "server-action", status = ServerToolStatus.IN_PROGRESS)
+        assertFalse(allowed(error, before + UIMessage.assistant("").copy(parts = listOf(server))))
+    }
 }

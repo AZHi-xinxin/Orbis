@@ -15,6 +15,25 @@ class OrbisManualChaptersTest {
     }
     private fun guide(id: String) = orbisManualReadChapter(id, emptySet(), limit = 10).toString()
 
+    @Test fun `zip guide describes bidirectional files with bounded text support and no execution`() {
+        val chapter = orbisManualChapters.single { it.id == "zip_files" }
+        assertTrue(chapter.uiPath.contains("＋ 能力 → 文件"))
+        val text = guide("zip_files")
+        listOf("orbis_zip_read", "orbis_zip_create", "list_archives", "read_text", "UTF-8",
+            "32 MiB", "1024", "8000", "不执行", "保存 / 导出", "不是系统指令",
+            "非文本条目只显示目录信息").forEach { assertTrue(it, text.contains(it)) }
+    }
+
+    @Test fun `screen sharing guide names the visible custom capability entry and explicit consent`() {
+        val chapter = orbisManualChapters.single { it.id == "screen_share" }
+        assertEquals("聊天输入框左侧 ＋ → ＋ 能力 → 屏幕共享", chapter.uiPath)
+        val text = guide("screen_share")
+        listOf("开始共享", "系统投影许可", "不会采集画面或开启麦克风", "取消授权").forEach {
+            assertTrue(it, text.contains(it))
+        }
+        assertFalse(text.contains("附件面板"))
+    }
+
     @Test fun `chapter IDs unique and all sections stay within per call size budget`() {
         assertEquals(orbisManualChapters.size, orbisManualChapters.map { it.id }.distinct().size)
         orbisManualChapters.forEach {

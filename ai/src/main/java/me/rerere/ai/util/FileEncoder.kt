@@ -68,9 +68,7 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
         }
 
         this.url.startsWith("data:") -> {
-            // 从 data URL 提取 mime type
-            val mimeType = url.substringAfter("data:").substringBefore(";")
-            EncodedImage(base64 = url, mimeType = mimeType)
+            encodeImageDataUri(url, withPrefix)
         }
         this.url.startsWith("http") -> {
             // HTTP URL 无法确定 mime type，默认使用 image/png
@@ -78,6 +76,19 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
         }
         else -> throw IllegalArgumentException("Unsupported URL format: $url")
     }
+}
+
+/** In-memory images use the same prefix contract as file-backed images. No disk cache is needed. */
+internal fun encodeImageDataUri(url: String, withPrefix: Boolean): EncodedImage {
+    val comma = url.indexOf(',')
+    require(url.startsWith("data:") && comma > 5 && comma < url.lastIndex) {
+        "Invalid image data URI"
+    }
+    val metadata = url.substring(5, comma).split(';')
+    val mimeType = metadata.first()
+    require(mimeType.startsWith("image/", ignoreCase = true) &&
+        metadata.last().equals("base64", ignoreCase = true)) { "Expected a base64 image data URI" }
+    return EncodedImage(base64 = if (withPrefix) url else url.substring(comma + 1), mimeType = mimeType)
 }
 
 fun UIMessagePart.Video.encodeBase64(withPrefix: Boolean = true): Result<String> = runCatching {

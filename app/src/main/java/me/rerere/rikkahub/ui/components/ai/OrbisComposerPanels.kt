@@ -46,7 +46,8 @@ internal fun OrbisCapabilityPanel(onAction: (OrbisComposerAction) -> Unit) {
         OrbisComposerAction.entries.filterNot { it == OrbisComposerAction.CONTEXT }.chunked(3).forEach { actions ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 actions.forEach { action ->
-                    Surface(onClick = { onAction(action) }, modifier = Modifier.weight(1f),
+                    Surface(onClick = { onAction(action) },
+                        modifier = Modifier.weight(1f).testTag("orbis-capability-${action.name.lowercase()}"),
                         shape = RoundedCornerShape(12.dp), color = OrbisTheme.colors.raisedPanel,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))) {
                         Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(5.dp),
@@ -60,7 +61,7 @@ internal fun OrbisCapabilityPanel(onAction: (OrbisComposerAction) -> Unit) {
                 repeat(3 - actions.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        Text("文件先加入草稿；工具配置可能对同一 AI 的其他窗口生效，以配置页为准。展开面板不执行工具。",
+        Text("文件先加入草稿；屏幕共享需再点击开始并完成系统授权。工具配置可能对同一 AI 的其他窗口生效。展开面板不执行工具。",
             fontSize = 10.sp, lineHeight = 15.sp, color = OrbisTheme.colors.mutedInk)
     }
 }

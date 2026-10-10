@@ -14,20 +14,29 @@ class OrbisComposerTest {
         assertEquals(OrbisComposerPanel.VOICE, toggleOrbisComposerPanel(OrbisComposerPanel.EMOTIONS, OrbisComposerPanel.VOICE))
     }
     @Test fun capabilitiesKeepPrototypeOrderWithoutExecuteAction() {
-        assertEquals(listOf("CAMERA", "IMAGE", "FILE", "TOOLS", "CONTEXT", "EXTENSIONS"), OrbisComposerAction.entries.map { it.name })
+        assertEquals(listOf("CAMERA", "IMAGE", "FILE", "SCREEN_SHARE", "TOOLS", "CONTEXT", "EXTENSIONS"), OrbisComposerAction.entries.map { it.name })
     }
     @Test fun eachCapabilityDispatchesOnlyItsOwnDestination() {
         val expected = mapOf(
             OrbisComposerAction.CAMERA to "camera", OrbisComposerAction.IMAGE to "image",
             OrbisComposerAction.FILE to "file", OrbisComposerAction.TOOLS to "mcp_settings",
             OrbisComposerAction.CONTEXT to "context", OrbisComposerAction.EXTENSIONS to "extensions",
+            OrbisComposerAction.SCREEN_SHARE to "screen_share",
         )
         expected.forEach { (action, target) ->
             val calls = mutableListOf<String>()
             dispatchOrbisCapability(action, { calls += "camera" }, { calls += "image" },
-                { calls += "file" }, { calls += "mcp_settings" }, { calls += "context" }, { calls += "extensions" })
+                { calls += "file" }, { calls += "mcp_settings" }, { calls += "context" },
+                { calls += "extensions" }, { calls += "screen_share" })
             assertEquals(listOf(target), calls)
         }
+    }
+    @Test fun permissionEntryClosesCapabilityPanelButDoesNotExecuteAnyCallback() {
+        assertNull(orbisComposerPanelAfterCapability(OrbisComposerPanel.CAPABILITIES, OrbisComposerAction.SCREEN_SHARE))
+        assertNull(orbisComposerPanelAfterCapability(OrbisComposerPanel.CAPABILITIES, OrbisComposerAction.TOOLS))
+        assertEquals(OrbisComposerPanel.CAPABILITIES,
+            orbisComposerPanelAfterCapability(OrbisComposerPanel.CAPABILITIES, OrbisComposerAction.IMAGE))
+        assertNull(orbisComposerPanelAfterCapability(null, OrbisComposerAction.SCREEN_SHARE))
     }
     @Test fun emotionsHaveUniqueIdsAndOnlyKnownCategories() {
         assertEquals(orbisQuickEmotions.size, orbisQuickEmotions.map { it.id }.distinct().size)

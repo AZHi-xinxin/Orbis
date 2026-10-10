@@ -46,6 +46,16 @@ internal class InterruptibleQueueControl<K> {
         return true
     }
 
+    /** Read/acknowledge-only recovery must never cancel another controller's remote work. */
+    fun beginLocalResetIfIdle(key: K): Boolean = synchronized(lock) {
+        if (key in resets || workers[key].orEmpty().any { !it.isCompleted } ||
+            interruptions[key].orEmpty().any { !it.isCompleted }) false
+        else {
+            resets[key] = emptyList()
+            true
+        }
+    }
+
     /** Waits only for the captured workers, including their NonCancellable cleanup. */
     suspend fun awaitInterrupted(key: K) {
         val captured = synchronized(lock) {

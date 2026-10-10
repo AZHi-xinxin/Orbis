@@ -230,6 +230,7 @@ internal fun OrbisSentinelBindingCard(
 internal fun orbisReceiptStateLabel(state: String): String = when (state) {
     "accepted" -> "已接收"
     "queued" -> "排队中"
+    "skipped" -> "本次已跳过，不再排队"
     "displayed" -> "已存入会话"
     "generating" -> "正在唤醒"
     "replied" -> "已回复"

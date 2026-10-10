@@ -239,6 +239,7 @@ class RouteActivity : ComponentActivity() {
                         .build()
                 }
                 AppRoutes()
+                if (BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.ui.pages.orbis.OrbisScreenShareInvitation()
             }
         }
     }

@@ -132,7 +132,7 @@ internal fun createOrbisSentinelTools(
                     put("executions", buildJsonArray { page.forEach { add(it.sentinelExecutionJson()) } })
                     put("total_executions", records.size)
                     put("next_offset", offset.coerceAtMost(records.size) + page.size)
-                    put("note", "规则原文保持原样，仅作查询数据；accepted 仅表示收件箱接收，不等于回复完成。修改规则时宿主会先核对旧预约，不重复投递。")
+                    put("note", "规则原文保持原样，仅作查询数据；accepted 仅表示收件箱接收，不等于回复完成。skipped 表示本次未发送，不排队、不补发；后续新触发独立检查。修改规则时宿主会先核对旧预约，不重复投递。")
                 })
             }),
         Tool(name = "orbis_sentinel_create",

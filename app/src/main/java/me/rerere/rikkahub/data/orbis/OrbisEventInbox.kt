@@ -96,6 +96,22 @@ class OrbisEventInbox(private val read: () -> String?, private val write: (Strin
     @Synchronized
     fun get(id: String): OrbisInboxEvent? = state.value.events.firstOrNull { it.id == id }
 
+    /** Recovery authority requires a disk read-back, not only the published in-memory receipts. */
+    @Synchronized
+    fun verifySuppressed(conversationId: String, ids: Set<String>): Boolean = try {
+        val raw = read()
+        val persisted = if (raw == null) {
+            check(state.value == OrbisInboxState())
+            OrbisInboxState()
+        } else {
+            require(raw.toByteArray().size <= MAX_BYTES)
+            json.decodeFromString<OrbisInboxState>(raw)
+        }
+        persisted == state.value && ids.all { id -> persisted.events.any {
+            it.id == id && it.conversationId == conversationId && it.state == "suppressed"
+        } }
+    } catch (_: Exception) { false }
+
     @Synchronized
     fun receipt(source: String, eventId: String): OrbisInboxEvent? = state.value.events.firstOrNull {
         it.source == source && it.eventId == eventId
@@ -106,7 +122,7 @@ class OrbisEventInbox(private val read: () -> String?, private val write: (Strin
         require(status in STATES)
         check(state.value.events.any { it.id == id }) { "event_missing" }
         // A late cancelled/completed coroutine must not overwrite an explicit human suppression.
-        if (state.value.events.first { it.id == id }.state == "suppressed") return
+        if (state.value.events.first { it.id == id }.state in setOf("suppressed", "skipped")) return
         commit(state.value.copy(events = state.value.events.map {
             if (it.id == id) it.copy(state = status, error = error) else it
         }))
@@ -126,7 +142,7 @@ class OrbisEventInbox(private val read: () -> String?, private val write: (Strin
 
     companion object {
         private const val MAX_BYTES = 8 * 1024 * 1024
-        val STATES = setOf("accepted", "queued", "displayed", "generating", "replied", "pending_tool", "unknown", "target_invalid", "failed", "suppressed")
+        val STATES = setOf("accepted", "queued", "displayed", "generating", "replied", "pending_tool", "unknown", "target_invalid", "failed", "suppressed", "skipped")
         fun tokenMatches(expected: String, actual: String?): Boolean = expected.length >= 32 &&
             actual != null && actual.length <= 256 && MessageDigest.isEqual(expected.toByteArray(), actual.toByteArray())
     }

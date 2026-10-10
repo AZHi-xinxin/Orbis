@@ -276,8 +276,8 @@ class OrbisEventInboxTest {
             inbox.mark(original.id, status, "diagnostic")
             assertEquals(original.copy(state = status, error = "diagnostic"), inbox.get(original.id))
             inbox.mark(original.id, "displayed")
-            if (status == "suppressed") {
-                assertEquals("suppressed", inbox.get(original.id)?.state)
+            if (status in setOf("suppressed", "skipped")) {
+                assertEquals(status, inbox.get(original.id)?.state)
                 assertEquals("diagnostic", inbox.get(original.id)?.error)
             } else assertNull(inbox.get(original.id)?.error)
         }

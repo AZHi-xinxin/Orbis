@@ -113,6 +113,7 @@ import me.rerere.rikkahub.data.model.OrbisComposerPanel
 import me.rerere.rikkahub.data.model.OrbisComposerAction
 import me.rerere.rikkahub.data.model.OrbisDictationDraft
 import me.rerere.rikkahub.data.model.toggleOrbisComposerPanel
+import me.rerere.rikkahub.data.model.orbisComposerPanelAfterCapability
 import me.rerere.rikkahub.service.OrbisVoiceCallPreflight
 import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
 import me.rerere.asr.ASRProviderSetting
@@ -539,7 +540,13 @@ fun ChatInput(
                         }
                         when (composerPanel) {
                             OrbisComposerPanel.CAPABILITIES -> OrbisCapabilityPanel { action ->
-                                if (action == OrbisComposerAction.TOOLS) composerPanel = null
+                                composerPanel = orbisComposerPanelAfterCapability(composerPanel, action)
+                                if (action == OrbisComposerAction.SCREEN_SHARE) {
+                                    closeManualDictation()
+                                    focusManager.clearFocus(force = true)
+                                    keyboardController?.hide()
+                                    composerExpanded = false
+                                }
                                 onOrbisCapability?.invoke(action)
                                     ?: toaster.show(message = "这个入口尚未接通。", type = ToastType.Normal)
                             }

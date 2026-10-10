@@ -8,8 +8,9 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 
 ## 从这里开始
 
-- [下载 Orbis 2.6.6 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.6)：普通用户直接下载 APK，不需要自行编译。
-- [本版说明](docs/RELEASE-2.6.6.md)：本次更新、安装选择、验收范围及当前限制。
+- [下载 Orbis 2.6.7 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.7)：普通用户直接下载 APK，不需要自行编译。
+- [本版说明](docs/RELEASE-2.6.7.md)：屏幕共享、紧凑浮窗、双向 ZIP 与恢复改进。
+- [给 AI 的使用说明](docs/AI-QUICKSTART.md)：如何邀请共享、看图、读写 ZIP、保存真实经历及处理失败；应用内也可查询 `orbis_help`。
 - [上手指南](docs/GETTING_STARTED.md)：配置模型、选择本地或自建云端、导书和开始游戏。
 - [隐私与权限](docs/PRIVACY.md)：什么保存在手机，什么可能发给外部服务，以及备份的范围。
 - [更新记录](docs/CHANGELOG.md)：当前功能与仍未开放的部分。
@@ -17,6 +18,9 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 - [来源与许可](docs/NOTICE.md)：上游与第三方声明，以及来源核对范围。
 
 ## 能做什么
+
+- **一起看屏幕**：经人类授权按间隔看图，紧凑浮窗能拖动、收进侧边，麦克风与 AI 外放分别控制；结束后留下文字总结。[入口与边界](docs/SCREEN-SHARING.md)。
+- **互相传 ZIP**：人类发送资料 ZIP，AI 分页读取受支持的文字；AI 也能生成可保存的文字 ZIP 附件，不执行压缩包中的代码。[AI 使用步骤](docs/AI-QUICKSTART.md)。
 
 - **原生 AI 聊天**：配置自己的模型提供商和助手，使用消息分支、Markdown、附件、搜索、朗读及按需工具。具体能力取决于模型和服务配置。
 - **本地后花园**：在手机保存日记、锚点、信件、心愿等文字，设置自己的展示称呼；不需要账号或 VPS。

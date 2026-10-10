@@ -184,6 +184,12 @@ class GenerationLoop(
         // One snapshot per collected generation, not per conversation. A new human wake (or the
         // existing approval-resume path) reevaluates current settings, memory and input transforms.
         val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime)
+        val screenShareTurn = if (allowLocalMemory) me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn.bind(
+            me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()?.state?.value,
+            assistant.id.toString(), conversationId?.toString()) else null
+        val screenRuntime = me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()
+        val screenLease = screenShareTurn?.let { screenRuntime?.retainTurn(it.frameId) }
+        try {
         val localMemoryTurn = if (allowLocalMemory && me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
             localMemory?.begin(assistant, conversationId, messages) else null
         val tools = snapshotGenerationTools(tools)
@@ -255,6 +261,7 @@ class GenerationLoop(
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
                 responseForContinuation = generateInternal(
+                    screenShareTurn = screenShareTurn,
                     requireActiveTurn = requireActiveTurn,
                     onGatewayRequest = onGatewayRequest,
                     inputSnapshot = inputSnapshot,
@@ -637,6 +644,7 @@ class GenerationLoop(
             if (stepIndex == maxSteps - 1) emit(GenerationChunk.ToolStepLimitStop)
         }
 
+        } finally { if (screenLease != null) screenRuntime?.releaseTurn(screenLease) }
     }.orderedGenerationFlow(Dispatchers.IO)
 
     private suspend fun generateInternal(
@@ -663,6 +671,7 @@ class GenerationLoop(
         compactionControl: ConversationCompactionControl? = null,
         includeCompactionReminder: Boolean = false,
         localMemoryTurn: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryTurn? = null,
+        screenShareTurn: me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn? = null,
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
@@ -740,7 +749,10 @@ class GenerationLoop(
             requireActiveTurn()
             return me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages(
                 context, assistant.id.toString(), localMemoryTurn?.project(internalMessages) ?: internalMessages,
-                modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE))
+                modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE)).let { projected ->
+                me.rerere.rikkahub.data.ai.transformers.projectOrbisScreenShareImages(screenShareTurn, projected,
+                    model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE))
+            }
         }
         // Publish once per new invocation, not on tool continuations. Counts remain local, never
         // alter prompts/cache keys, and deliberately do not claim upstream delivery or recall.
@@ -787,6 +799,7 @@ class GenerationLoop(
                     }
                 var retryCount = 0
                 var sawAnyChunk = false
+                var screenRequestOutcomeUnknown = false
 
                 while (true) {
                     val streamChunkHandler = StreamChunkHandler(model)
@@ -829,21 +842,23 @@ class GenerationLoop(
                             throw error.cause ?: error
                         }
                         currentCoroutineContext().ensureActive()
-                        val busyDelay = consultationBusyDelayMillis(error,
+                        val safeError = if (screenShareTurn != null) sanitizeScreenShareFailure(error, screenRequestOutcomeUnknown) else error
+                        if (error is IOException) screenRequestOutcomeUnknown = true
+                        val busyDelay = consultationBusyDelayMillis(safeError,
                             consultationBusyWaitUntilMillis, System.currentTimeMillis(), sawAnyChunk)
                         if (busyDelay != null) {
                             processingStatus.value = "咨询室正在等待同一网关的当前对话完成…"
                             delay(busyDelay)
                             continue
                         }
-                        val classified = KnownEmptyCompletionFailure.classify(error, attemptResponse.last())
+                        val classified = KnownEmptyCompletionFailure.classify(safeError, attemptResponse.last())
                         if (classified is KnownEmptyCompletionFailure) {
                             // ST may have already closed its wake. Replaying this tool continuation
                             // could lose context or repeat earlier side effects; never restart it.
                             throw classified
                         }
                         retryCount = awaitNetworkRetryOrThrow(
-                            error = error,
+                            error = safeError,
                             retryCount = retryCount,
                             processingStatus = processingStatus,
                             enabled = settings.networkSetting.enableAutoRetry,
@@ -856,6 +871,7 @@ class GenerationLoop(
                         processingStatus = processingStatus,
                         enabled = settings.networkSetting.enableAutoRetry,
                         consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis,
+                        sanitizeScreenFailure = screenShareTurn != null,
                     ) {
                         providerImpl.generateText(
                             providerSetting = provider,
@@ -883,15 +899,19 @@ class GenerationLoop(
         processingStatus: MutableStateFlow<String?>,
         enabled: Boolean,
         consultationBusyWaitUntilMillis: Long? = null,
+        sanitizeScreenFailure: Boolean = false,
         block: suspend () -> T,
     ): T {
         var retryCount = 0
+        var screenRequestOutcomeUnknown = false
         while (true) {
             try {
                 return block()
             } catch (error: Throwable) {
                 currentCoroutineContext().ensureActive()
-                val busyDelay = consultationBusyDelayMillis(error,
+                val safeError = if (sanitizeScreenFailure) sanitizeScreenShareFailure(error, screenRequestOutcomeUnknown) else error
+                if (error is IOException) screenRequestOutcomeUnknown = true
+                val busyDelay = consultationBusyDelayMillis(safeError,
                     consultationBusyWaitUntilMillis, System.currentTimeMillis(), sawOutput = false)
                 if (busyDelay != null) {
                     processingStatus.value = "咨询室正在等待同一网关的当前对话完成…"
@@ -899,7 +919,7 @@ class GenerationLoop(
                     continue
                 }
                 retryCount = awaitNetworkRetryOrThrow(
-                    error = error,
+                    error = safeError,
                     retryCount = retryCount,
                     processingStatus = processingStatus,
                     enabled = enabled,

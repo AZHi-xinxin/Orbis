@@ -194,8 +194,10 @@ val dataSourceModule = module {
             .addNetworkInterceptor(RequestLoggingInterceptor())
             .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
-                redactHeader("Proxy-Authorization")
-                level = HttpLoggingInterceptor.Level.HEADERS
+                // Opt-in diagnostics go through RequestLoggingInterceptor's redacted copies.
+                // HEADERS leaks auth/cookies; even BASIC leaks URL query credentials to logcat.
+                // Do not add a second raw sink for transient screen-share/media requests.
+                level = HttpLoggingInterceptor.Level.NONE
             })
             .build()
         client.also { SearchService.init(it, get()) }

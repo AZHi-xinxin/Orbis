@@ -111,6 +111,7 @@ internal fun FilesPicker(
     val settings = LocalSettings.current
     val provider = settings.getCurrentChatModel()?.findProvider(providers = settings.providers)
     val navController = LocalNavController.current
+    val screenShareContext = androidx.compose.ui.platform.LocalContext.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     val workspaces by workspaceRepository.listFlow().collectAsState(initial = emptyList())
 
@@ -145,6 +146,13 @@ internal fun FilesPicker(
             }
             onStartVideoMode?.let { start ->
                 BigIconTextButton(icon = { Text("▣") }, text = { Text("视频通话") }, onClick = start)
+            }
+            if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) {
+                BigIconTextButton(icon = { Text("▤") }, text = { Text("屏幕共享") }, onClick = {
+                    onDismiss()
+                    screenShareContext.startActivity(me.rerere.rikkahub.ui.activity.OrbisScreenShareActivity.intent(
+                        screenShareContext, conversation.assistantId.toString(), conversation.id.toString()))
+                })
             }
         }
 

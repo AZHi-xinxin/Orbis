@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
@@ -19,6 +20,12 @@ import me.rerere.common.android.appTempFolder
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.ZipAttachmentArchive
+import me.rerere.rikkahub.data.files.ZipAttachmentException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
@@ -48,6 +55,7 @@ internal fun rememberChatAttachmentPickerActions(
     val resources = LocalResources.current
     val toaster = LocalToaster.current
     val filesManager: FilesManager = koinInject()
+    val fileScope = rememberCoroutineScope()
     val cameraPermission = rememberPermissionState(PermissionCamera)
     PermissionManager(permissionState = cameraPermission)
 
@@ -156,10 +164,26 @@ internal fun rememberChatAttachmentPickerActions(
 
     val filePickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-            if (uris.isNotEmpty()) {
+            if (uris.isNotEmpty()) fileScope.launch {
                 val documents = uris.mapNotNull { uri ->
                     val fileName = filesManager.getFileNameFromUri(uri) ?: "file"
                     val mime = filesManager.getFileMimeType(uri) ?: "text/plain"
+                    if (ZipAttachmentArchive.isZip(fileName, mime)) {
+                        try {
+                            val saved = withContext(Dispatchers.IO) { filesManager.saveManagedZipFromUri(uri, fileName) }
+                            return@mapNotNull UIMessagePart.Document(
+                                url = filesManager.getFile(saved).toUri().toString(), fileName = fileName, mime = "application/zip")
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) {
+                            val detail = when ((error as? ZipAttachmentException)?.code) {
+                                "zip_archive_too_large", "zip_archive_size_or_type" -> "ZIP 最大 32 MiB。"
+                                "zip_filename_encoding_unsupported" -> "文件名需使用 UTF-8 编码；请重新打包后发送。"
+                                else -> "文件损坏、加密或超出安全限额；不会展开压缩包。"
+                            }
+                            toaster.show("无法添加 ZIP：$detail", type = ToastType.Error)
+                            return@mapNotNull null
+                        }
+                    }
                     if (isAllowedFileType(fileName, mime)) {
                         val localUri = filesManager.createChatFilesByContents(listOf(uri)).firstOrNull()
                             ?: run {

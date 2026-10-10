@@ -50,4 +50,4 @@ internal val orbisSentinelGuide = listOf(
         """{"type":"app_usage","app_package":"com.example.app","duration_seconds":1800,"prompt":"这个应用已经连续使用半小时"}"""),
 )
 
-internal const val ORBIS_SENTINEL_COMMON_GUIDE = "选择需要的类别，一次 create 即可设置；全部可选，不需逐步确认，也不必先读说明才能创建。enabled=false 可只保存不启用。规则固定绑定创建时的 AI 与窗口，AI 可跨自己的窗口管理；规则长期保存，不需每天重设，once 例外。所有事件都由宿主附带真实日期、时间和时区，AI 不用填写时间戳文案。人类仅控制总开关，关闭不删除规则，恢复不补发暂停期间事件。事件 accepted 仅表示收件箱接收，不保证 AI 回复或声音播放；权限、后台、省电、网络和模型状态影响实际执行。不会因打开说明自动创建任何规则；也不会自动关闭旧 VPS 链路。"
+internal const val ORBIS_SENTINEL_COMMON_GUIDE = "选择需要的类别，一次 create 即可设置；全部可选，不需逐步确认，也不必先读说明才能创建。enabled=false 可只保存不启用。规则固定绑定创建时的 AI 与窗口，AI 可跨自己的窗口管理；规则长期保存，不需每天重设，once 例外。所有事件都由宿主附带真实日期、时间和时区，AI 不用填写时间戳文案。人类仅控制总开关，关闭不删除规则，恢复不补发暂停期间事件。事件 accepted 仅表示收件箱接收，不保证 AI 回复或声音播放；skipped 表示本次未发送，原因保留，不排队或补发。后续新触发独立检查，遵守冷却；不要为补发重建一次性规则。权限、后台、省电、网络和模型状态影响实际执行，未知工具结果不自动重做。不会因打开说明自动创建任何规则；也不会自动关闭旧 VPS 链路。"

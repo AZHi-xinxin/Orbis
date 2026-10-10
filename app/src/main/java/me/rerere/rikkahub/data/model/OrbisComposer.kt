@@ -9,8 +9,13 @@ fun toggleOrbisComposerPanel(current: OrbisComposerPanel?, requested: OrbisCompo
 
 enum class OrbisComposerAction(val glyph: String, val title: String) {
     CAMERA("◉", "拍照"), IMAGE("▧", "图片"), FILE("▫", "文件"),
+    SCREEN_SHARE("▣", "屏幕共享"),
     TOOLS("⌁", "MCP / 工具"), CONTEXT("◔", "整理上下文"), EXTENSIONS("✦", "知识 / 自动化");
 }
+
+/** Permission/navigation destinations must not leave a capability panel covering the chat. */
+fun orbisComposerPanelAfterCapability(current: OrbisComposerPanel?, action: OrbisComposerAction) =
+    current.takeUnless { action == OrbisComposerAction.TOOLS || action == OrbisComposerAction.SCREEN_SHARE }
 
 /** Each capability has its own destination; MCP must never fall through to the attachment sheet. */
 fun dispatchOrbisCapability(
@@ -21,6 +26,7 @@ fun dispatchOrbisCapability(
     openMcpSettings: () -> Unit,
     openContext: () -> Unit,
     openExtensions: () -> Unit,
+    openScreenShare: () -> Unit,
 ) = when (action) {
     OrbisComposerAction.CAMERA -> takePicture()
     OrbisComposerAction.IMAGE -> pickImage()
@@ -28,6 +34,7 @@ fun dispatchOrbisCapability(
     OrbisComposerAction.TOOLS -> openMcpSettings()
     OrbisComposerAction.CONTEXT -> openContext()
     OrbisComposerAction.EXTENSIONS -> openExtensions()
+    OrbisComposerAction.SCREEN_SHARE -> openScreenShare()
 }
 
 data class OrbisQuickEmotion(val id: String, val glyph: String, val label: String, val category: String) {

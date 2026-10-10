@@ -15,11 +15,23 @@ class RequestLoggingInterceptor : Interceptor {
         val request = chain.request()
         val startTime = System.currentTimeMillis()
 
-        val requestHeaders = request.headers.toMap()
+        val requestHeaders = redactHttpLogHeaders(request.headers.toMap())
+        val requestUrl = redactHttpLogUrl(request.url.toString())
         val requestBody = request.body?.let { body ->
-            val buffer = Buffer()
-            body.writeTo(buffer)
-            buffer.readUtf8()
+            // Do not consume streaming/one-shot bodies for diagnostics or retain raw media in
+            // the 100-entry log ring after the screen-sharing buffer has been cleared.
+            val length = runCatching { body.contentLength() }.getOrDefault(-1L)
+            val subtype = body.contentType()?.subtype.orEmpty()
+            if (body.isDuplex() || body.isOneShot() || length !in 0..HTTP_LOG_BODY_LIMIT ||
+                !(subtype.equals("json", ignoreCase = true) || subtype.endsWith("+json", ignoreCase = true))) {
+                HTTP_LOG_BODY_OMITTED
+            } else runCatching {
+                Buffer().use { buffer ->
+                    body.writeTo(buffer)
+                    if (buffer.size > HTTP_LOG_BODY_LIMIT) HTTP_LOG_BODY_OMITTED
+                    else redactHttpLogBody(buffer.readUtf8())
+                }
+            }.getOrDefault(HTTP_LOG_BODY_OMITTED)
         }
 
         val response: Response
@@ -28,11 +40,11 @@ class RequestLoggingInterceptor : Interceptor {
         try {
             response = chain.proceed(request)
         } catch (e: Exception) {
-            error = e.message
+            error = redactHttpLogFailure(e.javaClass.simpleName)
             Logging.logRequest(
                 LogEntry.RequestLog(
                     tag = "HTTP",
-                    url = request.url.toString(),
+                    url = requestUrl,
                     method = request.method,
                     requestHeaders = requestHeaders,
                     requestBody = requestBody,
@@ -43,12 +55,12 @@ class RequestLoggingInterceptor : Interceptor {
         }
 
         val durationMs = System.currentTimeMillis() - startTime
-        val responseHeaders = response.headers.toMap()
+        val responseHeaders = redactHttpLogHeaders(response.headers.toMap())
 
         Logging.logRequest(
             LogEntry.RequestLog(
                 tag = "HTTP",
-                url = request.url.toString(),
+                url = requestUrl,
                 method = request.method,
                 requestHeaders = requestHeaders,
                 requestBody = requestBody,

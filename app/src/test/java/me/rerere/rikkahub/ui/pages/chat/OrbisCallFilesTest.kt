@@ -11,6 +11,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisCallFilesTest {
+    @Test fun toolArtifactsAreIndependentOfCollapsedDetailsButNotPermissionOrFailure() {
+        val doc = UIMessagePart.Document("file:///app/files/upload/gift.zip", "gift.zip", "application/zip")
+        val success = UIMessagePart.Tool("zip", "orbis_zip_create", "{}", output = listOf(doc))
+        assertEquals(doc, orbisToolDocuments(listOf(success), "message").single().part)
+        assertTrue(orbisToolDocuments(listOf(success.copy(output = emptyList())), "message").isEmpty())
+        assertTrue(orbisToolDocuments(listOf(success.copy(approvalState = ToolApprovalState.Denied("no"))), "message").isEmpty())
+        assertTrue(orbisToolDocuments(listOf(success.copy(metadata = buildJsonObject {
+            put("orbis_host_tool_failure", "tool_execution_interrupted")
+        })), "message").isEmpty())
+        assertEquals(1, orbisToolDocuments(listOf(success, success), "message").size)
+        assertTrue(orbisToolDocuments(listOf(UIMessagePart.Text("gift.zip")), "message").isEmpty())
+    }
     private fun message(vararg parts: UIMessagePart) = UIMessage.assistant("").copy(
         parts = parts.toList(), orbisVoiceCallId = "call-1", orbisVoiceCallKind = "turn",
     ).toMessageNode()

@@ -190,6 +190,28 @@ class ChatToolFactory(
                 }) else definition)
         }
         if (BuildConfig.ORBIS_ENABLED) {
+            if (!consultationReferenceOnly && conversationId != null && imageSourceMessageIds != null) {
+                val zipConversationId = kotlin.uuid.Uuid.parse(conversationId)
+                val zipLastUserId = conversationRepository.getConversationById(zipConversationId)
+                    ?.currentMessages?.lastOrNull { it.role == me.rerere.ai.core.MessageRole.USER }?.id
+                addAll(createOrbisZipAttachmentTools(
+                    assistantId = assistant.id,
+                    conversationId = zipConversationId,
+                    sourceMessageIds = imageSourceMessageIds,
+                    readConversation = { conversationRepository.getConversationById(zipConversationId) },
+                    readArchiveFile = { document -> readManagedZipAttachment(document,
+                        context.filesDir.resolve("upload"),
+                        org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.files.FilesManager>()) },
+                ))
+                add(createOrbisZipCreateTool(context, assistant.id.toString(), conversationId,
+                    scopeCurrent = {
+                        val ownerExists = (settingsStore?.settingsFlow?.value ?: settings)
+                            .getAssistantById(assistant.id) != null
+                        val live = conversationRepository.getConversationById(zipConversationId)
+                        ownerExists && isZipCreationScopeCurrent(assistant.id, zipConversationId,
+                            zipLastUserId, imageSourceMessageIds, live)
+                    }))
+            }
             val privateRoomTools = me.rerere.rikkahub.data.orbis.privateroom.buildPrivateRoomAssistantTools(
                 assistantId = assistant.id.toString(),
                 assistantExists = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
@@ -254,6 +276,7 @@ class ChatToolFactory(
             addAll(createOrbisVoiceCallTools(me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository(context), assistant.id.toString()))
             if (!consultationReferenceOnly) {
                 addAll(createOrbisCompanionSpaceTools(context, assistant.id.toString()))
+                if (conversationId != null) addAll(createOrbisScreenShareTools(context, assistant.id.toString(), conversationId))
                 if (conversationId != null) addAll(createOrbisVideoCallTools(context, assistant.id.toString(),
                     conversationId, voiceCallId, allowAmbientCallBinding))
             }

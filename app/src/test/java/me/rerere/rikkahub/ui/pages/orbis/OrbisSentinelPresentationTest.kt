@@ -10,6 +10,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OrbisSentinelPresentationTest {
+    @Test fun skippedWakeShowsCauseWithoutClaimingSentOrReplied() {
+        assertEquals("本次已跳过，不再排队", orbisSentinelReceiptStateLabel("skipped"))
+        assertTrue(orbisWakeReasonLabel("wake_gateway_unconfirmed").contains("旧连接"))
+        assertTrue(orbisWakeReasonLabel("wake_tool_pending").contains("审批"))
+        assertTrue(orbisWakeReasonLabel("wake_reply_in_progress").contains("另一条回复"))
+        assertEquals("future_reason", orbisWakeReasonLabel("future_reason"))
+    }
+
     private fun rule(type: OrbisSentinelType) = OrbisSentinelRule(
         id = "synthetic-rule", assistantId = "synthetic-ai", conversationId = "synthetic-chat",
         type = type, prompt = "  preserve [this] exactly\n", createdAtMs = 1L,

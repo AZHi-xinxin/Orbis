@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import android.app.Application
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,6 +23,12 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
+import me.rerere.rikkahub.data.model.OrbisComposerAction
+import me.rerere.rikkahub.data.model.OrbisComposerPanel
+import me.rerere.rikkahub.data.model.dispatchOrbisCapability
+import me.rerere.rikkahub.data.model.orbisComposerPanelAfterCapability
+import me.rerere.rikkahub.data.model.toggleOrbisComposerPanel
+import me.rerere.rikkahub.ui.activity.OrbisScreenShareActivity
 import me.rerere.rikkahub.ui.pages.orbis.OrbisVisualTheme
 import org.junit.Assert.*
 import org.junit.Rule
@@ -97,5 +104,60 @@ class OrbisComposerAndVideoEntryDeviceTest {
         compose.runOnIdle { allowed.value = true; active.value = true }
         compose.onNodeWithTag("orbis-start-video-call").assertIsNotEnabled()
         compose.runOnIdle { assertEquals(1, starts) }
+    }
+
+    @Test fun customCapabilityTabReachesScreenShareConsentOnlyOnTapAndBindsCurrentConversation() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val panel = mutableStateOf<OrbisComposerPanel?>(null)
+        val owner = mutableStateOf("synthetic-owner-a")
+        val conversation = mutableStateOf("synthetic-conversation-a")
+        val requests = mutableListOf<Intent>()
+        var unrelatedActions = 0
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
+            Column(Modifier.width(360.dp)) {
+                OrbisComposerTab(OrbisComposerPanel.CAPABILITIES.title,
+                    panel.value == OrbisComposerPanel.CAPABILITIES) {
+                    panel.value = toggleOrbisComposerPanel(panel.value, OrbisComposerPanel.CAPABILITIES)
+                }
+                if (panel.value == OrbisComposerPanel.CAPABILITIES) OrbisCapabilityPanel { action ->
+                    panel.value = orbisComposerPanelAfterCapability(panel.value, action)
+                    dispatchOrbisCapability(action,
+                        takePicture = { unrelatedActions++ }, pickImage = { unrelatedActions++ },
+                        pickFile = { unrelatedActions++ }, openMcpSettings = { unrelatedActions++ },
+                        openContext = { unrelatedActions++ }, openExtensions = { unrelatedActions++ },
+                        openScreenShare = { requests += OrbisScreenShareActivity.intent(context,
+                            owner.value, conversation.value) })
+                }
+            }
+        } } }
+        compose.onNodeWithTag("orbis-capability-screen_share").assertDoesNotExist()
+        compose.onNodeWithText("＋ 能力").performClick()
+        compose.onNodeWithTag("orbis-capability-screen_share").assertIsDisplayed().assertIsEnabled()
+        compose.runOnIdle { assertTrue(requests.isEmpty()) }
+        compose.onNodeWithTag("orbis-capability-screen_share").performClick()
+        compose.onNodeWithTag("orbis-capability-screen_share").assertDoesNotExist()
+        compose.runOnIdle {
+            assertNull(panel.value)
+            assertEquals(1, requests.size)
+            assertEquals(OrbisScreenShareActivity::class.java.name, requests.single().component?.className)
+            assertEquals("synthetic-owner-a", requests.single().getStringExtra("assistant"))
+            assertEquals("synthetic-conversation-a", requests.single().getStringExtra("conversation"))
+            assertEquals("human", requests.single().getStringExtra("initiator"))
+            assertFalse(requests.single().hasExtra("projection"))
+            assertFalse(requests.single().getBooleanExtra("microphone", false))
+            assertEquals(0, unrelatedActions)
+            owner.value = "synthetic-owner-b"
+            conversation.value = "synthetic-conversation-b"
+        }
+        // After cancel/back the same real custom panel can be opened again;
+        // a changed conversation must not reuse the previous permission target.
+        compose.onNodeWithText("＋ 能力").performClick()
+        compose.onNodeWithTag("orbis-capability-screen_share").performClick()
+        compose.runOnIdle {
+            assertEquals(2, requests.size)
+            assertEquals("synthetic-owner-b", requests.last().getStringExtra("assistant"))
+            assertEquals("synthetic-conversation-b", requests.last().getStringExtra("conversation"))
+            assertEquals(0, unrelatedActions)
+        }
     }
 }

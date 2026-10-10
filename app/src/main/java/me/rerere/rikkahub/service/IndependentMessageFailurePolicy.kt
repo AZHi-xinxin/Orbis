@@ -13,7 +13,10 @@ internal fun canContinueAfterIndependentModelFailure(error: Throwable, before: L
         message.getTools().any { tool ->
             !tool.isExecuted || tool.hostToolFailure()?.executionPerformed == null && tool.hostToolFailure() != null
         } }) return false
-    if (error is KnownEmptyCompletionFailure) return true
+    // A local screen revocation happens BEFORE the next provider request. Completed tools are
+    // durably retained by ChatService; unlike a transport failure there is no unknown new turn.
+    if (error is KnownEmptyCompletionFailure ||
+        error is me.rerere.rikkahub.data.ai.transformers.ScreenShareFrameRevokedException) return true
     val http = error as? HttpException ?: return false
     // A conflict explicitly means that another server-side generation/tool continuation may own
     // this channel. Do not turn a 409 into a burst of new requests or infer safety from error prose.

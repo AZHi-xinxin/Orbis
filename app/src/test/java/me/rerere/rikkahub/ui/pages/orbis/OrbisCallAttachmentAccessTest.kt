@@ -10,6 +10,19 @@ import org.junit.rules.TemporaryFolder
 class OrbisCallAttachmentAccessTest {
     @get:Rule val temp = TemporaryFolder()
 
+    @Test fun exportCopiesExactBinaryZipBytesAndNeverOpensOtherPrivateFiles() {
+        val uploads = temp.newFolder("export-upload")
+        val bytes = byteArrayOf(0x50, 0x4b, 3, 4, 0, -1, -128, 13, 10)
+        val file = File(uploads, "test.zip").apply { writeBytes(bytes) }
+        val output = java.io.ByteArrayOutputStream()
+        exportCallDocument(file.toURI().toString(), uploads, output)
+        org.junit.Assert.assertArrayEquals(bytes, output.toByteArray())
+        assertThrows(IllegalArgumentException::class.java) {
+            exportCallDocument(temp.newFile("private.bin").toURI().toString(), uploads, output)
+        }
+        org.junit.Assert.assertArrayEquals(bytes, output.toByteArray())
+    }
+
     @Test fun opensOnlyActualUploadFile() {
         val uploads = temp.newFolder("upload")
         val file = File(uploads, "需求.md").apply { writeText("synthetic") }

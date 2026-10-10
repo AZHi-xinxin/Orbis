@@ -114,6 +114,14 @@ class FilesManager(
         mimeType: String = "application/octet-stream",
     ): ManagedFileEntity = saveNewManagedFile(folder, displayName, mimeType) { it.writeBytes(bytes) }
 
+    /** ZIP is retained as one managed attachment, never extracted into the app's files. */
+    suspend fun saveManagedZipFromUri(uri: Uri, displayName: String): ManagedFileEntity =
+        saveNewManagedFile(FileFolders.UPLOAD, displayName, "application/zip") { target ->
+            val input = context.contentResolver.openInputStream(uri) ?: error("zip_source_unavailable")
+            input.use { source -> target.outputStream().use { ZipAttachmentArchive.copyBounded(source, it) } }
+            ZipAttachmentArchive.inspect(target)
+        }
+
     private suspend fun saveNewManagedFile(
         folder: String,
         displayName: String,

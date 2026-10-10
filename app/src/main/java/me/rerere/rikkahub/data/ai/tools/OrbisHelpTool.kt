@@ -17,7 +17,7 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.orbis.soup.createSoupTools
 
 internal const val ORBIS_HELP_TOOL_NAME = "orbis_help"
-internal const val ORBIS_MANUAL_VERSION = "orbis-help/22"
+internal const val ORBIS_MANUAL_VERSION = "orbis-help/23"
 private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide")
 private const val manualHostUi = "同一 App 内的原 Orbis 本地主页、原生聊天、同一 AI 的会话历史/搜索/重命名/分组、外观 DIY、本地动态星图演示与独立 ST 元信息连接设置、TechHub 和多 AI 群聊独立入口，以及模型/MCP/语音/文件/工作区/技能配置入口。"
 private const val manualStarMapDemoScope = "星点为本地合成数据，仅展示示例时间、类型与无标签关联，不读取真实 ST 记忆。"
@@ -35,6 +35,7 @@ private data class ManualToolCategory(val id: String, val names: List<String>, v
 }
 
 private val manualToolCategories = listOf(
+    ManualToolCategory("zip_files", listOf("orbis_zip_read", "orbis_zip_create"), "收发文字 ZIP，按需读目录/UTF-8 文本，不执行。见guide/zip_files。"),
     ManualToolCategory("local_schedule", listOf("orbis_schedule_list", "orbis_schedule_read", "orbis_schedule_create", "orbis_schedule_update", "orbis_schedule_delete"), "本机共享课表/日程，无需网关。写入须宿主批准与revision核验，不自动提醒。周重复/有效期、单次日期、重要标红及参数见guide/schedule或local_tools。"),
     ManualToolCategory("local_kaomoji", listOf("orbis_kaomoji_list", "orbis_kaomoji_add", "orbis_kaomoji_update"), "本机文字库，AI写入经批准，保存不发送；人类点选独立发送，草稿不变，删除在人类面板。不是图片表情包；参数/冲突见guide/expressions。"),
     ManualToolCategory("companion_spaces", listOf("orbis_secret_base", "orbis_shared_space", "orbis_photo_wall"), "当前助手的本地空间，双方可见，非联网社交。用法见guide/secret_base、shared_space、photo_wall。"),

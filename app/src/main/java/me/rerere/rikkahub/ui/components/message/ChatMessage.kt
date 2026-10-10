@@ -295,6 +295,15 @@ fun ChatMessage(
             messageExtras()
         }
 
+        // A real tool-produced file is a chat artifact, not hidden inside collapsed tool details.
+        val toolDocuments = remember(message.parts, pruning) {
+            me.rerere.rikkahub.ui.pages.chat.orbisToolDocuments(
+                message.parts.filterIndexed { index, _ -> index !in (pruning?.hiddenPartIndexes ?: emptySet()) },
+                message.id.toString(),
+            )
+        }
+        me.rerere.rikkahub.ui.pages.orbis.OrbisCallFileAttachments(toolDocuments, title = "生成的文件")
+
         // A quote belongs below its reply, outside the body bubble and above the actions.
         // Match the bubble's role alignment without occupying the side-avatar column.
         message.orbisQuote?.takeIf { it.isValid() }?.let { quote ->
@@ -768,64 +777,9 @@ internal fun MessagePartsBlock(
                     }
 
                     is UIMessagePart.Document -> {
-                        Surface(
-                            tonalElevation = 2.dp,
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                intent.data = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    part.url.toUri().toFile()
-                                )
-                                val chooserIndent = Intent.createChooser(intent, null)
-                                context.startActivity(chooserIndent)
-                            },
-                            modifier = Modifier,
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.tertiaryContainer
-                        ) {
-                            ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    when (part.mime) {
-                                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> {
-                                            Icon(
-                                                painter = painterResource(R.drawable.docx),
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-
-                                        "application/pdf" -> {
-                                            Icon(
-                                                painter = painterResource(R.drawable.pdf),
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-
-                                        else -> {
-                                            Icon(
-                                                imageVector = HugeIcons.File02,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = part.fileName,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 200.dp)
-                                    )
-                                }
-                            }
-                        }
+                        me.rerere.rikkahub.ui.pages.orbis.OrbisCallFileAttachments(
+                            listOf(me.rerere.rikkahub.ui.pages.chat.OrbisCallFile.Document(part, messageKey)), title = "文件",
+                        )
                     }
 
                     else -> {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -44,7 +45,8 @@ import org.koin.compose.koinInject
 
 /** File links are outside the collapsed body. No I/O happens until a human clicks an action. */
 @Composable
-internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>) {
+internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>, title: String = "本次通话的文件") {
+    if (files.isEmpty()) return
     val context = LocalContext.current
     val repository = koinInject<WorkspaceRepository>()
     val scope = rememberCoroutineScope()
@@ -62,9 +64,11 @@ internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>) {
         }
     }
 
-    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+    val exportMime = (selected as? OrbisCallFile.Document)?.part?.mime
+        ?.takeIf { it.matches(Regex("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+")) } ?: "text/plain"
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(exportMime)) { uri ->
         val pendingId = exportPending.also { exportPending = null }
-        val file = files.filterIsInstance<OrbisCallFile.Workspace>().firstOrNull { it.exportIdentity == pendingId }
+        val file = files.firstOrNull { it.exportIdentity == pendingId }
         if (uri != null && file == null) {
             notice = "导出未完成：原文件入口已经变化或未能恢复。所选位置可能只有空文件，请重新导出。"
         }
@@ -75,21 +79,24 @@ internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>) {
             try {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                        exportCallWorkspaceFile(repository, file, output)
+                        when (file) {
+                            is OrbisCallFile.Workspace -> exportCallWorkspaceFile(repository, file, output)
+                            is OrbisCallFile.Document -> exportCallDocument(file.part.url, File(context.filesDir, "upload"), output)
+                        }
                     } ?: error("output_unavailable")
                 }
                 notice = "文件已导出。"
                 terminalNoticeShown = true
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
-                notice = "导出未完成，请检查保存位置；若出现不完整文件，请勿当作备份。原文件未修改。"
+                notice = "导出未完成：本地附件导出限 32 MiB，文件也可能已移动或保存位置不可写；若出现不完整文件，请勿当作备份。原文件未修改。"
                 terminalNoticeShown = true
             }
             finally { busy = false; if (terminalNoticeShown) exportStarted = false }
         }
     }
 
-    OrbisCallFileAttachmentsContent(files) { file ->
+    OrbisCallFileAttachmentsContent(files, title = title) { file ->
         if (!busy && exportPending == null) {
             selected = file
             preview = null
@@ -109,6 +116,9 @@ internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>) {
                         Text(if (file.workspaceId != null) "打开的是这次工具绑定工作区中的当前文件，内容可能在通话后更新。"
                         else if (file.hasWriteSnapshot) "旧记录未保存工作区绑定；这里提供工具成功写入时的正文副本，不冒充当前文件。"
                         else "旧记录未保存工作区绑定，无法安全定位文件。请按路径到工作区核对；不会自动执行工具或改写文件。",
+                            style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("本地附件可原样导出，单文件限 32 MiB；网络链接只能打开，不会自动下载。",
                             style = MaterialTheme.typography.bodySmall)
                     }
                     if (busy) Text("正在读取或导出…")
@@ -161,7 +171,11 @@ internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>) {
                             } finally { busy = false }
                         }
                     }) { Text("查看文件") }
-                    if (file is OrbisCallFile.Workspace && readable) TextButton(
+                    val exportable = when (file) {
+                        is OrbisCallFile.Workspace -> readable
+                        is OrbisCallFile.Document -> file.part.url.startsWith("file:")
+                    }
+                    if (exportable) TextButton(
                         enabled = !busy && exportPending == null,
                         onClick = {
                             try {
@@ -180,20 +194,21 @@ internal fun OrbisCallFileAttachments(files: List<OrbisCallFile>) {
     }
 }
 
-private val OrbisCallFile.Workspace.exportIdentity: String
-    get() = "$key:$sourceMessageId:$toolCallId"
+private val OrbisCallFile.exportIdentity: String
+    get() = "$key:$sourceMessageId:${(this as? OrbisCallFile.Workspace)?.toolCallId.orEmpty()}"
 
 /** Stateless entry for isolated UI tests; no repository, file, model or microphone access. */
 @Composable
-internal fun OrbisCallFileAttachmentsContent(files: List<OrbisCallFile>, onOpen: (OrbisCallFile) -> Unit) {
+internal fun OrbisCallFileAttachmentsContent(files: List<OrbisCallFile>, title: String = "本次通话的文件", onOpen: (OrbisCallFile) -> Unit) {
     if (files.isEmpty()) return
     Column(Modifier.fillMaxWidth().testTag("orbis-call-files"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("本次通话的文件", style = MaterialTheme.typography.labelMedium)
+        Text(title, style = MaterialTheme.typography.labelMedium)
         files.forEach { file -> key(file.key) {
             Surface(onClick = { onOpen(file) }, shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.tertiaryContainer,
                 modifier = Modifier.fillMaxWidth().testTag("orbis-call-file:${file.key}")) {
-                Text("文件 · ${file.name}", Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                Text("文件 · ${file.name}", Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         } }
     }
