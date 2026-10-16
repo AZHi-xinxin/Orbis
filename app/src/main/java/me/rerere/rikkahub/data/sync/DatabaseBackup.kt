@@ -54,6 +54,12 @@ internal object DatabaseBackup {
             }
             collectMessages("message_node")
             collectMessages("orbis_compaction_backup_node")
+            val hasOriginals = copy.query("SELECT name FROM sqlite_master WHERE type='table' AND name='orbis_original_archive'").use { it.moveToFirst() }
+            if (hasOriginals) copy.query("SELECT a.file_references FROM orbis_original_archive a JOIN orbis_compaction_event e ON e.id=a.event_id JOIN conversationentity c ON c.id=e.conversation_id WHERE c.consultation_binding != ''").use { rows ->
+                while (rows.moveToNext()) JsonInstant.decodeFromString<Set<String>>(rows.getString(0)).forEach { url ->
+                    backupUploadPath(context.filesDir, url)?.let(candidates::add)
+                }
+            }
             val hiddenFavorites = linkedSetOf<String>()
             copy.query("SELECT id, ref_key, ref_json, snapshot_json, meta_json FROM favorites").use { rows ->
                 while (rows.moveToNext()) {

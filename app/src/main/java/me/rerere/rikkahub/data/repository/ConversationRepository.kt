@@ -407,6 +407,25 @@ class ConversationRepository(
         }
     }
 
+    /** Optional persistence for the independent human lane. Compare and append in ONE Room
+     * transaction, preserving current metadata. A conflict returns null, never blocks sending.
+     * No generation checkpoint is deleted or acknowledged by this operation.
+     */
+    suspend fun commitHumanContinuation(expected: Conversation, updated: Conversation): Conversation? = database.withTransaction {
+        check(expected.id == updated.id && expected.assistantId == updated.assistantId &&
+            expected.compactionEpoch == updated.compactionEpoch && expected.consultation == updated.consultation)
+        val entity = conversationDAO.getConversationById(expected.id.toString()) ?: return@withTransaction null
+        val current = conversationEntityToConversation(entity, loadMessageNodes(entity.id))
+        if (current.assistantId != expected.assistantId || current.compactionEpoch != expected.compactionEpoch ||
+            current.consultation != expected.consultation || current.messageNodes.size != expected.messageNodes.size ||
+            current.messageNodes.zip(expected.messageNodes).any { (a, b) ->
+                a.id != b.id || a.selectIndex != b.selectIndex || a.messages != b.messages
+            }) return@withTransaction null
+        val candidate = current.copy(messageNodes = updated.messageNodes, chatSuggestions = emptyList(), updateAt = Instant.now())
+        updateConversation(candidate, requireExistingOwner = expected.assistantId)
+        getConversationById(expected.id)
+    }
+
     /** Called only after the independent call archive has been durably verified. */
     suspend fun commitVoiceCallArchive(
         expected: Conversation, callId: String, archived: List<MessageNode>, summary: UIMessage,

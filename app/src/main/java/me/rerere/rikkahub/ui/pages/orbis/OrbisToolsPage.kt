@@ -39,15 +39,16 @@ import org.koin.androidx.compose.koinViewModel
 
 /** One entry per capability. Configuration belongs to system settings, not this launcher. */
 @Composable
-fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
+fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = null, conversationId: String? = null) {
     val navigator = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val selected = if (settings.init) null else settings.assistants.find { it.id == settings.assistantId }
+    val ownerScope = orbisToolsScope(settings, ownerAssistantId, conversationId)
+    val selected = ownerScope?.assistant
     var showGames by rememberSaveable { mutableStateOf(false) }
     var showStickers by rememberSaveable { mutableStateOf(false) }
-    var showCalls by rememberSaveable { mutableStateOf(false) }
-    var showGallery by rememberSaveable { mutableStateOf(false) }
-    var showPrivateRoom by rememberSaveable { mutableStateOf(false) }
+    var showCalls by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showGallery by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showPrivateRoom by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var companionSpace by rememberSaveable(selected?.id?.toString()) { mutableStateOf<CompanionSpaceSection?>(null) }
     val context = LocalContext.current
     var galleryName by remember(selected?.id) { mutableStateOf("") }
@@ -63,11 +64,12 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
-                OrbisPageHeader(title = "工具与娱乐", subtitle = "做事与喘气，都有位置",
+                OrbisPageHeader(title = "工具与娱乐", subtitle = selected?.let { "内容归属：${it.name.ifBlank { "未命名助手" }}" }
+                    ?: if (settings.init) "正在读取助手配置…" else "助手配置不可用，未切换到其他助手",
                     avatar = { Icon(HugeIcons.Package, contentDescription = null) },
                     navigationIcon = { BackButton() }, modifier = Modifier.statusBarsPadding())
             },
-            bottomBar = { OrbisChatDock(currentLabel = "当前 工具") },
+            bottomBar = { OrbisChatDock(currentLabel = "当前 工具", ownerAssistantId = ownerAssistantId, conversationId = conversationId) },
         ) { innerPadding ->
             LazyColumn(Modifier.fillMaxSize().padding(innerPadding),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 14.dp),
@@ -80,6 +82,11 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                             fontWeight = FontWeight.Bold, color = colors.ink,
                             modifier = Modifier.semantics { heading() })
                         Text("连接与朗读在系统设置；书籍与音乐留在原 Orbis。",
+                            fontSize = 12.sp, lineHeight = 18.sp, color = colors.mutedInk)
+                        Text(if (ownerAssistantId != null || conversationId != null)
+                            if (selected == null && !settings.init) "原助手或会话入口不可用，请从原聊天重新打开；没有切换到其他助手。"
+                            else "格子、秘密基地与生图作品归当前会话的助手所有；不会更改全局助手。"
+                            else "这是通用工具入口，内容归属上方显示的全局助手。",
                             fontSize = 12.sp, lineHeight = 18.sp, color = colors.mutedInk)
                     }
                 }
@@ -102,7 +109,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                                                 val enabled = item.destination !in setOf(OrbisToolDestination.LOCAL_CAPABILITIES,
                                                     OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM,
                                                     OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
-                                                    OrbisToolDestination.PHOTO_WALL) || selected != null
+                                                    OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.CHARACTER, OrbisToolDestination.IMAGE_WORKSHOP) || selected != null
                                                 val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
                                                 ToolsTile(tile, enabled, Modifier.weight(1f)) {
                                                     when (item.destination) {
@@ -111,6 +118,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                                                         OrbisToolDestination.LOCAL_CAPABILITIES -> selected?.id?.toString()?.let {
                                                             navigator.navigate(Screen.AssistantLocalTool(it))
                                                         }
+                                                        OrbisToolDestination.IMAGE_WORKSHOP -> ownerScope?.let { navigator.navigate(it.imageWorkshopRoute()) }
                                                         OrbisToolDestination.GAMES -> showGames = true
                                                         OrbisToolDestination.STICKERS -> showStickers = true
                                                         OrbisToolDestination.BLUETOOTH_TOY -> navigator.navigate(Screen.OrbisToy)
@@ -120,6 +128,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                                                         OrbisToolDestination.SECRET_BASE -> companionSpace = CompanionSpaceSection.SECRET
                                                         OrbisToolDestination.SHARED_SPACE -> companionSpace = CompanionSpaceSection.SOCIAL
                                                         OrbisToolDestination.PHOTO_WALL -> companionSpace = CompanionSpaceSection.PHOTOS
+                                                        OrbisToolDestination.CHARACTER -> selected?.let {
+                                                            me.rerere.rikkahub.ui.activity.OrbisCharacterActivity.launch(context, it.id.toString())
+                                                        }
                                                     }
                                                 }
                                             }
@@ -132,7 +143,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
                     }
                 }
                 item("permissions") {
-                    OutlinedButton(onClick = { showCalls = true }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { showCalls = true }, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
                         Text("通话记录 · 摘要与完整文字记录")
                     }
                     Surface(color = colors.sand.copy(alpha = .55f), shape = RoundedCornerShape(14.dp)) {
@@ -143,14 +154,16 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel()) {
             }
         }
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
-        if (companionSpace != null && selected != null) OrbisCompanionSpacesPage(selected.id.toString(), selected.name,
-            companionSpace!!, onClose = { companionSpace = null })
-        if (showPrivateRoom && selected != null) OrbisPrivateRoomPage(selected.id.toString(), selected.name,
-            onClose = { showPrivateRoom = false })
-        if (showGallery && selected != null) OrbisGalleryPage(selected.id.toString(), selected.name, onClose = { showGallery = false })
-        if (showCalls) OrbisVoiceCallHistorySheet(chatService.voiceCalls,
-            assistantId = selected?.id?.toString(), onRetry = chatService::retryVoiceCallArchiveIsolated,
-            onDismiss = { showCalls = false })
+        if (selected != null) key(selected.id) {
+            if (companionSpace != null) OrbisCompanionSpacesPage(selected.id.toString(), selected.name,
+                companionSpace!!, onClose = { companionSpace = null })
+            if (showPrivateRoom) OrbisPrivateRoomPage(selected.id.toString(), selected.name,
+                onClose = { showPrivateRoom = false })
+            if (showGallery) OrbisGalleryPage(selected.id.toString(), selected.name, onClose = { showGallery = false })
+            if (showCalls) OrbisVoiceCallHistorySheet(chatService.voiceCalls,
+                assistantId = selected.id.toString(), onRetry = chatService::retryVoiceCallArchiveIsolated,
+                onDismiss = { showCalls = false })
+        }
         if (showStickers) AlertDialog(
             onDismissRequest = { showStickers = false }, containerColor = colors.panel,
             title = { Text("你和伙伴的表情库", fontSize = 18.sp) },
@@ -183,7 +196,7 @@ internal fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifie
         OrbisToolDestination.GALLERY -> HugeIcons.Package
         OrbisToolDestination.SCHEDULE -> HugeIcons.Calendar03
         OrbisToolDestination.SHARED_SPACE -> HugeIcons.Favourite
-        OrbisToolDestination.PHOTO_WALL -> HugeIcons.Image02
+        OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.IMAGE_WORKSHOP -> HugeIcons.Image02
         else -> HugeIcons.Package
     }
     OrbisToolEntryCard(item.title, if (enabled) item.subtitle else "请先选择 AI 配置",

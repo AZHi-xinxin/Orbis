@@ -130,7 +130,7 @@ private fun CompanionSpacesContent(assistantId: String, assistantName: String, s
                 TextButton(onClick = onClose) { Text("返回") }
                 Column(Modifier.weight(1f)) {
                     Text(section.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("$aiName · 只属于你们的空间", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+                    Text("内容归属：$aiName · 只属于你们的空间", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                 }
                 TextButton(enabled = !busy && snapshot != null && error == null, onClick = {
                     when (section) {

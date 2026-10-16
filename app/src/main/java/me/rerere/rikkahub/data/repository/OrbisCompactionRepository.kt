@@ -138,6 +138,20 @@ class OrbisCompactionRepository(
                 encodeMessageNodeMessages(node.messages), node.selectIndex)
         })
         dao.insertEvent(event)
+        if (metadata.retainOriginals && stored.consultationBinding.isBlank()) {
+            val serialized = expected.messageNodes.map { JsonInstant.encodeToString(it) }
+            require(serialized.all { it.length <= 8_000_000 }) { "单条原文超过档案读取上限；压缩未提交，原文保留。" }
+            val references = JsonInstant.encodeToString(expected.messageNodes.flatMap { it.messages }
+                .flatMap { it.partsWithToolUndoAttachments() }.localFileUrls())
+            require(references.toByteArray().size <= 256 * 1024) { "附件引用过多；压缩未提交，原文保留。" }
+            dao.insertOriginalArchive(me.rerere.rikkahub.data.db.entity.OrbisOriginalArchiveEntity(event.id,
+                serialized.size, serialized.sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() } + references.toByteArray().size, references))
+            serialized.forEachIndexed { node, body ->
+                originalArchiveChunks(body).mapIndexed { index, chunk ->
+                    me.rerere.rikkahub.data.db.entity.OrbisOriginalChunkEntity(event.id, node, index, chunk)
+                }.chunked(32).forEach { dao.insertOriginalChunks(it) }
+            }
+        }
         if (metadata.captureLocalMemory) {
             val memories = me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository(database)
             // Capacity refusal does not prevent compaction; the complete summary remains on the
@@ -215,6 +229,35 @@ class OrbisCompactionRepository(
     suspend fun retainedFileReferences(urls: List<String>): Set<String> = urls.filter {
         dao.hasFileReference(JsonInstant.encodeToString(it))
     }.toSet()
+
+    suspend fun originalArchives(owner: Uuid, offset: Int = 0) = dao.listOriginalArchives(owner.toString(), 30, offset.coerceAtLeast(0))
+    suspend fun originalArchiveStats(owner: Uuid) = dao.originalStats(owner.toString())
+
+    /** Human reader only. No generation, executable tools, FTS indexing or active context insertion. */
+    suspend fun originalArchiveNode(owner: Uuid, eventId: String, index: Int): MessageNode = database.withTransaction {
+        check(dao.getEvent(eventId, owner.toString()) != null) { "档案不存在或不属于当前 AI。" }
+        val archive = checkNotNull(dao.getOriginalArchive(eventId)) { "档案已删除。" }
+        require(index in 0 until archive.nodeCount)
+        val body = StringBuilder()
+        var offset = 0
+        while (true) {
+            val chunks = dao.originalChunks(eventId, index, 16, offset)
+            if (chunks.isEmpty()) break
+            chunks.forEachIndexed { i, chunk ->
+                check(chunk.chunkIndex == offset + i && chunk.body.length <= 16_000) { "档案分块不完整。" }
+                body.append(chunk.body)
+                check(body.length <= 8_000_000) { "档案超过安全读取上限。" }
+            }
+            offset += chunks.size
+        }
+        JsonInstant.decodeFromString<MessageNode>(body.toString())
+    }
+
+    suspend fun deleteOriginalArchives(owner: Uuid, ids: Set<String>, all: Boolean = false): Int = database.withTransaction {
+        require(ids.size <= 30 && (all || ids.isNotEmpty()))
+        // Only this assistant's optional archives, never active chat or the latest rollback slot.
+        dao.deleteOriginalArchives(owner.toString(), ids.toList(), all)
+    }
 
     private suspend fun requireBaseline(expected: Conversation, baseline: Conversation): me.rerere.rikkahub.data.db.entity.ConversationEntity {
         require(expected.id == baseline.id && expected.assistantId == baseline.assistantId) { "compaction_baseline_owner_mismatch" }

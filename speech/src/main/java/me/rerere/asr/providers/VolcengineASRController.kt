@@ -29,6 +29,8 @@ import me.rerere.asr.ASRController
 import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
+import me.rerere.asr.ASRFailureKind
+import me.rerere.asr.classifyASRTransportFailure
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.appendAmplitude
 import me.rerere.asr.calculateRmsAmplitude
@@ -125,8 +127,9 @@ class VolcengineASRController(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 scope.launch {
                     if (this@VolcengineASRController.webSocket !== webSocket) return@launch
-                    Log.e(TAG, "Volcengine ASR websocket failed", t)
-                    setError(t.message ?: "ASR websocket failed")
+                    val kind = classifyASRTransportFailure(t, response?.code)
+                    Log.e(TAG, "Volcengine ASR websocket failed: ${kind.name}")
+                    setError("语音识别连接未完成 [ASR_${kind.name}]", kind)
                 }
             }
 
@@ -290,14 +293,14 @@ class VolcengineASRController(
         runCatching { old?.release() }
     }
 
-    private fun setError(message: String) {
+    private fun setError(message: String, kind: ASRFailureKind = ASRFailureKind.UNKNOWN) {
         pcmObserver.set(null)
         pauseCapture()
         finishJob?.cancel()
         val socket = webSocket
         webSocket = null
         socket?.cancel()
-        _state.update { it.copy(status = ASRStatus.Error, errorMessage = message) }
+        _state.update { it.copy(status = ASRStatus.Error, errorMessage = message, errorKind = kind) }
     }
 
     companion object {

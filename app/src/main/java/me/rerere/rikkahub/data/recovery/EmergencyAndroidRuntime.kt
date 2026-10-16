@@ -14,16 +14,20 @@ internal object EmergencyAndroidRuntime {
     const val PROCESS_SUFFIX = ":recovery"
     fun directory(context: Context) = File(context.applicationInfo.dataDir, "orbis-emergency").canonicalFile
     fun gate(context: Context) = EmergencyProcessGate(File(directory(context), "control"))
-    fun isRecoveryProcess(): Boolean = processName().endsWith(PROCESS_SUFFIX)
+    fun isLightweightProcess(context: Context): Boolean =
+        isEmergencyLightweightProcessName(processName(), context.packageName)
 
-    private fun processName(): String = if (Build.VERSION.SDK_INT >= 28) Application.getProcessName() else {
-        File("/proc/self/cmdline").inputStream().use { input ->
-            val bytes = ByteArray(512)
-            val count = input.read(bytes)
-            check(count > 0) { "Cannot identify application process" }
-            bytes.copyOf(count).toString(Charsets.UTF_8).substringBefore('\u0000')
-        }
-    }
+    private fun processName(): String = resolveEmergencyProcessName(
+        androidName = { if (Build.VERSION.SDK_INT >= 28) Application.getProcessName() else null },
+        procName = {
+            File("/proc/self/cmdline").inputStream().use { input ->
+                val bytes = ByteArray(512)
+                val count = input.read(bytes)
+                check(count > 0) { "Cannot identify application process" }
+                bytes.copyOf(count).toString(Charsets.UTF_8).substringBefore('\u0000')
+            }
+        },
+    )
 
     private data class OwnedProcess(val pid: Int, val parent: Int, val start: String, val name: String)
 
@@ -61,6 +65,10 @@ internal object EmergencyAndroidRuntime {
                     check(count > 0)
                     bytes.copyOf(count).toString(Charsets.UTF_8).substringBefore('\u0000')
                 }
+                // The launcher has no providers/services or data writers. Opening its status
+                // panel while exporting must not abort a cold backup. Its short inspection
+                // still uses the same file lease, so export cannot overlap a crash-flag read.
+                if (isEmergencyLauncherProcessName(name, context.packageName)) return@mapNotNull null
                 OwnedProcess(pid, stat[1].toInt(), stat[19], name)
             } catch (error: Exception) {
                 if (!folder.exists()) null else throw IllegalStateException(

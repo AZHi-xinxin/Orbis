@@ -51,6 +51,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ai.ModelListSheet
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.ai.rememberModelListState
@@ -269,6 +270,8 @@ internal fun ModelSettingItem(
                     headlineContent = { Text(stringResource(R.string.assistant_page_thinking_budget)) },
                     trailingContent = {
                         ReasoningButton(
+                            model = state.currentModel,
+                            provider = state.currentModel?.findProvider(providers),
                             reasoningLevel = reasoningLevel,
                             onUpdateReasoningLevel = onUpdateReasoningLevel,
                         )

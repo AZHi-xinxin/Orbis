@@ -14,6 +14,16 @@ import kotlin.uuid.Uuid
 /** Synthetic immutable data only; no provider, tool executor, file or database. */
 @Suppress("DEPRECATION")
 class OrbisMessageBatchTest {
+    @Test fun awaitingApprovalDoesNotLockUnrelatedDeletionAndCanItselfBeDeleted() {
+        val waiting = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.Tool("waiting", "noop", "{}",
+            approvalState = me.rerere.ai.ui.ToolApprovalState.Pending))).toMessageNode()
+        val c = source().let { it.copy(messageNodes = it.messageNodes + waiting) }
+        val unrelated = prepare(c, setOf(c.messageNodes.first().id))
+        assertTrue(unrelated.replacementNodes.last().currentMessage.getTools().single().isPending)
+        val selected = prepare(c, setOf(waiting.id))
+        assertFalse(selected.replacementNodes.any { it.id == waiting.id })
+        assertTrue(c.messageNodes.last().currentMessage.getTools().single().isPending)
+    }
     private fun source() = Conversation(assistantId = Uuid.random(), title = "synthetic",
         messageNodes = List(4) { UIMessage.user("synthetic $it").toMessageNode() })
     private fun call(id: String) = UIMessage.assistant("").copy(parts = listOf(UIMessagePart.ToolCall(id, "noop", "{}"))).toMessageNode()

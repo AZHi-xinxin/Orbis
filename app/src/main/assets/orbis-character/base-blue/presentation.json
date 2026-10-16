@@ -1,0 +1,608 @@
+{
+  "assets": [
+    {
+      "id": "pose-neutral",
+      "kind": "POSE",
+      "tag": "neutral",
+      "sha256": "ba6c4c421c5df0c2da3f24a2433ab63b1291213dddce594f91b2361c91b009db",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-invite",
+      "kind": "POSE",
+      "tag": "invite",
+      "sha256": "e162eca0d0a3bbc04cd920ade91bb4b1c10e746d5ae955b2140f673204c57de9",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-wave",
+      "kind": "POSE",
+      "tag": "wave",
+      "sha256": "4a4644d1e7b506d25117225160c6a8e88c9c8da19f0798796b367e1595c6e7f3",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-fold",
+      "kind": "POSE",
+      "tag": "fold",
+      "sha256": "fa4ab8d82edd167b8917be32ec72458c5e59c211cd93914c25871c272bc11a27",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-think",
+      "kind": "POSE",
+      "tag": "think",
+      "sha256": "03232611b51547cfc68b07d904c21036a601ea3574fbe661cbaee7623def1007",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-mug",
+      "kind": "POSE",
+      "tag": "mug",
+      "sha256": "1acb23fe8e18c0bdbe618253ab8da5e25ee5b5a4d3641975194a35fb24b50392",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-stretch",
+      "kind": "POSE",
+      "tag": "stretch",
+      "sha256": "90fee4728d9b3504e14079af78037b8c68840a529564701d940ddd0676fbe8ff",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-listen",
+      "kind": "POSE",
+      "tag": "listen",
+      "sha256": "2af960b87f2b8cc63c67363612af5abcca0bc0b9a5a7cec097985cb8ec14ce0b",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "pose-explain",
+      "kind": "POSE",
+      "tag": "explain",
+      "sha256": "6584557fa7b0e029a3727396bdaf2ae184ba54c8686605e5ad994d56044326c7",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-calm-1",
+      "kind": "EXPRESSION",
+      "tag": "calm",
+      "sha256": "2c51c6500469888bf3c1bfb3b48296681343102479d645684a912cf7ef1606b5",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-calm-2",
+      "kind": "EXPRESSION",
+      "tag": "calm",
+      "sha256": "374e5cdee43831ef4ddee5bd39ca8570e9e0dfe97f5b0164faf3ffee6fb9c562",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-calm-3",
+      "kind": "EXPRESSION",
+      "tag": "calm",
+      "sha256": "92176df994d986fe43bf2f213cfe3b9b0553fc41b5d5512f2f03f3658f2cd39a",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "calm",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-smile-1",
+      "kind": "EXPRESSION",
+      "tag": "smile",
+      "sha256": "d98e11b6434f502297cc642c8e03988fb8a860bcbc8bea540353108b16ca55b4",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "smile",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-smile-2",
+      "kind": "EXPRESSION",
+      "tag": "smile",
+      "sha256": "5cb213a9523cfcbc6affdcbfbfeb817d2f022fb70d46e680a9d20dc258e4b184",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "smile",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-smile-3",
+      "kind": "EXPRESSION",
+      "tag": "smile",
+      "sha256": "189f20e7e60ac44ab2cc8d3108c3b21907fc4a6a8c120ea2d9c7f04e5900e81a",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "smile",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-cry-1",
+      "kind": "EXPRESSION",
+      "tag": "cry",
+      "sha256": "6c682b5f317b2085a03e478f1915871512bc6ae0f3863a7291e5eb005d47fd58",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "cry",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-cry-2",
+      "kind": "EXPRESSION",
+      "tag": "cry",
+      "sha256": "71463d1ccc16d328fc4614614464101d46144c98cdb9b9c9ab58e97b52260c12",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "cry",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-cry-3",
+      "kind": "EXPRESSION",
+      "tag": "cry",
+      "sha256": "a5b78c6e3584c1e887677a0bc3e1116bb523bb712dabb26b353b7273727c3418",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "cry",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-think-1",
+      "kind": "EXPRESSION",
+      "tag": "think",
+      "sha256": "760a7f3d5e9f29bcd0d4feadf87aed2fafce8a2e39c3e8d45112ae21fff8507b",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "think",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-think-2",
+      "kind": "EXPRESSION",
+      "tag": "think",
+      "sha256": "9f24ea536ce51eeb0dc5ec243e11e1618dedfcc26815ea5df87838f873daa3ff",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "think",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-think-3",
+      "kind": "EXPRESSION",
+      "tag": "think",
+      "sha256": "88f7004f7841fdd5437619792858c5f2b42d26467a3696030b5c657a16c7b585",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "think",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-angry-1",
+      "kind": "EXPRESSION",
+      "tag": "angry",
+      "sha256": "cdfa4a456e8cf52fcb3c177600ceaaa2a1182ee1864946c52b7a6d3558bc19f0",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "angry",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-angry-2",
+      "kind": "EXPRESSION",
+      "tag": "angry",
+      "sha256": "9e3774b65fe468b0159dd118f53ea577eabd8c5343c66661be4854a712530c6a",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "angry",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-angry-3",
+      "kind": "EXPRESSION",
+      "tag": "angry",
+      "sha256": "ce613be8c8442b028748d92719754c316faed7f022ed4ba3d7435ab202c3a51a",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "angry",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-shy-1",
+      "kind": "EXPRESSION",
+      "tag": "shy",
+      "sha256": "1cf05ea6b5907a16ed7f748653e7c55285c19d3aad6f83aa339e332432aed14f",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "shy",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-shy-2",
+      "kind": "EXPRESSION",
+      "tag": "shy",
+      "sha256": "aaddf95c8aad079b04c77420959c793bb00d5eded6da4ce1a63203af859a5845",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "shy",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-shy-3",
+      "kind": "EXPRESSION",
+      "tag": "shy",
+      "sha256": "a804f75ec52ff8f51b3bdf6dfdaad929283c78decb440014c4725cc8ac456401",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "shy",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-sleepy-1",
+      "kind": "EXPRESSION",
+      "tag": "sleepy",
+      "sha256": "88594c28a7228e2be7d667855bceb556688da6e89ee4ccdbc5e0ce33e3d91f1a",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "sleepy",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-sleepy-2",
+      "kind": "EXPRESSION",
+      "tag": "sleepy",
+      "sha256": "bcba1a481fb6e40c775ab70f20b492e41bb41cd7ba232f95f8db992bdb4f2830",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "sleepy",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-sleepy-3",
+      "kind": "EXPRESSION",
+      "tag": "sleepy",
+      "sha256": "7b906c30f44ce9364c91001224fc0bd1e382f9ac2a132b3400f60cb2915cb806",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "sleepy",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-excited-1",
+      "kind": "EXPRESSION",
+      "tag": "excited",
+      "sha256": "5b15bf34bcdb01f56606b9c3ab4887c09dcbc5a8a295c9e0006549a93645884f",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "excited",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-excited-2",
+      "kind": "EXPRESSION",
+      "tag": "excited",
+      "sha256": "9ee8a2717bd7c4e25f31587654d22fe5ca1272685ba777b695b92522722aeba6",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "excited",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    },
+    {
+      "id": "expression-excited-3",
+      "kind": "EXPRESSION",
+      "tag": "excited",
+      "sha256": "8b4335e326810de2d5f6a68807d8bcfe0f775922eaf06c3b52399f4d5ce39ca5",
+      "width": 1024,
+      "height": 1536,
+      "emotion": "excited",
+      "trimBodyAtCardEdge": true,
+      "faceAnchor": {
+        "group": "base-blue-face-v1",
+        "x": 0.25,
+        "y": 0.28,
+        "width": 0.5,
+        "height": 0.24
+      },
+      "colorModel": "orbis-blue-v1"
+    }
+  ],
+  "widgetAssetId": "pose-neutral",
+  "scene": "living",
+  "card": "cloud-blue",
+  "greeting": "",
+  "expressionPolicy": null,
+  "widgetExpressionId": null,
+  "colors": {
+    "hair": "deepseek",
+    "eyes": "deepseek"
+  }
+}

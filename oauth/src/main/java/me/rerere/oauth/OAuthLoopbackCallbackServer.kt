@@ -28,6 +28,7 @@ data class OAuthCallback(
     val state: String,
     val error: String?,
     val errorDescription: String?,
+    val clientId: String? = null,
 )
 
 /**
@@ -39,6 +40,8 @@ data class OAuthCallback(
 class OAuthLoopbackCallbackServer(
     private val port: Int = 0,
     callbackPath: String = "/oauth/callback",
+    private val appName: String = "RikkaHub",
+    private val callbackReceiptOnly: Boolean = false,
 ) {
     private class CallbackRegistration {
         val result = CompletableDeferred<OAuthCallback>()
@@ -165,6 +168,7 @@ class OAuthLoopbackCallbackServer(
             state = state,
             error = error,
             errorDescription = call.request.queryParameters["error_description"],
+            clientId = call.request.queryParameters["client_id"],
         )
         val responseHtml = if (error == null) successHtml() else errorHtml()
         if (!registration.claimed.compareAndSet(false, true)) {
@@ -230,8 +234,8 @@ class OAuthLoopbackCallbackServer(
     private fun successHtml() = callbackPage(
         tone = "success",
         symbol = "&#10003;",
-        title = localizedString(R.string.oauth_callback_success_title, "Authorization complete"),
-        message = localizedString(
+        title = if (callbackReceiptOnly) "已收到授权结果" else localizedString(R.string.oauth_callback_success_title, "Authorization complete"),
+        message = if (callbackReceiptOnly) "请返回 $appName 完成账号验证。此页不代表模型连接测试已通过。" else localizedString(
             R.string.oauth_callback_success_message,
             "The account has been connected successfully.",
         ),
@@ -290,7 +294,7 @@ class OAuthLoopbackCallbackServer(
     )
 
     private fun localizedString(@StringRes resourceId: Int, fallback: String): String =
-        localizedContext?.getString(resourceId) ?: fallback
+        (localizedContext?.getString(resourceId) ?: fallback).replace("RikkaHub", appName)
 
     private fun callbackPage(
         tone: String,
@@ -302,6 +306,7 @@ class OAuthLoopbackCallbackServer(
         val safeTitle = title.escapeHtml()
         val safeMessage = message.escapeHtml()
         val safeHint = hint.escapeHtml()
+        val safeAppName = appName.escapeHtml()
         val languageTag = localizedContext
             ?.resources
             ?.configuration
@@ -317,7 +322,7 @@ class OAuthLoopbackCallbackServer(
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
               <meta name="color-scheme" content="light dark">
-              <title>$safeTitle · RikkaHub</title>
+              <title>$safeTitle · $safeAppName</title>
               <style>
                 :root {
                   color-scheme: light dark;
@@ -406,7 +411,7 @@ class OAuthLoopbackCallbackServer(
             </head>
             <body class="$tone">
               <main role="status" aria-live="polite">
-                <p class="brand">RikkaHub</p>
+                <p class="brand">$safeAppName</p>
                 <div class="status">
                   <div class="icon" aria-hidden="true">$symbol</div>
                   <h1>$safeTitle</h1>

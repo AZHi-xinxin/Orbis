@@ -9,6 +9,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisGameLibraryToolsTest {
+    @Test fun emptyReadIdMeansDirectoryButNeverCreatesDuringInstall() {
+        val f = Fixture()
+        assertTrue(call(f.tools[1], """{"game_id":"","include_html":false,"include_template":false}""").getValue("ok").jsonPrimitive.boolean)
+        assertFalse(call(f.tools[1], """{"game_id":"","include_html":true}""").getValue("ok").jsonPrimitive.boolean)
+        assertFalse(call(f.tools[0], """{"game_id":"","title":"x","html":"<html>x</html>"}""").getValue("ok").jsonPrimitive.boolean)
+        assertTrue(f.repo.readSnapshot().games.isEmpty())
+    }
     private class Fixture {
         val repo = OrbisMiniGameRepository(object : OrbisGameStorage {
             var raw: String? = null

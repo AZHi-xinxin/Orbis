@@ -1,5 +1,9 @@
 package me.rerere.ai.provider.providers.openai
 
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonArray
@@ -16,6 +20,7 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
 import me.rerere.ai.util.HttpException
@@ -240,6 +245,207 @@ class ResponseApiStreamDecoderTest {
     }
 
     @Test
+    fun `annotation added should emit the supplied source without completing the response`() {
+        val decoder = ResponseApiStreamDecoder()
+        val result = decoder.accept(SseEvent(data = json.encodeToString(annotationEvent(citation()))))
+
+        assertFalse(result.completed)
+        assertEquals(listOf(StreamChunk.Annotations(listOf(expectedCitation()))), result.chunks)
+    }
+
+    @Test
+    fun `repeated citations across added done and terminal snapshots should appear only once`() {
+        val decoder = ResponseApiStreamDecoder()
+        val part = outputTextPart(citation())
+        val item = messageItem(part)
+        val events = listOf(
+            buildJsonObject {
+                put("type", "response.content_part.added")
+                put("item_id", "msg_1")
+                put("content_index", 0)
+                put("part", outputTextPart())
+            },
+            buildJsonObject {
+                put("type", "response.output_text.delta")
+                put("item_id", "msg_1")
+                put("content_index", 0)
+                put("delta", "Source")
+            },
+            annotationEvent(citation()),
+            annotationEvent(citation()),
+            buildJsonObject {
+                put("type", "response.output_text.done")
+                put("item_id", "msg_1")
+                put("content_index", 0)
+                put("text", "Source")
+            },
+            buildJsonObject {
+                put("type", "response.content_part.done")
+                put("item_id", "msg_1")
+                put("content_index", 0)
+                put("part", part)
+            },
+            buildJsonObject {
+                put("type", "response.output_item.done")
+                put("item", item)
+            },
+            terminalEvent(item),
+        )
+        val chunks = events.flatMap { decoder.decode(it) }
+
+        assertEquals(1, chunks.filterIsInstance<StreamChunk.Annotations>().size)
+        val message = assemble(chunks)
+        assertEquals(listOf(expectedCitation()), message.annotations)
+        assertEquals("Source", message.parts.filterIsInstance<UIMessagePart.Text>().single().text)
+        assertEquals(1, chunks.filterIsInstance<StreamChunk.Finish>().size)
+        assertTrue(decoder.onClosed().isEmpty())
+    }
+
+    @Test
+    fun `each official snapshot stage can supply citations without an annotation event`() {
+        val part = outputTextPart(citation())
+        val snapshots = listOf(
+            buildJsonObject {
+                put("type", "response.content_part.added")
+                put("item_id", "msg_1")
+                put("part", part)
+            },
+            buildJsonObject {
+                put("type", "response.content_part.done")
+                put("item_id", "msg_1")
+                put("part", part)
+            },
+            buildJsonObject {
+                put("type", "response.output_item.done")
+                put("item", messageItem(part))
+            },
+            terminalEvent(messageItem(part)),
+        )
+
+        snapshots.forEach { snapshot ->
+            val chunks = ResponseApiStreamDecoder().decode(snapshot)
+            assertEquals(
+                snapshot["type"].toString(),
+                listOf(expectedCitation()),
+                chunks.filterIsInstance<StreamChunk.Annotations>().flatMap { it.annotations },
+            )
+        }
+    }
+
+    @Test
+    fun `terminal citations retain distinct sources across messages and content parts`() {
+        val first = messageItem(outputTextPart(citation()), outputTextPart(citation("https://example.org/second", "Second")))
+        val second = JsonObject(messageItem(outputTextPart(citation())) + ("id" to JsonPrimitive("msg_2")))
+        val chunks = ResponseApiStreamDecoder().decode(terminalEvent(first, second))
+
+        assertEquals(
+            listOf(expectedCitation(), UIMessageAnnotation.UrlCitation("Second", "https://example.org/second")),
+            chunks.filterIsInstance<StreamChunk.Annotations>().flatMap { it.annotations },
+        )
+    }
+
+    @Test
+    fun `unsafe malformed and non URL annotations should not become clickable sources`() {
+        val invalidUrls = listOf(
+            "javascript:alert(1)", "data:text/plain,source", "file:///tmp/source", "intent://source",
+            "//example.org/source", "/source", "https://", "https://user:secret@example.org/source",
+            "https://exa mple.org/source", "https://example.org/%broken",
+        )
+        val invalidAnnotations = invalidUrls.map { citation(it) } + listOf(
+            JsonNull,
+            JsonPrimitive("https://example.org/source"),
+            JsonObject(citation() - "url"),
+            JsonObject(citation() - "title"),
+            JsonObject(citation() + ("url" to JsonPrimitive(123))),
+            JsonObject(citation() + ("title" to JsonPrimitive(123))),
+            JsonObject(citation() + ("type" to JsonPrimitive("file_citation"))),
+            buildJsonObject {
+                put("type", "file_path")
+                put("file_id", "file_test")
+            },
+        )
+        val decoder = ResponseApiStreamDecoder()
+
+        invalidAnnotations.forEach { annotation ->
+            assertTrue(decoder.decode(annotationEvent(annotation)).isEmpty())
+        }
+        val chunks = decoder.decode(terminalEvent(messageItem(outputTextPart(*invalidAnnotations.toTypedArray()))))
+        assertTrue(chunks.none { it is StreamChunk.Annotations })
+        assertEquals(1, chunks.filterIsInstance<StreamChunk.Finish>().size)
+    }
+
+    @Test
+    fun `web search source lists do not manufacture citations`() {
+        val item = JsonObject(webSearchItem("completed") + ("action" to buildJsonObject {
+            put("type", "search")
+            put("query", "Kotlin")
+            put("sources", buildJsonArray {
+                add(buildJsonObject {
+                    put("type", "url")
+                    put("url", "https://example.org/source")
+                })
+            })
+        }))
+        val chunks = ResponseApiStreamDecoder().decode(terminalEvent(item))
+
+        assertTrue(chunks.none { it is StreamChunk.Annotations })
+        assertEquals("web_search", assemble(chunks).parts.filterIsInstance<UIMessagePart.ServerTool>().single().toolName)
+    }
+
+    @Test
+    fun `web search terminal status without a start keeps its tool name`() {
+        listOf("completed", "failed", "cancelled", "incomplete").forEach { status ->
+            val chunks = ResponseApiStreamDecoder().decode(buildJsonObject {
+                put("type", "response.web_search_call.$status")
+                put("item_id", "ws_1")
+            })
+            val tool = assemble(chunks).parts.single() as UIMessagePart.ServerTool
+
+            assertEquals("web_search", tool.toolName)
+            assertEquals("ws_1", tool.toolCallId)
+            assertEquals(if (status == "completed") ServerToolStatus.COMPLETED else ServerToolStatus.FAILED, tool.status)
+        }
+    }
+
+    @Test
+    fun `web search done and final snapshot without a start produce one named tool`() {
+        val decoder = ResponseApiStreamDecoder()
+        val item = webSearchItem("completed")
+        val chunks = decoder.decode(buildJsonObject {
+            put("type", "response.output_item.done")
+            put("item", item)
+        }) + decoder.decode(terminalEvent(item))
+        val tool = assemble(chunks).parts.single() as UIMessagePart.ServerTool
+
+        assertEquals("web_search", tool.toolName)
+        assertEquals(ServerToolStatus.COMPLETED, tool.status)
+        assertEquals("Kotlin", tool.input?.jsonObject?.get("query")?.jsonPrimitive?.content)
+        assertEquals(null, tool.output)
+    }
+
+    @Test
+    fun `response completion does not promote failed unfinished or unknown search statuses`() {
+        val expected = mapOf(
+            "completed" to ServerToolStatus.COMPLETED,
+            "failed" to ServerToolStatus.FAILED,
+            "incomplete" to ServerToolStatus.FAILED,
+            "cancelled" to ServerToolStatus.FAILED,
+            "in_progress" to ServerToolStatus.IN_PROGRESS,
+            "unknown" to ServerToolStatus.IN_PROGRESS,
+        )
+        expected.forEach { (status, expectedStatus) ->
+            val chunks = ResponseApiStreamDecoder().decode(terminalEvent(webSearchItem(status)))
+            val tool = assemble(chunks).parts.single() as UIMessagePart.ServerTool
+
+            assertEquals(status, expectedStatus, tool.status)
+            assertEquals("web_search", tool.toolName)
+        }
+        val missingStatus = JsonObject(webSearchItem("completed") - "status")
+        val chunks = ResponseApiStreamDecoder().decode(terminalEvent(missingStatus))
+        assertEquals(ServerToolStatus.IN_PROGRESS, (assemble(chunks).parts.single() as UIMessagePart.ServerTool).status)
+    }
+
+    @Test
     fun `non streaming response should parse web search without synthetic output`() {
         val result = api.parseResponseOutput(buildJsonObject {
             put("id", "resp_1")
@@ -317,6 +523,56 @@ class ResponseApiStreamDecoderTest {
             assertEquals("rs_test", it.metadataAs<OpenAIReasoningMetadata>()?.reasoningId)
             assertEquals("encrypted", it.metadataAs<OpenAIReasoningMetadata>()?.encryptedContent)
         }
+    }
+
+    private fun expectedCitation() = UIMessageAnnotation.UrlCitation("Source title", "https://example.org/source")
+
+    private fun citation(url: String = "https://example.org/source", title: String = "Source title") = buildJsonObject {
+        put("type", "url_citation")
+        put("url", url)
+        put("title", title)
+        put("start_index", 0)
+        put("end_index", 6)
+    }
+
+    private fun annotationEvent(annotation: JsonElement) = buildJsonObject {
+        put("type", "response.output_text.annotation.added")
+        put("item_id", "msg_1")
+        put("output_index", 0)
+        put("content_index", 0)
+        put("annotation_index", 0)
+        put("sequence_number", 1)
+        put("annotation", annotation)
+    }
+
+    private fun outputTextPart(vararg annotations: JsonElement) = buildJsonObject {
+        put("type", "output_text")
+        put("text", "Source")
+        put("annotations", buildJsonArray { annotations.forEach { add(it) } })
+    }
+
+    private fun messageItem(vararg parts: JsonObject) = buildJsonObject {
+        put("type", "message")
+        put("id", "msg_1")
+        put("role", "assistant")
+        put("status", "completed")
+        put("content", buildJsonArray { parts.forEach { add(it) } })
+    }
+
+    private fun terminalEvent(vararg output: JsonObject) = buildJsonObject {
+        put("type", "response.completed")
+        put("response", buildJsonObject {
+            put("id", "resp_1")
+            put("status", "completed")
+            put("output", buildJsonArray { output.forEach { add(it) } })
+        })
+    }
+
+    private fun assemble(chunks: List<StreamChunk>): UIMessage {
+        val handler = StreamChunkHandler(Model(modelId = "test-model"))
+        return chunks.fold(listOf(UIMessage.user("test"))) { messages, chunk ->
+            handler.handle(messages, chunk)
+        }.last()
     }
 
     private fun webSearchItem(status: String) = buildJsonObject {

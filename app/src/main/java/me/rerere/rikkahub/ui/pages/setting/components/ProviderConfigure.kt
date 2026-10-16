@@ -235,6 +235,18 @@ private fun ProviderConfigureOpenAI(
 ) {
     val toaster = LocalToaster.current
 
+    if (provider.chatGptAccountId != null) {
+        Text("ChatGPT 套餐连接 · 凭证仅保存在此设备的加密存储，不随配置导出。请在系统设置 → ChatGPT 套餐管理登录和授权。")
+        OutlinedTextField(value = provider.name, onValueChange = { onEdit(provider.copy(name = it.trim())) },
+            label = { Text("连接名称") }, modifier = Modifier.fillMaxWidth())
+        Text("官方 Responses 接口；不支持的采样、输出长度和自定义请求参数不发送。不会回退到付费 API。")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("启用连接")
+            Switch(checked = provider.enabled, onCheckedChange = { onEdit(provider.copy(enabled = it)) })
+        }
+        return
+    }
+
     if (!BuildConfig.ORBIS_ENABLED) provider.description()
 
     OutlinedTextField(

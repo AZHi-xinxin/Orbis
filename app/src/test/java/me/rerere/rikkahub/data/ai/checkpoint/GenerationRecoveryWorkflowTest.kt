@@ -28,8 +28,7 @@ import kotlin.uuid.Uuid
  * instrumentation test and does not prove Android lifecycle wiring. No disk, API or real tools.
  */
 class GenerationRecoveryWorkflowTest {
-    /** Current-behavior reproduction, not a fix: use real card helper + journal, synthetic DB. */
-    @Test fun `stage46 event card change after baseline makes completed reply conflict and blocks later sends`() = runBlocking {
+    @Test fun `event card change after baseline no longer blocks fresh human conversation`() = runBlocking {
         val run = Workflow()
         val seed = run.repository.stored
         val event = seed.currentMessages.first().copy(orbisEvent = OrbisEventMetadata(
@@ -47,24 +46,21 @@ class GenerationRecoveryWorkflowTest {
             run.repository.save(run.repository.read().applyEventPresentation(original.assistantId, edit))
         }
         run.session.visible = live.value
-        val error = runCatching { run.finish(live.value) }.exceptionOrNull()
-        assertTrue(error is GenerationCheckpointException)
-        assertEquals("database_prefix_changed", (error as GenerationCheckpointException).code)
-        // The full reply and completed receipt did reach the synthetic DB; the journal remains.
+        run.finish(live.value)
         assertEquals(final.messageNodes.drop(1), run.repository.stored.messageNodes.drop(1))
         assertEquals(original.currentMessages.first().parts, run.repository.stored.currentMessages.first().parts)
         assertTrue(run.repository.stored.currentMessages.first().orbisEvent!!.read)
-        val journalBefore = run.store.payload(original.id)
         val databaseBefore = run.repository.stored
-        assertFalse(run.settlePreviousGeneration())
-        assertTrue(run.session.queuePaused)
-        assertTrue(run.session.recoveryBlocked)
-        assertNotNull(runCatching { run.beginExplicitRequest() }.exceptionOrNull())
-        assertEquals(1, run.providerRequests)
+        assertTrue(run.settlePreviousGeneration())
+        assertFalse(run.session.queuePaused)
+        assertFalse(run.session.recoveryBlocked)
+        assertFalse(run.journal.hasCheckpoint(original.id))
+        run.beginExplicitRequest()
+        assertEquals(2, run.providerRequests)
         assertEquals(1, run.toolEffects)
         assertEquals(databaseBefore, run.repository.stored)
-        assertArrayEquals(journalBefore, run.store.payload(original.id))
-        assertFalse(run.events.contains("journal.delete"))
+        assertEquals(original.id, run.session.visible.id)
+        assertTrue(run.events.contains("journal.delete"))
     }
 
     @Test fun `stage46 editing history with leftover completed receipt blocks recovery without replay or erasure`() {

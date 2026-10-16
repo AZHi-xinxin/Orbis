@@ -177,6 +177,7 @@ class RouteActivity : ComponentActivity() {
     private var navStack: MutableList<NavKey>? = null
     private val orbisHomeNavigation = OrbisHomeNavigationState()
     private var showColdStart = false
+    private var pendingWorkshopOwner by mutableStateOf<String?>(null)
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
@@ -202,6 +203,7 @@ class RouteActivity : ComponentActivity() {
         enableEdgeToEdge()
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
+        pendingWorkshopOwner = intent.getStringExtra("orbis_image_workshop_owner")
         if (CrashHandler.hasCrashed(this)) {
             startActivity(Intent(this, SafeModeActivity::class.java))
             finish()
@@ -212,7 +214,7 @@ class RouteActivity : ComponentActivity() {
         val firstActivity = OrbisStartupProcess.gate.claim()
         showColdStart = shouldShowOrbisStartup(BuildConfig.ORBIS_ENABLED,
             (intent.action == Intent.ACTION_MAIN || intent.action == null) &&
-                !intent.hasExtra("conversationId"), firstActivity)
+                !intent.hasExtra("conversationId") && !intent.hasExtra("orbis_image_workshop_owner"), firstActivity)
         setContent {
             if (BuildConfig.ORBIS_ENABLED) {
                 val call by OrbisVoiceCallRuntime.get(this).callState.collectAsStateWithLifecycle()
@@ -291,6 +293,7 @@ class RouteActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        intent.getStringExtra("orbis_image_workshop_owner")?.let { pendingWorkshopOwner = it }
         if (intent.action == Intent.ACTION_MAIN || intent.hasExtra("conversationId")) {
             orbisHomeNavigation.returnToChat()
         }
@@ -348,6 +351,18 @@ class RouteActivity : ComponentActivity() {
         BindOrbisHomeNavigationFocus(orbisHomeNavigation)
 
         val backStack = rememberNavBackStack(startScreen)
+        LaunchedEffect(pendingWorkshopOwner, settings.init) {
+            val owner = pendingWorkshopOwner
+            if (!settings.init && owner != null) {
+                if (BuildConfig.ORBIS_ENABLED && settings.assistants.any { it.id.toString() == owner }) {
+                    orbisHomeNavigation.returnToChat()
+                    val target = Screen.ImageWorkshop(assistantId = owner)
+                    if (backStack.lastOrNull() != target) backStack.add(target)
+                }
+                pendingWorkshopOwner = null
+                intent.removeExtra("orbis_image_workshop_owner")
+            }
+        }
         val startup = rememberOrbisStartupState(
             enabled = showColdStart,
             targetChatId = startScreen.id,
@@ -539,9 +554,18 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.OrbisMcpSettings> {
                                 if (BuildConfig.ORBIS_ENABLED) OrbisSettingsPage(startAtMcp = true) else SettingMcpPage()
                             }
+                            entry<Screen.OrbisConversationMcpSettings> { key ->
+                                if (BuildConfig.ORBIS_ENABLED) {
+                                    OrbisSettingsPage(startAtMcp = true, ownerAssistantId = key.assistantId,
+                                        conversationId = key.conversationId)
+                                } else AssistantMcpPage(key.assistantId)
+                            }
 
                             entry<Screen.OrbisTools> {
                                 OrbisToolsPage()
+                            }
+                            entry<Screen.OrbisConversationTools> { key ->
+                                OrbisToolsPage(ownerAssistantId = key.assistantId, conversationId = key.conversationId)
                             }
                             entry<Screen.OrbisSchedule> {
                                 val navController = LocalNavController.current
@@ -577,7 +601,17 @@ class RouteActivity : ComponentActivity() {
                             }
 
                             entry<Screen.ImageGen> {
-                                ImageGenPage()
+                                if (BuildConfig.ORBIS_ENABLED) {
+                                    val nav = LocalNavController.current
+                                    me.rerere.rikkahub.ui.pages.orbis.workshop.ImageWorkshopPage(
+                                        onBack = { nav.popBackStack() }, onConfigureProviders = { nav.navigate(Screen.SettingProvider) })
+                                } else ImageGenPage()
+                            }
+                            entry<Screen.ImageWorkshop> { key ->
+                                val nav = LocalNavController.current
+                                me.rerere.rikkahub.ui.pages.orbis.workshop.ImageWorkshopPage(
+                                    assistantId = key.assistantId, conversationId = key.conversationId,
+                                    onBack = { nav.popBackStack() }, onConfigureProviders = { nav.navigate(Screen.SettingProvider) })
                             }
 
                             entry<Screen.WebView> { key ->
@@ -835,8 +869,16 @@ sealed interface Screen : NavKey {
     @Serializable
     data object OrbisMcpSettings : Screen
 
+    /** Separate from the existing general route so restored global entries retain their meaning. */
+    @Serializable
+    data class OrbisConversationMcpSettings(val assistantId: String, val conversationId: String? = null) : Screen
+
     @Serializable
     data object OrbisTools : Screen
+
+    /** Keep the legacy general tools route separate from a chat-owned tools entry. */
+    @Serializable
+    data class OrbisConversationTools(val assistantId: String, val conversationId: String) : Screen
 
     @Serializable
     data object OrbisSchedule : Screen
@@ -867,6 +909,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object ImageGen : Screen
+
+    @Serializable
+    data class ImageWorkshop(val assistantId: String? = null, val conversationId: String? = null) : Screen
 
     @Serializable
     data class WebView(val url: String = "", val contentId: String = "") : Screen

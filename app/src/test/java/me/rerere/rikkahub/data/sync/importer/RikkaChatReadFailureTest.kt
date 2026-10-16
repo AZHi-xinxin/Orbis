@@ -24,4 +24,17 @@ class RikkaChatReadFailureTest {
         }
         assertEquals("ok", readRikkaStage(RikkaChatReadStage.MESSAGE) { "ok" })
     }
+
+    @Test fun schemaChecksKeepFixedActionableDetailAcrossOuterStage() {
+        RikkaSchemaCheck.entries.forEach { check ->
+            val failure = runCatching {
+                readRikkaStage(RikkaChatReadStage.SCHEMA) { requireRikkaSchema(false, check) }
+            }.exceptionOrNull()!!
+            val text = ArchiveCapacity.publicError(failure)
+            assertTrue(text.contains("[RIKKA_SCHEMA/${check.name}]"))
+            assertTrue(text.contains("不要删表或清数据"))
+            assertNull(failure.cause)
+        }
+        requireRikkaSchema(true, RikkaSchemaCheck.TABLE)
+    }
 }

@@ -16,6 +16,15 @@ import kotlin.uuid.Uuid
 /** Synthetic inbox projection only. No model, real chat, phone observer or Koin services. */
 @RunWith(AndroidJUnit4::class)
 class OrbisPendingNotificationCardTest {
+    @Test fun notificationCanCloseWithoutClearingOrReplayingWork() {
+        var closed = 0
+        compose.setContent { MaterialTheme { OrbisPendingNotificationCard(event) { closed++ } } }
+        compose.onNodeWithText("展开").performClick()
+        compose.onNodeWithText("收起").assertIsDisplayed()
+        compose.onNodeWithText("关闭通知").performClick()
+        compose.onNodeWithTag("sentinel-notice-${event.id}").assertDoesNotExist()
+        compose.runOnIdle { org.junit.Assert.assertEquals(1, closed) }
+    }
     @get:Rule val compose = createShellComposeRule()
     private val conversation = Conversation(id = Uuid.random(), assistantId = Uuid.random(), messageNodes = emptyList())
     private val event = OrbisInboxEvent(eventId = "synthetic", source = "lc_sentinel", text = "合成通知原文",

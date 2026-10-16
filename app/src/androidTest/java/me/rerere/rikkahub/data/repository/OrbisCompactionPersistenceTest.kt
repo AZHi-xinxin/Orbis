@@ -61,11 +61,61 @@ class OrbisCompactionPersistenceTest {
             (if (i % 2 == 0) UIMessage.user("synthetic original $i") else UIMessage.assistant("synthetic reply $i")).toMessageNode()
         })
     private suspend fun compact(f: Fixture, before: Conversation, summary: String = "I wrote this synthetic summary", keep: Int = 2,
-        captureLocalMemory: Boolean = false): OrbisCompactionCommit {
+        captureLocalMemory: Boolean = false, retainOriginals: Boolean = false): OrbisCompactionCommit {
         val start = UIMessage.assistant(summary).toMessageNode()
         return f.repository.commit(before, listOf(start) + before.messageNodes.takeLast(keep),
             OrbisCompactionMetadata(start.currentMessage.id, summary, keep, 350_000, 2_000, "synthetic estimate", "synthetic estimate",
-                captureLocalMemory = captureLocalMemory))
+                captureLocalMemory = captureLocalMemory, retainOriginals = retainOriginals))
+    }
+
+    @Test fun optionalOriginalsDefaultOffAndDeleteDoesNotTouchCurrentOrRollback() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            val first = compact(f, before)
+            assertEquals(0, f.repository.originalArchiveStats(before.assistantId).count)
+            val second = compact(f, first.conversation, retainOriginals = true)
+            val id = second.event.id.toString()
+            assertEquals(1, f.repository.originalArchives(before.assistantId).size)
+            assertEquals(first.conversation.messageNodes.first(), f.repository.originalArchiveNode(before.assistantId, id, 0))
+            assertTrue(runCatching { f.repository.originalArchiveNode(Uuid.random(), id, 0) }.isFailure)
+            assertEquals(0, f.repository.deleteOriginalArchives(Uuid.random(), setOf(id)))
+            assertEquals(1, f.repository.deleteOriginalArchives(before.assistantId, setOf(id)))
+            assertEquals(0, f.repository.originalArchiveStats(before.assistantId).count)
+            assertStored(second.conversation, f.load(before.id))
+            assertEquals(second.event.id, f.repository.latestRollback(before.id, before.assistantId)!!.id)
+        }
+    }
+
+    @Test fun originalsKeepBranchesAndAttachmentsAcrossLaterCompactionsAndOwnerScopedClear() = runBlocking {
+        Fixture().use { f ->
+            val url = "file:///synthetic/archive-only.png"
+            val firstNode = UIMessage.user("synthetic original").toMessageNode().let { it.copy(messages = listOf(it.currentMessage,
+                UIMessage.user("synthetic alternative").copy(parts = listOf(UIMessagePart.Image(url)))), selectIndex = 1) }
+            val before = original().let { it.copy(messageNodes = listOf(firstNode) + it.messageNodes) }; f.save(before, true)
+            val other = original(); f.save(other, true); compact(f, other, retainOriginals = true)
+            val first = compact(f, before, retainOriginals = true)
+            val second = compact(f, first.conversation, retainOriginals = true)
+            assertEquals(firstNode, f.repository.originalArchiveNode(before.assistantId, first.event.id.toString(), 0))
+            assertEquals(setOf(url), f.repository.retainedFileReferences(listOf(url)))
+            assertEquals(2, f.repository.deleteOriginalArchives(before.assistantId, emptySet(), all = true))
+            assertEquals(1, f.repository.originalArchiveStats(other.assistantId).count)
+            assertTrue(f.repository.retainedFileReferences(listOf(url)).isEmpty())
+            assertStored(second.conversation, f.load(before.id))
+        }
+    }
+
+    @Test fun archiveInsertFailureRollsBackCompactionAndConversationDeletionCascadesArchive() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            f.db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fail_archive BEFORE INSERT ON orbis_original_chunk BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END")
+            assertTrue(runCatching { compact(f, before, retainOriginals = true) }.isFailure)
+            assertStored(before, f.load(before.id)); assertEquals(0, f.repository.originalArchiveStats(before.assistantId).count)
+            f.db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_archive")
+            compact(f, before, retainOriginals = true)
+            f.db.conversationDao().deleteById(before.id.toString())
+            assertEquals(0, f.repository.originalArchiveStats(before.assistantId).count)
+            f.db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM orbis_original_chunk").use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
+        }
     }
 
     @Test fun aiCompactionSavesFullSummaryAsStaticAndManualDefaultDoesNot() = runBlocking {

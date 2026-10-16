@@ -164,6 +164,7 @@ fun ChatList(
     onQuoteJump: ((OrbisMessageQuote) -> Unit)? = null,
     historyMutationDisabledReason: String? = null,
     notifications: List<me.rerere.rikkahub.data.orbis.OrbisInboxEvent> = emptyList(),
+    onDismissNotification: (me.rerere.rikkahub.data.orbis.OrbisInboxEvent) -> Unit = {},
     onPreviewMessageBatch: (suspend (Set<Uuid>, OrbisMessageBatchOperation) -> OrbisMessageBatchPreview)? = null,
     onApplyMessageBatch: (suspend (OrbisMessageBatchPreview) -> OrbisMessageBatchResult)? = null,
 ) {
@@ -185,6 +186,7 @@ fun ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
                 notifications = notifications,
+                onDismissNotification = onDismissNotification,
                 state = state,
                 loading = loading,
                 processingStatus = processingStatus,
@@ -247,6 +249,7 @@ private fun ChatListNormal(
     innerPadding: PaddingValues,
     conversation: Conversation,
     notifications: List<me.rerere.rikkahub.data.orbis.OrbisInboxEvent>,
+    onDismissNotification: (me.rerere.rikkahub.data.orbis.OrbisInboxEvent) -> Unit,
     state: LazyListState,
     loading: Boolean,
     processingStatus: String? = null,
@@ -467,7 +470,7 @@ private fun ChatListNormal(
             }
 
             itemsIndexed(notifications, key = { _, event -> "sentinel-notice-${event.id}" }) { _, event ->
-                OrbisPendingNotificationCard(event)
+                OrbisPendingNotificationCard(event, onDismiss = { onDismissNotification(event) })
             }
 
             if (!loading && assistant?.allowConversationSystemPrompt == true && onConversationSystemPromptChange != null) {

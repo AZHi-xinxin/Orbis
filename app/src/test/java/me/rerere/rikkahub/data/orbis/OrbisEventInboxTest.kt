@@ -240,7 +240,8 @@ class OrbisEventInboxTest {
     fun `state publication happens only after persistence callback completes`() {
         lateinit var inbox: OrbisEventInbox
         val observed = mutableListOf<OrbisInboxState>()
-        inbox = OrbisEventInbox(read = { null }, write = { observed += inbox.state.value })
+        var disk: String? = null
+        inbox = OrbisEventInbox(read = { disk }, write = { observed += inbox.state.value; disk = it })
         inbox.bind(setOf(source), first)
         inbox.accept(input(), first, 1)
         assertTrue(observed[0].bindings.isEmpty())
@@ -273,8 +274,8 @@ class OrbisEventInboxTest {
             val inbox = Storage().open()
             inbox.bind(setOf(source), first)
             val original = inbox.accept(input(), first, 1).first
-            inbox.mark(original.id, status, "diagnostic")
-            assertEquals(original.copy(state = status, error = "diagnostic"), inbox.get(original.id))
+            inbox.mark(original.id, status, "diagnostic", now = 2)
+            assertEquals(original.copy(state = status, error = "diagnostic", updatedAt = 2), inbox.get(original.id))
             inbox.mark(original.id, "displayed")
             if (status in setOf("suppressed", "skipped")) {
                 assertEquals(status, inbox.get(original.id)?.state)

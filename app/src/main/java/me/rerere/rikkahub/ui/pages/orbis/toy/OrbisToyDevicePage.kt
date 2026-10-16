@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.orbis.toy.OrbisToyController
 import me.rerere.rikkahub.data.orbis.toy.ToyNearbyDevice
+import me.rerere.rikkahub.data.orbis.toy.ToyProfile
+import me.rerere.rikkahub.data.orbis.toy.YutuControlContract
 import me.rerere.rikkahub.ui.pages.orbis.OrbisPageHeader
 import me.rerere.rikkahub.ui.pages.orbis.OrbisPageSurface
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
@@ -56,7 +58,7 @@ fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit 
     DisposableEffect(controller) { onDispose { controller.stopScan() } }
     OrbisPageSurface {
         Scaffold(containerColor = Color.Transparent, contentColor = OrbisTheme.colors.ink, topBar = {
-            OrbisPageHeader(title = "蓝牙 Toy", subtitle = "手机直连 · 手动选设备 · 原版五档",
+            OrbisPageHeader(title = "蓝牙 Toy", subtitle = "手机直连 · 手动选设备 · 识别设备协议",
                 navigationIcon = { TextButton(onClick = onBack) { Text("返回") } },
                 modifier = Modifier.statusBarsPadding())
         }) { insets ->
@@ -68,7 +70,10 @@ fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit 
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(state.deviceName ?: "尚未选择设备", style = MaterialTheme.typography.titleMedium)
                             Text(state.message)
-                            if (state.requestedIntensity != null) Text("已请求强度 ${state.requestedIntensity}（${state.level} 档）· 持续到停止")
+                            if (state.requestedIntensity != null) Text("已请求 ${state.level} 档 · 持续到停止")
+                            state.requestedYutuStrength?.let { strength -> state.durationSeconds?.let { seconds ->
+                                Text("YUTU 已请求目标值 $strength · 本次设置 ${YutuControlContract.durationLabel(seconds)}，到时断开")
+                            } }
                             if (state.connected) Text("已连接 ${state.deviceNames.size} 台设备")
                             if (state.physicalStopUncertain) Text("无法确认设备已物理停止，请检查实体开关。", color = MaterialTheme.colorScheme.error)
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -79,8 +84,12 @@ fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit 
                     }
                 }
                 item {
-                    Text("沿用原版 FFE0 协议及五档映射，支持手动添加多台设备；不能保证所有蓝牙设备兼容。AI 只能控制你选定且已连接的设备，连接名单变化后旧授权不再适用。")
-                    Text("非零强度每 1.4 秒重发，直到你或 AI 明确停止；没有额外时长上限，切到后台不会被主动断开。持续运行中加入的新设备也会跟随当前强度。系统休眠、杀进程或蓝牙断线仍可能中断控制，无法保证后台持续运行或物理停机；请保留实体开关的操作条件。",
+                    Text("在同一个入口扫描并选择设备，按识别到的协议处理连接。司沃康沿用 FFE0 协议：AI 只能填写 level 0–5，0 停止、1–5 为五档，不是百分比或频率；重复同一档位不会改变输出。支持手动添加多台兼容设备；不能保证所有蓝牙设备兼容。AI 只能控制你选定且已连接的设备，连接名单变化后旧授权不再适用。")
+                    Text("YUTU V2 扶潮 TO-G9（固件 1.0.0）连接后等待授权，不会自动运行。AI 的 strength 可选 1、2、3、5、10、20、50、100。${YutuControlContract.STRENGTH_GUIDE}${YutuControlContract.DURATION_GUIDE}51–99 未标定，暂不开放。当前未开放独立电机、原厂模式编号或自定义波形。不同协议不能同时连接；YUTU 当前限一台。",
+                        Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("重要：YUTU 的数值 0 并不是停止。点击停止、AI 请求停止或本次时长结束时，Orbis 都会请求断开蓝牙；再次使用需本人手动重连。不会自动续跑。系统休眠或蓝牙异常时不能保证及时断开或物理停机，请保留实体开关的操作条件。",
+                        Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("司沃康非零档位每 1.4 秒重发，直到你或 AI 明确停止；没有额外时长上限，切到后台不会被主动断开。持续运行中加入的同协议设备也会跟随当前档位。系统休眠、杀进程或蓝牙断线仍可能中断控制，无法保证后台持续运行或物理停机；请保留实体开关的操作条件。",
                         Modifier.padding(top = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 item {
@@ -96,8 +105,14 @@ fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit 
                 items(discovery.devices, key = { it.selectionId }) { device ->
                     Card(Modifier.fillMaxWidth()) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column(Modifier.weight(1f)) { Text(device.name); Text("编号尾号 ${device.suffix}") }
-                            TextButton(enabled = !discovery.connecting, onClick = { selection = device }) { Text("选择") }
+                            Column(Modifier.weight(1f)) {
+                                Text(device.name)
+                                Text("编号尾号 ${device.suffix}")
+                                if (device.yutuV2) Text("YUTU V2 · 专用协议 · 停止即断开")
+                            }
+                            TextButton(enabled = !discovery.connecting, onClick = { selection = device }) {
+                                Text("选择")
+                            }
                         }
                     }
                 }
@@ -107,8 +122,10 @@ fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit 
     }
     selection?.let { selected ->
         AlertDialog(onDismissRequest = { selection = null }, title = { Text("连接这台设备？") },
-            text = { Text("${selected.name} · 尾号 ${selected.suffix}\n请确认这是你自己的设备。" +
-                if (state.requestedIntensity != null) "当前有持续强度 ${state.requestedIntensity}；新设备连接后也会跟随当前强度。" else "当前未运行；连接后等待设置强度。") },
+            text = { Text(if (selected.yutuV2)
+                "${selected.name} · 尾号 ${selected.suffix}\n请确认是你自己的设备。连接本身不会启动，之后 AI 调用需要授权。当前仅适配固件 1.0.0。停止会断开蓝牙；再次使用需你手动重连。请保留实体开关的操作条件。"
+                else "${selected.name} · 尾号 ${selected.suffix}\n请确认这是你自己的设备。" +
+                if (state.profile == ToyProfile.SVAKOM && state.requestedIntensity != null) "当前为 ${state.level} 档持续运行；同协议新设备连接后也会跟随当前档位。" else "连接后等待设置档位；更换协议前请先停止并断开。") },
             confirmButton = { TextButton(onClick = { selection = null; controller.connectSelected(selected.selectionId) }) { Text("确认连接") } },
             dismissButton = { TextButton(onClick = { selection = null }) { Text("取消") } })
     }

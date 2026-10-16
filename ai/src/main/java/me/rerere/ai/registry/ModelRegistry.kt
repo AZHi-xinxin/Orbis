@@ -688,11 +688,13 @@ object ModelRegistry {
     )
 
     val MODEL_INPUT_MODALITIES = ModelData { modelId ->
-        resolveModalities(modelId) { it.inputModalities }
+        if (me.rerere.ai.provider.providers.openai.SeedreamImageApi.isImageModel(modelId)) listOf(Modality.TEXT, Modality.IMAGE)
+        else resolveModalities(modelId) { it.inputModalities }
     }
 
     val MODEL_OUTPUT_MODALITIES = ModelData { modelId ->
-        resolveModalities(modelId) { it.outputModalities }
+        if (me.rerere.ai.provider.providers.openai.SeedreamImageApi.isImageModel(modelId)) listOf(Modality.IMAGE)
+        else resolveModalities(modelId) { it.outputModalities }
     }
 
     val MODEL_ABILITIES = ModelData { modelId ->

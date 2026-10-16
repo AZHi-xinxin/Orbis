@@ -20,7 +20,8 @@ class VoiceRecoveryPolicyTest {
 
     @Test fun onlyThreeIdleAsrRetriesAreAllowedWithExactBackoff() {
         val failure = VoiceRecoveryPolicy.failure(VoiceFailureStage.ASR_LISTEN, IOException("Connection reset"))
-        assertEquals(listOf(1000L, 3000L, 8000L, null), (0..3).map { VoiceRecoveryPolicy.retryDelay(it, failure, true) })
+        assertEquals(listOf(1000L, 3000L, 8000L, null),
+            (0..3).map { VoiceRecoveryPolicy.retryDelay(it, failure, true) })
         assertNull(VoiceRecoveryPolicy.retryDelay(0, failure, false))
         assertNull(VoiceRecoveryPolicy.retryDelay(0, VoiceSessionFailure(VoiceFailureStage.ASR_LISTEN, "ASR_LISTEN_NETWORK_RESET", true, true), true))
     }

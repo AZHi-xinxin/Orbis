@@ -1,0 +1,191 @@
+{
+  "mode": "built-in image generation",
+  "base": "Use case: stylized-concept\nAsset type: a single production-ready transparent PNG chibi upper-body character sprite for the Orbis Android companion widget.\nPrimary request: translate the user's ORIGINAL pencil character design (Image 1) into a polished Q/chibi illustration, with rendering polish and widget framing comparable to Image 2.\nInput images: Image 1 is the ONLY identity, hair silhouette and costume design reference. Image 2 is ONLY the painted anime-chibi art style, head/body proportion and waist-up framing reference; do NOT copy its brown hair, face identity, black shirt, ring or private character traits.\nSubject: a youthful masculine humanoid AI service assistant. Soft layered medium blue hair, slim long side locks, the small upward hair tuft in the sketch, luminous BLUE eyes, fair face, a gentle restrained smile. Small dark headset with a fine boom microphone near his cheek. White asymmetric fitted high-collar work uniform with pale blue-grey seams, an inset small glowing cyan inverted-triangle switch at the neck; a tiny simple BLUE whale silhouette badge on the chest, no lettering. Silver metallic articulated hands with understated finger joints, not gloves. Slim elegant shoulders.\nPose: neutral welcoming default pose, upper body upright and nearly frontal, both metallic hands held loosely together below the chest. Calm, attentive and quietly lively, not stern.\nStyle: exquisite clean anime chibi illustration, large expressive head but not toddler-like, softly shaded detailed blue hair and fine linework, restrained glossy eyes, subtle fabric rendering and metal highlights.\nComposition: 1024x1536 portrait framing. One character only, centered bust from whole hair tuft to waist, every finger completely inside frame, generous transparent margins. Head stays front-facing for reuse with expression layers. No props, no room, no card.\nConstraints: genuinely transparent background, no backdrop gradient, no vignette, no cast shadow, no text, no watermark, no border, no checkerboard painted into pixels. Keep the design recognizably different from Image 2's private character.",
+  "variants": [
+    {
+      "id": "pose-invite",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: One metallic hand extended palm-up toward the viewer in a welcoming invitation; the other lowered, fingers fully visible.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-wave",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: One metallic hand raised beside the shoulder in a small polite wave; other hand resting near waist. Keep raised hand BELOW the cheek, not across the face.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-fold",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: Both metallic arms comfortably folded across chest; a composed professional stance. Do not cover the face.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-think",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: One metallic index finger resting just below chin, other forearm supporting the elbow. Inquisitive, not distressed. Keep fingers below mouth and do not cover face features.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-mug",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: Both metallic hands gently holding one simple white ceramic mug at lower chest. No steam across face. No writing on mug.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-stretch",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: A small relaxed shoulder stretch, both elbows slightly out and hands loosely clasped near chest. Keep the upright head unchanged, no arms above the head.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-listen",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: Attentive listening pose, one metallic hand lifted toward the headset earpiece without covering the face, the other hand resting near waist.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "pose-explain",
+      "prompt": "Use case: identity-preserve\nAsset type: single transparent PNG upper-body Orbis Android widget sprite, matching a character set.\nImage 1 is the edit target and sole identity anchor. Keep the blue hair, BLUE eyes, hairstyle, head size, face outline, headset microphone, white asymmetric uniform, cyan triangular neck switch, whale chest mark and silver metallic articulated hands exactly the same.\nChange ONLY body/arm pose below the neck. Preserve the face/hair pixel placement and nearly frontal camera, size, crop and entire 1024x1536 canvas. The eyes, nose and mouth must remain unoccluded in exactly the same position for interchangeable facial animation.\nNew pose: Professional helpful explanation, one metallic hand presenting to the side with palm up and the other hand open near the chest. Keep both hands completely visible.\nConstraints: true transparent alpha background. One character, no setting/card, no text/watermark, no background glow or shadow. Complete fingers and whole hair inside frame with transparent margin. No costume changes. Keep the same restrained gentle smile, fine painted anime chibi shading and slim build. Never add human skin on metallic hands. Waist-up only.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-calm-1",
+      "emotion": "calm",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: calm attentive neutral mouth, relaxed brows.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-calm-2",
+      "emotion": "calm",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: serene faint closed-lip smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-calm-3",
+      "emotion": "calm",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: quietly assured slightly raised eyebrow and tiny restrained smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-smile-1",
+      "emotion": "smile",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: warm closed-mouth friendly smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-smile-2",
+      "emotion": "smile",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: bright happy smile with open mouth, delighted eyes.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-smile-3",
+      "emotion": "smile",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: cheerful smile with eyes softly closed.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-cry-1",
+      "emotion": "cry",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: watery blue eyes, one small tear and a tremulous mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-cry-2",
+      "emotion": "cry",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: sad blue eyes with tears on both cheeks, softly downturned mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-cry-3",
+      "emotion": "cry",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: quietly sniffling, glossy blue eyes and a restrained unhappy face.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-think-1",
+      "emotion": "think",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: thoughtful blue eyes looking slightly to the side, tiny pursed mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-think-2",
+      "emotion": "think",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: curious slightly raised eyebrows, blue eyes looking forward, small questioning mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-think-3",
+      "emotion": "think",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: concentrating blue eyes looking down slightly, gentle brow furrow.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-angry-1",
+      "emotion": "angry",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: mildly annoyed frown, luminous RED irises replacing blue, closed mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-angry-2",
+      "emotion": "angry",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: determined displeased eyebrows, RED irises, lips slightly parted.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-angry-3",
+      "emotion": "angry",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: strong frustrated expression with RED irises, tightened brows and small exasperated open mouth; still the same gentle character not evil.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-shy-1",
+      "emotion": "shy",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: slight blush across cheeks, bashful tiny smile, blue eyes.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-shy-2",
+      "emotion": "shy",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: more visible blush, shy blue eyes looking slightly aside, small closed smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-shy-3",
+      "emotion": "shy",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: flustered rosy cheeks, wide blue eyes and a tiny surprised mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-sleepy-1",
+      "emotion": "sleepy",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: heavy-lidded sleepy blue eyes and relaxed closed mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-sleepy-2",
+      "emotion": "sleepy",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: eyes gently closed and peaceful resting mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-sleepy-3",
+      "emotion": "sleepy",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: drowsy half-closed blue eyes with a small yawning mouth.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas.",
+      "ref": "pose-neutral.png"
+    },
+    {
+      "id": "expression-excited-1",
+      "emotion": "excited",
+      "ref": "pose-neutral.png",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: bright excited expression, wide DEEP RED eyes and a delighted open smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas."
+    },
+    {
+      "id": "expression-excited-2",
+      "emotion": "excited",
+      "ref": "pose-neutral.png",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: enthusiastic joyful expression, shining DEEP RED irises and broad smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas."
+    },
+    {
+      "id": "expression-excited-3",
+      "emotion": "excited",
+      "ref": "pose-neutral.png",
+      "prompt": "Use case: identity-preserve\nAsset type: a single expression-variant transparent PNG for an Orbis Android widget, 1024x1536.\nImage 1 is the edit target. Change ONLY facial expression: intensely moved and excited, DEEP RED irises, slightly flushed cheeks and a soft delighted smile.\nKeep ALL other pixels and design as unchanged as possible: same centered head position, size, frontal angle, skin contour, blue hair and long side locks, headset, collar, glowing triangular switch, white work uniform, whale mark, clasped metallic hands, waist-up pose. Preserve eyes/nose/mouth overall locations. No hand gesture, pose change, background, caption, icons, floating emotion symbols or props. Same elegant detailed anime chibi shading. Genuinely transparent background, preserve existing transparency. Complete hair and hands inside canvas."
+    }
+  ],
+  "references": "Original character sketch supplied by project maintainer. Private chibi reference used for style/framing only; reference files are not included."
+}

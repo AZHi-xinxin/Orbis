@@ -89,6 +89,89 @@ import kotlin.uuid.Uuid
 @RunWith(AndroidJUnit4::class)
 class GenerationLoopLoopbackTest {
     @Test(timeout = 30_000)
+    fun rememberedApprovalResumesHumanLaneWhileOldProducerIsStillFinalizing() = runBlocking<Unit> {
+        fixture(streaming = true, approval = true, expectedRequests = 4) { fixture ->
+            var grantFile: String? = null
+            val store = me.rerere.rikkahub.data.ai.approval.ToolApprovalStore({ grantFile }, { grantFile = it })
+            val assistantId = Uuid.random()
+            fixture.toolAdapter = { me.rerere.rikkahub.data.ai.approval.bindToolApproval(it, assistantId.toString(), store) }
+            val supervisor = kotlinx.coroutines.SupervisorJob()
+            val scope = kotlinx.coroutines.CoroutineScope(supervisor + kotlinx.coroutines.Dispatchers.Default)
+            val decisionReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val finishOld = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val done = kotlinx.coroutines.CompletableDeferred<Unit>()
+            val lane = me.rerere.rikkahub.service.HumanContinuationLane(
+                me.rerere.rikkahub.data.model.Conversation(assistantId = assistantId,
+                    messageNodes = fixture.initial.map { me.rerere.rikkahub.data.model.MessageNode(messages = listOf(it)) }),
+                scope, { true }, { done.completeExceptionally(it) })
+            try {
+                val old = lane.send(null) { snapshot, _, publish ->
+                    val pending = fixture.collect()
+                    publish(snapshot.updateCurrentMessages(pending))
+                    decisionReady.complete(Unit)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        finishOld.await()
+                        publish(snapshot) // Must not overwrite the approved successor.
+                    }
+                }
+                withTimeout(10_000) { decisionReady.await() }
+                val target = checkNotNull(lane.captureApproval("synthetic-call-1"))
+                assertTrue(lane.resolveApproval(target, { tool ->
+                    store.allow(assistantId.toString(), checkNotNull(tool.hostApproval))
+                    tool.copy(approvalState = ToolApprovalState.Approved)
+                }) { snapshot, _, publish ->
+                    val final = fixture.collect(snapshot.currentMessages)
+                    publish(snapshot.updateCurrentMessages(final))
+                    done.complete(Unit)
+                })
+                withTimeout(10_000) { done.await() }
+                assertEquals(listOf(1, 2, 3), fixture.executions.toList())
+                assertEquals(4, fixture.server.requests.size)
+                assertTrue(lane.state.value.currentMessages.last().toText().contains("synthetic final answer"))
+                val reloaded = me.rerere.rikkahub.data.ai.approval.ToolApprovalStore({ grantFile }, { error("read only") })
+                assertTrue(reloaded.permits(assistantId.toString(), checkNotNull(target.tool.hostApproval)))
+                finishOld.complete(Unit); withTimeout(5_000) { old.join() }
+                assertTrue(lane.state.value.currentMessages.last().toText().contains("synthetic final answer"))
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            } finally {
+                finishOld.complete(Unit)
+                supervisor.cancel()
+            }
+        }
+    }
+    @Test(timeout = 30_000)
+    fun unavailableTargetsReturnNotExecutedWithoutAnImpossibleApproval() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = true, expectedRequests = 4) { fixture ->
+                fixture.approvalCurrent = false
+                val final = fixture.collect()
+                assertTrue(fixture.executions.isEmpty())
+                assertEquals(4, fixture.server.requests.size)
+                assertTrue(final.last().getTools().all { it.isExecuted && !it.isPending &&
+                    it.hostToolFailure() == HostToolFailure.APPROVAL_CHANGED })
+                assertTrue(final.last().toText().contains("synthetic final answer"))
+                assertEquals(0, fixture.context.privateStorageAccesses.get())
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun expiredApprovedTargetSettlesAndNewCallsContinueWithoutReplay() = runBlocking<Unit> {
+        fixture(streaming = true, approval = true, expectedRequests = 4) { fixture ->
+            val pending = fixture.collect()
+            assertTrue(pending.last().getTools().single().isPending)
+            val approved = pending.dropLast(1) + pending.last().copy(parts = pending.last().parts.map {
+                if (it is UIMessagePart.Tool) it.copy(approvalState = ToolApprovalState.Approved) else it
+            })
+            fixture.approvalCurrent = false
+            val final = fixture.collect(approved)
+            assertEquals(4, fixture.server.requests.size)
+            assertTrue(fixture.executions.isEmpty())
+            assertTrue(final.last().getTools().all { it.isExecuted && !it.isPending })
+            assertTrue(final.last().toText().contains("synthetic final answer"))
+        }
+    }
+    @Test(timeout = 30_000)
     fun localMemoryToolsReceiveHostReplayIdentityInTheRealGenerationLoop() = runBlocking<Unit> {
         for (streaming in listOf(true, false)) {
             fixture(streaming, approval = false, expectedRequests = 4, memoryMode = true) { fixture ->
@@ -1115,6 +1198,8 @@ class GenerationLoopLoopbackTest {
         var toolStepLimitStops = 0
             private set
         private val approvalChecks = AtomicInteger()
+        var approvalCurrent = true
+        var toolAdapter: (Tool) -> Tool = { it }
         val initial = listOf(UIMessage.user("synthetic earlier human"), UIMessage.assistant("synthetic earlier assistant"), UIMessage.user("synthetic current human"))
         var lastPublished: List<UIMessage> = initial
             private set
@@ -1132,6 +1217,7 @@ class GenerationLoopLoopbackTest {
                 else approval || (mixedApprovalBatch && args.jsonObject.getValue("step").jsonPrimitive.int >= 2)
             },
             hostApproval = HostToolApproval("synthetic_tool", "fixture-v1", "Synthetic local counter"),
+            isApprovalCurrent = { approvalCurrent },
             execute = { args ->
                 val step = args.jsonObject.getValue("step").jsonPrimitive.int
                 check(step in 1..3 && step !in executions) { "Synthetic tool repeated or out of range." }
@@ -1187,7 +1273,7 @@ class GenerationLoopLoopbackTest {
             loop.generateText(
                 settings = settings, model = model, assistant = assistant.copy(contextMessageLimit = contextLimit), messages = from,
                 memories = listOf(AssistantMemory(1, "synthetic initial memory")),
-                tools = listOf(tool) + compaction?.tools().orEmpty(), maxSteps = maxSteps,
+                tools = listOf(toolAdapter(tool)) + compaction?.tools().orEmpty(), maxSteps = maxSteps,
                 inputTransformers = listOf(changingInput, PromptInjectionTransformer),
                 outputTransformers = outputTransformers, conversationId = conversationId,
                 compactionControl = compaction, includeCompactionReminder = compaction != null,

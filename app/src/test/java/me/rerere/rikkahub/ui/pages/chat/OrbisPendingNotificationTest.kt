@@ -32,7 +32,13 @@ class OrbisPendingNotificationTest {
         val next = event.copy(id = Uuid.random().toString(), receivedAt = 2)
         val failed = event.copy(state = "failed", attemptStarted = true)
         assertEquals(listOf(failed, next), orbisPendingConversationNotifications(listOf(next, failed), conversation))
-        assertTrue(independentNotificationLabel(failed).contains("后续通知继续"))
+        assertTrue(independentNotificationLabel(failed).contains("不影响发送新消息"))
         assertTrue(independentNotificationLabel(next).contains("待 AI 处理"))
+    }
+
+    @Test fun dismissedNoticeDoesNotHideTheNextEvent() {
+        val next = event.copy(id = Uuid.random().toString(), receivedAt = 2)
+        assertEquals(listOf(next), orbisPendingConversationNotifications(
+            listOf(event.copy(notificationDismissed = true), next), conversation))
     }
 }

@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
 import com.lover.connect.ui.components.StarSwitch as Switch
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.OrbisConversationPrompt
@@ -57,6 +59,8 @@ internal fun OrbisConversationPromptSheet(
     onDismiss: () -> Unit,
     assistant: Assistant? = null,
     onSaveGenerationParameters: (suspend (OrbisGenerationParameterEdit) -> OrbisGenerationParameters)? = null,
+    model: Model? = null,
+    provider: ProviderSetting? = null,
 ) {
     var text by rememberSaveable(conversationId) { mutableStateOf(prompt.text) }
     var enabled by rememberSaveable(conversationId) { mutableStateOf(prompt.enabled) }
@@ -179,6 +183,8 @@ internal fun OrbisConversationPromptSheet(
                     OrbisGenerationParametersSection(
                         conversationId = conversationId,
                         assistant = assistant,
+                        model = model,
+                        provider = provider,
                         editable = editable,
                         onSavingChange = { parametersSaving = it },
                         onSaved = { anythingSaved = true },

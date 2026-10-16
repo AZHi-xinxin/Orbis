@@ -42,7 +42,8 @@ internal fun createOrbisStickersTool(readState: suspend () -> OrbisStickerState)
 private data class StickerRequest(val action: String, val query: String?, val id: String?, val offset: Int, val limit: Int)
 
 private fun parseStickerRequest(value: JsonElement): StickerRequest? {
-    val obj = value as? JsonObject ?: return null
+    val obj = omitReadPlaceholders(value as? JsonObject ?: return null, setOf("list"),
+        mapOf("query" to JsonPrimitive(""), "id" to JsonPrimitive("")))
     if (obj.keys.any { it !in setOf("action", "query", "id", "offset", "limit") }) return null
     fun string(key: String): String? = (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
     fun number(key: String, default: Int): Int? = if (key !in obj) default else
@@ -97,4 +98,10 @@ private fun stickerResults(state: OrbisStickerState, request: StickerRequest): J
     }
 }
 
-private fun stickerError(code: String) = buildJsonObject { put("ok", false); put("error", code) }
+private fun stickerError(code: String) = buildJsonObject {
+    put("ok", false); put("error", code)
+    if (code == "orbis_stickers_invalid_parameters") {
+        put("message", "list 只接受 action、offset、limit；search 需 query，不能填 id；lookup 只接受 action、id。不要用示例ID代替真实目录ID。")
+        put("list_example", buildJsonObject { put("action", "list"); put("offset", 0); put("limit", 10) })
+    }
+}

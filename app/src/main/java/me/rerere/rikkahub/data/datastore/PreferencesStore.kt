@@ -575,6 +575,17 @@ class SettingsStore(
         }
     }
 
+    suspend fun updateOriginalArchiveRetention(assistantId: Uuid, enabled: Boolean) {
+        check(!settingsFlow.value.init) { "设置尚未加载，请稍后重试。" }
+        editPersistedSettings(dataStore) { preferences ->
+            val assistants = JsonInstant.decodeFromString<List<Assistant>>(preferences[ASSISTANTS] ?: "[]")
+            check(assistants.any { it.id == assistantId }) { "当前 AI 已不存在。" }
+            preferences[ASSISTANTS] = JsonInstant.encodeToString(assistants.map {
+                if (it.id == assistantId) it.copy(retainCompactionOriginals = enabled) else it
+            })
+        }
+    }
+
     suspend fun updateAssistantReasoningLevel(assistantId: Uuid, reasoningLevel: ReasoningLevel) {
         update { settings ->
             settings.copy(

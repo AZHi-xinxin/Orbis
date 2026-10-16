@@ -21,6 +21,8 @@ import me.rerere.workspace.WorkspaceFileEntry
 import me.rerere.workspace.WorkspaceManager
 import me.rerere.workspace.WorkspaceShellStatus
 import me.rerere.workspace.WorkspaceStorageArea
+import me.rerere.workspace.WorkspaceFileChunk
+import me.rerere.workspace.WorkspaceTextUpdate
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -58,6 +60,27 @@ class WorkspaceRepository(
     }
 
     suspend fun getById(id: String): WorkspaceEntity? = dao.getById(id)
+
+    suspend fun readNativeChunk(id: String, path: String, offset: Long, maxBytes: Int, revision: String?): WorkspaceFileChunk =
+        withContext(Dispatchers.IO) {
+            val workspace = dao.getById(id) ?: error("workspace_missing")
+            manager.readNativeChunk(workspace.root, path, offset, maxBytes, revision)
+        }
+
+    suspend fun readNativeBytes(id: String, path: String): ByteArray = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("workspace_missing")
+        manager.readNativeBytes(workspace.root, path)
+    }
+
+    suspend fun writeNativeText(id: String, path: String, text: String, overwrite: Boolean): WorkspaceFileEntry = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("workspace_missing")
+        manager.writeNativeText(workspace.root, path, text, overwrite)
+    }
+
+    suspend fun updateNativeText(id: String, path: String, update: (String) -> String): WorkspaceTextUpdate = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("workspace_missing")
+        manager.updateNativeText(workspace.root, path, update)
+    }
 
     /** Independent consultation reference reads never create directories or use Rootfs aliases. */
     internal suspend fun readConsultationReference(id: String, arguments: JsonElement): String = withContext(Dispatchers.IO) {

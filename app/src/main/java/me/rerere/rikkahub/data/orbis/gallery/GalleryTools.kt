@@ -32,7 +32,7 @@ internal fun createGalleryTools(open: () -> GalleryRepository, allowWrites: Bool
                 "answer_list" -> "只读一个明确指定作品的答案目录。使用offset分页，每页20条；返回提交来源、时间与答案ID，不返回答案正文。不会发送模型请求或触发工具。"
                 "answer_begin" -> "经批准开始AI本人长问卷答案草稿，绑定作品id和expected_revision。回答超过32KiB时使用本工具、orbis_gallery_append分块追加、orbis_gallery_answer_publish完整校验后提交。正文必须是题目id到字符串数组的JSON对象（如{\"q1\":[\"我的答案\"]}），每块32KiB、合计16MiB内。不能代填人类问卷；草稿不会被当作已提交答案。"
                 "answer_publish" -> "经批准完整校验并提交AI答案草稿，需answer_begin返回的draft_id。源问卷版本变化、必填题漏答、非法选项会拒绝。标注AI本人填写和提交时间，不可伪造人类答案。"
-                "begin" -> "经人类批准开始写格子作品草稿。kind=html/text/questionnaire。title最多120字，id留空新建；修改需id和expected_revision。每件最多16MiB，append每次32KiB，最后publish；不要将长正文放单次工具结果。questionnaire正文JSON格式：{\"version\":1,\"respondent\":\"human\",\"description\":\"说明\",\"questions\":[{\"id\":\"q1\",\"text\":\"题目\",\"type\":\"text\",\"options\":[],\"required\":false}]}。题型text/single/multiple。问卷最多200题、1MiB；要AI回答人类导入的题时respondent=ai。HTML在离线沙箱运行，无网络/本地文件/Java桥，不提供宿主能力；问卷用原生表单，不以HTML脚本提交答案。"
+                "begin" -> "经人类批准开始写格子作品草稿。kind=html/text/questionnaire。title最多120字。新建省略id或填空字符串，expected_revision省略或填0；修改必须填目录返回的非空id和最新expected_revision，不能猜编号或用0覆盖已有作品。每件最多16MiB，append每次32KiB，最后publish；不要将长正文放单次工具结果。questionnaire正文JSON格式：{\"version\":1,\"respondent\":\"human\",\"description\":\"说明\",\"questions\":[{\"id\":\"q1\",\"text\":\"题目\",\"type\":\"text\",\"options\":[],\"required\":false}]}。题型text/single/multiple。问卷最多200题、1MiB；要AI回答人类导入的题时respondent=ai。HTML在离线沙箱运行，无网络/本地文件/Java桥，不提供宿主能力；问卷用原生表单，不以HTML脚本提交答案。"
                 "append" -> "经批准追加一块UTF-8作品正文到草稿；单次最多32KiB，expected_bytes为上次返回的字节数。整件最多16MiB。相同偏移与相同字节重试不重复写。这里会把片段留在工具调用记录，不要一次发整本长文件。"
                 "publish" -> "经批准校验并发布草稿到格子。只有成功后人类可看到卡片。修改保留全部旧版本；不自动执行HTML，不更改聊天记录，不发送模型请求。失败时旧版本仍在。"
                 "cancel" -> "经批准丢弃一个尚未发布的AI草稿，不删除任何已发布版本。"
@@ -47,7 +47,7 @@ internal fun createGalleryTools(open: () -> GalleryRepository, allowWrites: Bool
                     "read" -> { text("id", "作品ID", 80); integer("revision", "目录版本，必须指定以防分页中作品变化"); integer("offset", "UTF-8字节偏移，默认0") }
                     "answers" -> { text("answer_id", "list目录中返回的答案ID", 80); integer("offset", "UTF-8字节偏移，默认0") }
                     "answer_list" -> { text("id", "作品ID", 80); integer("offset", "答案目录偏移，默认0") }
-                    "begin" -> { text("title", "作品名称"); text("kind", "html/text/questionnaire"); text("id", "可选，修改已有作品时填写", 80); integer("expected_revision", "修改时需填最新版本") }
+                    "begin" -> { text("title", "作品名称"); text("kind", "html/text/questionnaire"); text("id", "新建省略或空字符串；修改填目录返回的作品ID", 80); integer("expected_revision", "新建省略或0；修改必填目录返回的最新版本") }
                     "append" -> { text("draft_id", "begin返回的草稿ID", 80); integer("expected_bytes", "从0开始，或上次append返回的字节数"); text("text", "最多32KiB UTF-8的一块正文", GalleryLimits.CHUNK_BYTES) }
                     "publish", "cancel", "answer_publish" -> text("draft_id", "begin返回的草稿ID", 80)
                     "delete", "answer", "answer_begin" -> { text("id", "作品ID", 80); integer("expected_revision", "目录返回的版本")
@@ -135,7 +135,12 @@ internal fun executeGalleryTool(store: GalleryRepository, action: String, raw: J
                 put("utf8_fragment", page.first); put("next_offset", page.second?.let(::JsonPrimitive) ?: JsonNull)
             }
             "begin" -> {
-                val draft = store.begin(text("title"), text("kind"), "ai", obj["id"]?.let { text("id") }, number("expected_revision", 0))
+                // Only begin defines an empty ID as a new draft. Never normalize IDs for reads,
+                // deletion, answers or a nonzero edit revision, nor trim/repair a nonempty ID.
+                val id = if ("id" in obj) text("id").takeUnless { it.isEmpty() } else null
+                val revision = number("expected_revision", 0)
+                require(id != null || revision == 0) { "gallery_invalid_parameters" }
+                val draft = store.begin(text("title"), text("kind"), "ai", id, revision)
                 put("draft_id", draft.id); put("bytes", 0); put("chunk_byte_limit", GalleryLimits.CHUNK_BYTES); put("file_byte_limit", GalleryLimits.BODY_BYTES)
             }
             "append" -> put("bytes", store.append(text("draft_id"), number("expected_bytes"), text("text"), "ai"))

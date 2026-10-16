@@ -60,15 +60,15 @@ internal fun MessageQueuePanel(
     // A voice-only pause or historical receipt is not a paused chat queue.
     val resultMessage = recovery.message.takeUnless { needsRecovery }
     fun closeManagement() {
-        // The window closes immediately, including Back/outside dismissal. A repeated platform
-        // dismissal after the button click must not request a second continuation.
+        // Dismissal is presentation only. New human input never needs a dialog acknowledgement.
         if (!showManagement) return
         showManagement = false
-        if (state.paused) onContinueFreshInput()
         if (!recovery.isRunning && recovery.phase != QueueRecoveryPhase.IDLE)
             onDismissRecoveryResult(recovery)
     }
-    if (state.messages.isNotEmpty() || needsRecovery) {
+    // A stopped reply with zero queued inputs is not something the human needs to manage.
+    // The service independently accepts new human input even when the OLD queue is held.
+    if (state.messages.isNotEmpty()) {
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -77,7 +77,7 @@ internal fun MessageQueuePanel(
             Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = when {
-                        state.paused -> "消息已暂停 · ${state.messages.size} 条待发"
+                        state.paused -> "保留待核对 · ${state.messages.size}"
                         state.messages.isNotEmpty() && state.messages.all { it.recoveryHeldReason != null } ->
                             "保留待核对 · ${state.messages.size}"
                         state.messages.isNotEmpty() -> "待发消息 · ${state.messages.size}"
@@ -87,9 +87,6 @@ internal fun MessageQueuePanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                 )
-                if (state.paused) TextButton(onClick = {
-                    onContinueFreshInput()
-                }, modifier = Modifier.testTag("chat_queue_continue_fresh")) { Text("继续聊天") }
                 TextButton(onClick = { showManagement = true },
                     modifier = Modifier.testTag("chat_queue_manage")) { Text("管理") }
             }
@@ -97,11 +94,11 @@ internal fun MessageQueuePanel(
     }
     if (showManagement) AlertDialog(
         onDismissRequest = ::closeManagement,
-        title = { Text("待发消息与暂停处理") },
+        title = { Text("待发消息管理") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (state.paused)
-                    "本次回复已中断，已保存内容保留。关闭后可发送新消息；旧待发消息不会自动重发，旧工具不会重试。"
+                    "旧待发消息单独保留，不会自动重发或重试旧工具。新消息可直接发送，不需要在这里恢复队列。"
                     else "这里是尚未发送的内容，不是历史聊天。关闭此窗口不会发送消息或打断当前回复。",
                     style = MaterialTheme.typography.bodySmall)
                 if (!resultMessage.isNullOrBlank()) Text(resultMessage,

@@ -24,7 +24,7 @@ internal fun createOrbisCompanionSpaceTools(open: () -> OrbisCompanionSpacesStor
 )
 
 private fun spaceTool(module: String, instructions: String, actions: List<String>, open: () -> OrbisCompanionSpacesStore) = Tool(
-    name = "orbis_$module", description = instructions,
+    name = "orbis_$module", description = instructions + " 每次只填当前 action 使用的字段。目录读取示例：{\"action\":\"list\",\"offset\":0}；不要给读取填写入字段或编造ID、版本。",
     parameters = { InputSchema.Obj(buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(actions.map(::JsonPrimitive))) })
         listOf("id", "image_id", "reply_to").forEach { put(it, buildJsonObject { put("type", "string") }) }
@@ -43,7 +43,10 @@ private fun spaceTool(module: String, instructions: String, actions: List<String
 )
 
 internal fun executeCompanionSpaceTool(store: OrbisCompanionSpacesStore, module: String, raw: JsonElement): List<UIMessagePart> {
-    val args = raw as? JsonObject ?: error("space_arguments_invalid")
+    val args = omitReadPlaceholders(raw as? JsonObject ?: error("space_arguments_invalid"), setOf("list"),
+        mapOf("id" to JsonPrimitive(""), "image_id" to JsonPrimitive(""), "reply_to" to JsonPrimitive(""),
+            "text" to JsonPrimitive(""), "expected_revision" to JsonPrimitive(0), "position" to JsonPrimitive(0),
+            "liked" to JsonPrimitive(false), "image_ids" to JsonArray(emptyList())))
     fun text(key: String, default: String? = null): String = if (key !in args) default ?: error("space_arguments_invalid")
         else (args[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("space_arguments_invalid")
     fun number(key: String, default: Int? = null): Int = if (key !in args) default ?: error("space_arguments_invalid")

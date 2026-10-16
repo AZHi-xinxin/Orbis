@@ -168,12 +168,15 @@ class GenerationLoop(
         initialContextEpoch: Long = 0,
         includeCompactionReminder: Boolean = false,
         durableCheckpoints: Boolean = false,
+        stopOnUnknownToolOutcome: Boolean = durableCheckpoints,
         outputFrozenPrefixCount: Int? = null,
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
         emitTerminalEvidence: Boolean = false,
         // Group and AI-to-AI invocations must neither inject private notes nor advance human turns.
         allowLocalMemory: Boolean = true,
+        // A proactive preflight may read the same context without advancing human memory turns.
+        readOnlyLocalMemory: Boolean = false,
         admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
         requireActiveTurn: () -> Unit = {},
@@ -184,14 +187,14 @@ class GenerationLoop(
         // One snapshot per collected generation, not per conversation. A new human wake (or the
         // existing approval-resume path) reevaluates current settings, memory and input transforms.
         val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime)
-        val screenShareTurn = if (allowLocalMemory) me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn.bind(
+        val screenShareTurn = if (allowLocalMemory && !readOnlyLocalMemory) me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn.bind(
             me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()?.state?.value,
             assistant.id.toString(), conversationId?.toString()) else null
         val screenRuntime = me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()
         val screenLease = screenShareTurn?.let { screenRuntime?.retainTurn(it.frameId) }
         try {
         val localMemoryTurn = if (allowLocalMemory && me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
-            localMemory?.begin(assistant, conversationId, messages) else null
+            localMemory?.begin(assistant, conversationId, messages, readOnly = readOnlyLocalMemory) else null
         val tools = snapshotGenerationTools(tools)
         val privatePresentation = PrivateRoomGenerationPresentation(
             enabled = tools.any { it.name == "orbis_private_room_write" },
@@ -201,6 +204,11 @@ class GenerationLoop(
         var messages: List<UIMessage> = messages
         privatePresentation.classify(messages, completed = false) // also cover approval/resume turns
         var contextEpoch = initialContextEpoch
+        // Exactly the value given to context_compaction_status; no independent UI estimator.
+        val usageConfiguration = preparedContextConfiguration(assistant, model,
+            conversationSystemPrompt, orbisPrompt, conversationModeInjectionIds,
+            conversationLorebookIds, workspaceCwd)
+        var preparedUsage: Pair<Long, Long>? = null
         var lastVisualEmissionNanos = 0L
         var historySoftReached = false
         suspend fun admit(candidate: List<UIMessage>) {
@@ -261,6 +269,8 @@ class GenerationLoop(
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
                 responseForContinuation = generateInternal(
+                    readOnlyPreflight = readOnlyLocalMemory,
+                    onPreparedUsage = { preparedUsage = it to System.currentTimeMillis() },
                     screenShareTurn = screenShareTurn,
                     requireActiveTurn = requireActiveTurn,
                     onGatewayRequest = onGatewayRequest,
@@ -338,6 +348,10 @@ class GenerationLoop(
                         .toLocalDateTime(TimeZone.currentSystemDefault())
                 )
                 messages = privatePresentation.classify(messages, completed = true)
+                preparedUsage?.let { (tokens, preparedAt) ->
+                    messages = attachPreparedContextUsage(messages, tokens, preparedAt, contextEpoch,
+                        assistant.id, model.id, usageConfiguration)
+                }
                 admit(messages)
                 emit(GenerationChunk.Messages(messages, contextEpoch))
 
@@ -369,6 +383,8 @@ class GenerationLoop(
                     val toolDef = tools.find { it.name == tool.toolName }
                     when {
                         protected !== tool -> protected
+                        tool.isExecuted -> tool
+                        toolDef != null && !toolDef.isApprovalCurrent() -> tool.unavailableApprovalFailure()
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
                             tool.approvalState is ToolApprovalState.Auto -> {
@@ -482,9 +498,9 @@ class GenerationLoop(
                         // Auto or Approved - execute the tool
                         runCatching {
                             executedTools += tool.dispatchProvidedTool(tools) { toolDef ->
-                                check(toolDef.isApprovalCurrent()) { "工具目标或授权已变化，请重新发起调用；此次未执行。" }
+                                if (!toolDef.isApprovalCurrent()) return@dispatchProvidedTool tool.unavailableApprovalFailure()
                                 if (tool.approvalState is ToolApprovalState.Approved) {
-                                    check(tool.matchesHostApproval(toolDef)) { "审批快照已过期或参数已改变，请重新发起调用；此次未执行。" }
+                                    if (!tool.matchesHostApproval(toolDef)) return@dispatchProvidedTool tool.unavailableApprovalFailure()
                                 } else if (toolDef.needsApproval(tool.inputAsJson())) {
                                     // A remembered grant may have been revoked after model generation.
                                     return@dispatchProvidedTool tool.awaitHostApproval(toolDef)
@@ -505,9 +521,9 @@ class GenerationLoop(
                                 } else toolDef.execute(args)
                                 val hasShellAccess = tools.any { it.name == "workspace_shell" }
                                 val completed = tool.withGenerationToolOutput(
-                                    // Private results must not be spilled as ordinary workspace files.
-                                    output = if (me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName(toolDef.name) ||
-                                        toolDef.name == me.rerere.rikkahub.data.ai.tools.ORBIS_MEMORY_TOOL) result
+                                    // Private results must not spill; native paged reads must retain
+                                    // their complete JSON cursor even when PRoot is unavailable.
+                                    output = if (keepCompleteToolOutput(toolDef.name)) result
                                         else maybeTruncateToolOutput(tool.toolCallId, result, hasShellAccess)
                                 )
                                 val previous = withCurrentToolResults()
@@ -520,7 +536,7 @@ class GenerationLoop(
                             // 取消必须向上传播，否则停止生成会被误报为工具执行错误
                             if (it is CancellationException) throw it
                             if (it is GenerationDurabilityException) throw it
-                            if (toolOutcomeIsUnknown(executionStarted, durableCheckpoints, it)) {
+                            if (toolOutcomeIsUnknown(executionStarted, stopOnUnknownToolOutcome, it)) {
                                 // A transport/implementation exception after dispatch is not proof
                                 // that the external effect failed. Keep STARTED, never synthesize
                                 // a completed receipt or advance to another external action.
@@ -676,6 +692,8 @@ class GenerationLoop(
         consultationBusyWaitUntilMillis: Long? = null,
         onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
         requireActiveTurn: () -> Unit = {},
+        onPreparedUsage: (Long) -> Unit = {},
+        readOnlyPreflight: Boolean = false,
     ): UIMessage {
         var initialEstimate: Long? = null
         var initialSelection: GenerationContextSelection? = null
@@ -740,6 +758,7 @@ class GenerationLoop(
             initialEstimate = initialEstimate,
         )
         compactionControl?.observeRequestEstimate(prepared.estimatedTokens)
+        onPreparedUsage(prepared.estimatedTokens)
         // Reversible tool deletions are private local bookkeeping, never provider input.
         val internalMessages = prepared.messages.map { it.withoutDeletedToolRecordData().withVoiceNoteTranscripts() }
         // Resolve expiring frame handles anew for each HTTP attempt; never freeze image bytes
@@ -747,6 +766,7 @@ class GenerationLoop(
         suspend fun providerMessages(): List<UIMessage> {
             // Host-bound identity survives in-turn compaction and message-count projection.
             requireActiveTurn()
+            if (readOnlyPreflight) return localMemoryTurn?.project(internalMessages) ?: internalMessages
             return me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages(
                 context, assistant.id.toString(), localMemoryTurn?.project(internalMessages) ?: internalMessages,
                 modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE)).let { projected ->
@@ -756,7 +776,7 @@ class GenerationLoop(
         }
         // Publish once per new invocation, not on tool continuations. Counts remain local, never
         // alter prompts/cache keys, and deliberately do not claim upstream delivery or recall.
-        if (conversationId != null) initialSelection?.let { selection ->
+        if (conversationId != null && !readOnlyPreflight) initialSelection?.let { selection ->
             generationContextReceipts.record(conversationId.toString(),
                 selection.receipt(internalMessages, System.currentTimeMillis()))
         }
@@ -834,8 +854,8 @@ class GenerationLoop(
                                 throw StreamChunkHandlingException(error)
                             }
                         }
-                        // Only the successful attempt becomes a continuation segment. Retried
-                        // partial streams never enter the input snapshot or execute their tools.
+                        // Only the successful attempt becomes a continuation segment.
+                        // A failed partial stream is never automatically replayed.
                         return copyGenerationMessage(attemptResponse.last().finishReasoning())
                     } catch (error: Throwable) {
                         if (error is StreamChunkHandlingException) {
@@ -862,6 +882,7 @@ class GenerationLoop(
                             retryCount = retryCount,
                             processingStatus = processingStatus,
                             enabled = settings.networkSetting.enableAutoRetry,
+                            receivedAnyChunk = sawAnyChunk,
                         )
                     }
                 }
@@ -933,19 +954,22 @@ class GenerationLoop(
         retryCount: Int,
         processingStatus: MutableStateFlow<String?>,
         enabled: Boolean,
+        receivedAnyChunk: Boolean = false,
     ): Int {
         // 用户主动停止生成时，底层连接也可能以 IOException("canceled") 收尾；
         // 先检查协程状态，确保取消不会被当作网络波动重新拉起。
         currentCoroutineContext().ensureActive()
-        if (!enabled || error !is IOException || retryCount >= MAX_PROVIDER_NETWORK_RETRIES) {
+        if (!canAutomaticallyRetryProvider(error, enabled, retryCount, MAX_PROVIDER_NETWORK_RETRIES, receivedAnyChunk)) {
             throw error
         }
+        // Policy permits only IO failures, before any response chunk. HTTP 400/402 are not retried.
+        val networkError = error as IOException
 
         val nextRetryCount = retryCount + 1
         val retryDelay = INITIAL_PROVIDER_RETRY_DELAY_MS shl retryCount
         processingStatus.value = context.getString(
             R.string.chat_generation_network_retrying,
-            getNetworkErrorMessage(error),
+            getNetworkErrorMessage(networkError),
             nextRetryCount,
             MAX_PROVIDER_NETWORK_RETRIES,
         )

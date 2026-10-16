@@ -27,6 +27,8 @@ internal fun parseOrbisCompactionThreshold(text: String): Int? =
     text.trim().toIntOrNull()?.takeIf { it in 0..1_000_000 }
 
 internal fun orbisCompactionBasisLabel(basis: String): String = when {
+    basis.startsWith("prepared_request_estimate") -> "最近已准备请求的估算（与 AI 状态工具及提醒同口径；不是精确计费）"
+    basis.startsWith("stable_active_message_body_estimate") -> "活动消息正文估算（固定口径；不含思考、系统提示、工具定义）"
     basis.startsWith("previous_provider_") -> "最近供应商用量 + 回复与新增内容估算；不是下一次请求的精确用量"
     basis.startsWith("estimated_text_") -> "正文与工具载荷的本地估算；附件与供应商计数方式可能不同"
     basis.startsWith("estimate;") -> "含请求与工具定义的本地估算；不是供应商精确用量"

@@ -87,7 +87,7 @@ import dev.chrisbanes.haze.blur.material3.Material3
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import me.rerere.ai.provider.Model
-import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.chatgpt.ChatGptPlanCapabilities
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRStatus
@@ -103,8 +103,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 import me.rerere.rikkahub.data.datastore.Settings
-import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getQuickMessagesOfAssistant
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -145,6 +144,8 @@ fun ChatInput(
     state: ChatInputState,
     loading: Boolean,
     settings: Settings,
+    assistant: Assistant?,
+    chatModel: Model?,
     hazeState: HazeState,
     enableSearch: Boolean,
     onUpdateSearchMode: (SearchMode) -> Unit,
@@ -178,7 +179,11 @@ fun ChatInput(
     onOrbisSendTextEmotion: ((String) -> Boolean)? = null,
 ) {
     val toaster = LocalToaster.current
-    val assistant = settings.getCurrentAssistant()
+    if (assistant == null) {
+        Text("当前对话所属 AI 暂不可用，输入草稿已保留。请返回选择或恢复该 AI。",
+            modifier = modifier.padding(16.dp))
+        return
+    }
     val hazeTintColor = MaterialTheme.colorScheme.surfaceContainerLow
     val inputHazeStyle = HazeBlurStyle.Material3 {
         blurRadius(12.dp)
@@ -200,7 +205,7 @@ fun ChatInput(
     val ttsSpeaking by tts.isSpeaking.collectAsState()
     val containerShape = if (orbis) RoundedCornerShape(23.dp) else MaterialTheme.shapes.largeIncreased
     val modelListState = rememberModelListState(
-        modelId = assistant.chatModelId ?: settings.chatModelId,
+        modelId = chatModel?.id,
         providers = settings.providers,
         type = ModelType.CHAT,
     )
@@ -210,7 +215,7 @@ fun ChatInput(
         keyboardController?.hide()
         if (loading && state.isEmpty()) {
             onCancelClick()
-        } else if (settings.getCurrentChatModel() == null) {
+        } else if (chatModel == null) {
             modelListState.open()
         } else {
             onSendClick()
@@ -230,8 +235,8 @@ fun ChatInput(
         loading -> "当前回复尚未结束，请完成或停止本轮后再发起通话。"
         asrState.isRecording || asrState.status == ASRStatus.Connecting || asrState.status == ASRStatus.Stopping ->
             "请先结束当前录音或识别，再发起通话。"
-        messageQueue.paused -> "消息队列已暂停，请先检查并恢复队列。"
-        messageQueue.messages.any { it.recoveryHeldReason == null } -> "消息队列尚未处理完，请稍后再发起通话。"
+        // A fresh human call has its own continuation lane. Old paused inputs and tools
+        // remain held; entering a call must not require replaying that backlog first.
         onStartVoiceMode == null -> "当前页面暂不能发起通话，请回到聊天页面。"
         else -> OrbisVoiceCallPreflight.firstFailure(settings, assistant)?.explanation
     }
@@ -239,7 +244,7 @@ fun ChatInput(
     val videoUnavailableReason = when {
         voiceUnavailableReason != null -> voiceUnavailableReason
         onStartVideoMode == null -> "当前页面暂不能发起视频，请回到聊天页面。"
-        me.rerere.ai.provider.Modality.IMAGE !in settings.getCurrentChatModel()?.inputModalities.orEmpty() ->
+        me.rerere.ai.provider.Modality.IMAGE !in chatModel?.inputModalities.orEmpty() ->
             "请先选择支持图片输入的模型。"
         else -> null
     }
@@ -386,6 +391,7 @@ fun ChatInput(
                                 if (composerExpanded) "收起输入功能" else "展开输入功能", modifier = Modifier.size(19.dp))
                         }
                         TextInputRow(
+                            assistant = assistant,
                             state = state,
                             modifier = Modifier.weight(1f),
                             completionProviders = completionProviders,
@@ -426,7 +432,6 @@ fun ChatInput(
                             // Search
                             val enableSearchMsg = stringResource(R.string.web_search_enabled)
                             val disableSearchMsg = stringResource(R.string.web_search_disabled)
-                            val chatModel = settings.getCurrentChatModel()
                             SearchPickerButton(
                                 compact = orbis,
                                 enableSearch = enableSearch,
@@ -449,10 +454,13 @@ fun ChatInput(
                             )
 
                             // Reasoning
-                            val model = settings.getCurrentChatModel()
-                            if (model?.abilities?.contains(ModelAbility.REASONING) == true) {
+                            val model = chatModel
+                            val provider = model?.findProvider(settings.providers)
+                            if (model != null && ChatGptPlanCapabilities.supportsReasoning(model, provider)) {
                                 ReasoningButton(
                                     compact = orbis,
+                                    model = model,
+                                    provider = provider,
                                     reasoningLevel = assistant.reasoningLevel,
                                     onUpdateReasoningLevel = {
                                         onUpdateAssistant(assistant.copy(reasoningLevel = it))
@@ -685,13 +693,13 @@ private fun ActionIconButton(
 @Composable
 private fun TextInputRow(
     state: ChatInputState,
+    assistant: Assistant,
     modifier: Modifier = Modifier,
     completionProviders: List<ChatCompletionProvider>,
     onSendMessage: () -> Unit,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
-    val assistant = settings.getCurrentAssistant()
     val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
         settings.getQuickMessagesOfAssistant(assistant)
     }

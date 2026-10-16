@@ -97,18 +97,17 @@ private class ReasoningState(
 }
 
 @Composable
-private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<ReasoningState, Boolean> {
+private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning, generating: Boolean): Pair<ReasoningState, Boolean> {
     val settings = LocalSettings.current
     val collapseByDefault = LocalOrbisDeepSeekStyle.current && settings.displaySetting.deepSeekCollapseThinking
-    val loading = reasoning.finishedAt == null
+    val loading = generating && reasoning.finishedAt == null
     val scrollState = rememberScrollState()
 
     val state = remember(reasoning.createdAt, collapseByDefault) {
         ReasoningState(
             scrollState = scrollState,
             collapseWhileLoading = collapseByDefault,
-            initialDuration = reasoning.finishedAt?.let { it - reasoning.createdAt }
-                ?: (Clock.System.now() - reasoning.createdAt)
+            initialDuration = reasoningDuration(reasoning, loading, Clock.System.now()) ?: Duration.ZERO
         )
     }
 
@@ -127,10 +126,11 @@ private fun rememberReasoningState(reasoning: UIMessagePart.Reasoning): Pair<Rea
         }
     }
 
-    LaunchedEffect(loading) {
+    LaunchedEffect(loading, reasoning.createdAt, reasoning.finishedAt) {
+        state.duration = reasoningDuration(reasoning, loading, Clock.System.now()) ?: Duration.ZERO
         if (loading) {
             while (isActive) {
-                state.duration = (reasoning.finishedAt ?: Clock.System.now()) - reasoning.createdAt
+                state.duration = reasoningDuration(reasoning, loading, Clock.System.now()) ?: Duration.ZERO
                 delay(50)
             }
         }
@@ -214,10 +214,12 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     reasoning: UIMessagePart.Reasoning,
     model: Model?,
     assistant: Assistant?,
+    generating: Boolean = false,
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
 ) {
-    val (state, loading) = rememberReasoningState(reasoning)
+    val (state, loading) = rememberReasoningState(reasoning, generating)
+    val unknownDuration = !loading && reasoning.finishedAt == null
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null
     val chatFontFamily = LocalTextStyle.current.fontFamily
@@ -242,7 +244,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
             ) {
                 Icon(HugeIcons.Idea01, null, modifier = Modifier.size(16.dp), tint = ink)
                 Text(
-                    text = if (showThinkingTitle) thinkingTitle!! else stringResource(
+                    text = if (showThinkingTitle) thinkingTitle!! else if (unknownDuration) "思考记录" else stringResource(
                         R.string.deep_thinking_seconds,
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat(),
                     ),
@@ -294,7 +296,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
                 ReasoningTitle(title = thinkingTitle!!)
             } else {
                 Text(
-                    text = stringResource(
+                    text = if (unknownDuration) "思考记录" else stringResource(
                         R.string.deep_thinking_seconds,
                         state.duration.toDouble(DurationUnit.SECONDS).toFloat()
                     ),

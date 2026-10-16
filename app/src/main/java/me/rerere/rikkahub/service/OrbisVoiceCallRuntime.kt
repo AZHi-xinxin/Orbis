@@ -184,7 +184,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                         }
                     },
                     onUnavailable = {
-                        publishFocusPause(session, "音频路由未能切换，收音与朗读已暂停，请检查耳机后恢复。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
+                        publishFocusPause(session, "通话音频暂未恢复，收音与朗读已暂停。请点“恢复通话音频”重试。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
                     },
                 )
                 check(session.audioRouting?.start() == true) { "Audio route unavailable" }
@@ -193,6 +193,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                 // owner while it waited; never open ASR from that stale startup continuation.
                 check(session.focusState == VoiceAudioFocusState.AVAILABLE) { "Audio focus lost during startup" }
                 voiceSession.start(
+                    freshHumanReplies = true,
                     createAsr = createAsr,
                     speak = speak,
                     stopSpeaking = stopSpeaking,
@@ -332,7 +333,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
             val confirmed = session.audioRouting?.resume() == true
             if (current !== session || session.ending) return@launch
             if (confirmed) publishConfirmedAudio(session)
-            else publishFocusPause(session, "音频输出未能确认，收音与朗读保持暂停。请检查耳机后重试。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
+            else publishFocusPause(session, "通话音频暂未恢复，收音与朗读保持暂停。请稍后点“恢复通话音频”重试。[AUDIO_ROUTE_UNAVAILABLE]", manual = true)
         }.also { it.start() }
         // Only the attempt was accepted. Capture/playback stays paused until actual readback.
         return true

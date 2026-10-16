@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.asr.throwIfFailure
+
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
@@ -97,6 +99,7 @@ class VoiceSessionController(
         data class RetryCapture(val revision: Long) : Event
         data class CheckReplies(val revision: Long, val checkReady: suspend () -> Boolean) : Event
         data class RepliesChecked(val revision: Long, val ready: Boolean) : Event
+        data class FreshReplyNoticeExpired(val revision: Long) : Event
         data class SupplementaryReply(val reply: Deferred<String?>) : Event
         data class RequestSupplementaryReply(
             val stillCurrent: () -> Boolean,
@@ -131,6 +134,8 @@ class VoiceSessionController(
         // Readiness only, including call/model ownership before and after checking. This
         // callback must never clear a queue/tool hold, resend input or start model work.
         checkReplyResume: (suspend () -> Boolean)? = null,
+        /** Caller accepts fresh human turns independently of old queue/tool persistence. */
+        freshHumanReplies: Boolean = false,
     ) {
         if (job?.isCompleted == false) return
         val events = Channel<Event>(Channel.UNLIMITED)
@@ -153,7 +158,7 @@ class VoiceSessionController(
                 delay(200)
                 runSession(events, createAsr, speak, stopSpeaking, onConnected,
                     initialAssistantText, cancelPendingReply, isHeadsetConnected, requestOpening,
-                    correctTranscript, enqueueRecognizedMessage, onReplyPauseChanged, checkReplyResume)
+                    correctTranscript, enqueueRecognizedMessage, onReplyPauseChanged, checkReplyResume, freshHumanReplies)
             } catch (e: Exception) {
                 if (e is CancellationException && !currentCoroutineContext().isActive) throw e
                 terminalError = when (e) {
@@ -187,6 +192,7 @@ class VoiceSessionController(
         enqueueRecognizedMessage: ((ASRCorrectionResult) -> Deferred<String?>)?,
         onReplyPauseChanged: (Boolean) -> Unit,
         checkReplyResume: (suspend () -> Boolean)?,
+        freshHumanReplies: Boolean,
     ) = coroutineScope {
         val pending = linkedMapOf<Long, Pending>()
         val ready = ArrayDeque<Playback>()
@@ -236,7 +242,10 @@ class VoiceSessionController(
             // Detached from the session's structured teardown: even a broken external
             // checker cannot delay hang-up. Its old channel/revision cannot regain audio.
             replyResumeJob = scope.launch {
-                for (delayMs in longArrayOf(250L, 750L, 1_500L, 3_000L)) {
+                var attempt = 0
+                while (isActive) {
+                    val delayMs = when (attempt) { 0 -> 250L; 1 -> 750L; 2 -> 1_500L; 3 -> 3_000L; else -> 5_000L }
+                    if (attempt < 4) attempt++
                     delay(delayMs)
                     if (controls !== events || revision != replyRevision.get() || !mutableState.value.replyBlocked) return@launch
                     if (checkRepliesReady(revision, 2_000L, checkReady)) {
@@ -244,7 +253,6 @@ class VoiceSessionController(
                         return@launch
                     }
                 }
-                events.trySend(Event.RepliesChecked(revision, false))
             }
         }
 
@@ -299,6 +307,20 @@ class VoiceSessionController(
             val revision = replyRevision.incrementAndGet()
             replyResumeJob?.cancel()
             replyResumeJob = null
+            if (freshHumanReplies) {
+                // A failed model/tool/save is not a microphone failure. Keep the current
+                // capture (including long speech), user mute and focus ownership intact.
+                pending.values.forEach { it.observer?.cancel() }
+                pending.clear()
+                ready.clear()
+                if (playing != null) { stopPlayback(); if (capture == null) waitForTail() }
+                mutableState.update { it.copy(replyBlocked = false, replyResumeChecking = false,
+                    replyNotice = null, pendingReplies = 0,
+                    recoveryNotice = "本轮回复未完成，可直接继续说话；旧消息和工具不会自动重试。[FRESH_VOICE_INPUT]") }
+                runCatching { onReplyPauseChanged(false) }
+                launch { delay(4_000); events.send(Event.FreshReplyNoticeExpired(revision)) }
+                return
+            }
             // Publish the independent fence before suspending cleanup. Audio focus and mute
             // controls must never release a model/tool-result hold.
             mutableState.update { it.copy(replyBlocked = true, replyResumeChecking = false,
@@ -319,7 +341,8 @@ class VoiceSessionController(
             ready.clear()
             waitForTail()
             // Failure can arrive just before ChatService finishes its exact turn. Allow
-            // only a bounded, read-only recheck; unresolved holds still require the human.
+            // read-only, timeout-bounded checks for this active call. Slow safe cleanup may
+            // finish later than the initial retry window; unresolved holds stay in place.
             // Keep the manual action available while these background checks are running.
             scheduleReplyChecks(revision)
         }
@@ -650,7 +673,15 @@ class VoiceSessionController(
                             // Only future audio is enabled. Old input and playback were detached.
                             muteOutput?.invoke(!mutableState.value.speakerEnabled || mutableState.value.audioFocusSuspended)
                             runCatching { onReplyPauseChanged(false) }
+                        } else {
+                            // A manual check that is too early must not permanently stop the
+                            // late-readiness observer. This never replays input or tool work.
+                            scheduleReplyChecks(event.revision)
                         }
+                    }
+                    is Event.FreshReplyNoticeExpired -> if (event.revision == replyRevision.get()) {
+                        mutableState.update { if (it.recoveryNotice?.contains("[FRESH_VOICE_INPUT]") == true)
+                            it.copy(recoveryNotice = null) else it }
                     }
                 }
             }
@@ -673,7 +704,7 @@ class VoiceSessionController(
             asr.start {}
             withTimeout(15_000) {
                 asr.state.first {
-                    check(it.errorMessage == null) { it.errorMessage.orEmpty() }
+                    it.throwIfFailure()
                     it.status != ASRStatus.Connecting
                 }.also { check(it.status == ASRStatus.Listening || it.voiceTurn.isComplete) { "Unable to start speech recognition" } }
             }
@@ -684,7 +715,7 @@ class VoiceSessionController(
                 it.copy(recoveryNotice = "识别连接已恢复；旧录音没有重发。[ASR_RECONNECTED]") else it }
             // Realtime providers use server VAD; batch adapters use local >=3s endpointing.
             val ended = asr.state.onEach {
-                check(it.errorMessage == null) { it.errorMessage.orEmpty() }
+                it.throwIfFailure()
                 check(it.status == ASRStatus.Listening || it.voiceTurn.isComplete) { "Speech recognition disconnected" }
                 onState(it, false)
             }.first { it.voiceTurn.speechEnded }
@@ -694,7 +725,7 @@ class VoiceSessionController(
             onState(ended, true)
             return withTimeout(asr.finalTranscriptTimeoutMs) {
                 asr.state.first {
-                    check(it.errorMessage == null) { it.errorMessage.orEmpty() }
+                    it.throwIfFailure()
                     check(it.voiceTurn.isComplete || it.status == ASRStatus.Listening) {
                         "Speech recognition disconnected before the final transcript was received"
                     }

@@ -69,7 +69,6 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
@@ -135,7 +134,6 @@ import me.rerere.rikkahub.ui.components.ai.InjectionQuickConfigSheet
 import me.rerere.rikkahub.ui.components.ai.CompressContextDialog
 import me.rerere.rikkahub.data.model.OrbisComposerAction
 import me.rerere.rikkahub.data.model.dispatchOrbisCapability
-import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.components.ai.completion.WorkspaceCompletionProvider
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -177,8 +175,9 @@ fun ChatPage(
     }
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
-    val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
-    val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
+    val composerScope = conversationComposerScope(setting, conversation.assistantId)
+    val currentChatModel = composerScope?.model
+    val enableWebSearch = composerScope?.assistant?.enableWebSearch == true
     val errors by vm.errors.collectAsStateWithLifecycle()
 
     var manualContextOpen by remember(id) { mutableStateOf(false) }
@@ -413,6 +412,7 @@ private fun ChatPageContent(
     val batchVoiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
     val eventInbox by vm.eventInbox.collectAsStateWithLifecycle()
     val assistant = setting.getCurrentAssistant()
+    val composerAssistant = conversationComposerScope(setting, conversation.assistantId)?.assistant
     val startupAppearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val startupInheritBackground = !startupAppearance.backgroundEnabled &&
         (assistant.background != null || assistant.useGradientBackground)
@@ -451,7 +451,7 @@ private fun ChatPageContent(
         onAttachmentAdded = { showFilesSheet = false },
     )
     val allowAudioVideoAttachments =
-        setting.getCurrentChatModel()?.findProvider(setting.providers) is ProviderSetting.Google
+        currentChatModel?.findProvider(setting.providers) is ProviderSetting.Google
 
     val completionProviders = remember(assistant.workspaceId, conversation.workspaceCwd, workspaceRepository) {
         assistant.workspaceId?.let { workspaceId ->
@@ -515,8 +515,10 @@ private fun ChatPageContent(
                 val messageQueue by vm.messageQueue.collectAsStateWithLifecycle()
                 val gatewayStopNotice by vm.gatewayStopNotice.collectAsStateWithLifecycle()
                 val queueRecovery by vm.messageQueueRecovery.collectAsStateWithLifecycle()
+                val persistenceWarning by vm.humanContinuationPersistenceWarning.collectAsStateWithLifecycle(initialValue = null)
                 val voiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
                 Column(if (BuildConfig.ORBIS_ENABLED) Modifier.navigationBarsPadding().imePadding() else Modifier) {
+                TransientContinuationNotice(persistenceWarning)
                 ChatInput(
                     onStartVoiceMode = onStartVoiceMode,
                     onStartVideoMode = onStartVideoMode,
@@ -529,12 +531,14 @@ private fun ChatPageContent(
                     onFinishEditQueuedMessage = vm::finishEditQueuedMessage,
                     onResumeMessageQueue = vm::resumeMessageQueue,
                     onContinueFreshInput = vm::dismissPauseAndContinueFreshInput,
-                    onStopGatewayWait = vm::stopGeneration,
+                    onStopGatewayWait = vm::stopGatewayWait,
                     gatewayStopNotice = gatewayStopNotice,
                     queueRecovery = queueRecovery,
                     onDismissQueueRecoveryResult = vm::dismissQueueRecoveryResult,
                     loading = loadingJob != null,
                     settings = setting,
+                    assistant = composerAssistant,
+                    chatModel = currentChatModel,
                     hazeState = hazeState,
                     completionProviders = completionProviders,
                     onCancelClick = {
@@ -542,34 +546,7 @@ private fun ChatPageContent(
                     },
                     enableSearch = enableWebSearch,
                     onUpdateSearchMode = { mode ->
-                        val current = setting.getCurrentAssistant()
-                        val model = setting.getCurrentChatModel()
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == current.id) {
-                                        assistant.copy(enableWebSearch = mode == SearchMode.LOCAL)
-                                    } else {
-                                        assistant
-                                    }
-                                },
-                                providers = if (model == null) {
-                                    setting.providers
-                                } else {
-                                    setting.providers.map { provider ->
-                                        provider.editModel(
-                                            model.copy(
-                                                tools = if (mode == SearchMode.BUILT_IN) {
-                                                    model.tools + BuiltInTools.Search
-                                                } else {
-                                                    model.tools - BuiltInTools.Search
-                                                }
-                                            )
-                                        )
-                                    }
-                                },
-                            )
-                        )
+                        vm.setConversationSearchMode(conversation.assistantId, currentChatModel?.id, mode)
                     },
                     onSendClick = {
                         if (currentChatModel == null) {
@@ -601,27 +578,15 @@ private fun ChatPageContent(
                         inputState.clearInput()
                     },
                     onUpdateChatModel = {
-                        vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
+                        vm.setChatModel(ownerId = conversation.assistantId, model = it)
                     },
                     onUpdateAssistant = {
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == it.id) {
-                                        it
-                                    } else {
-                                        assistant
-                                    }
-                                }
-                            )
-                        )
+                        if (it.id == conversation.assistantId) {
+                            vm.setConversationReasoning(conversation.assistantId, currentChatModel?.id, it.reasoningLevel)
+                        }
                     },
                     onUpdateSearchService = { index ->
-                        vm.updateSettings(
-                            setting.copy(
-                                searchServiceSelected = index
-                            )
-                        )
+                        vm.setSearchService(index)
                     },
                     onMoreClick = {
                         showFilesSheet = true
@@ -644,7 +609,12 @@ private fun ChatPageContent(
                             takePicture = attachmentPickerActions.onTakePicture,
                             pickImage = attachmentPickerActions.onPickImage,
                             pickFile = attachmentPickerActions.onPickFile,
-                            openMcpSettings = { navController.navigate(Screen.OrbisMcpSettings) { launchSingleTop = true } },
+                            openMcpSettings = {
+                                navController.navigate(Screen.OrbisConversationMcpSettings(
+                                    conversation.assistantId.toString(), conversation.id.toString())) {
+                                    launchSingleTop = true
+                                }
+                            },
                             openContext = onManualContext,
                             openExtensions = { showOrbisExtensions = true },
                             openScreenShare = {
@@ -656,7 +626,8 @@ private fun ChatPageContent(
                         )
                     },
                 )
-                if (BuildConfig.ORBIS_ENABLED && !WindowInsets.isImeVisible) OrbisChatDock()
+                if (BuildConfig.ORBIS_ENABLED && !WindowInsets.isImeVisible) OrbisChatDock(
+                    ownerAssistantId = conversation.assistantId.toString(), conversationId = conversation.id.toString())
                 }
             },
             containerColor = Color.Transparent,
@@ -665,6 +636,7 @@ private fun ChatPageContent(
                 innerPadding = innerPadding,
                 conversation = conversation,
                 notifications = orbisPendingConversationNotifications(eventInbox.events, conversation),
+                onDismissNotification = vm::dismissOrbisNotification,
                 state = chatListState,
                 bottomFollowState = bottomFollowState,
                 loading = loadingJob != null,
@@ -792,6 +764,8 @@ private fun ChatPageContent(
         }
 
         if (BuildConfig.ORBIS_ENABLED && showOrbisPrompt) {
+            val promptAssistant = setting.assistants.firstOrNull { it.id == conversation.assistantId }
+            val promptModel = promptAssistant?.let { setting.findModelById(it.chatModelId ?: setting.chatModelId) }
             OrbisConversationPromptSheet(
                 conversationId = conversation.id.toString(),
                 prompt = conversation.orbisPrompt,
@@ -799,7 +773,9 @@ private fun ChatPageContent(
                 composerOpacity = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current).composerOpacity,
                 onSave = vm::saveOrbisPrompt,
                 onDismiss = { showOrbisPrompt = false },
-                assistant = setting.assistants.firstOrNull { it.id == conversation.assistantId },
+                assistant = promptAssistant,
+                model = promptModel,
+                provider = promptModel?.findProvider(setting.providers),
                 onSaveGenerationParameters = vm::saveOrbisGenerationParameters,
             )
         }
@@ -948,16 +924,32 @@ private fun TopBar(
     if (BuildConfig.ORBIS_ENABLED) {
         var manualVisible by rememberSharedPreferenceBoolean("orbis_chat_manual_visible", true)
         val assistant = settings.getAssistantById(conversation.assistantId) ?: settings.getCurrentAssistant()
+        var originalArchivesOpen by remember(assistant.id) { mutableStateOf(false) }
+        if (originalArchivesOpen) me.rerere.rikkahub.ui.pages.orbis.OrbisOriginalArchives(assistant.id) { originalArchivesOpen = false }
         val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
         // A 350K conversation must not be re-serialized on the main thread for every streamed token.
-        val estimate by produceState<CompactionContextEstimate?>(null, conversation.id,
-            conversation.compactionEpoch, model?.id, isGenerating,
+        val usageConfiguration = remember(assistant, model, conversation.customSystemPrompt,
+            conversation.orbisPrompt, conversation.modeInjectionIds, conversation.lorebookIds, conversation.workspaceCwd) {
+            me.rerere.rikkahub.data.ai.preparedContextConfiguration(assistant, model,
+                conversation.customSystemPrompt, conversation.orbisPrompt, conversation.modeInjectionIds,
+                conversation.lorebookIds, conversation.workspaceCwd)
+        }
+        // Key the async value itself too: produceState retains its old value until its effect runs.
+        val estimateKey = listOf(conversation.id, conversation.compactionEpoch, usageConfiguration,
+            isGenerating, if (isGenerating) null else conversation.messageNodes)
+        val estimation by produceState<Pair<List<Any?>, Pair<CompactionContextEstimate, me.rerere.ai.ui.OrbisPreparedContextUsage?>>?>(null,
+            conversation.id, conversation.compactionEpoch, usageConfiguration, isGenerating,
             if (isGenerating) null else conversation.messageNodes) {
             value = null
             if (!isGenerating) value = withContext(Dispatchers.Default) {
-                estimateCurrentContext(conversation.currentMessages, model?.id)
+                val messages = conversation.currentMessages
+                estimateKey to (me.rerere.rikkahub.data.ai.compaction.estimateActiveMessageBodies(messages) to
+                    me.rerere.rikkahub.data.ai.validPreparedContextUsage(messages, conversation.compactionEpoch,
+                        assistant.id, model?.id, usageConfiguration))
             }
         }
+        val estimate = estimation?.takeIf { it.first == estimateKey }?.second
+        val requestUsage = estimate?.second
         val budget = remember(conversation.messageNodes, conversation.compactionEpoch, model?.id, model?.modelId,
             assistant.compactionThresholdTokens, isGenerating, estimate) {
             deriveOrbisContextBudget(
@@ -966,9 +958,12 @@ private fun TopBar(
                 referenceLimit = model?.modelId?.let { ModelRegistry.MODEL_CONTEXT_LENGTH.getData(it) },
                 isGenerating = isGenerating,
                 reminderThresholdTokens = assistant.compactionThresholdTokens,
-                currentUsageTokens = estimate?.tokens,
-                currentUsageSource = estimate?.basis,
+                currentUsageTokens = requestUsage?.tokens,
+                currentUsageSource = requestUsage?.let { "prepared_request_estimate" },
                 currentEstimatePending = !isGenerating && estimate == null,
+                requirePreparedRequest = true,
+                bodyUsageTokens = estimate?.first?.tokens,
+                requestPreparedAtMillis = requestUsage?.preparedAtMillis,
             )
         }
         val headerOpacity = settings.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current).headerOpacity
@@ -997,6 +992,7 @@ private fun TopBar(
                         onRollbackLatest = onRollbackCompaction,
                         onOpen = onOpenCompaction,
                         onManualContext = onManualContext.takeIf { conversation.messageNodes.isNotEmpty() },
+                        onOriginalArchives = { originalArchivesOpen = true },
                     )
                 }
                 OrbisHeaderIconButton(onClick = onClickMenu, backgroundOpacity = headerOpacity) {

@@ -127,6 +127,13 @@ internal object OrbisVoiceCallPreflight {
             is TTSProviderSetting.Step -> { endpoint = provider.baseUrl; key = provider.apiKey; modelAndVoicePresent = provider.model.isNotBlank() && provider.voice.isNotBlank() }
             // Fish can select a default voice without reference_id.
             is TTSProviderSetting.FishAudio -> { endpoint = provider.baseUrl; key = provider.apiKey; modelAndVoicePresent = provider.model.isNotBlank() }
+            is TTSProviderSetting.Volcengine -> {
+                endpoint = provider.baseUrl
+                key = if (provider.legacyAuth && provider.appId.isNotBlank()) provider.accessToken else if (provider.legacyAuth) "" else provider.apiKey
+                modelAndVoicePresent = provider.resourceId in setOf("seed-tts-2.0", "seed-icl-2.0") && provider.speaker.isNotBlank()
+                if (key.isBlank()) return OrbisCallFailure.TTS_CREDENTIAL
+                if (!endpoint.startsWith("https://")) return OrbisCallFailure.TTS_ENDPOINT
+            }
             is TTSProviderSetting.SystemTTS -> return null
         }
         val host = endpointHost(endpoint, false) ?: return OrbisCallFailure.TTS_ENDPOINT

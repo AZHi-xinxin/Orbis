@@ -69,6 +69,7 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                                         toolName = function?.get("name")?.jsonPrimitive?.contentOrNull ?: "",
                                         input = function?.get("arguments")?.jsonPrimitive?.contentOrNull ?: "",
                                         output = emptyList(),
+                                        metadata = toolCall.googleChatCompletionsSignatureMetadata(),
                                     )),
                                 ),
                                 responseId,
@@ -217,7 +218,8 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                             add(StreamChunk.ToolCallStart(id, part.toolName, part.metadata))
                         }
                         lastToolId = id
-                        if (nameDelta.isNotEmpty() || part.input.isNotEmpty()) {
+                        // A signature can arrive after the last argument byte, on its own chunk.
+                        if (nameDelta.isNotEmpty() || part.input.isNotEmpty() || part.metadata != null) {
                             add(StreamChunk.ToolCallDelta(id, nameDelta, part.input, part.metadata))
                         }
                     }

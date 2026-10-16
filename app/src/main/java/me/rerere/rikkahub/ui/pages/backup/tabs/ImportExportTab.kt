@@ -168,13 +168,13 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         item {
             LocalCard {
                 Text("导出 Orbis 本地备份", fontWeight = FontWeight.Bold)
-                Text("连接设置始终包含在备份中。陪伴模块凭据、设备授权、观察日记与围栏配置不在此备份内。", fontSize = 12.sp)
+                Text("连接设置始终包含在备份中。勾选文件时同时备份各助手的角色图片、配色、台词和面部配准；桌面绑定与临时表情授权不迁移。陪伴模块凭据、设备授权、观察日记与围栏配置不在此备份内。", fontSize = 12.sp)
                 WebDavConfig.BackupItem.entries.forEach { item ->
                     Row {
                         Checkbox(checked = item in items, enabled = !busy, onCheckedChange = { checked ->
                             vm.updateLocalBackupItems(if (checked) items + item else items - item)
                         })
-                        Text(if (item == WebDavConfig.BackupItem.DATABASE) "聊天记录" else "附件、字体、技能、课表与颜文字", modifier = Modifier.padding(top = 14.dp))
+                        Text(if (item == WebDavConfig.BackupItem.DATABASE) "聊天记录" else "附件、角色小部件、字体、技能、课表与颜文字", modifier = Modifier.padding(top = 14.dp))
                     }
                 }
                 TextButton(enabled = !busy, onClick = {
@@ -183,14 +183,14 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
                 }) { Text("保存到本地文件") }
             }
         }
-        item { BackupCard("恢复 Orbis 备份", "将替换连接设置和上方勾选的数据，恢复前请先导出当前备份。课表和颜文字按编号合并：相同跳过、冲突停止本次恢复；旧备份没有这两项则不动本机两库。不是 RikkaHub 聊天合并入口。", !busy, "选择要恢复的 Orbis 备份") { confirm = "local" } }
+        item { BackupCard("恢复 Orbis 备份", "将替换连接设置和上方勾选的数据，恢复前请先导出当前备份。角色素材只还原到原助手编号，其他助手素材不动；旧备份无角色素材则保留本机素材，恢复后重新添加桌面绑定。课表和颜文字按编号合并：相同跳过、冲突停止。不是 RikkaHub 聊天合并入口。", !busy, "选择要恢复的 Orbis 备份") { confirm = "local" } }
     }
     confirm?.let { kind ->
         AlertDialog(onDismissRequest = { confirm = null }, title = { Text(if (kind == "local") "确认恢复并替换" else "确认导入聊天") },
             text = { Text(when (kind) {
                 "rikka" -> "只追加聊天到当前身份。不运行导入的工具、不启用导入的提示词、不更改模型或密钥。不会仅因版本号不同而拒绝；无法安全识别的聊天结构会停止导入，未知内容类型会保留文字或标明无法提取，不会覆盖原数据。"
                 "chatbox" -> "使用既有 ChatBox 导入规则，可能更新模型映射与会话系统提示词。请仅选自己的备份。"
-                else -> "这会替换连接设置及勾选的数据。课表和颜文字按编号合并，同编号不同内容会停止恢复，旧包无这两项则不动本机两库。请确保已有备份；要合并 RikkaHub 聊天请取消并使用第一个入口。"
+                else -> "这会替换连接设置及勾选的数据，包括原助手编号下的角色素材；不会按名字或当前选择重新分配角色。桌面小部件需要重新绑定。课表和颜文字按编号合并，同编号不同内容会停止恢复。请确保已有备份；要合并 RikkaHub 聊天请取消并使用对应入口。"
             }) }, confirmButton = { TextButton(onClick = { action = kind; confirm = null; open.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text("选择文件") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("取消") } })
     }

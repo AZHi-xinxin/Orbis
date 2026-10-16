@@ -26,6 +26,10 @@ data class UIMessage(
     val usage: TokenUsage? = null,
     /** Historical usage remains visible after a manual history edit, but is not a current budget anchor. */
     val usageContextInvalidated: Boolean = false,
+    /** The latest prepared input's estimate. Validated against the selected branch before display. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val orbisPreparedContextUsage: OrbisPreparedContextUsage? = null,
     val translation: String? = null,
     /** Hide private tool details and subsequent reasoning, not earlier reasoning, public Text or model input. */
     val privateRoomContentHidden: Boolean = false,

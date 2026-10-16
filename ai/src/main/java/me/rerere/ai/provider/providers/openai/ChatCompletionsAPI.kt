@@ -50,6 +50,7 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.metadataAs
+import me.rerere.ai.ui.GoogleChatCompletionsThoughtMetadata
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.configureReferHeaders
@@ -189,12 +190,17 @@ class ChatCompletionsAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
+        val supportsGoogleSignatures = host == "generativelanguage.googleapis.com" ||
+            host == "aiplatform.googleapis.com" || host.endsWith(".aiplatform.googleapis.com") ||
+            params.model.modelId.contains("gemini", ignoreCase = true)
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
                 "messages",
                 buildMessages(
-                    messages = messages,
+                    // Keep saved metadata, but do not send a Gemini-only extension after a model switch.
+                    messages = if (supportsGoogleSignatures) messages else
+                        messages.map { it.withoutGoogleChatCompletionsToolSignatures() },
                     includeHistoryReasoning = providerSetting.includeHistoryReasoning,
                     includeOpenRouterReasoningDetails = isOpenRouter,
                     supportInputModalities = params.model.inputModalities,
@@ -581,6 +587,14 @@ class ChatCompletionsAPI(
                                 // 使用 inputAsJson() 归一化，避免流式中断导致的残缺 JSON 被发送
                                 put("arguments", tool.inputAsJson().toString())
                             })
+                            // Echo only an actually received signature on its original tool call.
+                            // Do not manufacture signatures for old history or translate native ones.
+                            tool.metadataAs<GoogleChatCompletionsThoughtMetadata>()?.thoughtSignature
+                                ?.takeIf { it.isNotEmpty() }?.let { signature ->
+                                    put("extra_content", buildJsonObject {
+                                        put("google", buildJsonObject { put("thought_signature", signature) })
+                                    })
+                                }
                         })
                     }
                 })
@@ -735,7 +749,8 @@ class ChatCompletionsAPI(
                             toolCallId = toolCallId ?: "",
                             toolName = toolName ?: "",
                             input = arguments ?: "",
-                            output = emptyList()
+                            output = emptyList(),
+                            metadata = toolCalls.jsonObject.googleChatCompletionsSignatureMetadata(),
                         )
                     )
                 }

@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
@@ -31,7 +32,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
-data class ToyNearbyDevice(val selectionId: String, val name: String, val suffix: String)
+data class ToyNearbyDevice(val selectionId: String, val name: String, val suffix: String,
+    val yutuV2: Boolean = false)
 data class ToyDiscoveryState(val scanning: Boolean = false, val connecting: Boolean = false,
     val devices: List<ToyNearbyDevice> = emptyList(), val message: String = "")
 
@@ -85,8 +87,10 @@ class OrbisToyController private constructor(context: Context) {
                             candidates[id] = device
                             val name = (result.scanRecord?.deviceName ?: device.name ?: "未命名 BLE 设备")
                                 .filterNot(Char::isISOControl).take(60)
+                            val yutuV2 = YutuV2Info.matchesAdvertisement(name,
+                                result.scanRecord?.getManufacturerSpecificData(YutuV2Info.MANUFACTURER_ID))
                             val existing = discovery.value.devices.filterNot { it.selectionId == id }
-                            discoveryMutable.value = discovery.value.copy(devices = existing + ToyNearbyDevice(id, name, id.takeLast(5)))
+                            discoveryMutable.value = discovery.value.copy(devices = existing + ToyNearbyDevice(id, name, id.takeLast(5), yutuV2))
                         } catch (_: SecurityException) {
                             stopScan(); discoveryMutable.value = discovery.value.copy(message = "蓝牙权限已失效，请重新授权。")
                         }
@@ -122,12 +126,20 @@ class OrbisToyController private constructor(context: Context) {
             links.entries.removeAll { it.value.gatt == null }
             if (links.containsKey(selectionId)) return@launch
             val device = candidates[selectionId] ?: return@launch
-            val label = discovery.value.devices.find { it.selectionId == selectionId }?.name ?: "用户选择的 Toy"
+            val selected = discovery.value.devices.find { it.selectionId == selectionId }
+            val label = selected?.name ?: "用户选择的 Toy"
+            val profile = if (selected?.yutuV2 == true) ToyProfile.YUTU_V2 else ToyProfile.SVAKOM
+            if (state.value.connected && (state.value.profile != profile || profile == ToyProfile.YUTU_V2)) {
+                discoveryMutable.value = discovery.value.copy(message = "请先停止并断开当前设备，再选择另一种协议或另一台 YUTU。")
+                return@launch
+            }
             stopScan()
             val expected = ++sequence
-            discoveryMutable.value = discovery.value.copy(connecting = true, message = "正在连接并验证 FFE0 协议；连接后遵循你确认的当前强度。")
+            discoveryMutable.value = discovery.value.copy(connecting = true, message =
+                if (profile == ToyProfile.YUTU_V2) "正在验证 YUTU V2 服务、通知与固件；连接不会启动设备。"
+                else "正在连接并验证 FFE0 协议；连接后遵循你确认的当前档位。")
             connectJob = scope.launch {
-                val link = GattToyTransport()
+                val link = GattToyTransport(profile)
                 val discovered = CompletableDeferred<Unit>()
                 val callback = object : BluetoothGattCallback() {
                     override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
@@ -148,6 +160,22 @@ class OrbisToyController private constructor(context: Context) {
                     override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                         scope.launch {
                             if (links[selectionId] !== link) return@launch
+                            val yutuService = gatt.getService(UUID.fromString(YutuV2Info.SERVICE))
+                            if (yutuService != null || profile == ToyProfile.YUTU_V2) {
+                                link.profile = ToyProfile.YUTU_V2
+                                val service = yutuService
+                                val op = service?.getCharacteristic(UUID.fromString(YutuV2Info.OPERATION))
+                                val fn = service?.getCharacteristic(UUID.fromString(YutuV2Info.FUNCTION))
+                                if (status != BluetoothGatt.GATT_SUCCESS || op == null || fn == null ||
+                                    op.properties and BluetoothGattCharacteristic.PROPERTY_WRITE == 0 ||
+                                    fn.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE == 0 ||
+                                    listOf(op, fn).any { it.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0 }) {
+                                    discovered.completeExceptionally(IllegalStateException("unsupported_yutu_profile"))
+                                } else {
+                                    link.operation = op; link.characteristic = fn; discovered.complete(Unit)
+                                }
+                                return@launch
+                            }
                             val writable = runCatching { gatt.getService(SERVICE)?.characteristics.orEmpty() }.getOrDefault(emptyList()).filter {
                                 it.properties and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
                             }
@@ -157,7 +185,17 @@ class OrbisToyController private constructor(context: Context) {
                         }
                     }
                     override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-                        scope.launch { if (links[selectionId] === link && characteristic.uuid == link.characteristic?.uuid) link.completeWrite(status) }
+                        scope.launch { if (links[selectionId] === link && characteristic.uuid == link.pendingCharacteristic && !link.writingDescriptor) link.completeWrite(status) }
+                    }
+                    override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                        scope.launch { if (links[selectionId] === link && link.writingDescriptor && descriptor.characteristic.uuid == link.pendingCharacteristic) link.completeWrite(status) }
+                    }
+                    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+                        val copy = value.copyOf()
+                        scope.launch { if (links[selectionId] === link) link.receive(characteristic, copy) }
+                    }
+                    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                        if (Build.VERSION.SDK_INT < 33) onCharacteristicChanged(gatt, characteristic, characteristic.value?.copyOf() ?: return)
                     }
                 }
                 try {
@@ -166,10 +204,13 @@ class OrbisToyController private constructor(context: Context) {
                         BluetoothDevice.PHY_LE_1M_MASK, Handler(Looper.getMainLooper()))
                     check(link.gatt != null)
                     withTimeout(15_000) { discovered.await() }
+                    if (link.profile == ToyProfile.YUTU_V2) withTimeout(10_000) { link.prepareYutu() }
                     check(sequence == expected && links[selectionId] === link)
                     session.attach(label, link)
                     if (state.value.connected && links[selectionId] === link && sequence == expected) {
-                        discoveryMutable.value = discovery.value.copy(connecting = false, devices = emptyList(), message = "已加入手动选择的设备；可以继续添加其它设备。")
+                        discoveryMutable.value = discovery.value.copy(connecting = false, devices = emptyList(), message =
+                            if (link.profile == ToyProfile.YUTU_V2) "YUTU V2 固件 1.0.0 已连接，等待本人授权后的 AI 调用；不会自动启动。"
+                            else "已加入手动选择的设备；可以继续添加同协议设备。")
                         candidates.clear()
                     } else error("connection_changed")
                 } catch (e: Exception) {
@@ -177,25 +218,39 @@ class OrbisToyController private constructor(context: Context) {
                     if (links[selectionId] === link) links.remove(selectionId)
                     session.linkLost(link, "连接已中断；请检查设备的实体状态。")
                     if (sequence == expected) discoveryMutable.value = discovery.value.copy(connecting = false,
-                        message = "连接失败、超时或协议不兼容；未开启控制。请检查自己的设备后重试。")
+                        message = if (link.profile == ToyProfile.YUTU_V2)
+                            "YUTU 连接、通知或固件核验未通过；当前适配固件 1.0.0。未开启控制，请确认官方 App 已断开且设备已开机。"
+                        else "连接失败、超时或协议不兼容；未开启控制。请检查自己的设备后重试。")
                     if (e is CancellationException) throw e
                 }
             }
         }
     }
 
-    suspend fun set(intensity: Int, expectedScope: String): ToyState = withContext(Dispatchers.Main.immediate) {
-        if (intensity == 0) return@withContext stop()
+    suspend fun setLevel(level: Int, expectedScope: String): ToyState = withContext(Dispatchers.Main.immediate) {
+        ToyProtocol.legacyIntensityForLevel(level) // Reject invalid levels before checking or using a connection.
+        if (level == 0) return@withContext stop()
         check(hasConnectionPermission()) { "蓝牙连接权限不可用，请本人重新授权。" }
         check(expectedScope == approvalScope()) { "设备连接已变化，请重新获取工具并批准当前连接。" }
         val expectedEpoch = activationEpoch
-        session.set(intensity) {
+        session.setLevel(level) {
             expectedEpoch == activationEpoch && expectedScope == approvalScope() && hasConnectionPermission()
         }
     }
     suspend fun stop(): ToyState = withContext(Dispatchers.Main.immediate) {
         activationEpoch++ // Invalidate queued activation before waiting for the in-flight GATT write.
+        sequence++
+        connectJob?.cancel(); connectJob = null
+        discoveryMutable.value = discovery.value.copy(connecting = false)
         session.stop()
+    }
+
+    internal suspend fun setYutu(command: YutuControlContract.Command, expectedScope: String): ToyState = withContext(Dispatchers.Main.immediate) {
+        check(hasConnectionPermission() && expectedScope == approvalScope()) { "设备连接或授权已变化，请重新获取工具。" }
+        val expectedEpoch = activationEpoch
+        session.setYutu(command.strength, command.durationSeconds) {
+            expectedEpoch == activationEpoch && expectedScope == approvalScope() && hasConnectionPermission()
+        }
     }
     fun stopAndDisconnect(reason: String = "已尝试停止并断开。") {
         scope.launch {
@@ -208,17 +263,28 @@ class OrbisToyController private constructor(context: Context) {
         }
     }
 
-    private inner class GattToyTransport : ToyTransport {
+    private inner class GattToyTransport(override var profile: ToyProfile) : ToyTransport {
         var gatt: BluetoothGatt? = null
         var characteristic: BluetoothGattCharacteristic? = null
+        var operation: BluetoothGattCharacteristic? = null
+        var pendingCharacteristic: UUID? = null
+        var writingDescriptor = false
+        private val firmware = CompletableDeferred<String>()
         private var pending: CompletableDeferred<Unit>? = null
         override suspend fun write(packet: ByteArray) {
+            if (profile == ToyProfile.YUTU_V2) {
+                check(packet.size == 3 && packet[0] == 0xA0.toByte() && packet[1] == 0xA0.toByte() && (packet[2].toInt() and 0xff) in YutuControlContract.testedValues)
+                check(characteristic?.uuid.toString() == YutuV2Info.FUNCTION)
+            }
+            writeTo(checkNotNull(characteristic), packet)
+        }
+        private suspend fun writeTo(target: BluetoothGattCharacteristic, packet: ByteArray) {
             check(hasConnectionPermission()) { "蓝牙连接权限不可用。" }
             check(pending == null) { "write_in_progress" }
             val active = checkNotNull(gatt)
-            val target = checkNotNull(characteristic)
             val completion = CompletableDeferred<Unit>()
             pending = completion
+            pendingCharacteristic = target.uuid
             try {
                 val type = if (target.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0)
                     BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT else BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -229,13 +295,40 @@ class OrbisToyController private constructor(context: Context) {
                 }
                 check(accepted) { "write_rejected" }
                 completion.await()
-            } finally { if (pending === completion) pending = null }
+            } finally { if (pending === completion) { pending = null; pendingCharacteristic = null } }
+        }
+        suspend fun prepareYutu() {
+            val active = checkNotNull(gatt)
+            for (target in listOf(checkNotNull(operation), checkNotNull(characteristic))) {
+                val descriptor = checkNotNull(target.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")))
+                check(active.setCharacteristicNotification(target, true))
+                val completion = CompletableDeferred<Unit>()
+                pending = completion; pendingCharacteristic = target.uuid; writingDescriptor = true
+                try {
+                    val accepted = if (Build.VERSION.SDK_INT >= 33)
+                        active.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.copyOf()) == BluetoothStatusCodes.SUCCESS
+                    else { descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE.copyOf(); active.writeDescriptor(descriptor) }
+                    check(accepted) { "yutu_notify_rejected" }
+                    completion.await()
+                } finally { pending = null; pendingCharacteristic = null; writingDescriptor = false }
+            }
+            writeTo(checkNotNull(operation), YutuV2Info.firmwareQuery())
+            check(firmware.await() == "1.0.0") { "yutu_firmware_unverified" }
+        }
+        fun receive(target: BluetoothGattCharacteristic, packet: ByteArray) {
+            if (profile != ToyProfile.YUTU_V2 || target.service?.uuid.toString() != YutuV2Info.SERVICE ||
+                target.uuid.toString() !in setOf(YutuV2Info.OPERATION, YutuV2Info.FUNCTION)) return
+            val value = YutuV2Info.parseNotification(packet)
+            if (value is YutuV2Info.Value.Firmware) firmware.complete(value.version)
         }
         fun completeWrite(status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) pending?.complete(Unit)
             else pending?.completeExceptionally(IllegalStateException("write_failed"))
         }
-        fun failPending() { pending?.completeExceptionally(IllegalStateException("disconnected")) }
+        fun failPending() {
+            pending?.completeExceptionally(IllegalStateException("disconnected"))
+            firmware.completeExceptionally(IllegalStateException("disconnected"))
+        }
         override fun close() {
             failPending()
             val old = gatt; gatt = null

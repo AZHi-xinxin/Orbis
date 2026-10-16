@@ -25,6 +25,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HostToolFailureTest {
+    @Test fun `pending approval cancellation is known not executed`() {
+        val original = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(call(approval = ToolApprovalState.Pending)))
+        listOf(HostToolFailure.INTERRUPTED, HostToolFailure.USER_CANCELLED).forEach { reason ->
+            val result = original.finishInterruptedHostTools(reason).getTools().single()
+            assertEquals(HostToolFailure.APPROVAL_CANCELLED, result.hostToolFailure())
+            assertEquals(false, result.hostToolFailure()?.executionPerformed)
+            assertFalse(result.isPending); assertFalse(result.canResumeExecution)
+        }
+    }
     private fun call(
         name: String = "unknown_tool",
         approval: ToolApprovalState = ToolApprovalState.Auto,

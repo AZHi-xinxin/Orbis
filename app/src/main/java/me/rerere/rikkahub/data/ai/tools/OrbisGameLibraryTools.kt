@@ -66,7 +66,7 @@ internal fun createOrbisGameLibraryTools(
         execute = { args -> gameLibraryResult {
             val obj = args as? JsonObject ?: error("invalid_game_parameters")
             require(obj.keys.all { it in setOf("game_id", "include_html", "include_template") }) { "invalid_game_parameters" }
-            val id = obj["game_id"]?.let { require(it is JsonPrimitive && it.isString) { "invalid_game_parameters" }; it.content }
+            val id = obj["game_id"]?.let { require(it is JsonPrimitive && it.isString) { "invalid_game_parameters" }; it.content.takeIf(String::isNotEmpty) }
             fun boolean(key: String) = obj[key]?.let {
                 (it as? JsonPrimitive)?.takeUnless { value -> value.isString }?.booleanOrNull ?: error("invalid_game_parameters")
             } ?: false

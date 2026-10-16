@@ -160,7 +160,8 @@ internal fun OrbisGalleryPage(assistantId: String, assistantName: String, onClos
                         TextButton(onClick = { if (selected != null) selected = null else onClose() }) { Text("返回") }
                         Column(Modifier.weight(1f)) {
                             Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("A LITTLE PLACE FOR US", fontSize = 9.sp, letterSpacing = 2.sp, color = OrbisTheme.colors.mutedInk)
+                            Text("内容归属：${assistant?.name?.ifBlank { null } ?: assistantName.ifBlank { "未命名助手" }}",
+                                style = MaterialTheme.typography.labelSmall, color = OrbisTheme.colors.mutedInk)
                         }
                         if (selected == null) TextButton(enabled = !busy, onClick = { newName = snapshot.customName; rename = true }) { Text("命名") }
                     }

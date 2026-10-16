@@ -28,6 +28,8 @@ data class Assistant(
     val contextMessageLimit: Int = 0,
     // Advisory only. Zero disables reminders; the host never generates a summary or compacts automatically.
     val compactionThresholdTokens: Int = 0,
+    // Human-only opt-in; not an AI tool argument and never retroactively reconstructs originals.
+    val retainCompactionOriginals: Boolean = false,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     // Orbis notes are independent of legacy/global RikkaHub memory. Light never injects.

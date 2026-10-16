@@ -339,7 +339,12 @@ fun ChatDrawerContent(
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.chat_page_menu_image_generation)) },
                             leadingIcon = { Icon(HugeIcons.Image02, null) },
-                            onClick = { showMenuPopup = false; navController.navigate(Screen.ImageGen) },
+                            onClick = {
+                                showMenuPopup = false
+                                navController.navigate(if (BuildConfig.ORBIS_ENABLED)
+                                    Screen.ImageWorkshop(current.assistantId.toString(), current.id.toString())
+                                else Screen.ImageGen)
+                            },
                         )
                     }
                 }

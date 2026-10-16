@@ -77,6 +77,7 @@ internal fun OrbisContextBudgetButton(
     onRollbackLatest: (() -> Unit)? = null,
     onOpen: (() -> Unit)? = null,
     onManualContext: (() -> Unit)? = null,
+    onOriginalArchives: (() -> Unit)? = null,
 ) {
     if (!BuildConfig.ORBIS_ENABLED) return
     var open by rememberSaveable { mutableStateOf(false) }
@@ -110,6 +111,7 @@ internal fun OrbisContextBudgetButton(
         onSaveThreshold = onSaveThreshold, onDeleteEvent = onDeleteEvent,
         onRollbackLatest = onRollbackLatest, onDismiss = { open = false },
         onManualContext = onManualContext?.let { action -> { open = false; action() } },
+        onOriginalArchives = onOriginalArchives?.let { action -> { open = false; action() } },
     )
 }
 
@@ -122,6 +124,7 @@ internal fun OrbisContextBudgetSheet(
     onDeleteEvent: ((Uuid) -> Unit)? = null,
     onRollbackLatest: (() -> Unit)? = null,
     onManualContext: (() -> Unit)? = null,
+    onOriginalArchives: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
@@ -163,6 +166,11 @@ internal fun OrbisContextBudgetSheet(
                 }
                 OrbisScrollablePanel(modifier = Modifier.weight(1f), windowInsets = WindowInsets(0, 0, 0, 0),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp)) {
+                    if (onOriginalArchives != null) BudgetCard {
+                        Text("可选原文档案", fontWeight = FontWeight.Bold)
+                        Text("默认不额外保留 AI 压缩原文。仅由你开启，可查看、单份删除或批量清理。", fontSize = 12.sp)
+                        TextButton(onClick = onOriginalArchives) { Text("原文保留开关与管理") }
+                    }
                     if (onManualContext != null) BudgetCard {
                         Text("人类手动整理", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Text("超过模型上限、暂时无法回复时也能使用。你选归档终点，完整原文独立保存；预览并确认后，当前窗口只发送整理说明与保留的后文。",
@@ -236,8 +244,15 @@ internal fun OrbisContextBudgetSheet(
                         Text("当前参考：${budget.currentUsageTokens?.let { "${formatOrbisTokenCount(it)} tokens" } ?: "暂无可靠数值"}",
                             fontSize = 12.sp, lineHeight = 18.sp)
                         budget.currentUsageSource?.let { Text(orbisCompactionBasisLabel(it), fontSize = 11.sp, lineHeight = 17.sp, color = colors.mutedInk) }
+                        budget.requestPreparedAtMillis?.let {
+                            Text("请求准备时间：${formatCompactionTime(it)}", fontSize = 11.sp, color = colors.mutedInk)
+                        }
+                        budget.bodyUsageTokens?.let {
+                            Text("活动正文单独估算：${formatOrbisTokenCount(it)}（$it tokens）；不是圆环或提醒的分子。",
+                                fontSize = 11.sp, lineHeight = 17.sp, color = colors.mutedInk)
+                        }
                         Text(budgetReason(budget.reason), fontSize = 12.sp, lineHeight = 18.sp)
-                        Text("提醒阈值不是模型硬上限。附件、工具定义和供应商计数方式可能影响真实占用；估算不是容量保证。",
+                        Text("圆环与 AI 提醒共用整次请求估算，包含系统提示、工具定义、注入内容及供应商用量安全参考。每个请求步骤完成后更新；新回复尚未计入下一次请求。正在生成，或整理、修改历史及切换配置后，旧值不继续冒充当前用量。正文另列，两者不可直接相减当作精确开销。阈值不是模型硬上限或计费数。",
                             fontSize = 11.sp, lineHeight = 17.sp, color = colors.mutedInk)
                     }
                     OrbisLatestRollbackCard(
@@ -247,7 +262,7 @@ internal fun OrbisContextBudgetSheet(
                     BudgetCard {
                         Text("压缩历史", Modifier.testTag("orbis-compaction-history").semantics { heading() },
                             fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("记录所属窗口、时间、用量与摘要指纹。历史不能编辑，也不能点选回滚；删除记录不会删除当前聊天。",
+                        Text("记录所属窗口、时间、用量与摘要指纹。删除记录同时删除其可选原文档案及关联撤销点，不删除当前聊天。",
                             fontSize = 11.sp, lineHeight = 18.sp, color = colors.mutedInk)
                         if (compactionState.loading) Text("正在读取压缩记录…", fontSize = 12.sp)
                         else if (compactionState.history.isEmpty()) Text("还没有压缩记录。", fontSize = 12.sp)
@@ -303,6 +318,12 @@ private fun OrbisLatestRollbackCard(
 @Composable
 private fun OrbisCompactionEventRow(event: OrbisCompactionEvent, canEdit: Boolean, onDeleteEvent: ((Uuid) -> Unit)?) {
     val colors = OrbisTheme.colors
+    var confirmDelete by remember(event.id) { mutableStateOf(false) }
+    if (confirmDelete) androidx.compose.material3.AlertDialog(onDismissRequest = { confirmDelete = false },
+        title = { Text("删除压缩记录？") },
+        text = { Text("同时删除这次压缩的可选原文档案和关联撤销点，不删除当前聊天。不可撤销。") },
+        confirmButton = { TextButton(enabled = canEdit, onClick = { confirmDelete = false; onDeleteEvent?.invoke(event.id) }, modifier = Modifier.testTag("orbis-compaction-delete-confirm")) { Text("确认删除") } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } })
     Surface(Modifier.fillMaxWidth().testTag("orbis-compaction-event-${event.id}"),
         shape = RoundedCornerShape(12.dp), color = colors.panel, contentColor = colors.ink) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -317,7 +338,7 @@ private fun OrbisCompactionEventRow(event: OrbisCompactionEvent, canEdit: Boolea
                 Text("SHA-256\n${event.summaryHash}", fontSize = 10.sp, lineHeight = 15.sp,
                     fontFamily = FontFamily.Monospace, color = colors.mutedInk)
             }
-            if (onDeleteEvent != null) TextButton(onClick = { onDeleteEvent(event.id) }, enabled = canEdit,
+            if (onDeleteEvent != null) TextButton(onClick = { confirmDelete = true }, enabled = canEdit,
                 modifier = Modifier.align(Alignment.End).testTag("orbis-compaction-delete-${event.id}")) {
                 Text("删除记录", fontSize = 11.sp)
             }
@@ -340,7 +361,8 @@ private fun BudgetCard(content: @Composable androidx.compose.foundation.layout.C
 
 private fun budgetReason(reason: OrbisBudgetReason): String = when (reason) {
     OrbisBudgetReason.READY_REFERENCE -> "比例来自最近供应商输入用量，仅供参考；不是下一次请求的精确占用。"
-    OrbisBudgetReason.CURRENT_ESTIMATE -> "这是当前上下文估算值，不是供应商实测值。新回复返回用量后再核对。"
+    OrbisBudgetReason.CURRENT_ESTIMATE -> "最近请求与 AI 提醒使用同一估算值，不是供应商实测或下一次请求的精确值。"
+    OrbisBudgetReason.REQUEST_ESTIMATE_UNAVAILABLE -> "暂无与当前分支和配置匹配的请求记录；下一次正常请求完成后更新。不会把正文或旧供应商用量冒充请求占比。"
     OrbisBudgetReason.ESTIMATE_PENDING -> "正在计算当前参考用量，不先套用压缩前或旧窗口的数据。"
     OrbisBudgetReason.REMINDERS_DISABLED -> "已关闭阈值提醒；这不影响 AI 自主提交压缩。"
     OrbisBudgetReason.GENERATING -> "正在生成或等待工具，本轮用量尚未稳定，暂不显示比例。"

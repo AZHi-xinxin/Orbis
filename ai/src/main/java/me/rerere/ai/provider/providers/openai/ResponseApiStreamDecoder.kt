@@ -1,8 +1,10 @@
 package me.rerere.ai.provider.providers.openai
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -15,10 +17,12 @@ import me.rerere.ai.ui.OpenAIReasoningMetadata
 import me.rerere.ai.ui.ReasoningType
 import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
 import me.rerere.common.http.jsonObjectOrNull
+import java.net.URI
 
 internal class ResponseApiStreamDecoder : StreamChunkDecoder {
     private val state = ResponseStreamState()
@@ -51,6 +55,8 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 textId ?: error("item_id not found"),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
             )
+            "response.output_text.annotation.added" ->
+                state.annotations(listOfNotNull(parseUrlCitation(payload["annotation"])))
             "response.reasoning_summary_text.delta" -> state.reasoningDelta(
                 summaryReasoningId ?: error("item_id not found"),
                 payload["delta"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -66,10 +72,13 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
             "response.content_part.added" -> {
                 val part = payload["part"]?.jsonObject ?: return emptyList()
                 if (part["type"]?.jsonPrimitive?.contentOrNull == "output_text") {
-                    state.startText(textId ?: error("item_id not found"))
+                    state.startText(textId ?: error("item_id not found")) + parsePartAnnotations(part)
                 } else emptyList()
             }
-            "response.content_part.done", "response.output_text.done" ->
+            "response.content_part.done" ->
+                parsePartAnnotations(payload["part"] as? JsonObject) +
+                    state.endText(textId ?: error("item_id not found"))
+            "response.output_text.done" ->
                 state.endText(textId ?: error("item_id not found"))
             "response.reasoning_summary_part.added" -> state.startReasoning(
                 summaryReasoningId ?: error("item_id not found"),
@@ -111,6 +120,8 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
                 val type = item["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
                 val id = item["id"]?.jsonPrimitive?.content ?: error("chunk id not found")
                 when (type) {
+                    "message" -> parseMessageAnnotations(item)
+                    "web_search_call" -> parseWebSearchSnapshot(item)
                     "reasoning" -> {
                         val metadata = OpenAIReasoningMetadata(
                             reasoningId = id,
@@ -190,12 +201,64 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         }
 
         return buildList {
+            (response?.get("output") as? JsonArray)?.forEach { output ->
+                val item = output as? JsonObject ?: return@forEach
+                when (item.stringValue("type")) {
+                    "message" -> addAll(parseMessageAnnotations(item))
+                    "web_search_call" -> addAll(parseWebSearchSnapshot(item))
+                }
+            }
             parseUsage(response?.get("usage") as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
             addAll(state.finish(
                 finishReason = finishReason,
                 responseId = response?.get("id")?.jsonPrimitive?.contentOrNull,
                 model = response?.get("model")?.jsonPrimitive?.contentOrNull,
             ))
+        }
+    }
+
+    private fun parseMessageAnnotations(item: JsonObject): List<StreamChunk> =
+        (item["content"] as? JsonArray)?.flatMap { parsePartAnnotations(it as? JsonObject) }.orEmpty()
+
+    private fun parsePartAnnotations(part: JsonObject?): List<StreamChunk> {
+        if (part == null || part.stringValue("type") != "output_text") return emptyList()
+        val annotations = (part["annotations"] as? JsonArray).orEmpty().mapNotNull(::parseUrlCitation)
+        return state.annotations(annotations)
+    }
+
+    private fun parseUrlCitation(value: JsonElement?): UIMessageAnnotation.UrlCitation? {
+        val annotation = value as? JsonObject ?: return null
+        if (annotation.stringValue("type") != "url_citation") return null
+        val url = annotation.stringValue("url") ?: return null
+        val title = annotation.stringValue("title") ?: return null
+        // Only carry an actual upstream web URL. File IDs, relative paths and executable schemes
+        // must never become clickable sources; do not infer a source from search query/result text.
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        if (uri.scheme?.lowercase() !in setOf("http", "https") ||
+            uri.host.isNullOrBlank() || uri.rawUserInfo != null
+        ) return null
+        return UIMessageAnnotation.UrlCitation(title = title, url = url)
+    }
+
+    private fun JsonObject.stringValue(key: String): String? =
+        (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
+
+    private fun parseWebSearchSnapshot(item: JsonObject): List<StreamChunk> {
+        if (item.stringValue("id").isNullOrBlank()) return emptyList()
+        val tool = item.toOpenAIServerTool()
+        return buildList {
+            // Some responses only include this item in output_item.done or the final snapshot.
+            // Start supplies the wire tool name before End; the handler merges by the same ID.
+            addAll(state.startServerTool(tool))
+            if (tool.status != ServerToolStatus.IN_PROGRESS) {
+                addAll(state.endServerTool(
+                    id = tool.toolCallId,
+                    input = tool.input,
+                    output = tool.output,
+                    status = tool.status,
+                    metadata = tool.metadata,
+                ))
+            }
         }
     }
 
@@ -217,6 +280,12 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         val providerStatus = event.substringAfterLast('.', missingDelimiterValue = "")
         if (!isOpenAIServerToolCall(itemType) || itemId == null) return emptyList()
 
+        if (itemType == "web_search_call" && providerStatus in setOf("completed", "failed", "cancelled", "incomplete")) {
+            return state.startServerTool(itemId, "web_search") + state.endServerTool(
+                itemId,
+                status = if (providerStatus == "completed") ServerToolStatus.COMPLETED else ServerToolStatus.FAILED,
+            )
+        }
         return when (providerStatus) {
             "completed" -> state.endServerTool(itemId, status = ServerToolStatus.COMPLETED)
             "failed", "cancelled", "incomplete" ->
@@ -245,11 +314,17 @@ internal class ResponseApiStreamDecoder : StreamChunkDecoder {
         private val openImageIds = linkedSetOf<String>()
         private val openToolIds = linkedSetOf<String>()
         private val openServerToolIds = linkedSetOf<String>()
+        private val seenAnnotations = linkedSetOf<UIMessageAnnotation.UrlCitation>()
         var finished = false
             private set
 
         fun abort() {
             finished = true
+        }
+
+        fun annotations(values: List<UIMessageAnnotation.UrlCitation>): List<StreamChunk> {
+            val fresh = values.filter(seenAnnotations::add)
+            return if (fresh.isEmpty()) emptyList() else listOf(StreamChunk.Annotations(fresh))
         }
 
         fun startText(id: String) = if (openTextIds.add(id)) listOf(StreamChunk.TextStart(id)) else emptyList()

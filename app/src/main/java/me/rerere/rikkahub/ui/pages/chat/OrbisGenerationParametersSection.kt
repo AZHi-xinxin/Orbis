@@ -30,6 +30,8 @@ import com.lover.connect.ui.components.StarSwitch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.ai.generationContextReceipts
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterConflict
@@ -37,6 +39,7 @@ import me.rerere.rikkahub.data.model.OrbisGenerationParameterDraft
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterEdit
 import me.rerere.rikkahub.data.model.OrbisGenerationParameters
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
+import me.rerere.rikkahub.ui.components.ai.reasoningSelectionPolicy
 import kotlin.math.roundToInt
 
 /** Uses the same Assistant fields and ReasoningButton as AssistantBasicPage, but edits a draft. */
@@ -48,6 +51,8 @@ internal fun OrbisGenerationParametersSection(
     onSavingChange: (Boolean) -> Unit,
     onSaved: () -> Unit,
     onSave: suspend (OrbisGenerationParameterEdit) -> OrbisGenerationParameters,
+    model: Model? = null,
+    provider: ProviderSetting? = null,
 ) {
     val key = "$conversationId:${assistant.id}"
     var baselineJson by rememberSaveable(key) {
@@ -58,6 +63,7 @@ internal fun OrbisGenerationParametersSection(
         mutableStateOf(Json.encodeToString(OrbisGenerationParameterDraft.from(baseline)))
     }
     val draft = Json.decodeFromString<OrbisGenerationParameterDraft>(draftJson)
+    val reasoningSelection = reasoningSelectionPolicy(draft.reasoningLevel, model, provider)
     var saving by remember(key) { mutableStateOf(false) }
     var notice by rememberSaveable(key) { mutableStateOf<String?>(null) }
     var failed by rememberSaveable(key) { mutableStateOf(false) }
@@ -136,11 +142,13 @@ internal fun OrbisGenerationParametersSection(
         }
         if (editable) {
             ReasoningButton(modifier = Modifier.heightIn(min = 48.dp), compact = true, reasoningLevel = draft.reasoningLevel,
+                model = model, provider = provider,
                 onUpdateReasoningLevel = { change(draft.copy(reasoningLevel = it)) })
         } else {
-            Text(draft.reasoningLevel.name)
+            Text(reasoningSelection.effectiveLevel.name)
         }
     }
+    reasoningSelection.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     if (dirty && parsed.isFailure) {
         Text(parsed.exceptionOrNull()?.message ?: "请检查参数。", color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodySmall)

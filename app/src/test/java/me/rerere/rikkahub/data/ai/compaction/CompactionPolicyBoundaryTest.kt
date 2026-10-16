@@ -104,8 +104,7 @@ class CompactionPolicyBoundaryTest {
             parts = listOf(UIMessagePart.Reasoning(reasoning = "private synthetic thought"),
                 completedCall().copy(output = listOf(UIMessagePart.Text("untrusted tool output")))))
         val previous = assistant("the AI-authored summary")
-        val prepared = prepareCompaction(args(), listOf(previous, raw), raw)
-        assertEquals(previous.toText(), prepared.summary.toText())
+        assertTrue(runCatching { prepareCompaction(args(), listOf(previous, raw), raw) }.isFailure)
     }
 
     @Test fun `missing summary and invalid retain counts leave input unchanged`() {
@@ -113,10 +112,28 @@ class CompactionPolicyBoundaryTest {
         assertTrue(runCatching { prepareCompaction(args(), input, null) }.isFailure)
         val source = listOf(assistant("my summary"))
         listOf(-1, 2).forEach { keep ->
-            assertTrue(runCatching { prepareCompaction(args("{\"keep_recent\":$keep}"), source, null) }.isFailure)
+            assertTrue(runCatching { prepareCompaction(args("{\"keep_recent\":$keep}"), source, source.single()) }.isFailure)
         }
         assertEquals("synthetic source", input.single().toText())
-        assertEquals(0, prepareCompaction(args("{\"keep_recent\":0}"), source, null).keepRecent)
+        assertEquals(0, prepareCompaction(args("{\"keep_recent\":0}"), source, source.single()).keepRecent)
+    }
+
+    @Test fun `old assistant text is never an implicit compaction source`() {
+        val old = assistant("previous ordinary answer, not a summary")
+        val input = listOf(UIMessage.user("old question"), old)
+        assertTrue(runCatching { prepareCompaction(args(), input, null) }.isFailure)
+        assertTrue(runCatching { prepareCompaction(args(), input, assistant("")) }.isFailure)
+        assertEquals(old, input.last())
+    }
+
+    @Test fun `explicit summary wins over redundant implicit flag and retains provenance`() {
+        val prepared = prepareCompaction(args("{\"use_last_message\":true,\"summary\":\"explicit summary\"}"),
+            listOf(assistant("historical answer")), assistant("current unrelated text"))
+        assertEquals("explicit summary", prepared.summary.toText())
+        assertNull(prepared.sourceMessageId)
+        val metadata = prepared.summary.parts.single().metadata!!
+        assertEquals("explicit_argument", metadata.getValue("summary_source").jsonPrimitive.content)
+        assertEquals(orbisCompactionSummaryHash("explicit summary"), metadata.getValue("summary_sha256").jsonPrimitive.content)
     }
 
     @Test fun `explicit summary preserves exact text and role`() {

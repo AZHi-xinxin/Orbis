@@ -3,6 +3,8 @@ package me.rerere.rikkahub.ui.pages.chat
 import java.io.IOException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.TimeoutCancellationException
+import me.rerere.asr.ASRFailureException
+import me.rerere.asr.ASRFailureKind
 
 internal enum class VoiceFailureStage { ASR_START, ASR_LISTEN, ASR_FINAL, CONNECT, MODEL, TTS, AUDIO }
 
@@ -33,6 +35,9 @@ internal object VoiceRecoveryPolicy {
 
     fun failure(stage: VoiceFailureStage, error: Throwable, hadSpeech: Boolean = false): VoiceSessionFailure {
         if (error is VoiceSessionFailure) return error
+        if (error is ASRFailureException) return VoiceSessionFailure(
+            stage, "${stage.name}_${error.kind.name}", error.kind == ASRFailureKind.NETWORK, hadSpeech,
+        )
         val description = error.message.orEmpty().lowercase()
         val timeout = error is TimeoutCancellationException || error is SocketTimeoutException ||
             description.contains("timed out") || description.contains("timeout")

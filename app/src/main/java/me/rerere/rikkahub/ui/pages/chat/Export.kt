@@ -673,7 +673,7 @@ private fun ChainOfThoughtScope.ExportedReasoningStep(
 ) {
     val duration = reasoning.finishedAt?.let { endTime ->
         endTime - reasoning.createdAt
-    } ?: (kotlin.time.Clock.System.now() - reasoning.createdAt)
+    } ?: 0.seconds // Unknown historical duration must not grow with the current clock.
 
     ControlledChainOfThoughtStep(
         expanded = expanded,

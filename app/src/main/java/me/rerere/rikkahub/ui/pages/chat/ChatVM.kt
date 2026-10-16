@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -40,7 +42,6 @@ import me.rerere.rikkahub.data.ai.HostToolFailure
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
-import me.rerere.rikkahub.data.datastore.getCurrentChatModel
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.files.FilesManager
@@ -63,6 +64,7 @@ import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.components.ai.SearchMode
 import me.rerere.rikkahub.ui.pages.orbis.OrbisCompactionUiState
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.UpdateChecker
@@ -82,7 +84,9 @@ class ChatVM(
     private val favoriteRepository: FavoriteRepository,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
-    val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val conversation: StateFlow<Conversation> = chatService.getDisplayedConversationFlow(_conversationId)
+    val humanContinuationNotice = chatService.getHumanContinuationNotice(_conversationId)
+    val humanContinuationPersistenceWarning = chatService.getHumanContinuationPersistenceWarning(_conversationId)
     val eventInbox = chatService.orbisEvents.inbox.state
     var chatListInitialized by mutableStateOf(false) // 聊天列表是否已经滚动到底部
     internal var initialLoadSettled by mutableStateOf(false)
@@ -288,13 +292,13 @@ class ChatVM(
         settingsStore.settingsFlow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
 
     // 网络搜索(每个助手独立)
-    val enableWebSearch = settings.map {
-        it.getCurrentAssistant().enableWebSearch
+    val enableWebSearch = combine(settings, conversation) { current, chat ->
+        conversationComposerScope(current, chat.assistantId)?.assistant?.enableWebSearch ?: false
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     // 当前模型
-    val currentChatModel = settings.map { settings ->
-        settings.getCurrentChatModel()
+    val currentChatModel = combine(settings, conversation) { current, chat ->
+        conversationComposerScope(current, chat.assistantId)?.model
     }.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     // 错误状态
@@ -302,12 +306,27 @@ class ChatVM(
 
     fun dismissError(id: Uuid) = chatService.dismissError(id)
 
+    fun dismissOrbisNotification(event: me.rerere.rikkahub.data.orbis.OrbisInboxEvent) {
+        val chat = conversation.value
+        if (event.conversationId != chat.id.toString() || event.assistantId != chat.assistantId.toString()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            // Local hide happens immediately; a disk failure cannot block the composer.
+            runCatching { chatService.orbisEvents.inbox.dismissNotification(event.id,
+                chat.assistantId.toString(), chat.id.toString()) }
+        }
+    }
+
     fun clearAllErrors() = chatService.clearAllErrors()
 
-    val messageQueue = chatService.getMessageQueueFlow(_conversationId)
+    val messageQueue = combine(chatService.getMessageQueueFlow(_conversationId), humanContinuationNotice) { queue, notice ->
+        // Retain manageable old entries without implying that new human input is blocked.
+        if (notice != null) queue.copy(paused = false) else queue
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, chatService.getMessageQueueFlow(_conversationId).value)
     val gatewayStopNotice = chatService.gatewayStopNotice(_conversationId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-    val messageQueueRecovery = chatService.messageQueueRecoveryState(_conversationId)
+    val messageQueueRecovery = combine(chatService.messageQueueRecoveryState(_conversationId), humanContinuationNotice) { recovery, notice ->
+        if (notice != null) me.rerere.rikkahub.service.QueueRecoveryState() else recovery
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000),
             me.rerere.rikkahub.service.QueueRecoveryState())
 
@@ -363,19 +382,38 @@ class ChatVM(
     }
 
     // 设置聊天模型
-    fun setChatModel(assistant: Assistant, model: Model) {
+    fun setChatModel(ownerId: Uuid, model: Model) {
         viewModelScope.launch {
-            settingsStore.update { settings ->
-                settings.copy(
-                    assistants = settings.assistants.map {
-                        if (it.id == assistant.id) {
-                            it.copy(
-                                chatModelId = model.id
-                            )
-                        } else {
-                            it
-                        }
-                    })
+            settingsStore.update { current ->
+                if (conversation.value.assistantId != ownerId) current
+                else conversationComposerWithModel(current, ownerId, model.id)
+            }
+        }
+    }
+
+    fun setConversationReasoning(ownerId: Uuid, expectedModelId: Uuid?, level: ReasoningLevel) {
+        viewModelScope.launch {
+            settingsStore.update { current ->
+                if (conversation.value.assistantId != ownerId) current
+                else conversationComposerWithReasoning(current, ownerId, expectedModelId, level)
+            }
+        }
+    }
+
+    fun setConversationSearchMode(ownerId: Uuid, expectedModelId: Uuid?, mode: SearchMode) {
+        viewModelScope.launch {
+            settingsStore.update { current ->
+                if (conversation.value.assistantId != ownerId) current
+                else conversationComposerWithSearch(current, ownerId, expectedModelId, mode)
+            }
+        }
+    }
+
+    fun setSearchService(index: Int) {
+        viewModelScope.launch {
+            settingsStore.update { current ->
+                if (current.searchServices.getOrNull(index) == null) current
+                else current.copy(searchServiceSelected = index)
             }
         }
     }
@@ -568,6 +606,11 @@ class ChatVM(
     }
 
     fun stopGeneration() {
+        chatService.interruptGenerationForHuman(_conversationId)
+    }
+
+    // An explicit technical recovery action must not be the composer's ordinary stop button.
+    fun stopGatewayWait() {
         viewModelScope.launch {
             try {
                 chatService.stopGeneration(_conversationId, HostToolFailure.USER_CANCELLED, stopGatewayWait = true)

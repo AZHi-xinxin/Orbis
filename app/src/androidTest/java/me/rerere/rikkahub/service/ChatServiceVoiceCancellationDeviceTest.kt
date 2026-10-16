@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -31,6 +32,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.GenerationLoop
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
@@ -53,11 +55,13 @@ import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.orbis.FreshHumanInputRecoveryStore
 import me.rerere.rikkahub.data.orbis.FreshHumanRecoveryStatus
 import me.rerere.rikkahub.data.orbis.OrbisQueuePauseStore
 import me.rerere.rikkahub.data.orbis.QueuePauseStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRecord
+import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStatus
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallStorage
 import me.rerere.rikkahub.data.repository.ConversationRepository
@@ -103,31 +107,212 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class ChatServiceVoiceCancellationDeviceTest {
-    @Test fun dismissNoticeInvalidatesAnOldUtteranceWaitingForIngressButKeepsItsTranscript() = runBlocking {
+    @Test fun explicitNewCallConnectsOverPausedBacklogWithoutReplayingIt() = runBlocking {
+        fixture(connectCall = false) { f ->
+            f.assertFreshCallOverOldQueue()
+        }
+    }
+
+    @Test fun explicitNewCallConnectsOverPendingHistoricalToolWithoutExecutingIt() = runBlocking {
+        fixture(connectCall = false) { f ->
+            f.assertFreshCallOverOldQueue(pendingTool = true)
+        }
+    }
+
+    @Test fun savedContinuationReturnsToNormalWithoutSentinelAndKeepsUsageEpoch() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false, initialCompactionEpoch = 7) { f ->
+            f.installStaleLocalLatch()
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic fresh after pause"))))
+            }
+            f.awaitFreshHumanAnswer()
+            f.awaitNormalHistory()
+            f.assertCurrentUsageReceipt()
+            f.assertBatchDeleteWorks()
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic next normal turn"))))
+                f.assertNoContinuationLane()
+            }
+            withTimeout(10_000) {
+                while (f.peer.requests.get() < 2) kotlinx.coroutines.delay(20)
+                f.service.getGenerationJobStateFlow(f.conversationId).first { it == null }
+            }
+            f.assertNoContinuationLane()
+            f.assertCurrentUsageReceipt()
+            assertEquals(2, f.peer.requests.get())
+        }
+    }
+
+    @Test fun aPausedQueueAloneDoesNotChangeTheNextHumanReplyPipeline() = runBlocking {
+        fixture(connectCall = false) { f ->
+            f.pauseQueueWithoutRecovery()
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic explicit new send"))))
+                f.assertNoContinuationLane()
+            }
+            f.awaitFreshHumanAnswer()
+            f.service.getGenerationJobStateFlow(f.conversationId).first { it == null }
+            f.assertNoContinuationLane()
+            assertEquals(1, f.peer.requests.get())
+        }
+    }
+
+    @Test fun ordinaryStopDuringARealModelRequestIsNotReportedAsARecoveryError() = runBlocking {
+        fixture(maxRequests = 2) { f ->
+            f.peer.holdFirstRequest.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic mistaken request"))))
+            }
+            withTimeout(10_000) { f.peer.firstRequestHeld.await() }
+            val oldJob = f.currentJob()
+            withContext(Dispatchers.Main) { f.service.interruptGenerationForHuman(f.conversationId) }
+            f.peer.releaseFirstRequest.countDown()
+            withTimeout(10_000) { oldJob.join() }
+            assertTrue("Ordinary interruption is not a recovery error", f.service.errors.value.isEmpty())
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic correction after model started"))))
+            }
+            f.awaitFreshHumanAnswer()
+            assertEquals(2, f.peer.requests.get())
+        }
+    }
+
+    @Test fun ordinaryStopAcceptsTheCorrectedMessageWithoutRecoveryOrAcknowledgement() = runBlocking {
         fixture { f ->
-            val original = "synthetic accepted speech still waiting for ingress"
+            f.pauseNextHistorySave.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic typo"))))
+            }
+            withTimeout(5_000) { f.beforeHistorySave.await() }
+            withContext(Dispatchers.Main) {
+                f.service.interruptGenerationForHuman(f.conversationId)
+                assertNull(f.service.getGenerationJobStateFlow(f.conversationId).first())
+                assertTrue(f.service.sendMessage(f.conversationId, listOf(UIMessagePart.Text("synthetic correction"))))
+            }
+            val visible = f.awaitFreshHumanAnswer()
+            assertEquals(1, visible.currentMessages.count { it.toText() == "synthetic correction" })
+            assertEquals(1, f.peer.requests.get())
+            assertEquals(QueueRecoveryPhase.IDLE, f.service.messageQueueRecoveryState(f.conversationId).first().phase)
+        }
+    }
+
+    @Test fun ordinaryStopReturnsWhileOldCleanupIsStillBlockedAndLateOutputCannotReplaceCorrection() = runBlocking {
+        fixture { f -> f.assertNormalStopDoesNotWaitForCleanup() }
+    }
+
+    @Test fun savedReplyConflictDoesNotRequireRecoveryOrASecondHumanSend() = runBlocking {
+        fixture { f ->
+            val before = f.installCheckpointConflict(tailCommitted = true)
+            val checkpoint = AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId)
+            withContext(Dispatchers.Main) {
+                assertTrue("First send must start an independent turn", f.service.sendMessage(
+                    f.conversationId, listOf(UIMessagePart.Text("synthetic fresh request"))))
+            }
+            val visible = f.awaitFreshHumanAnswer()
+            assertEquals(before.id, visible.id)
+            assertEquals(before.assistantId, visible.assistantId)
+            assertEquals(before.messageNodes, visible.messageNodes.take(before.messageNodes.size))
+            assertArrayEquals(checkpoint, AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId))
+            assertTrue(f.service.getMessageQueueFlow(f.conversationId).value.messages.isEmpty())
+            assertEquals(1, f.peer.requests.get())
+        }
+    }
+
+    @Test fun uncommittedCheckpointConflictStillAllowsANewHumanRoundAndPreservesOldEvidence() = runBlocking {
+        fixture { f ->
+            val before = f.installCheckpointConflict(tailCommitted = false)
+            val checkpoint = AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId)
+            withContext(Dispatchers.Main) { assertTrue(f.service.sendMessage(f.conversationId,
+                listOf(UIMessagePart.Text("synthetic independent wake")))) }
+            assertEquals(before.id, f.awaitFreshHumanAnswer().id)
+            assertEquals(1, f.peer.requests.get())
+            assertArrayEquals(checkpoint, AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId))
+        }
+    }
+
+    @Test fun humanSendDoesNotWaitForTheHistoryWriterMutex() = runBlocking {
+        fixture { f -> f.assertHumanWakeWhileHistoryLocked() }
+    }
+
+    @Test fun continuationCommitPreservesNewMetadataAndRefusesUnseenHistoryEdits() = runBlocking {
+        fixture { f ->
+            val before = checkNotNull(f.repository.getConversationById(f.conversationId))
+            f.repository.updateConversation(before.copy(title = "new human title"))
+            val next = before.copy(messageNodes = before.messageNodes + UIMessage.user("new human input").toMessageNode())
+            val committed = checkNotNull(f.repository.commitHumanContinuation(before, next))
+            assertEquals("new human title", committed.title)
+            val unseen = committed.copy(messageNodes = committed.messageNodes + UIMessage.user("unseen edit").toMessageNode())
+            f.repository.updateConversation(unseen)
+            assertNull(f.repository.commitHumanContinuation(committed,
+                committed.copy(messageNodes = committed.messageNodes + UIMessage.assistant("late reply").toMessageNode())))
+            assertEquals(unseen.messageNodes, checkNotNull(f.repository.getConversationById(f.conversationId)).messageNodes)
+            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
+    @Test fun incompleteReplyWithHistoryConflictRemainsPreservedAndNeverPretendsToRecover() = runBlocking {
+        fixture { f ->
+            val before = f.installCheckpointConflict(tailCommitted = false)
+            val checkpoint = AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId)
+            withContext(Dispatchers.Main) { f.service.dismissPauseAndContinueFreshInput(f.conversationId) }.join()
+            assertEquals(QueueRecoveryPhase.FAILURE, f.service.messageQueueRecoveryState(f.conversationId).first().phase)
+            assertTrue(f.paused())
+            assertEquals(before.messageNodes, checkNotNull(f.repository.getConversationById(f.conversationId)).messageNodes)
+            assertArrayEquals(checkpoint, AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId))
+            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
+    @Test fun staleLocalLatchWithExactSavedHistoryRecoversWithoutClearingOldAutomaticProtection() = runBlocking {
+        fixture { f ->
+            f.installStaleLocalLatch()
+            f.dismissPausedNotice()
+            assertFalse(f.paused())
+            assertEquals(FreshHumanRecoveryStatus.DETACHED, f.persistedFreshRecoveryStatus())
+            assertEquals(0, f.peer.requests.get())
+            f.assertNewReplyAndNewCallWork()
+        }
+    }
+
+    @Test fun proactiveAdmissionNeverCreatesUnknownSessionsAndRespectsHumanPause() = runBlocking {
+        fixture { f ->
+            f.assertProactiveUnknownTargetIsReadOnly()
+            f.assertHumanPauseBlocksProactiveDecision()
+            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
+    @Test fun freshUtteranceDoesNotWaitForOldIngressMutex() = runBlocking {
+        fixture { f ->
+            val original = "synthetic fresh speech bypasses old ingress"
             val ingress = f.voiceIngressMutex()
             lateinit var oldReply: Deferred<String?>
             ingress.lock()
             try {
                 oldReply = f.utterance(original)
-                assertFalse(oldReply.isCompleted)
-                assertEquals(0, checkNotNull(f.service.voiceCalls.get(f.callId)).transcript.count { it.content == original })
-                f.dismissPausedNotice()
-                assertFalse(f.paused())
-                assertFalse("Dismissal must finish without waiting for old ingress", oldReply.isCompleted)
-                assertEquals(0, f.peer.requests.get())
+                assertEquals(ANSWER, withTimeout(10_000) { oldReply.await() })
+                assertEquals(1, f.peer.requests.get())
+                f.assertRetainedExactlyOnce(original, substring = true)
             } finally {
                 ingress.unlock()
             }
-            assertNull(oldReply.await())
             assertEquals(1, checkNotNull(f.service.voiceCalls.get(f.callId)).transcript.count { it.content == original })
-            f.assertAbsentFromChatAndQueue(original)
-            assertEquals(0, f.peer.requests.get())
             assertFalse(f.paused())
-            f.assertFreshInputCanDrain()
-            f.assertAbsentFromChatAndQueue(original)
-            assertEquals(0, f.peer.requests.get())
+        }
+    }
+
+    @Test fun newSpeechCanAnswerWhilePreviousVoiceHistorySaveIsStillBlocked() = runBlocking {
+        fixture { f ->
+            f.pauseNextHistorySave.set(true)
+            val old = f.utterance("synthetic old voice awaiting save")
+            withTimeout(5_000) { f.beforeHistorySave.await() }
+            val next = f.utterance("synthetic new voice correction")
+            assertEquals(ANSWER, withTimeout(10_000) { next.await() })
+            val visible = f.service.getDisplayedConversationFlow(f.conversationId).value
+            assertEquals(1, visible.currentMessages.count { it.toText().contains("synthetic new voice correction") })
+            assertEquals(1, f.peer.requests.get())
+            // The new speech does not require the old producer/queue to acknowledge success.
+            assertTrue(next.isCompleted)
         }
     }
 
@@ -270,9 +455,10 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
     }
 
-    private suspend fun fixture(maxRequests: Int = 1, block: suspend (Fixture) -> Unit) {
+    private suspend fun fixture(maxRequests: Int = 1, connectCall: Boolean = true,
+        initialCompactionEpoch: Long = 0, block: suspend (Fixture) -> Unit) {
         val f = Fixture(maxRequests)
-        try { withTimeout(30_000) { f.prepare(); block(f); f.peer.assertHealthy() } }
+        try { withTimeout(30_000) { f.prepare(connectCall, initialCompactionEpoch); block(f); f.peer.assertHealthy() } }
         finally { withContext(NonCancellable) { f.close() } }
     }
 
@@ -367,10 +553,17 @@ class ChatServiceVoiceCancellationDeviceTest {
         val finalSnapshotEntered = CompletableDeferred<Unit>()
         val releaseSnapshot = CountDownLatch(1)
 
-        suspend fun prepare() {
-            repository.insertConversation(Conversation.ofId(conversationId, assistant.id).copy(title = "Synthetic fixed title"))
+        suspend fun prepare(connectCall: Boolean, initialCompactionEpoch: Long) {
+            // Seed an already-compacted synthetic page before the service loads it. Ordinary
+            // saves correctly reject changing the epoch of an existing live conversation.
+            repository.insertConversation(Conversation.ofId(conversationId, assistant.id).copy(
+                title = "Synthetic fixed title", compactionEpoch = initialCompactionEpoch,
+                messageNodes = if (initialCompactionEpoch > 0) listOf(
+                    UIMessage.user("synthetic retained history").toMessageNode()) else emptyList()))
             withContext(Dispatchers.Main) {
                 service.addConversationReference(conversationId)
+                service.initializeConversation(conversationId)
+                if (!connectCall) return@withContext
                 val call = service.prepareVoiceCall(conversationId, video = true)
                 callId = call.id
                 service.connectVoiceCall(callId, System.currentTimeMillis())
@@ -391,6 +584,163 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
 
         fun paused(): Boolean = service.getMessageQueueFlow(conversationId).value.paused
+
+        suspend fun pauseQueueWithoutRecovery() = withContext(Dispatchers.Main) {
+            assertFalse(session().generationRecoveryBlocked)
+            session().messageQueue.pause()
+        }
+
+        suspend fun assertFreshCallOverOldQueue(pendingTool: Boolean = false) {
+            val oldTool = UIMessagePart.Tool("old-call-tool", "synthetic_must_not_execute", "{}",
+                approvalState = me.rerere.ai.ui.ToolApprovalState.Pending)
+            withContext(Dispatchers.Main) {
+                if (pendingTool) {
+                    val before = session().state.value
+                    service.saveConversation(conversationId, before.copy(messageNodes = before.messageNodes +
+                        UIMessage.assistant("").copy(parts = listOf(oldTool)).toMessageNode()))
+                } else {
+                    session().messageQueue.pause()
+                    session().messageQueue.enqueue(listOf(UIMessagePart.Text("synthetic old backlog")))
+                }
+                val call = service.prepareVoiceCall(conversationId)
+                callId = call.id
+                withTimeout(5_000) { service.connectVoiceCall(call.id, System.currentTimeMillis(), freshHumanCall = true) }
+                assertEquals(OrbisVoiceCallStatus.ACTIVE, service.voiceCalls.get(call.id)?.status)
+                assertEquals("A begin marker is not a model request", 0, peer.requests.get())
+            }
+            val reply = utterance("synthetic new call input")
+            assertEquals(ANSWER, withTimeout(15_000) { reply.await() })
+            assertEquals("Only the fresh utterance may reach the model", 1, peer.requests.get())
+            if (!pendingTool) {
+                assertTrue(service.getMessageQueueFlow(conversationId).value.messages.any {
+                    it.parts.any { p -> p is UIMessagePart.Text && p.text == "synthetic old backlog" }
+                })
+            }
+        }
+
+        suspend fun awaitNormalHistory() = withTimeout(10_000) {
+            session().humanContinuation.first { it == null }
+        }
+
+        fun assertNoContinuationLane() = assertNull(session().humanContinuation.value)
+
+        fun assertCurrentUsageReceipt() {
+            val c = service.getDisplayedConversationFlow(conversationId).value
+            val config = me.rerere.rikkahub.data.ai.preparedContextConfiguration(assistant, model,
+                c.customSystemPrompt, c.orbisPrompt, c.modeInjectionIds, c.lorebookIds, c.workspaceCwd)
+            val receipt = me.rerere.rikkahub.data.ai.validPreparedContextUsage(c.currentMessages,
+                c.compactionEpoch, c.assistantId, model.id, config)
+            assertNotNull("The current request receipt must match the displayed conversation", receipt)
+            assertEquals(c.compactionEpoch, receipt!!.contextEpoch)
+        }
+
+        suspend fun assertBatchDeleteWorks() {
+            val c = service.getDisplayedConversationFlow(conversationId).value
+            val preview = service.previewMessageBatch(conversationId, setOf(c.messageNodes.first().id),
+                me.rerere.rikkahub.data.model.OrbisMessageBatchOperation.DELETE)
+            service.applyMessageBatch(conversationId, preview)
+            assertFalse(checkNotNull(repository.getConversationById(conversationId)).messageNodes
+                .any { it.id == c.messageNodes.first().id })
+        }
+
+        suspend fun installCheckpointConflict(tailCommitted: Boolean): Conversation = withContext(Dispatchers.Main) {
+            val base = checkNotNull(repository.getConversationById(conversationId)).copy(messageNodes = listOf(
+                UIMessage.user("synthetic prior history").toMessageNode(),
+                UIMessage.user("synthetic prior question").toMessageNode()))
+            service.saveConversation(conversationId, base)
+            val handle = withContext(Dispatchers.IO) { journal.begin(base) }
+            val reply = UIMessage.assistant("synthetic prior complete reply").toMessageNode()
+            withContext(Dispatchers.IO) {
+                journal.checkpoint(handle, base.assistantId, base.compactionEpoch, base.messageNodes.takeLast(1) + reply)
+            }
+            val edited = base.copy(messageNodes = base.messageNodes.mapIndexed { i, node ->
+                if (i == 0) node.copy(messages = node.messages.map { it.copy(translation = "synthetic human edit") }) else node
+            } + if (tailCommitted) listOf(reply) else emptyList())
+            service.saveConversation(conversationId, edited)
+            session().messageQueue.pause()
+            // Reproduce only the blocking restriction; production must prove and clear it.
+            session().generationRecoveryBlocked = true
+            edited
+        }
+
+        suspend fun installStaleLocalLatch() = withContext(Dispatchers.Main) {
+            check(!journal.hasCheckpoint(conversationId))
+            session().generationRecoveryBlocked = true
+            session().messageQueue.pause()
+        }
+
+        suspend fun awaitFreshHumanAnswer(): Conversation = withTimeout(15_000) {
+            service.getDisplayedConversationFlow(conversationId).first { c ->
+                c.currentMessages.any { it.toText() == ANSWER }
+            }
+        }
+
+        suspend fun assertHumanWakeWhileHistoryLocked() {
+            val s = session()
+            s.orbisPromptEditMutex.lock()
+            try {
+                withContext(Dispatchers.Main) {
+                    s.manualContextWriteInProgress = true
+                    assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("wake while writer is stuck"))))
+                }
+                assertEquals(conversationId, awaitFreshHumanAnswer().id)
+                assertEquals(1, peer.requests.get())
+                assertTrue("Test must still own the unavailable writer", s.orbisPromptEditMutex.isLocked)
+            } finally {
+                s.manualContextWriteInProgress = false
+                s.orbisPromptEditMutex.unlock()
+            }
+        }
+
+        suspend fun assertNormalStopDoesNotWaitForCleanup() {
+            val s = session()
+            val started = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val finished = CompletableDeferred<Unit>()
+            val baseline = s.state.value
+            val old = activeScope.launch(Dispatchers.Main, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                try { started.complete(Unit); kotlinx.coroutines.awaitCancellation() }
+                finally { withContext(NonCancellable) {
+                    release.await()
+                    // Simulate the old producer returning a stale display snapshot after cancellation.
+                    s.state.value = baseline
+                    finished.complete(Unit)
+                } }
+            }
+            withContext(Dispatchers.Main) { s.setJob(old); old.start() }
+            started.await()
+            try {
+                withTimeout(1_000) { withContext(Dispatchers.Main) {
+                    service.interruptGenerationForHuman(conversationId)
+                } }
+                assertFalse(old.isCompleted)
+                withContext(Dispatchers.Main) {
+                    assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("synthetic new correction"))))
+                }
+                awaitFreshHumanAnswer()
+                release.complete(Unit)
+                finished.await()
+                val current = service.getDisplayedConversationFlow(conversationId).value
+                assertTrue(current.currentMessages.any { it.toText() == "synthetic new correction" })
+                assertTrue(current.currentMessages.any { it.toText() == ANSWER })
+                assertEquals(1, peer.requests.get())
+            } finally { release.complete(Unit); old.join() }
+        }
+
+        suspend fun assertProactiveUnknownTargetIsReadOnly() = withContext(Dispatchers.Main) {
+            val field = ChatService::class.java.getDeclaredField("sessions").apply { isAccessible = true }
+            val before = (field.get(service) as Map<*, *>).size
+            assertFalse(service.mayRunProactiveDecision(Uuid.random(), assistant.id))
+            assertFalse(service.mayRunProactiveDecision(conversationId, Uuid.random()))
+            assertEquals(before, (field.get(service) as Map<*, *>).size)
+        }
+
+        suspend fun assertHumanPauseBlocksProactiveDecision() = withContext(Dispatchers.Main) {
+            session().messageQueue.pause()
+            assertTrue(session().messageQueue.state.value.paused)
+            assertFalse(service.mayRunProactiveDecision(conversationId, assistant.id, session().state.value))
+            assertTrue("Read-only admission must not clear the human pause", session().messageQueue.state.value.paused)
+        }
 
         fun voiceIngressMutex(): Mutex = ChatService::class.java.getDeclaredField("voiceIngressMutex")
             .apply { isAccessible = true }.get(service) as Mutex
@@ -574,6 +924,9 @@ class ChatServiceVoiceCancellationDeviceTest {
         private val socket = ServerSocket(0, 1, LOOPBACK)
         val port = socket.localPort
         val requests = AtomicInteger()
+        val holdFirstRequest = AtomicBoolean(false)
+        val firstRequestHeld = CompletableDeferred<Unit>()
+        val releaseFirstRequest = CountDownLatch(1)
         private val stopped = AtomicBoolean(false)
         private val failure = AtomicReference<Throwable?>()
         private val worker = thread(name = "synthetic-chat-service-peer", isDaemon = true) {
@@ -598,6 +951,13 @@ class ChatServiceVoiceCancellationDeviceTest {
                     val scratch = ByteArray(4096)
                     while (left > 0) { val n = input.read(scratch, 0, minOf(left, scratch.size)); check(n > 0); left -= n }
                     check(requests.incrementAndGet() <= maxRequests) { "Unexpected replay/derived request" }
+                    if (holdFirstRequest.compareAndSet(true, false)) {
+                        firstRequestHeld.complete(Unit)
+                        check(releaseFirstRequest.await(15, TimeUnit.SECONDS)) { "Synthetic request gate timed out" }
+                        // The test cancels its first real HTTP request, not a fabricated Job.
+                        // Closing without an answer must not replay that input or block correction.
+                        return@use
+                    }
                     val body = """{"id":"synthetic","object":"chat.completion","created":1,"model":"synthetic-service-voice","choices":[{"index":0,"message":{"role":"assistant","content":"$ANSWER"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""".toByteArray()
                     connection.getOutputStream().apply {
                         write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
@@ -609,7 +969,7 @@ class ChatServiceVoiceCancellationDeviceTest {
             }
         }
         fun assertHealthy() { failure.get()?.let { throw AssertionError("Synthetic loopback failed", it) } }
-        override fun close() { stopped.set(true); socket.close(); worker.join(9_000); check(!worker.isAlive); assertHealthy() }
+        override fun close() { stopped.set(true); releaseFirstRequest.countDown(); socket.close(); worker.join(9_000); check(!worker.isAlive); assertHealthy() }
     }
 
     private companion object {

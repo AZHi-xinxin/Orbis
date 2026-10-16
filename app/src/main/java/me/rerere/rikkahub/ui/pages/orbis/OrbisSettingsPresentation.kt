@@ -63,7 +63,7 @@ internal data class OrbisSpeechRules(
 internal fun orbisSettingsInitialItem(startAtMcp: Boolean): Int = if (startAtMcp) 1 else 0
 
 internal enum class OrbisToolGroup { WORK, PLAY }
-internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL }
+internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER }
 internal data class OrbisToolEntry(
     val destination: OrbisToolDestination,
     val group: OrbisToolGroup,
@@ -77,6 +77,7 @@ internal val orbisToolEntries = listOf(
     OrbisToolEntry(OrbisToolDestination.WORKSPACE, OrbisToolGroup.WORK, "⌘", "工作区", "文件、终端与技能"),
     OrbisToolEntry(OrbisToolDestination.ATTACHMENTS, OrbisToolGroup.WORK, "▰", "聊天附件", "已保存的消息文件"),
     OrbisToolEntry(OrbisToolDestination.LOCAL_CAPABILITIES, OrbisToolGroup.WORK, "⌁", "本地能力", "当前 AI 工具开关"),
+    OrbisToolEntry(OrbisToolDestination.IMAGE_WORKSHOP, OrbisToolGroup.WORK, "✦", "AI 生图工坊", "共同创作 · 原图与小部件素材"),
     OrbisToolEntry(OrbisToolDestination.GAMES, OrbisToolGroup.PLAY, "●○", "游戏机", "本地九路五子棋"),
     OrbisToolEntry(OrbisToolDestination.STICKERS, OrbisToolGroup.PLAY, "☺", "表情库", "图片与共享标签"),
     OrbisToolEntry(OrbisToolDestination.BLUETOOTH_TOY, OrbisToolGroup.PLAY, "◉", "蓝牙 Toy", "设备连接与本地控制"),
@@ -86,4 +87,5 @@ internal val orbisToolEntries = listOf(
     OrbisToolEntry(OrbisToolDestination.SECRET_BASE, OrbisToolGroup.PLAY, "✉", "秘密基地", "你写序章，伙伴续写番外"),
     OrbisToolEntry(OrbisToolDestination.SHARED_SPACE, OrbisToolGroup.PLAY, "♡", "共同空间", "分享日常，互相点赞与回应"),
     OrbisToolEntry(OrbisToolDestination.PHOTO_WALL, OrbisToolGroup.PLAY, "▧", "照片墙", "把相片和背面的心情留住"),
+    OrbisToolEntry(OrbisToolDestination.CHARACTER, OrbisToolGroup.PLAY, "✧", "小部件设置", "效果预览 · 人物素材 · 桌面卡片"),
 )

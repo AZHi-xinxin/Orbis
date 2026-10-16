@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.files.FileFolders
 import java.io.File
 import kotlinx.coroutines.SupervisorJob
@@ -58,10 +59,9 @@ class RikkaHubApp : Application() {
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isRecoveryProcess()) return
+        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isLightweightProcess(base)) return
         // This runs before providers, settings, migrations and any automatic event recovery.
         CrashHandler.install(base)
-        var newlyDetectedCrash = false
         try {
             val gate = me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.gate(base)
             emergencyBusinessLease = gate.tryAcquireBusinessLease()
@@ -69,28 +69,22 @@ class RikkaHubApp : Application() {
             if (emergencyBusinessLease != null) {
                 if (!CrashHandler.hasCrashed(base)) return
                 gate.requestRecovery()
-                newlyDetectedCrash = true
                 emergencyBusinessLease?.close()
                 emergencyBusinessLease = null
             }
         } catch (_: Exception) {
             // Do not initialize data writers if the recovery fence cannot be checked.
         }
-        if (newlyDetectedCrash) runCatching {
-            base.startActivity(Intent(base, me.rerere.rikkahub.ui.activity.EmergencyBackupActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
-        // An existing rescue fence may be encountered when DocumentsUI enumerates our workspace
-        // provider. Re-launching singleTask rescue here would cancel its active save picker.
-        // Stay fail-closed without changing the foreground task; the native launcher is available.
-        // Background launch restrictions may hide the page; the independent launcher remains available.
+        // Providers/services can start Application without a human launcher tap. Never launch
+        // a UI here or disturb an active rescue save picker. The independent :launcher process
+        // displays the blocked state when the human next opens the ordinary app icon.
         android.os.Process.killProcess(android.os.Process.myPid())
         kotlin.system.exitProcess(0)
     }
 
     override fun onCreate() {
         super.onCreate()
-        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isRecoveryProcess()) return
+        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isLightweightProcess(this)) return
         // Restore files and settings before eager Koin singletons or workers can access them.
         try {
             val restored = runBlocking(Dispatchers.IO) {
@@ -144,6 +138,9 @@ class RikkaHubApp : Application() {
                 .onFailure { Log.w(TAG, "Orbis event recovery unavailable; receipts retained") }
             runCatching { me.rerere.rikkahub.data.orbis.sentinel.OrbisSentinels.open(this@RikkaHubApp).reschedule() }
                 .onFailure { Log.w(TAG, "Native sentinel unavailable; configuration retained") }
+            if (BuildConfig.ORBIS_ENABLED) runCatching {
+                withContext(Dispatchers.IO) { me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(this@RikkaHubApp).recoverQueue() }
+            }.onFailure { Log.w(TAG, "Image workshop recovery unavailable; jobs retained") }
         }
 
         // Increment launch count
@@ -286,7 +283,7 @@ class RikkaHubApp : Application() {
 
     override fun onTerminate() {
         super.onTerminate()
-        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isRecoveryProcess()) return
+        if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isLightweightProcess(this)) return
         get<AppScope>().cancel()
         stopService(Intent(this, WebServerService::class.java))
     }

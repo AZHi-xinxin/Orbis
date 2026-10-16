@@ -9,6 +9,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
 import me.rerere.rikkahub.ui.activity.EmergencyBackupActivity
+import me.rerere.rikkahub.ui.activity.OrbisLauncherActivity
+import me.rerere.rikkahub.RouteActivity
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,6 +18,35 @@ import org.junit.runner.RunWith
 /** Metadata only: never launches the real rescue UI, acquires its fence or stops any process. */
 @RunWith(AndroidJUnit4::class)
 class EmergencyColdEntryContractTest {
+    @Suppress("DEPRECATION")
+    @Test fun normalLauncherIsAlsoNativeAndHasNoBackgroundComponents() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        check(instrumentation is IsolatedGenerationLoopRunner)
+        val context = instrumentation.targetContext
+        assertEquals(Application::class.java, context.applicationContext.javaClass)
+        val manager = context.packageManager
+        val name = OrbisLauncherActivity::class.java.name
+        val activity = manager.getActivityInfo(ComponentName(context.packageName, name), PackageManager.GET_META_DATA)
+        assertTrue(activity.enabled)
+        assertTrue(activity.exported)
+        assertEquals("${context.packageName}:launcher", activity.processName)
+        assertEquals("${context.packageName}.launcher", activity.taskAffinity)
+        assertEquals(Activity::class.java, OrbisLauncherActivity::class.java.superclass)
+        assertTrue(activity.metaData?.containsKey("android.app.shortcuts") == true)
+        val launchers = manager.queryIntentActivities(Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            setPackage(context.packageName)
+        }, 0).map { it.activityInfo.name }
+        assertTrue(name in launchers)
+        assertTrue(EmergencyBackupActivity::class.java.name in launchers)
+        assertFalse(RouteActivity::class.java.name in launchers)
+        val components = manager.getPackageInfo(context.packageName,
+            PackageManager.GET_PROVIDERS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS)
+        assertTrue(components.providers.orEmpty().none { it.processName == activity.processName || it.multiprocess })
+        assertTrue(components.services.orEmpty().none { it.processName == activity.processName })
+        assertTrue(components.receivers.orEmpty().none { it.processName == activity.processName })
+    }
+
     @Suppress("DEPRECATION")
     @Test fun launcherEntryUsesNativeViewsAndAnIndependentProcessWithoutAppProviders() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

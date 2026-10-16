@@ -170,8 +170,8 @@ class FutureAutomaticWakeRecoveryPolicyTest {
         inbox.bind(setOf("self_reminder"), binding)
         val old = inbox.accept(OrbisIncomingEvent("old", "self_reminder", "synthetic"), binding, 1).first
         dropWrites = true
-        inbox.mark(old.id, "suppressed", "held_by_future_wake_recovery")
-        assertEquals("suppressed", inbox.get(old.id)?.state)
+        assertEquals("event_inbox_verify_failed", runCatching { inbox.mark(old.id, "suppressed", "held_by_future_wake_recovery") }.exceptionOrNull()?.message)
+        assertEquals("accepted", inbox.get(old.id)?.state)
         assertFalse(inbox.verifySuppressed(conversation, setOf(old.id)))
         val reopened = OrbisEventInbox({ disk }, { disk = it })
         assertEquals("accepted", reopened.get(old.id)?.state)

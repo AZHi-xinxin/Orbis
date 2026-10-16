@@ -366,7 +366,11 @@ class GenerationReminderRequestTest {
         val status = control.tools().single { it.name == "context_compaction_status" }
         suspend fun statusEstimate(): Long {
             val output = status.execute(JsonObject(emptyMap())).single() as UIMessagePart.Text
-            return Json.parseToJsonElement(output.text).jsonObject.getValue("estimated_tokens").jsonPrimitive.long
+            val fields = Json.parseToJsonElement(output.text).jsonObject
+            assertEquals(me.rerere.rikkahub.data.ai.compaction.estimateActiveMessageBodies(authoredHistory).tokens,
+                fields.getValue("body_estimated_tokens").jsonPrimitive.long)
+            assertEquals(fields.getValue("prepared_request_estimated_tokens"), fields.getValue("estimated_tokens"))
+            return fields.getValue("prepared_request_estimated_tokens").jsonPrimitive.long
         }
         assertEquals(before.estimatedTokens, statusEstimate())
 

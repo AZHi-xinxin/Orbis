@@ -9,6 +9,7 @@ import me.rerere.rikkahub.data.ai.HostToolFailure
 import me.rerere.rikkahub.data.ai.withHostToolFailure
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.preserveEventPresentation
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.security.DigestOutputStream
@@ -179,25 +180,34 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
 
     /** Read-only recovery decision. An unrelated/newer DB snapshot is never overwritten. */
     @Synchronized
-    fun recover(persisted: Conversation): GenerationCheckpointRecovery? = guarded {
+    fun recover(persisted: Conversation, allowAlreadyCommittedTail: Boolean = false): GenerationCheckpointRecovery? = guarded {
         val record = read(persisted.id) ?: return@guarded null
+        // An explicit fresh-input recovery may acknowledge an EXACT already-saved tail even
+        // when earlier history has since been edited. This returns the current database page
+        // unchanged: it is not permission to merge a stale checkpoint across that edit.
+        if (allowAlreadyCommittedTail && alreadyCommittedTail(record, persisted)) {
+            return@guarded GenerationCheckpointRecovery(record.handle(), persisted, false,
+                record.tools.filter { it.status == GenerationToolStatus.STARTED }.map { it.callId }.toSet())
+        }
         validateBaseIdentity(record, persisted)
         val protectedIds = (persisted.messageNodes.take(record.prefixCount) +
             persisted.messageNodes.takeLast(record.suffixCount)).map { it.id }.toSet()
         checkSafe(record.tail.none { it.id in protectedIds }, "checkpoint_overlaps_protected_nodes")
         val storedTail = persisted.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount)
-        val storedHash = nodesHash(storedTail)
-        val rawHash = nodesHash(record.tail)
+        val storedHash = protectedNodesHash(storedTail, record.version)
+        val rawHash = protectedNodesHash(record.tail, record.version)
         val restoredTail = recoveryTail(record)
-        val recoveryHash = nodesHash(restoredTail)
+        val recoveryHash = protectedNodesHash(restoredTail, record.version)
         checkSafe(storedHash == record.baseTailHash || storedHash == rawHash || storedHash == recoveryHash,
             "database_tail_changed")
         val changed = storedHash != recoveryHash
         // Favorite state is derived from its separate Room table and is intentionally transient
         // in MessageNode JSON. A recovery must not reset the current page's derived UI flag.
         val favorites = storedTail.associate { it.id to it.isFavorite }
+        val committed = storedTail.associateBy { it.id }
         val restoredWithFavorites = restoredTail.map { node ->
-            favorites[node.id]?.let { node.copy(isFavorite = it) } ?: node
+            val restored = favorites[node.id]?.let { node.copy(isFavorite = it) } ?: node
+            committed[node.id]?.let { preserveEventPresentation(restored, it) } ?: restored
         }
         GenerationCheckpointRecovery(record.handle(),
             if (changed) persisted.copy(messageNodes = persisted.messageNodes.take(record.prefixCount) +
@@ -254,15 +264,21 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
      * A stale run or a failed/partial save cannot erase a newer recovery record.
      */
     @Synchronized
-    fun clearAfterDurableCommit(handle: GenerationCheckpointHandle, storedConversation: Conversation) = guarded {
+    fun clearAfterDurableCommit(handle: GenerationCheckpointHandle, storedConversation: Conversation,
+        allowAlreadyCommittedTail: Boolean = false) = guarded {
         val record = requireCurrent(handle)
+        // Re-read and re-prove at deletion, not just at the earlier recovery decision.
+        if (allowAlreadyCommittedTail && alreadyCommittedTail(record, storedConversation)) {
+            store.delete(handle.conversationId)
+            return@guarded
+        }
         validateBaseIdentity(record, storedConversation)
-        val storedHash = nodesHash(storedConversation.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount))
-        val recoveryHash = nodesHash(recoveryTail(record))
+        val storedHash = protectedNodesHash(storedConversation.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount), record.version)
+        val recoveryHash = protectedNodesHash(recoveryTail(record), record.version)
         if (record.tools.any { it.status == GenerationToolStatus.STARTED }) {
             checkSafe(storedHash == recoveryHash, "unknown_tool_requires_interrupted_receipt")
         } else {
-            checkSafe(storedHash == nodesHash(record.tail) || storedHash == recoveryHash, "checkpoint_not_committed")
+            checkSafe(storedHash == protectedNodesHash(record.tail, record.version) || storedHash == recoveryHash, "checkpoint_not_committed")
         }
         store.delete(handle.conversationId)
     }
@@ -272,12 +288,33 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
             suffixCount in 0..(base.messageNodes.size - prefixCount), "invalid_baseline")
         val tail = base.messageNodes.drop(prefixCount).dropLast(suffixCount)
         validateTail(tail, emptyList())
-        return CheckpointRecord(conversationId = base.id, ownerId = base.assistantId, runId = runId,
+        return CheckpointRecord(version = 2, conversationId = base.id, ownerId = base.assistantId, runId = runId,
             epoch = base.compactionEpoch, prefixCount = prefixCount,
-            prefixHash = nodesHash(base.messageNodes.take(prefixCount)),
-            suffixCount = suffixCount, suffixHash = nodesHash(base.messageNodes.takeLast(suffixCount)),
-            baseTailHash = nodesHash(tail),
+            prefixHash = protectedNodesHash(base.messageNodes.take(prefixCount), 2),
+            suffixCount = suffixCount, suffixHash = protectedNodesHash(base.messageNodes.takeLast(suffixCount), 2),
+            baseTailHash = protectedNodesHash(tail, 2),
             anchors = tail.map { CheckpointAnchor(it.id, it.messages.map { message -> message.id }) }, tail = tail)
+    }
+
+    /** Caller has stopped the journal's producer and reads committed Room history. Only an
+     * exact contained, completed checkpoint is acknowledged. Newer appended turns stay intact;
+     * unknown dispatched effects, edited prefixes and changed branches are never discarded.
+     */
+    @Synchronized
+    fun clearContainedInDurableContinuation(persisted: Conversation): Boolean = guarded {
+        val record = read(persisted.id) ?: return@guarded false
+        if (record.suffixCount != 0 || persisted.assistantId != record.ownerId ||
+            persisted.compactionEpoch != record.epoch ||
+            record.tools.any { it.status == GenerationToolStatus.STARTED } ||
+            record.tail.any { node -> node.messages.any { message ->
+                message.getTools().any { !it.isExecuted }
+            } } || persisted.messageNodes.size.toLong() < record.prefixCount.toLong() + record.tail.size ||
+            persisted.messageNodes.map { it.id }.distinct().size != persisted.messageNodes.size) return@guarded false
+        if (protectedNodesHash(persisted.messageNodes.take(record.prefixCount), record.version) != record.prefixHash ||
+            protectedNodesHash(persisted.messageNodes.drop(record.prefixCount).take(record.tail.size), record.version) !=
+            protectedNodesHash(record.tail, record.version)) return@guarded false
+        store.delete(persisted.id)
+        true
     }
 
     private fun requireCurrent(handle: GenerationCheckpointHandle): CheckpointRecord {
@@ -295,9 +332,23 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
             current.compactionEpoch == record.epoch, "owner_or_epoch_changed")
         checkSafe(record.prefixCount <= current.messageNodes.size &&
             record.suffixCount <= current.messageNodes.size - record.prefixCount &&
-            nodesHash(current.messageNodes.take(record.prefixCount)) == record.prefixHash, "database_prefix_changed")
-        checkSafe(nodesHash(current.messageNodes.takeLast(record.suffixCount)) == record.suffixHash,
+            protectedNodesHash(current.messageNodes.take(record.prefixCount), record.version) == record.prefixHash, "database_prefix_changed")
+        checkSafe(protectedNodesHash(current.messageNodes.takeLast(record.suffixCount), record.version) == record.suffixHash,
             "database_suffix_changed")
+    }
+
+    private fun alreadyCommittedTail(record: CheckpointRecord, current: Conversation): Boolean {
+        if (current.id != record.conversationId || current.assistantId != record.ownerId ||
+            current.compactionEpoch != record.epoch ||
+            current.messageNodes.size.toLong() != record.prefixCount.toLong() + record.tail.size + record.suffixCount)
+            return false
+        val protected = current.messageNodes.take(record.prefixCount) + current.messageNodes.takeLast(record.suffixCount)
+        if (current.messageNodes.map { it.id }.distinct().size != current.messageNodes.size ||
+            protected.any { node -> record.tail.any { it.id == node.id } }) return false
+        // Raw STARTED/pending tool cards are NOT enough. Unknown effects must already have
+        // their interrupted receipt in Room, and the caller must retain the automatic hold.
+        return protectedNodesHash(current.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount), 2) ==
+            protectedNodesHash(recoveryTail(record), 2)
     }
 
     private fun validateTail(tail: List<MessageNode>, anchors: List<CheckpointAnchor>) {
@@ -349,7 +400,7 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         checkSafe(bytes.size <= MAX_BYTES, "checkpoint_too_large")
         val envelope = json.decodeFromString<CheckpointEnvelope>(bytes.toString(Charsets.UTF_8))
         val record = envelope.record
-        checkSafe(record.version == 1 && record.conversationId == id && record.epoch >= 0 &&
+        checkSafe(record.version in 1..2 && record.conversationId == id && record.epoch >= 0 &&
             record.prefixCount >= 0 && record.suffixCount >= 0 && record.suffixCount <= Int.MAX_VALUE - record.prefixCount,
             "invalid_checkpoint_header")
         checkSafe(envelope.sha256 == hashJson(record), "checkpoint_checksum_mismatch")
@@ -365,11 +416,23 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         store.writeAtomic(record.conversationId, bytes)
     }
 
-    private fun nodesHash(nodes: List<MessageNode>): String {
+    /** V1 keeps its exact legacy digest. V2 ignores ONLY event read/fold UI bits in
+     * history, never payload, provenance, branch choice, translations or tool receipts.
+     * Tool receipt hashes remain byte-exact and recovery always keeps current UI bits.
+     */
+    private fun protectedNodesHash(nodes: List<MessageNode>, version: Int): String =
+        nodesHash(nodes, normalizeEventPresentation = version >= 2)
+
+    private fun nodesHash(nodes: List<MessageNode>, normalizeEventPresentation: Boolean = false): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val out = DigestOutputStream(NullOutput, digest)
         nodes.forEach { node ->
-            json.encodeToStream(node, out)
+            val protectedNode = if (!normalizeEventPresentation || node.messages.none { it.orbisEvent != null }) node
+            else node.copy(messages = node.messages.map { message ->
+                message.orbisEvent?.let { event -> message.copy(orbisEvent = event.copy(read = false, collapsed = true)) }
+                    ?: message
+            })
+            json.encodeToStream(protectedNode, out)
             // Literal NUL never occurs in serialized JSON; delimit nodes without a history blob.
             digest.update(0.toByte())
         }

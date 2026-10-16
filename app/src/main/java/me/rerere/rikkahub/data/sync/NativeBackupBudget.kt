@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.sync
 import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
 import me.rerere.rikkahub.data.sync.importer.ArchiveFailure
 import me.rerere.rikkahub.data.sync.importer.ArchiveReadException
+import me.rerere.rikkahub.data.orbis.character.CharacterBackup
 import java.io.FilterOutputStream
 import java.io.OutputStream
 import java.util.zip.ZipEntry
@@ -12,7 +13,8 @@ internal object NativeBackupBudget {
     const val MAX_SETTINGS_BYTES = 8L * ArchiveCapacity.MIB
     data class Inspection(val expandedBytes: Long, val databaseBytes: Long, val entries: Int)
 
-    fun entryLimit(name: String): Long = OrbisLocalToolBackup.maxBytes(name)?.toLong()
+    fun entryLimit(name: String): Long = CharacterBackup.maxBytes(name)?.toLong()
+        ?: OrbisLocalToolBackup.maxBytes(name)?.toLong()
         ?: if (name == "settings.json") MAX_SETTINGS_BYTES else ArchiveCapacity.MAX_DISK_ENTRY_BYTES
 
     fun inspect(archiveBytes: Long, entries: Sequence<ZipEntry>): Inspection {

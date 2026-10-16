@@ -33,6 +33,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.hugeicons.stroke.Idea01
@@ -43,9 +45,6 @@ import me.rerere.rikkahub.ui.components.ui.icons.ReasoningLow
 import me.rerere.rikkahub.ui.components.ui.icons.ReasoningMedium
 import kotlin.math.roundToInt
 
-private val levels = ReasoningLevel.entries
-private val levelCount = levels.size
-
 @Composable
 fun ReasoningButton(
     modifier: Modifier = Modifier,
@@ -53,19 +52,25 @@ fun ReasoningButton(
     reasoningLevel: ReasoningLevel,
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
     compact: Boolean = false,
+    model: Model? = null,
+    provider: ProviderSetting? = null,
 ) {
     var showPicker by remember { mutableStateOf(false) }
+    val selection = reasoningSelectionPolicy(reasoningLevel, model, provider)
+    val effectiveLevel = selection.effectiveLevel
 
     if (showPicker) {
         ReasoningPicker(
-            reasoningLevel = reasoningLevel,
+            reasoningLevel = effectiveLevel,
+            levels = selection.levels,
+            notice = selection.notice,
             onDismissRequest = { showPicker = false },
             onUpdateReasoningLevel = onUpdateReasoningLevel
         )
     }
 
     if (compact) {
-        val levelLabel = when (reasoningLevel) {
+        val levelLabel = when (effectiveLevel) {
             ReasoningLevel.OFF -> "关"
             ReasoningLevel.AUTO -> "自动"
             ReasoningLevel.LOW -> "低"
@@ -76,16 +81,16 @@ fun ReasoningButton(
         }
         OrbisInputPill(
             label = "思考·$levelLabel",
-            icon = if (reasoningLevel.isEnabled) HugeIcons.Idea01 else HugeIcons.Idea,
+            icon = if (effectiveLevel.isEnabled) HugeIcons.Idea01 else HugeIcons.Idea,
             onClick = { showPicker = true },
             modifier = modifier,
-            active = reasoningLevel.isEnabled,
+            active = effectiveLevel.isEnabled,
         )
         return
     }
 
     ToggleSurface(
-        checked = reasoningLevel.isEnabled,
+        checked = effectiveLevel.isEnabled,
         onClick = { showPicker = true },
         modifier = modifier,
     ) {
@@ -98,7 +103,7 @@ fun ReasoningButton(
                 modifier = Modifier.size(24.dp),
                 contentAlignment = Alignment.Center
             ) {
-                ReasoningIcon(reasoningLevel)
+                ReasoningIcon(effectiveLevel)
             }
             if (!onlyIcon) Text(stringResource(R.string.setting_provider_page_reasoning))
         }
@@ -110,11 +115,15 @@ fun ReasoningPicker(
     reasoningLevel: ReasoningLevel,
     onDismissRequest: () -> Unit = {},
     onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
+    levels: List<ReasoningLevel> = ReasoningLevel.entries.toList(),
+    notice: String? = null,
 ) {
+    require(levels.size >= 2) { "A reasoning picker needs at least two choices" }
+    val levelCount = levels.size
     val currentIndex = levels.indexOf(reasoningLevel).coerceAtLeast(0)
     var sliderValue by remember { mutableFloatStateOf(currentIndex.toFloat()) }
 
-    LaunchedEffect(currentIndex) {
+    LaunchedEffect(currentIndex, levels) {
         sliderValue = currentIndex.toFloat()
     }
 
@@ -140,7 +149,7 @@ fun ReasoningPicker(
                     style = MaterialTheme.typography.titleLarge,
                 )
                 Text(
-                    text = stringResource(R.string.reasoning_picker_hint),
+                    text = notice ?: stringResource(R.string.reasoning_picker_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,

@@ -12,6 +12,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisStickersToolTest {
+    @Test fun emptyReadPlaceholdersWorkButMeaningfulIdRequiresLookup() {
+        val tool = createOrbisStickersTool { state(2) }
+        assertTrue(run(tool, """{"action":"list","query":"","id":"","offset":0,"limit":5}""").getValue("ok").jsonPrimitive.boolean)
+        val rejected = run(tool, """{"action":"list","query":"","id":"st000001","offset":0,"limit":5}""")
+        assertFalse(rejected.getValue("ok").jsonPrimitive.boolean)
+        assertTrue(rejected.containsKey("list_example"))
+        assertTrue(run(tool, """{"action":"lookup","id":"st000001"}""").getValue("ok").jsonPrimitive.boolean)
+    }
     private fun state(count: Int) = OrbisStickerState(nextNumber = count + 1, stickers = List(count) { index ->
         OrbisSticker(OrbisStickerRepository.idForNumber(index + 1), listOf(if (index % 2 == 0) "安慰" else "开心"),
             "png", 1, 1, 100, "a".repeat(64), 0)

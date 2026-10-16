@@ -6,6 +6,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.orbis.OrbisHistoryCleanupReceipt
+import me.rerere.rikkahub.data.orbis.OrbisHistoryPreview
+import me.rerere.rikkahub.data.orbis.OrbisHistoryCompletion
+import me.rerere.rikkahub.data.orbis.historyCutoff
 
 /**
  * Pure rule/configuration and outbox ledger. No timers, device access, network, or model calls.
@@ -205,7 +209,7 @@ class OrbisSentinelRuleStore(
             return@synchronized OrbisSentinelReservation(old, true)
         }
         if (expectedUpdatedAtMs != null && expectedUpdatedAtMs != old.updatedAtMs) return@synchronized null
-        if (before.executions.any { it.eventId == eventId }) return@synchronized null
+        if (before.executions.any { it.eventId == eventId } || before.historyReceipts.any { it.eventId == eventId }) return@synchronized null
         fun draw(bound: Long): Long = randomBounded(bound).also { require(it in 0 until bound) { "invalid_sentinel_random_draw" } }
         var working = old
         if (old.type == OrbisSentinelType.AGREEMENT && facts.lastHumanMessageMs != null &&
@@ -246,7 +250,7 @@ class OrbisSentinelRuleStore(
     }
 
     private fun reserve(before: OrbisSentinelState, old: OrbisSentinelRule, eventId: String, now: Long): OrbisSentinelReservation {
-        require(before.executions.none { it.eventId == eventId }) { "sentinel_event_id_conflict" }
+        require(before.executions.none { it.eventId == eventId } && before.historyReceipts.none { it.eventId == eventId }) { "sentinel_event_id_conflict" }
         val updated = old.copy(pendingEventId = eventId, pendingSinceMs = now, pendingText = null,
             pendingMasterGeneration = before.masterGeneration,
             updatedAtMs = now, lastError = null)
@@ -279,10 +283,10 @@ class OrbisSentinelRuleStore(
         require(skippedReason == null || ERROR_CODE.matches(skippedReason)) { "invalid_sentinel_error_code" }
         val before = current()
         val existing = before.rules.firstOrNull { it.id == id }
-        if (existing != null && existing.pendingEventId == null && before.executions.any {
+        if (existing != null && existing.pendingEventId == null && (before.executions.any {
                 it.ruleId == id && it.eventId == eventId && it.status in setOf(
                     OrbisSentinelExecutionStatus.ACCEPTED, OrbisSentinelExecutionStatus.CANCELLED)
-            }) return@synchronized existing
+            } || before.historyReceipts.any { it.ruleId == id && it.eventId == eventId })) return@synchronized existing
         val old = pending(before, id, eventId)
         require(old.pendingText != null) { "sentinel_event_not_staged" }
         require(now >= checkNotNull(old.pendingSinceMs)) { "invalid_sentinel_completion_time" }
@@ -367,6 +371,48 @@ class OrbisSentinelRuleStore(
 
     private fun current(): OrbisSentinelState = load().also { mutable.value = it }
 
+    /** Human-only. Enabling retention does not change any rule or replay historical events. */
+    fun setHistoryRetention(automatic: Boolean, keepDays: Int): OrbisSentinelState = synchronized(lock) {
+        historyCutoff(0, keepDays)
+        val before = current()
+        commitIfChanged(before, before.copy(historyRetention = before.historyRetention.copy(automatic = automatic, keepDays = keepDays)))
+    }
+
+    fun markHistoryAttempt(now: Long) = synchronized(lock) {
+        validateTime(now)
+        val before = current()
+        commitIfChanged(before, before.copy(historyRetention = before.historyRetention.copy(lastAttemptAt = now)))
+    }
+
+    private fun historyCandidates(before: OrbisSentinelState, cutoff: Long, completedEventIds: Set<OrbisHistoryCompletion>): List<OrbisSentinelExecution> {
+        val pending = before.rules.mapNotNull { it.pendingEventId }.toSet()
+        return before.executions.filter { it.eventId !in pending && it.createdAtMs < cutoff && it.updatedAtMs < cutoff &&
+            (it.status == OrbisSentinelExecutionStatus.CANCELLED ||
+                it.status == OrbisSentinelExecutionStatus.ACCEPTED &&
+                    OrbisHistoryCompletion("native_sentinel.${it.ruleId}", it.eventId, it.assistantId, it.conversationId) in completedEventIds) }
+    }
+
+    fun historyPreview(now: Long, keepDays: Int, completedEventIds: Set<OrbisHistoryCompletion>): OrbisHistoryPreview = synchronized(lock) {
+        val before = current()
+        val found = historyCandidates(before, historyCutoff(now, keepDays), completedEventIds)
+        OrbisHistoryPreview(found.size, before.executions.size - found.size, json.encodeToString(before).toByteArray().size)
+    }
+
+    fun cleanHistory(now: Long, keepDays: Int, completedEventIds: Set<OrbisHistoryCompletion>, operationId: String): OrbisHistoryCleanupReceipt = synchronized(lock) {
+        require(runCatching { UUID.fromString(operationId).toString() == operationId }.getOrDefault(false)) { "invalid_cleanup_operation" }
+        val before = current()
+        before.lastCleanup?.takeIf { it.operationId == operationId }?.let { return@synchronized it }
+        val found = historyCandidates(before, historyCutoff(now, keepDays), completedEventIds)
+        val ids = found.map { it.eventId }.toSet()
+        val after = before.copy(executions = before.executions.filterNot { it.eventId in ids }, historyReceipts = before.historyReceipts +
+            found.map { OrbisSentinelHistoryReceipt(it.eventId, it.ruleId, it.status) })
+        var result = OrbisHistoryCleanupReceipt(operationId, found.size, after.executions.size, before.executions.size - found.size,
+            json.encodeToString(before).toByteArray().size, 0, now)
+        repeat(3) { result = result.copy(bytesAfter = json.encodeToString(after.copy(lastCleanup = result)).toByteArray().size) }
+        commit(after.copy(lastCleanup = result))
+        result
+    }
+
     private fun load(): OrbisSentinelState {
         val encoded = read() ?: run {
             check(!seenPersisted) { "sentinel_store_disappeared" }
@@ -399,6 +445,14 @@ class OrbisSentinelRuleStore(
         require(value.masterGeneration >= 0) { "invalid_sentinel_master_generation" }
         value.masterChangedAtMs?.let(::validateTime)
         value.resumedAtMs?.let(::validateTime)
+        historyCutoff(0, value.historyRetention.keepDays)
+        value.historyRetention.lastAttemptAt?.let(::validateTime)
+        require((value.executions.map { it.eventId } + value.historyReceipts.map { it.eventId }).distinct().size ==
+            value.executions.size + value.historyReceipts.size) { "sentinel_duplicate_execution" }
+        value.historyReceipts.forEach {
+            validateEventId(it.eventId); validateId(it.ruleId)
+            require(it.status in setOf(OrbisSentinelExecutionStatus.ACCEPTED, OrbisSentinelExecutionStatus.CANCELLED)) { "invalid_history_receipt" }
+        }
         require(value.rules.map { it.id }.distinct().size == value.rules.size) { "sentinel_duplicate_rule" }
         val pendingIds = value.rules.mapNotNull { it.pendingEventId }
         require(pendingIds.distinct().size == pendingIds.size) { "sentinel_duplicate_pending_event" }

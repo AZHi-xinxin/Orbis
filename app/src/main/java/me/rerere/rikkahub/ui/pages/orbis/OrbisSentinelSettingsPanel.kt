@@ -121,4 +121,5 @@ internal fun OrbisSentinelSettingsPanel() {
             }
         },
     )
+    OrbisSentinelHistoryPanel(state, inbox, sentinels, chat)
 }

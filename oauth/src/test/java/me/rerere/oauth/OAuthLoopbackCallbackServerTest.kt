@@ -15,6 +15,36 @@ import kotlin.time.Duration.Companion.seconds
 class OAuthLoopbackCallbackServerTest {
     private val httpClient = OkHttpClient()
 
+    @Test fun `Orbis callback is only a receipt and never claims a working model`() = runBlocking {
+        val server = OAuthLoopbackCallbackServer(callbackPath = "/auth/callback", appName = "Orbis", callbackReceiptOnly = true)
+        val session = server.openSession("receipt-state")
+        try {
+            withContext(Dispatchers.IO) {
+                execute("${session.redirectUri}?code=synthetic&state=receipt-state&client_id=oaiapp_test").use {
+                    val page = it.body.string()
+                    assertEquals(200, it.code)
+                    assertTrue(page.contains("Orbis"))
+                    assertTrue(page.contains("已收到授权结果"))
+                    assertTrue(page.contains("不代表模型连接测试已通过"))
+                    assertFalse(page.contains("RikkaHub"))
+                    assertFalse(page.contains("connected successfully"))
+                }
+            }
+        } finally { session.close() }
+    }
+
+    @Test
+    fun `issued dynamic client id is preserved without changing legacy callbacks`() = runBlocking {
+        val server = OAuthLoopbackCallbackServer(callbackPath = "/auth/callback")
+        val session = server.openSession("siwc-state")
+        try {
+            withContext(Dispatchers.IO) {
+                execute("${session.redirectUri}?code=test-code&state=siwc-state&client_id=oaiapp_test").use { assertEquals(200, it.code) }
+            }
+            assertEquals("oaiapp_test", session.awaitCallback(2.seconds)?.clientId)
+        } finally { session.close() }
+    }
+
     @Test
     fun `callback is delivered only to matching state`() = runBlocking {
         val server = OAuthLoopbackCallbackServer()

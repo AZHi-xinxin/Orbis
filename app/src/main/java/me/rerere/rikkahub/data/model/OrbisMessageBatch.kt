@@ -70,7 +70,9 @@ internal fun messageBatchClosure(conversation: Conversation, requested: Set<Uuid
             message.parts.forEach { part ->
                 val toolId = when (part) {
                     is UIMessagePart.Tool -> {
-                        require(part.isExecuted) { "存在未完成或待批准的工具，请先处理工具再整理。" }
+                        // Pending decisions have not dispatched. Whole-node deletion cancels
+                        // the selected card; an unrelated pending card must not lock all history.
+                        require(part.isExecuted || part.isPending) { "工具仍在执行，请结束后再整理。" }
                         combined.add(part.toolCallId); part.toolCallId
                     }
                     is UIMessagePart.ToolCall -> { calls.add(part.toolCallId); part.toolCallId }

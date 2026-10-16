@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/character_widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:padding="0dp" android:background="@android:color/transparent">
+    <!-- Launchers may allocate a tall cell area. The visible horizontal stage must not stretch with it. -->
+    <FrameLayout android:id="@+id/character_widget_canvas" android:layout_width="match_parent" android:layout_height="180dp"
+        android:layout_gravity="center_vertical" android:background="@android:color/transparent">
+    <!-- Complete card behind the sprite: changing pose cannot expose a baked-in hole. -->
+    <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_marginTop="36dp" android:layout_marginBottom="16dp" android:layout_marginStart="14dp" android:layout_marginEnd="8dp"
+        android:clipToOutline="true" android:background="@drawable/orbis_character_widget_background">
+        <ImageView android:id="@+id/character_widget_card" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:scaleType="centerCrop" android:importantForAccessibility="no" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:layout_marginStart="122dp"
+            android:paddingStart="8dp" android:paddingEnd="10dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:orientation="vertical" android:gravity="center_vertical">
+            <TextView android:id="@+id/character_widget_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Orbis · 互动" android:textSize="12sp" android:textColor="#283B40" android:maxLines="1" android:ellipsize="end" />
+            <TextClock android:id="@+id/character_widget_date" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:format12Hour="M月d日 EEEE" android:format24Hour="M月d日 EEEE" android:textSize="10sp" android:textColor="#465C60" />
+            <TextClock android:id="@+id/character_widget_clock" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:format12Hour="h:mm" android:format24Hour="HH:mm" android:textSize="34sp" android:fontFamily="sans-serif-light" android:includeFontPadding="false" android:textColor="#283B40" />
+            <TextView android:id="@+id/character_widget_hint" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="点此选择助手" android:textSize="11sp" android:textColor="#465C60" android:maxLines="2" android:ellipsize="end" />
+        </LinearLayout>
+    </FrameLayout>
+    <ImageView android:id="@+id/character_widget_image" android:layout_width="148dp" android:layout_height="match_parent"
+        android:layout_gravity="start|bottom" android:scaleType="fitCenter" android:src="@mipmap/ic_launcher" android:contentDescription="角色形象" />
+    <LinearLayout android:layout_width="132dp" android:layout_height="match_parent" android:orientation="vertical" android:layout_gravity="start">
+        <TextView android:id="@+id/character_widget_head" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1.2"
+            android:contentDescription="轻触头部，更换允许的表情" />
+        <TextView android:id="@+id/character_widget_hand" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+            android:contentDescription="轻触手部，更换动作" />
+    </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

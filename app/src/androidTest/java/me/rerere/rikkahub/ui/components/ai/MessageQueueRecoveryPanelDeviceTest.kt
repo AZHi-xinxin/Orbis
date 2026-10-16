@@ -40,6 +40,22 @@ class MessageQueueRecoveryPanelDeviceTest {
     }
     @get:Rule val rules: RuleChain = RuleChain.outerRule(isolated).around(compose)
 
+    @Test fun saveWarningExpiresWithoutDismissalAndDoesNotReturnOnRecomposition() {
+        val notice = "临时续聊：保存未确认，但可继续发送。"
+        val unrelated = mutableStateOf(0)
+        compose.mainClock.autoAdvance = false
+        compose.setContent { MaterialTheme {
+            androidx.compose.material3.Text("updates=${unrelated.value}")
+            me.rerere.rikkahub.ui.pages.chat.TransientContinuationNotice(notice)
+        } }
+        compose.onNodeWithText(notice).assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(4_100)
+        compose.onNodeWithText(notice).assertDoesNotExist()
+        compose.runOnIdle { unrelated.value++ }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText(notice).assertDoesNotExist()
+    }
+
     /** A semantics click can finish before Android has focused the newly attached Dialog window. */
     private fun awaitFocusedManagementDialog(): View {
         compose.onNodeWithTag("chat_queue_close_management").assertIsDisplayed()
@@ -112,7 +128,7 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.waitForIdle()
     }
 
-    @Test fun emptyPausedQueueContinuesFreshInputDirectlyWithoutRemoteRecoveryOrConfirmation() {
+    @Test fun emptyPausedQueueNeverCreatesARecoveryCardOrDialog() {
         var continuations = 0
         var recoveryCalls = 0
         var stops = 0
@@ -124,12 +140,13 @@ class MessageQueueRecoveryPanelDeviceTest {
             onStopGatewayWait = { stops++ },
             recovery = QueueRecoveryState(QueueRecoveryPhase.RUNNING, "legacy remote request still pending"),
         ) } }
-        compose.onNodeWithText("消息已暂停 · 0 条待发").assertExists()
+        compose.onNodeWithText("消息已暂停 · 0 条待发").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_recover").assertDoesNotExist()
-        compose.onNodeWithTag("chat_queue_continue_fresh").assertIsEnabled().performClick()
+        compose.onNodeWithTag("chat_queue_continue_fresh").assertDoesNotExist()
+        compose.onNodeWithTag("chat_queue_manage").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_confirm_resume").assertDoesNotExist()
         compose.onNodeWithTag("chat_message_queue").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, continuations); assertEquals(0, recoveryCalls); assertEquals(0, stops) }
+        compose.runOnIdle { assertEquals(0, continuations); assertEquals(0, recoveryCalls); assertEquals(0, stops) }
         compose.onNodeWithText("停止旧轮并核对？").assertDoesNotExist()
     }
 
@@ -147,7 +164,7 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.onNodeWithText(text, substring = true).assertExists()
         compose.onNodeWithTag("chat_queue_recover").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_stop_gateway").assertDoesNotExist()
-        compose.onNodeWithText("本次回复已中断，已保存内容保留。关闭后可发送新消息；旧待发消息不会自动重发，旧工具不会重试。").assertExists()
+        compose.onNodeWithText("旧待发消息单独保留，不会自动重发或重试旧工具。新消息可直接发送，不需要在这里恢复队列。").assertExists()
         compose.runOnIdle { assertEquals(0, removals) }
     }
 
@@ -228,7 +245,7 @@ class MessageQueueRecoveryPanelDeviceTest {
         ) } }
         compose.onNodeWithTag("chat_message_queue").assertDoesNotExist()
         compose.runOnIdle {
-            queue.value = MessageQueueState(paused = true)
+            queue.value = MessageQueueState(listOf(QueuedMessage(parts = listOf(UIMessagePart.Text("synthetic retained")))), paused = true)
             notices.value = mapOf("chat" to QueueRecoveryState(QueueRecoveryPhase.PENDING, "新等待尚未核对"))
         }
         compose.onNodeWithText("旧恢复结果").assertDoesNotExist()
@@ -243,7 +260,7 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.onNodeWithText("正在核对新等待").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_close_management").assertIsEnabled().performClick()
         compose.onNodeWithTag("chat_queue_close_management").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, continuations) }
+        compose.runOnIdle { assertEquals(0, continuations) }
     }
 
     @Test fun closingManagementConsumesOnlyPresentationAndKeepsHeldMessagesWithoutDispatching() {
@@ -285,11 +302,11 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.onNodeWithText("上一次成功记录").assertDoesNotExist()
         compose.runOnIdle { queue.value = MessageQueueState(paused = true) }
         compose.onNodeWithText("上一次成功记录").assertDoesNotExist()
-        compose.onNodeWithText("消息已暂停 · 0 条待发").assertExists()
-        compose.onNodeWithTag("chat_queue_manage").performClick()
+        compose.onNodeWithText("消息已暂停 · 0 条待发").assertDoesNotExist()
+        compose.onNodeWithTag("chat_queue_manage").assertDoesNotExist()
         compose.onNodeWithText("上一次成功记录").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_recover").assertDoesNotExist()
-        compose.onNodeWithTag("chat_queue_close_management").assertIsEnabled()
+        compose.onNodeWithTag("chat_queue_close_management").assertDoesNotExist()
     }
 
     @Test fun historicalFailureWithoutRealQueuePauseDoesNotBlockHealthyChat() {
@@ -346,7 +363,7 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.runOnIdle { assertEquals(0, submitted); assertEquals(1, cancellations) }
     }
 
-    @Test fun closingPausedManagementRequestsFreshInputOnceWithoutReplayOrLegacyRemoteActions() {
+    @Test fun closingPausedManagementDoesNotResumeOrReplayAnything() {
         val item = QueuedMessage(parts = listOf(UIMessagePart.Text("synthetic preserved queued input")))
         val queue = MessageQueueState(listOf(item), paused = true)
         val result = QueueRecoveryState(QueueRecoveryPhase.PENDING, "旧工具仍待核对")
@@ -365,9 +382,9 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.onNodeWithText("旧工具仍待核对").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_close_management").performClick()
         compose.onNodeWithTag("chat_queue_close_management").assertDoesNotExist()
-        compose.onNodeWithText("消息已暂停 · 1 条待发").assertExists()
+        compose.onNodeWithText("保留待核对 · 1").assertExists()
         compose.runOnIdle {
-            assertEquals(1, continuations)
+            assertEquals(0, continuations)
             assertSame(item, queue.messages.single())
             assertTrue(queue.paused) // The UI does not mutate/dispatch the queue itself.
         }
@@ -375,13 +392,14 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.onNodeWithTag("chat_queue_recover").assertDoesNotExist()
         compose.onNodeWithTag("chat_queue_stop_gateway").assertDoesNotExist()
         compose.onNodeWithText("synthetic preserved queued input", substring = true).assertExists()
-        compose.runOnIdle { assertEquals(1, continuations) }
+        compose.runOnIdle { assertEquals(0, continuations) }
     }
 
     @Test fun systemBackClosesPausedManagementWithoutWaitingForRemoteRecovery() {
         var continuations = 0
         compose.setContent { MaterialTheme { MessageQueuePanel(
-            state = MessageQueueState(paused = true), onRemove = {}, onBeginEdit = { null },
+            state = MessageQueueState(listOf(QueuedMessage(parts = listOf(UIMessagePart.Text("synthetic retained")))), paused = true),
+            onRemove = {}, onBeginEdit = { null },
             onFinishEdit = { _, _ -> }, onResume = { fail("must not recover remotely") },
             onContinueFreshInput = { continuations++ },
             onStopGatewayWait = { fail("must not stop remotely") },
@@ -393,14 +411,15 @@ class MessageQueueRecoveryPanelDeviceTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         compose.waitForIdle()
         compose.onNodeWithTag("chat_queue_close_management").assertDoesNotExist()
-        compose.onNodeWithText("消息已暂停 · 0 条待发").assertExists()
-        compose.runOnIdle { assertEquals(1, continuations) }
+        compose.onNodeWithText("保留待核对 · 1").assertExists()
+        compose.runOnIdle { assertEquals(0, continuations) }
     }
 
-    @Test fun outsideTapClosesPausedManagementAndRequestsFreshInputOnce() {
+    @Test fun outsideTapClosesPausedManagementWithoutARecoverySideEffect() {
         var continuations = 0
         compose.setContent { MaterialTheme { MessageQueuePanel(
-            state = MessageQueueState(paused = true), onRemove = { fail("must not delete") },
+            state = MessageQueueState(listOf(QueuedMessage(parts = listOf(UIMessagePart.Text("synthetic retained")))), paused = true),
+            onRemove = { fail("must not delete") },
             onBeginEdit = { null }, onFinishEdit = { _, _ -> },
             onResume = { fail("must not replay") }, onContinueFreshInput = { continuations++ },
             onStopGatewayWait = { fail("must not stop remotely") },
@@ -408,8 +427,8 @@ class MessageQueueRecoveryPanelDeviceTest {
         compose.onNodeWithTag("chat_queue_manage").performClick()
         tapOutsideDialog(awaitFocusedManagementDialog())
         compose.onNodeWithTag("chat_queue_close_management").assertDoesNotExist()
-        compose.onNodeWithText("消息已暂停 · 0 条待发").assertExists()
-        compose.runOnIdle { assertEquals(1, continuations) }
+        compose.onNodeWithText("保留待核对 · 1").assertExists()
+        compose.runOnIdle { assertEquals(0, continuations) }
     }
 
     @Test fun closingUnpausedManagementDoesNotInterruptHealthyGenerationEvenWithOldRecoveryState() {

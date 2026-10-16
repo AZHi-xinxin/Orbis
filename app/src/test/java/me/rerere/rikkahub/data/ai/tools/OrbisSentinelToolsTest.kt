@@ -20,6 +20,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisSentinelToolsTest {
+    @Test fun `invalid once union fields reject before execution but saved rules are never labelled unexecuted`() = runTest {
+        val fixture = Fixture()
+        for (extra in listOf("\"duration_seconds\":1", "\"duration_seconds\":0.001", "\"quiet_enabled\":false", "\"app_package\":\"\"")) {
+            val raw = Json.parseToJsonElement("""{"type":"once","due_at_ms":20000,"prompt":"test",$extra}""").jsonObject
+            val rejected = failed { call(fixture.tools(), "create", raw) }
+            assertTrue(rejected is ToolRejectedBeforeExecutionException)
+            assertTrue((rejected as ToolRejectedBeforeExecutionException).publicReason.contains("尚未写入"))
+        }
+        assertEquals(0, fixture.writes); assertEquals(0, fixture.scheduleRequests)
+        val schedulingFailure = call(fixture.tools(onChanged = { error("synthetic scheduling failure") }), "create", createArgs("once"))
+        assertTrue(schedulingFailure["saved"]!!.jsonPrimitive.boolean)
+        assertFalse(schedulingFailure["runtime_reschedule_requested"]!!.jsonPrimitive.boolean)
+        assertTrue(fixture.writes > 0)
+        var persisted: String? = null
+        var writes = 0
+        val uncertainStore = OrbisSentinelRuleStore(read = { persisted }, write = {
+            persisted = it; writes++; throw java.io.IOException("synthetic failure after commit")
+        }, lock = Any())
+        val afterCommit = failed { call(createOrbisSentinelTools(uncertainStore, AI, CURRENT, now = { 10_000L }),
+            "create", createArgs("once")) }
+        assertFalse(afterCommit is ToolRejectedBeforeExecutionException)
+        assertEquals(1, writes)
+        assertEquals(1, uncertainStore.list().size)
+    }
     private class Fixture {
         var persisted: String? = null
         var writes = 0

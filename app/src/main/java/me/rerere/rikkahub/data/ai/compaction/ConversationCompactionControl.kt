@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.compaction
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -37,7 +38,7 @@ fun estimateCompactionTokens(messages: List<UIMessage>): Long = messages.sumOf {
     // Use the same reversible voice-note projection as the provider request, including nested
     // tool results. Audio paths, original ASR and playback metadata are not model context.
     val encoded = compactionEstimateJson.encodeToString(UIMessage.serializer(),
-        message.withoutDeletedToolRecordData().withVoiceNoteTranscripts())
+        message.withoutDeletedToolRecordData().withVoiceNoteTranscripts().copy(orbisPreparedContextUsage = null))
     estimateCompactionTextTokens(encoded) + 8L
 }
 
@@ -54,6 +55,15 @@ fun estimateCompactionTextTokens(text: String): Long {
 }
 
 data class CompactionContextEstimate(val tokens: Long, val basis: String)
+
+/** A stable UI/tool reference. Never switch to historical provider usage after a new reply.
+ * Deliberately excludes reasoning and request-time system/tool definitions: those have a
+ * separate prepared-request measurement and cannot be reconstructed by a chat page alone.
+ */
+fun estimateActiveMessageBodies(messages: List<UIMessage>): CompactionContextEstimate = CompactionContextEstimate(
+    estimateCompactionTokens(messages.map { it.copy(parts = it.parts.filterNot { part -> part is UIMessagePart.Reasoning }, usage = null) }),
+    "stable_active_message_body_estimate; excludes_reasoning_system_and_tool_schemas",
+)
 
 /** Old retained usage cannot survive a compaction boundary as the new context's measurement. */
 fun estimateCurrentContext(
@@ -138,7 +148,7 @@ class ConversationCompactionControl(
     fun tools(): List<Tool> = listOf(
         Tool(
             name = COMPACT_TOOL_NAME,
-            description = "整理本对话活动上下文。你先写自己的普通可见摘要，再调用 use_last_message=true；也可显式提供 summary。不会找其他模型代写。默认保留最近 min(32,现有条数) 条原文，keep_recent 可为0，显式超过现有条数会报错。可选调用context_compaction_status查询现有条数和用量，但不是整理前置。工具调用与结果成组保留，必要协议尾段额外计数。成功后同一轮继续，失败原文不变；旧上下文有可撤销记录。无 ST/锚点/人工确认前置。",
+            description = "整理本对话活动上下文。你在本次回复中先写普通可见摘要，再调用 use_last_message=true；不会向历史消息回退寻找摘要。也可显式提供 summary，其正文优先使用。不会找其他模型代写。默认保留最近 min(32,现有条数) 条原文，keep_recent 可为0，显式超过现有条数会报错。可选调用context_compaction_status查询现有条数和用量，但不是整理前置。工具调用与结果成组保留，必要协议尾段额外计数。成功后同一轮继续，失败原文不变；旧上下文有可撤销记录。无 ST/锚点/人工确认前置。",
             parameters = { InputSchema.Obj(buildJsonObject {
                 put("use_last_message", buildJsonObject { put("type", "boolean") })
                 put("summary", buildJsonObject { put("type", "string") })
@@ -152,12 +162,18 @@ class ConversationCompactionControl(
         ),
         Tool(
             name = "context_compaction_status",
-            description = "查看本对话活动上下文条数、近似用量和整理提醒阈值。0仅关闭提醒，不禁用compact。用量是估算而非当前请求精确token。",
+            description = "查看本对话活动条数、整次请求估算和整理提醒阈值。estimated_tokens 与人类圆环、AI提醒同用请求口径；正文另列 body_estimated_tokens，不可混用。圆环在请求完成后更新，生成中不显示旧比例。0仅关闭提醒，不禁用compact。都不是精确计费token。",
             parameters = { InputSchema.Obj(JsonObject(emptyMap())) },
             execute = { listOf(UIMessagePart.Text(buildJsonObject {
                 put("active_messages", readMessages().size)
-                put("estimated_tokens", lastInputEstimate ?: estimateCompactionTokens(readMessages()))
-                put("basis", "estimate; includes frozen request and tool schemas when available; not exact provider usage")
+                val body = estimateActiveMessageBodies(readMessages())
+                put("body_estimated_tokens", body.tokens)
+                put("body_basis", body.basis)
+                put("estimated_tokens", lastInputEstimate?.let(::JsonPrimitive) ?: JsonNull)
+                put("basis", "prepared_request_estimate; same request basis as chat ring and reminder; not exact billing")
+                put("same_reference_as_chat_ring", lastInputEstimate != null)
+                lastInputEstimate?.let { put("prepared_request_estimated_tokens", it) }
+                put("request_basis", "prepared request includes system, injections, tool schemas and provider safety estimates; ring publishes latest completed step and hides stale values during generation or after history/configuration changes")
                 put("reminder_threshold_tokens", thresholdTokens)
                 put("reminder_starts_at_ratio", 0.9)
                 put("automatic_compaction", false)
@@ -194,12 +210,14 @@ fun prepareCompaction(
     val useLast = args["use_last_message"]?.let {
         (it as? JsonPrimitive)?.booleanOrNull ?: error("use_last_message必须是布尔值。")
     } ?: (explicit == null)
-    val source = if (useLast) {
+    // Only the current provider response can supply implicit summary text. Falling back to an
+    // arbitrary older assistant answer silently loses history and also pollutes local memory.
+    // Explicit text wins even when a model redundantly sends use_last_message=true.
+    val source = if (explicit == null && useLast) {
         currentResponse?.takeIf { ordinaryText(it) != null }
-            ?: messages.lastOrNull { ordinaryText(it) != null }
     } else null
-    val summaryText = source?.let(::ordinaryText) ?: explicit
-        ?: error("没有可用的AI普通正文摘要。请先写摘要，或提供summary；本次未修改原文。")
+    val summaryText = explicit ?: source?.let(::ordinaryText)
+        ?: error("本次回复没有普通正文摘要，不能使用历史旧回复代替。请在本次回复先写摘要，或显式提供summary；本次未修改原文。")
     val keep = args["keep_recent"]?.let {
         (it as? JsonPrimitive)?.takeIf { value -> !value.isString }?.intOrNull
             ?: error("keep_recent必须是非负整数。")
@@ -207,7 +225,12 @@ fun prepareCompaction(
     require(keep in 0..messages.size) { "keep_recent=$keep，现有${messages.size}条；请使用0..${messages.size}，本次未修改原文。" }
     val summary = UIMessage.assistant(summaryText).copy(
         modelId = source?.modelId ?: messages.lastOrNull()?.modelId,
-        parts = listOf(UIMessagePart.Text(summaryText, buildJsonObject { put(COMPACTION_SUMMARY_MARKER, true) })),
+        parts = listOf(UIMessagePart.Text(summaryText, buildJsonObject {
+            put(COMPACTION_SUMMARY_MARKER, true)
+            put("summary_source", if (source == null) "explicit_argument" else "current_response")
+            source?.let { put("source_message_id", it.id.toString()) }
+            put("summary_sha256", orbisCompactionSummaryHash(summaryText))
+        })),
     )
     return PreparedCompaction(summary, keep, messages.size, source?.id)
 }
@@ -240,6 +263,8 @@ fun buildCompactionReplacement(
         put("new_start_message_id", request.summary.id.toString())
         put("created_at_ms", createdAtEpochMillis)
         put("summary_sha256", summaryHash)
+        put("summary_source", if (request.sourceMessageId == null) "explicit_argument" else "current_response")
+        request.sourceMessageId?.let { put("source_message_id", it.toString()) }
         put("before_tokens", beforeTokens)
         put("after_tokens_estimate", afterTokens)
         put("usage_basis", "before: previous provider usage when valid plus estimate; after: text/tool estimate including this receipt")

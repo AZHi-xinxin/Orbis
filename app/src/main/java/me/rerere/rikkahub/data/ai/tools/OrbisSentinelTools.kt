@@ -139,12 +139,17 @@ internal fun createOrbisSentinelTools(
             description = "一次调用即可创建需要的本机哨兵，无逐次确认，不必先查说明。长期类别：ritual 每日仪式（daily_at_local+prompt，可选随机窗口）；agreement 静默约定（默认30分钟/50%/23:30–07:30静默+prompt）；screen_observation 默认30分钟屏幕观察；night_usage 默认00:00–07:30非聊天应用5分钟；screen_on 默认常亮10分钟；low_battery 低电量默认100%；geofence 沿用人类围栏；touch 触屏+prompt。once 用due_at_ms+prompt预约一次。系统事实类 observation/night/screen_on/battery/geofence 不接受prompt。全部自由选设，可enabled=false；人类总开关不可改。系统自动加真实日期时间时区。细节/示例可查orbis_sentinel_guide。",
             parameters = { sentinelSchema(sentinelConfigurationProperties(), listOf("type")) },
             needsApproval = { false }, execute = { args ->
-                val obj = sentinelArgs(args, SENTINEL_CONFIGURATION_KEYS)
-                val type = sentinelType(obj.sentinelRequiredString("type"))
-                val at = now()
-                val initial = OrbisSentinelRule(assistantId = assistantId, conversationId = conversationId, type = type,
-                    prompt = obj.sentinelString("prompt") ?: "", enabled = true, createdAtMs = at, updatedAtMs = at)
-                changedResult(store.create(initial.withSentinelConfiguration(obj, newRule = true)))
+                val candidate = sentinelPrewrite("哨兵创建参数无效，尚未写入或预约。只填写所选 type 的字段；once 最小参数为 type=once、due_at_ms（未来Unix毫秒）、prompt，不要附 duration_seconds、每日/静默/概率/应用字段。其他类型请查询 orbis_sentinel_guide 后修正参数。") {
+                    val obj = sentinelArgs(args, SENTINEL_CONFIGURATION_KEYS)
+                    val type = sentinelType(obj.sentinelRequiredString("type"))
+                    val at = now()
+                    val initial = OrbisSentinelRule(assistantId = assistantId, conversationId = conversationId, type = type,
+                        prompt = obj.sentinelString("prompt") ?: "", enabled = true, createdAtMs = at, updatedAtMs = at)
+                    initial.withSentinelConfiguration(obj, newRule = true)
+                }
+                // Storage/scheduling failures after this boundary can have side effects.
+                // They MUST remain unknown rather than falsely claiming nothing happened.
+                changedResult(store.create(candidate))
             }),
         Tool(name = "orbis_sentinel_update",
             description = "修改当前 AI 已有本机哨兵的内容、条件或规则启用状态，可跨本 AI 窗口管理；不能更改固定 AI/会话绑定或人类总开关。只传要改的字段，prompt 原样保存。类型改变时须提供新类型条件。宿主先核对旧预约：已送达的不重发，未送达的旧预约结束后再修改。",
@@ -226,7 +231,7 @@ private fun sentinelConfigurationProperties() = buildJsonObject {
     put("type", sentinelString(orbisSentinelGuide.map { it.type }))
     put("prompt", buildJsonObject { put("type", "string"); put("description", "仅 ritual/agreement/touch/once/旧自定义类必填：你亲写的唤醒正文，系统不改写；事实播报类不能填。") })
     put("enabled", buildJsonObject { put("type", "boolean"); put("description", "仅此条规则，绝非人类总开关；新建默认 true") })
-    put("duration_seconds", buildJsonObject { put("type", "number"); put("minimum", 0.001); put("description", "agreement 600–86400默认1800；screen_observation 只选1800/3600/5400/7200/9000/10800默认1800；night_usage默认300；screen_on默认600；旧interval/chat_idle/chat_left/app_usage仍为秒数。") })
+    put("duration_seconds", buildJsonObject { put("type", "number"); put("minimum", 0.001); put("description", "once/ritual/touch/low_battery/geofence 必须省略此字段，不要填0或1。agreement 600–86400默认1800；screen_observation 只选1800/3600/5400/7200/9000/10800默认1800；night_usage默认300；screen_on默认600；旧interval/chat_idle/chat_left/app_usage仍为秒数。") })
     put("due_at_ms", buildJsonObject { put("type", "integer"); put("minimum", 1); put("description", "once 的 Unix 毫秒时间戳") })
     put("app_package", sentinelString())
     put("action", sentinelString(listOf("wake", "device_context", "screenshot")))

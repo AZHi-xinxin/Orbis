@@ -52,10 +52,14 @@ class OpenAIProvider(
 
     private val chatCompletionsAPI = ChatCompletionsAPI(client = client, keyRoulette = keyRoulette)
     private val responseAPI = ResponseAPI(client = client, keyRoulette = keyRoulette)
+    // Ordinary API connections do not need the separate account store (or its disk setup).
+    private val planAccounts by lazy { context?.let { me.rerere.ai.provider.chatgpt.ChatGptPlanAccounts(it) } }
+    private val planAPI by lazy { planAccounts?.let(::ChatGptPlanAPI) }
 
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
+            providerSetting.chatGptAccountId?.let { return@withContext (planAccounts ?: error("siwc_not_signed_in")).models(it) }
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models")
@@ -76,14 +80,15 @@ class OpenAIProvider(
                 val modelObj = modelJson.jsonObject
                 val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
 
-                Model(
+                SeedreamImageApi.modelDefaults(Model(
                     modelId = id,
                     displayName = id,
-                )
+                ))
             }
         }
 
     override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
+        require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐用量请到 ChatGPT 设置 → Usage 查看。" }
         providerSetting.retiredSiliconFlowBalanceNotice()?.let { error(it) }
         require(providerSetting.apiKey.isNotBlank()) { "未配置此连接的密钥" }
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
@@ -121,7 +126,9 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): Flow<StreamChunk> = if (providerSetting.useResponseApi) {
+    ): Flow<StreamChunk> = if (providerSetting.chatGptAccountId != null) {
+        (planAPI ?: error("siwc_not_signed_in")).stream(providerSetting, messages, params)
+    } else if (providerSetting.useResponseApi) {
         responseAPI.streamText(
             providerSetting = providerSetting,
             messages = messages,
@@ -139,7 +146,9 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): TextGenerationResult = if (providerSetting.useResponseApi) {
+    ): TextGenerationResult = if (providerSetting.chatGptAccountId != null) {
+        (planAPI ?: error("siwc_not_signed_in")).generate(providerSetting, messages, params)
+    } else if (providerSetting.useResponseApi) {
         responseAPI.generateText(
             providerSetting = providerSetting,
             messages = messages,
@@ -157,6 +166,7 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         params: EmbeddingGenerationParams
     ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
+        require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐接入不提供嵌入接口，请配置独立 API。" }
         require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
 
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
@@ -211,6 +221,13 @@ class OpenAIProvider(
         require(providerSetting is ProviderSetting.OpenAI) {
             "Expected OpenAI provider setting"
         }
+        require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐接入不提供生图接口，请配置独立生图 AI。" }
+        require(!SeedreamImageApi.isVideoModel(params.model.modelId)) { "workshop_video_model" }
+        if (SeedreamImageApi.usesArk(providerSetting, params.model)) {
+            seedreamImages(providerSetting, params.model, params.prompt, params.size, params.numOfImages,
+                params.customHeaders, params.customBody, emptyList()).forEach { emit(it) }
+            return@flow
+        }
 
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
 
@@ -259,8 +276,15 @@ class OpenAIProvider(
         require(providerSetting is ProviderSetting.OpenAI) {
             "Expected OpenAI provider setting"
         }
+        require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐接入不提供改图接口，请配置独立生图 AI。" }
+        require(!SeedreamImageApi.isVideoModel(params.model.modelId)) { "workshop_video_model" }
         require(params.images.isNotEmpty()) {
             "At least one image is required"
+        }
+        if (SeedreamImageApi.usesArk(providerSetting, params.model)) {
+            seedreamImages(providerSetting, params.model, params.prompt, params.size, params.numOfImages,
+                params.customHeaders, params.customBody, params.images).forEach { emit(it) }
+            return@flow
         }
 
         val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
@@ -314,6 +338,45 @@ class OpenAIProvider(
         }
 
         items.forEach { emit(it) }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    private suspend fun seedreamImages(setting: ProviderSetting.OpenAI, model: Model, prompt: String,
+        size: String, count: Int, headers: List<me.rerere.ai.provider.CustomHeader>,
+        custom: List<me.rerere.ai.provider.CustomBody>, images: List<String>): List<ImageGenerationItem> = withContext(Dispatchers.IO) {
+        require(images.size <= 4) { "workshop_reference" }
+        val references = images.map { path ->
+            val file = File(path)
+            require(file.isFile && file.length() in 1..(24L * 1024 * 1024) && file.extension.lowercase() in SUPPORTED_EDIT_IMAGE_EXTENSIONS) {
+                "workshop_image_format"
+            }
+            "data:${file.imageMediaType()};base64,${Base64.encode(file.readBytes())}"
+        }
+        val body = SeedreamImageApi.requestBody(model, prompt, size, count, custom, references)
+        val encodedBody = body.toString().toRequestBody("application/json".toMediaType())
+        val oneShotBody = object : okhttp3.RequestBody() {
+            override fun contentType() = encodedBody.contentType()
+            override fun contentLength() = encodedBody.contentLength()
+            override fun isOneShot() = true
+            override fun writeTo(sink: okio.BufferedSink) = encodedBody.writeTo(sink)
+        }
+        val request = Request.Builder().url("${setting.baseUrl.trimEnd('/')}/images/generations")
+            .headers(headers.toHeaders())
+            .header("Authorization", "Bearer ${keyRoulette.next(setting.apiKey, setting.id.toString())}")
+            .header("Content-Type", "application/json")
+            .post(oneShotBody).build()
+        // Do not retry a potentially billed image request or follow credential-bearing redirects.
+        val imageClient = client.newBuilder().retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build()
+        imageClient.newCall(request).await().use { response ->
+            if (!response.isSuccessful) error(when (response.code) {
+                401 -> "workshop_image_auth"
+                403 -> "workshop_image_access"
+                404 -> "workshop_image_model"
+                429 -> "workshop_image_limit"
+                else -> "workshop_provider_failed"
+            })
+            parseImageResponse(response.body.string())
+        }
     }
 
     private suspend fun parseImageResponse(bodyStr: String): List<ImageGenerationItem> {

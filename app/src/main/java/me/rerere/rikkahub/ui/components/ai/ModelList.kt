@@ -199,11 +199,15 @@ internal fun ModelSelectorButton(
     compact: Boolean = false,
 ) {
     val model = state.currentModel
+    val usesChatGptPlan = state.providers.filterIsInstance<ProviderSetting.OpenAI>().any {
+        it.chatGptAccountId != null && it.models.any { candidate -> candidate.id == model?.id }
+    }
+    val modelLabel = model?.displayName?.let { if (usesChatGptPlan) "$it · ChatGPT 套餐" else it }
 
     if (compact) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OrbisInputPill(
-                label = model?.displayName ?: stringResource(R.string.model_list_select_model),
+                label = modelLabel ?: stringResource(R.string.model_list_select_model),
                 icon = HugeIcons.Brain02,
                 onClick = { state.open() },
                 modifier = modifier,
@@ -237,7 +241,7 @@ internal fun ModelSelectorButton(
                     )
                 }
                 Text(
-                    text = model?.displayName ?: stringResource(R.string.model_list_select_model),
+                    text = modelLabel ?: stringResource(R.string.model_list_select_model),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall

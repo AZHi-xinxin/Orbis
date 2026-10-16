@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +27,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,10 +37,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.File02
@@ -46,12 +49,15 @@ import me.rerere.hugeicons.stroke.Share08
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
-import me.rerere.workspace.WorkspaceStorageArea
 import org.koin.compose.koinInject
 import java.io.File
+import java.util.UUID
 
 private const val DEFAULT_VISIBLE_COUNT = 3
-private val WORKSPACE_FILE_TOOL_NAMES = setOf("workspace_write_file", "workspace_edit_file")
+private val PendingWorkspaceExportSaver = Saver<EditedWorkspaceFile?, List<String>>(
+    save = { it?.saveExportState() ?: emptyList() },
+    restore = ::restoreEditedWorkspaceExport,
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -59,38 +65,38 @@ internal fun EditedFilesList(
     parts: List<UIMessagePart>,
     assistant: Assistant?,
 ) {
-    val workspaceId = assistant?.workspaceId?.toString() ?: return
-    val editedFiles = remember(parts) {
-        parts.filterIsInstance<UIMessagePart.Tool>()
-            .filter { it.toolName in WORKSPACE_FILE_TOOL_NAMES && it.isExecuted }
-            .mapNotNull { tool ->
-                tool.inputAsJson().jsonObject["path"]?.jsonPrimitive?.contentOrNull
-            }
-            .distinct()
-    }
+    val editedFiles = remember(parts) { editedWorkspaceFiles(parts) }
     if (editedFiles.isEmpty()) return
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val workspaceRepository: WorkspaceRepository = koinInject()
 
-    var selectedPath by remember { mutableStateOf<String?>(null) }
-    var expanded by remember { mutableStateOf(false) }
+    var selectedFile by remember(assistant?.id, parts) { mutableStateOf<EditedWorkspaceFile?>(null) }
+    // SAF can recreate the Activity: save the original pair, never reconstruct it from current settings.
+    var pendingExport by rememberSaveable(stateSaver = PendingWorkspaceExportSaver) {
+        mutableStateOf<EditedWorkspaceFile?>(null)
+    }
+    var expanded by remember(assistant?.id, parts) { mutableStateOf(false) }
     val visibleFiles = if (expanded) editedFiles else editedFiles.take(DEFAULT_VISIBLE_COUNT)
     val hasMore = editedFiles.size > DEFAULT_VISIBLE_COUNT
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("*/*"),
     ) { uri ->
-        val path = selectedPath.also { selectedPath = null } ?: return@rememberLauncherForActivityResult
+        val source = pendingExport.also { pendingExport = null } ?: return@rememberLauncherForActivityResult
         if (uri == null) return@rememberLauncherForActivityResult
-        val outputStream = context.contentResolver.openOutputStream(uri) ?: return@rememberLauncherForActivityResult
         scope.launch {
             runCatching {
-                val (area, relativePath) = resolveWorkspacePath(path)
-                outputStream.use { output ->
-                    workspaceRepository.exportFile(workspaceId, area, relativePath, output)
+                withContext(Dispatchers.IO) {
+                    val outputStream = context.contentResolver.openOutputStream(uri) ?: error("export_destination_unavailable")
+                    outputStream.use { output ->
+                        workspaceRepository.exportRootfsFile(source.workspaceId, source.path, output)
+                    }
                 }
+            }.onFailure {
+                if (it is CancellationException) throw it
+                Toast.makeText(context, "文件暂时无法导出，请确认原工作区和文件仍存在。", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -99,10 +105,10 @@ internal fun EditedFilesList(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        visibleFiles.forEach { path ->
-            val fileName = remember(path) { path.substringAfterLast('/') }
+        visibleFiles.forEach { source ->
+            val fileName = source.name
             Surface(
-                onClick = { selectedPath = path },
+                onClick = { selectedFile = source },
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.tertiaryContainer,
             ) {
@@ -141,11 +147,10 @@ internal fun EditedFilesList(
         }
     }
 
-    if (selectedPath != null) {
-        val path = selectedPath!!
-        val fileName = remember(path) { path.substringAfterLast('/') }
+    if (selectedFile != null) {
+        val fileName = selectedFile!!.name
         ModalBottomSheet(
-            onDismissRequest = { selectedPath = null },
+            onDismissRequest = { selectedFile = null },
             sheetState = rememberBottomSheetState(
                 initialValue = SheetValue.Hidden,
                 enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
@@ -165,8 +170,10 @@ internal fun EditedFilesList(
                 )
                 Card(
                     onClick = {
-                        val p = selectedPath ?: return@Card
-                        exportLauncher.launch(p.substringAfterLast('/'))
+                        val source = selectedFile ?: return@Card
+                        pendingExport = source
+                        selectedFile = null
+                        exportLauncher.launch(source.name)
                     },
                     shape = MaterialTheme.shapes.medium,
                 ) {
@@ -190,27 +197,29 @@ internal fun EditedFilesList(
                 }
                 Card(
                     onClick = {
-                        val p = selectedPath ?: return@Card
-                        selectedPath = null
+                        val source = selectedFile ?: return@Card
+                        selectedFile = null
                         scope.launch {
                             runCatching {
-                                val (area, relativePath) = resolveWorkspacePath(p)
-                                val dir = File(context.cacheDir, "workspace_share").apply { mkdirs() }
-                                val file = File(dir, p.substringAfterLast('/'))
-                                file.outputStream().use { output ->
-                                    workspaceRepository.exportFile(workspaceId, area, relativePath, output)
+                                val uri = withContext(Dispatchers.IO) {
+                                    // Same-named files from different workspaces must not overwrite a shared URI.
+                                    val dir = File(context.cacheDir, "workspace_share/${UUID.randomUUID()}")
+                                    check(dir.mkdirs())
+                                    val file = File(dir, source.name)
+                                    file.outputStream().use { output ->
+                                        workspaceRepository.exportRootfsFile(source.workspaceId, source.path, output)
+                                    }
+                                    FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                                 }
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    file,
-                                )
                                 val intent = Intent(Intent.ACTION_SEND).apply {
                                     type = "application/octet-stream"
                                     putExtra(Intent.EXTRA_STREAM, uri)
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
                                 context.startActivity(Intent.createChooser(intent, null))
+                            }.onFailure {
+                                if (it is CancellationException) throw it
+                                Toast.makeText(context, "文件暂时无法分享，请确认原工作区和文件仍存在。", Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -236,14 +245,5 @@ internal fun EditedFilesList(
                 }
             }
         }
-    }
-}
-
-private fun resolveWorkspacePath(path: String): Pair<WorkspaceStorageArea, String> {
-    val trimmed = path.trimEnd('/')
-    return if (trimmed == "/workspace" || trimmed.startsWith("/workspace/")) {
-        WorkspaceStorageArea.FILES to trimmed.removePrefix("/workspace").trimStart('/')
-    } else {
-        WorkspaceStorageArea.LINUX to trimmed.trimStart('/')
     }
 }

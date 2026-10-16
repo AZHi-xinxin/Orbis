@@ -58,6 +58,7 @@ fun TTSProviderConfigure(
                     is TTSProviderSetting.Step -> "Step"
                     is TTSProviderSetting.ElevenLabs -> "ElevenLabs"
                     is TTSProviderSetting.FishAudio -> "Fish Audio"
+                    is TTSProviderSetting.Volcengine -> "豆包 TTS 2.0"
                 },
                 options = providers,
                 readOnly = true,
@@ -75,6 +76,7 @@ fun TTSProviderConfigure(
                         TTSProviderSetting.ElevenLabs::class -> "ElevenLabs"
                         TTSProviderSetting.FishAudio::class -> "Fish Audio"
                         TTSProviderSetting.Step::class -> "Step"
+                        TTSProviderSetting.Volcengine::class -> "豆包 TTS 2.0"
                         else -> providerClass.simpleName ?: "Unknown"
                     }
                 },
@@ -135,6 +137,7 @@ fun TTSProviderConfigure(
                             name = "Step TTS"
                         )
 
+                        TTSProviderSetting.Volcengine::class -> TTSProviderSetting.Volcengine(id = setting.id)
                         else -> setting
                     }
                     onValueChange(newSetting)
@@ -170,8 +173,31 @@ fun TTSProviderConfigure(
             is TTSProviderSetting.ElevenLabs -> ElevenLabsTTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.FishAudio -> FishAudioTTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.Step -> StepTTSConfiguration(setting, onValueChange)
+            is TTSProviderSetting.Volcengine -> VolcengineTTSConfiguration(setting, onValueChange)
         }
     }
+}
+
+@Composable
+private fun VolcengineTTSConfiguration(setting: TTSProviderSetting.Volcengine, onValueChange: (TTSProviderSetting) -> Unit) {
+    Text("豆包语音 2.0 · HTTP 流式接收，按文本段播放。需本人在火山语音控制台开通；此处不会自动开通或购买。")
+    SelectTextField(value = if (setting.legacyAuth) "App ID + Access Token" else "API Key", options = listOf(false, true), readOnly = true,
+        optionToString = { if (it) "旧版：App ID + Access Token" else "新版：API Key" },
+        onOptionSelected = { onValueChange(setting.copy(legacyAuth = it)) })
+    if (setting.legacyAuth) {
+        OutlinedTextField(setting.appId, { onValueChange(setting.copy(appId = it)) }, label = { Text("App ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(setting.accessToken, { onValueChange(setting.copy(accessToken = it)) }, label = { Text("Access Token（不是 IAM AK/SK）") }, singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+    } else OutlinedTextField(setting.apiKey, { onValueChange(setting.copy(apiKey = it)) }, label = { Text("语音 API Key") }, singleLine = true,
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+    SelectTextField(value = setting.resourceId, options = listOf("seed-tts-2.0", "seed-icl-2.0"), readOnly = true,
+        optionToString = { if (it == "seed-tts-2.0") "TTS 2.0 公共音色" else "声音复刻 2.0（需已购买并训练的音色）" },
+        onOptionSelected = { onValueChange(setting.copy(resourceId = it)) })
+    OutlinedTextField(setting.speaker, { onValueChange(setting.copy(speaker = it)) }, label = { Text("已授权的 speaker / 音色 ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    SelectTextField(value = setting.format, options = listOf("pcm", "mp3"), readOnly = true, optionToString = { it.uppercase() },
+        onOptionSelected = { onValueChange(setting.copy(format = it)) })
+    Text("采样率 24 kHz。测试朗读会联网，并可能消耗试用额度或产生费用。未选择此服务前不改变原来的音色。")
+    OutlinedTextField(setting.baseUrl, { onValueChange(setting.copy(baseUrl = it)) }, label = { Text("HTTPS 服务根地址（不含接口路径）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 }
 
 @Composable

@@ -18,7 +18,7 @@ import kotlin.uuid.Uuid
 
 /** Open is local-only; only Read requests /models, only Confirm writes the named AI binding. */
 @Composable
-internal fun OrbisGatewayModelEntry() {
+internal fun OrbisGatewayModelEntry(ownerAssistantId: String? = null) {
     val store = koinInject<SettingsStore>()
     val settings by store.settingsFlow.collectAsStateWithLifecycle()
     val client = koinInject<OkHttpClient>()
@@ -35,7 +35,7 @@ internal fun OrbisGatewayModelEntry() {
     var gatewayProvider by remember { mutableStateOf<ProviderSetting.OpenAI?>(null) }
     var manageRoutes by remember { mutableStateOf(false) }
     val choices = remember(settings.providers) { orbisStModelEntryChoices(settings.providers) }
-    val current = settings.assistants.singleOrNull { it.id == settings.assistantId }
+    val current = orbisSettingsAssistant(settings, ownerAssistantId)
     OrbisSettingsLink("ST 网关 · 添加线路与切换模型", "在手机授权添加兼容模型（如 Pro），再单独确认切换；身份与记忆保留",
         if (!settings.init && current != null && !busy) ({
             target = current.id

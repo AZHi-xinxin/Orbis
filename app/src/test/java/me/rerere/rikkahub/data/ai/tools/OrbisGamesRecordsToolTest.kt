@@ -24,6 +24,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisGamesRecordsToolTest {
+    @Test fun emptyReadIdIsAnUnfilteredQuery() {
+        val tool = createOrbisGamesRecordsTool({ OrbisGameState() }, { OrbisMiniGameState() })
+        assertEquals(run(tool), run(tool, Json.parseToJsonElement("""{"game_id":""}""")))
+    }
     @Test fun `filtered records do not depend on an unrelated damaged library`() {
         val native = createOrbisGamesRecordsTool({ OrbisGameState() }, { error("unrelated storage") })
         assertTrue(run(native, buildJsonObject { put("game_id", "gomoku") }).getValue("ok").jsonPrimitive.boolean)

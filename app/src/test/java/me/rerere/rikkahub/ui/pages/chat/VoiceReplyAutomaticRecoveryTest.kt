@@ -103,22 +103,25 @@ class VoiceReplyAutomaticRecoveryTest {
         } finally { r.voice.stopAndJoin() }
     }
 
-    @Test fun unresolvedReadinessIsBoundedAndLeavesManualContinueAvailable() = runTest {
+    @Test fun unresolvedReadinessContinuesAtFiveSecondIntervalsAndLeavesManualContinueAvailable() = runTest {
         val r = Rig(backgroundScope)
         val times = mutableListOf<Long>()
         try {
             r.start { times += testScheduler.currentTime; false }; advanceTimeBy(201); runCurrent()
             r.recorders.single().final("saved"); runCurrent(); r.failReply(); runCurrent()
+            val originalNotice = r.voice.state.value.replyNotice
+            assertFalse(originalNotice.isNullOrBlank())
             advanceTimeBy(60_000); runCurrent()
-            assertEquals(listOf(451L, 1_201L, 2_701L, 5_701L), times)
+            assertEquals(listOf(451L, 1_201L, 2_701L, 5_701L) + (1..10).map { 5_701L + it * 5_000L }, times)
             assertTrue(r.voice.state.value.replyBlocked)
             assertFalse(r.voice.state.value.replyResumeChecking)
-            assertTrue(r.voice.state.value.replyNotice.orEmpty().contains("MODEL_RESUME_BLOCKED"))
+            assertEquals(originalNotice, r.voice.state.value.replyNotice) // Quiet failed probes retain the original failure reason.
             assertEquals(2, r.recorders.size)
             assertEquals(listOf("saved"), r.inputs)
             assertTrue(r.voice.requestReplyResume { true }); runCurrent()
             assertFalse(r.voice.state.value.replyBlocked)
-            assertEquals(4, times.size)
+            advanceTimeBy(60_000); runCurrent()
+            assertEquals(14, times.size) // Successful manual recovery stops the observer.
         } finally { r.voice.stopAndJoin() }
     }
 
@@ -162,7 +165,7 @@ class VoiceReplyAutomaticRecoveryTest {
             advanceTimeBy(201); runCurrent()
             r.recorders.single().final("saved"); runCurrent(); r.failReply(); runCurrent()
             advanceTimeBy(30_000); runCurrent()
-            assertEquals(4, checks)
+            assertEquals(8, checks) // Exceptions stay fail-closed while later checks remain available.
             assertTrue(r.voice.state.value.replyBlocked)
             assertTrue(r.voice.state.value.isActive)
             assertFalse(r.voice.state.value.replyNotice.orEmpty().contains("secret"))
@@ -179,7 +182,7 @@ class VoiceReplyAutomaticRecoveryTest {
             advanceTimeBy(201); runCurrent()
             r.recorders.single().final("saved"); runCurrent(); r.failReply(); runCurrent()
             advanceTimeBy(30_000); runCurrent()
-            assertEquals(4, checks)
+            assertEquals(6, checks) // Each query times out after two seconds, then backs off.
             assertTrue(r.voice.state.value.replyBlocked)
             assertFalse(r.voice.state.value.replyResumeChecking)
             assertTrue(r.voice.requestReplyResume { true }); runCurrent()
@@ -194,10 +197,14 @@ class VoiceReplyAutomaticRecoveryTest {
         var activeChecks = 0
         var maximumChecks = 0
         var manualChecks = 0
+        var automaticChecks = 0
         try {
             r.start {
                 activeChecks++; maximumChecks = maxOf(maximumChecks, activeChecks)
-                try { withContext(NonCancellable) { gate.await() } } finally { activeChecks-- }
+                try {
+                    automaticChecks++
+                    if (automaticChecks == 1) withContext(NonCancellable) { gate.await() } else false
+                } finally { activeChecks-- }
             }
             advanceTimeBy(201); runCurrent()
             r.recorders.single().final("saved"); runCurrent(); r.failReply(); runCurrent()

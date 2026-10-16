@@ -27,6 +27,8 @@ import me.rerere.asr.ASRController
 import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
+import me.rerere.asr.ASRFailureKind
+import me.rerere.asr.classifyASRTransportFailure
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.appendAmplitude
 import me.rerere.asr.calculateRmsAmplitude
@@ -115,15 +117,15 @@ class DashScopeASRController(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val handshakeResult = response?.let { " (HTTP ${it.code} ${it.message})" }.orEmpty()
-                Log.e(TAG, "DashScope ASR websocket failed$handshakeResult", t)
                 if (this@DashScopeASRController.webSocket !== webSocket) return
+                val kind = classifyASRTransportFailure(t, response?.code)
+                Log.e(TAG, "DashScope ASR websocket failed: ${kind.name}")
 
                 finishTimeoutJob?.cancel()
                 finishTimeoutJob = null
                 this@DashScopeASRController.webSocket = null
                 releaseRecorder()
-                setError(t.message ?: "ASR websocket failed")
+                setError("语音识别连接未完成 [ASR_${kind.name}]", kind)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -135,10 +137,7 @@ class DashScopeASRController(
                 this@DashScopeASRController.webSocket = null
                 releaseRecorder()
                 _state.update {
-                    it.copy(
-                        status = ASRStatus.Idle,
-                        errorMessage = null
-                    )
+                    it.copy(status = ASRStatus.Idle, errorMessage = null)
                 }
             }
         })
@@ -370,12 +369,13 @@ class DashScopeASRController(
         }
     }
 
-    private fun setError(message: String) {
+    private fun setError(message: String, kind: ASRFailureKind = ASRFailureKind.UNKNOWN) {
         pcmObserver.set(null)
         _state.update {
             it.copy(
                 status = ASRStatus.Error,
-                errorMessage = message
+                errorMessage = message,
+                errorKind = kind
             )
         }
     }

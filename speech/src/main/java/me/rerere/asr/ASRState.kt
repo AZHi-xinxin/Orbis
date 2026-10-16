@@ -17,6 +17,7 @@ data class ASRState(
     val voiceTurn: ASRVoiceTurn = ASRVoiceTurn(),
     val echoCancellationAvailable: Boolean = false,
     val echoCancellationActive: Boolean = false,
+    val errorKind: ASRFailureKind? = null,
 ) {
     val isRecording: Boolean
         get() = status == ASRStatus.Connecting || status == ASRStatus.Listening || status == ASRStatus.Stopping

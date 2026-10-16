@@ -133,10 +133,31 @@ fun withCommittedVoiceNotePlayed(snapshot: Conversation, current: Conversation):
  * Works inside tool results too, so text-only gateways never receive an unsupported audio part.
  */
 fun UIMessage.withVoiceNoteTranscripts(): UIMessage = copy(parts = parts.map { it.voiceNoteRequestPart() })
+fun UIMessagePart.Audio.withSharedAcoustics(measurement: OrbisVoiceAcoustics): UIMessagePart.Audio = copy(metadata = buildJsonObject {
+    metadata?.forEach { (key, value) -> put(key, value) }
+    put("acoustic_v1_shared", true)
+    put("acoustic_v1", Json.encodeToJsonElement(OrbisVoiceAcoustics.serializer(), measurement))
+})
+
+private fun UIMessagePart.Audio.sharedAcousticsText(): String {
+    if (metadata?.get("acoustic_v1_shared") != JsonPrimitive(true)) return ""
+    val measurement = runCatching { Json.decodeFromJsonElement(OrbisVoiceAcoustics.serializer(), metadata!!.getValue("acoustic_v1")) }.getOrNull() ?: return ""
+    if (measurement.durationMs !in 1..120_000 || measurement.sampleRate !in 8000..48000 ||
+        measurement.pitchHz.size > 480 || measurement.pitchHz.any { it != null && (!it.isFinite() || it !in 50.0..600.0) } ||
+        measurement.rmsDbfs !in -100.0..0.0 || measurement.peakDbfs !in -100.0..0.0 || measurement.dynamicRangeDb !in 0.0..100.0 ||
+        measurement.pauseThresholdDbfs !in -70.0..-10.0 || measurement.minimumPauseMs !in 100..2000 ||
+        measurement.pitchStepMs != 250 || measurement.lowEnergySegments.size > 1200 ||
+        measurement.lowEnergyPauseCount != measurement.lowEnergySegments.size ||
+        measurement.lowEnergyPauseMs !in 0..measurement.durationMs ||
+        measurement.lowEnergySegments.any { it.startMs !in 0..measurement.durationMs || it.durationMs !in 1..measurement.durationMs || it.startMs + it.durationMs > measurement.durationMs }) return ""
+    return "\n[人类选择附带的本机声学测量] " + measurement.description(voiceNoteTranscript()) +
+        "\n[acoustic_v1，F0 为每 250ms 的 50ms 窗粗估值，null 表示不可靠；不是完整轨迹或心理推断] " +
+        Json.encodeToString(OrbisVoiceAcoustics.serializer(), measurement)
+}
 private fun UIMessagePart.voiceNoteRequestPart(): UIMessagePart = when (this) {
     is UIMessagePart.Audio -> if (isOrbisVoiceNote()) UIMessagePart.Text(
-        if (voiceNoteTranscript().isBlank()) "[语音条：未取得转写文字，不要猜测内容。]"
-        else "[语音条转写] ${voiceNoteTranscript()}"
+        (if (voiceNoteTranscript().isBlank()) "[语音条：未取得转写文字，不要猜测内容。]"
+        else "[语音条转写] ${voiceNoteTranscript()}") + sharedAcousticsText()
     ) else this
     is UIMessagePart.Tool -> copy(output = output.map { it.voiceNoteRequestPart() })
     else -> this
@@ -170,6 +191,8 @@ class OrbisVoicePcmBuffer(private val maxSeconds: Int = 120) {
         return pcm16MonoWav(bytes.toByteArray(), rate) to (bytes.size().toLong() * 1000 / (rate * 2))
     }
     @Synchronized fun discard() { closed = true; bytes.reset() }
+    @Synchronized fun acousticSnapshot(): Pair<ByteArray, Int>? =
+        if (rate == 0 || bytes.size() < 2 || bytes.size() % 2 != 0) null else bytes.toByteArray() to rate
 }
 
 fun pcm16MonoWav(pcm: ByteArray, sampleRate: Int): ByteArray {

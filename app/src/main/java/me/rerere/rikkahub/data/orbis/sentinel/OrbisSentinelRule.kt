@@ -3,6 +3,8 @@ package me.rerere.rikkahub.data.orbis.sentinel
 import java.util.UUID
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.orbis.OrbisHistoryCleanupReceipt
+import me.rerere.rikkahub.data.orbis.OrbisHistoryRetention
 
 @Serializable
 enum class OrbisSentinelType {
@@ -123,7 +125,14 @@ data class OrbisSentinelState(
     val resumedAtMs: Long? = null,
     val rules: List<OrbisSentinelRule> = emptyList(),
     val executions: List<OrbisSentinelExecution> = emptyList(),
+    val historyReceipts: List<OrbisSentinelHistoryReceipt> = emptyList(),
+    val historyRetention: OrbisHistoryRetention = OrbisHistoryRetention(),
+    val lastCleanup: OrbisHistoryCleanupReceipt? = null,
 )
+
+@Serializable
+data class OrbisSentinelHistoryReceipt(val eventId: String, val ruleId: String,
+    val status: OrbisSentinelExecutionStatus)
 
 data class OrbisSentinelReservation(val rule: OrbisSentinelRule, val replay: Boolean)
 

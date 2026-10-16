@@ -8,6 +8,7 @@ import org.junit.Test
 class OrbisEventTriggerTimeTest {
     private val binding = OrbisEventBinding("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222")
     private val input = OrbisIncomingEvent("trigger-time-test", "lc_sentinel", "original", false)
+    private fun memoryInbox(): OrbisEventInbox { var disk: String? = null; return OrbisEventInbox({ disk }, { disk = it }) }
 
     @Test fun senderTriggerAndHostReceiptRemainSeparateAndPersistAcrossReload() {
         var disk: String? = null
@@ -21,7 +22,7 @@ class OrbisEventTriggerTimeTest {
     }
 
     @Test fun identicalOrLegacyReplayDoesNotRewriteOriginalTime() {
-        val inbox = OrbisEventInbox({ null }, {})
+        val inbox = memoryInbox()
         inbox.bind(setOf(input.source), binding)
         val original = inbox.accept(input.copy(occurred_at = 100L), binding, 200L).first
         assertEquals(original, inbox.accept(input.copy(occurred_at = 100L), binding, 900L).first)
@@ -31,7 +32,7 @@ class OrbisEventTriggerTimeTest {
     }
 
     @Test fun oldRecordKeepsUnknownTriggerInsteadOfInventingOneOnReplay() {
-        val inbox = OrbisEventInbox({ null }, {})
+        val inbox = memoryInbox()
         inbox.bind(setOf(input.source), binding)
         val original = inbox.accept(input, binding, 200L).first
         assertNull(original.occurredAt)
@@ -40,7 +41,8 @@ class OrbisEventTriggerTimeTest {
 
     @Test fun invalidOrUnreasonablyFutureTimestampDoesNotWrite() {
         var writes = 0
-        val inbox = OrbisEventInbox({ null }, { writes++ })
+        var disk: String? = null
+        val inbox = OrbisEventInbox({ disk }, { disk = it; writes++ })
         inbox.bind(setOf(input.source), binding)
         for (bad in listOf(-1L, 0L, 301_001L, Long.MAX_VALUE)) {
             val failure = runCatching { inbox.accept(input.copy(occurred_at = bad), binding, 1_000L) }.exceptionOrNull()

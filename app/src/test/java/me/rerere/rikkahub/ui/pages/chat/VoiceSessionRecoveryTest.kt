@@ -46,7 +46,8 @@ class VoiceSessionRecoveryTest {
             inputs += it
             CompletableDeferred<String?>().also { reply -> replies += reply }
         }
-        fun start(muted: Boolean = false) = voice.start(
+        fun start(muted: Boolean = false, checkReady: (suspend () -> Boolean)? = null, fresh: Boolean = false) = voice.start(
+            freshHumanReplies = fresh,
             createAsr = {
                 check(factoryFailureAfter?.let { recorders.size < it } != false) { "synthetic factory unavailable" }
                 Recorder(finalTimeoutMs).also { recorders += it }
@@ -55,7 +56,65 @@ class VoiceSessionRecoveryTest {
             stopSpeaking = {}, setOutputMuted = { outputMuted += it },
             onConnected = { connected++ }, onEnded = { ended += it },
             initialMicrophoneEnabled = !muted, requestOpening = { opening++; null },
+            checkReplyResume = checkReady,
         )
+    }
+
+    @Test fun freshSpeechDoesNotNeedQueueRecoveryAfterModelFailure() = runTest {
+        val r = Rig(backgroundScope)
+        try {
+            r.start(fresh = true); advanceTimeBy(201); runCurrent()
+            r.recorders.last().final("first input"); runCurrent()
+            val listening = r.recorders.last()
+            r.replies.single().completeExceptionally(me.rerere.rikkahub.service.MessageQueuePausedException()); runCurrent()
+            assertFalse(r.voice.state.value.replyBlocked)
+            assertFalse(listening.disposed)
+            assertTrue(r.voice.state.value.microphoneEnabled)
+            listening.final("new human correction"); runCurrent()
+            assertEquals(listOf("first input", "new human correction"), r.inputs)
+            r.replies.last().complete("new response"); runCurrent()
+            assertEquals(listOf("new response"), r.spoken)
+            advanceTimeBy(4_001); runCurrent()
+            assertNull(r.voice.state.value.recoveryNotice)
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun freshRecoveryDoesNotReopenMutedOrFocusSuspendedMicrophone() = runTest {
+        val r = Rig(backgroundScope)
+        try {
+            r.start(fresh = true); advanceTimeBy(201); runCurrent()
+            r.recorders.last().final("input"); runCurrent()
+            r.voice.setMicrophoneEnabled(false); r.voice.setSpeakerEnabled(false)
+            r.voice.setAudioFocusSuspended(true); runCurrent()
+            val count = r.recorders.size
+            r.replies.single().completeExceptionally(IllegalStateException("save failed")); runCurrent()
+            advanceTimeBy(60_000); runCurrent()
+            assertFalse(r.voice.state.value.replyBlocked)
+            assertFalse(r.voice.state.value.microphoneEnabled)
+            assertFalse(r.voice.state.value.speakerEnabled)
+            assertTrue(r.voice.state.value.audioFocusSuspended)
+            assertEquals(count, r.recorders.size)
+            assertTrue(r.spoken.isEmpty())
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun oldReplyFailureDoesNotDiscardAnOngoingLongUtterance() = runTest {
+        val r = Rig(backgroundScope)
+        try {
+            r.start(fresh = true); advanceTimeBy(201); runCurrent()
+            r.recorders.last().final("earlier request"); runCurrent()
+            val recorder = r.recorders.last()
+            val longText = "这是一段用于回归测试的长发言。".repeat(300)
+            recorder.state.value = recorder.state.value.copy(transcript = longText,
+                voiceTurn = ASRVoiceTurn("long-human-speech"))
+            runCurrent()
+            r.replies.first().completeExceptionally(IllegalStateException("old save failed")); runCurrent()
+            assertFalse(recorder.disposed)
+            assertFalse(r.voice.state.value.replyBlocked)
+            recorder.final(longText); runCurrent()
+            assertEquals(listOf("earlier request", longText), r.inputs)
+            assertTrue(r.spoken.isEmpty())
+        } finally { r.voice.stopAndJoin() }
     }
 
     @Test fun silentCallHasNoThirtyMinuteOrOvernightLocalDeadline() = runTest {
@@ -68,6 +127,71 @@ class VoiceSessionRecoveryTest {
             assertFalse(r.recorders.single().disposed)
             assertTrue(r.inputs.isEmpty()); assertTrue(r.ended.isEmpty())
         } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun typedIdleEofRetriesButTypedAuthenticationDoesNot() = runTest {
+        for (kind in listOf(me.rerere.asr.ASRFailureKind.NETWORK, me.rerere.asr.ASRFailureKind.AUTHORIZATION)) {
+            val r = Rig(backgroundScope) { testScheduler.currentTime }
+            try {
+                r.start(); advanceTimeBy(201); runCurrent()
+                r.recorders.last().state.value = ASRState(status = ASRStatus.Error,
+                    errorMessage = "unexpected end of stream", errorKind = kind)
+                runCurrent(); advanceTimeBy(1_001); runCurrent()
+                assertEquals(if (kind == me.rerere.asr.ASRFailureKind.NETWORK) 2 else 1, r.recorders.size)
+                assertTrue(r.inputs.isEmpty())
+            } finally { r.voice.stopAndJoin() }
+        }
+    }
+
+    @Test fun typedNetworkFailureWithPartialSpeechStillNeedsManualResume() = runTest {
+        val r = Rig(backgroundScope)
+        try {
+            r.start(); advanceTimeBy(201); runCurrent()
+            r.recorders.last().state.value = ASRState(status = ASRStatus.Error,
+                transcript = "partial", errorMessage = "network", errorKind = me.rerere.asr.ASRFailureKind.NETWORK)
+            runCurrent(); advanceTimeBy(60_000); runCurrent()
+            assertEquals(1, r.recorders.size)
+            assertFalse(r.voice.state.value.microphoneEnabled)
+            assertTrue(r.inputs.isEmpty())
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun safeReadinessAfterTwentySecondsResumesOnlyFutureInputAndPreservesMute() = runTest {
+        val r = Rig(backgroundScope)
+        var ready = false
+        try {
+            r.start(checkReady = { ready }); advanceTimeBy(201); runCurrent()
+            r.recorders.last().final("accepted input"); runCurrent()
+            r.replies.single().completeExceptionally(IllegalStateException("slow cleanup")); runCurrent()
+            val recordersBeforeMute = r.recorders.size
+            r.voice.setMicrophoneEnabled(false); r.voice.setSpeakerEnabled(false); runCurrent()
+            advanceTimeBy(20_000); runCurrent()
+            assertTrue(r.voice.state.value.replyBlocked)
+            // An early manual check must not cancel subsequent automatic safe checks.
+            assertTrue(r.voice.requestReplyResume { ready }); runCurrent()
+            ready = true; advanceTimeBy(6_000); runCurrent()
+            assertFalse(r.voice.state.value.replyBlocked)
+            assertFalse(r.voice.state.value.microphoneEnabled)
+            assertFalse(r.voice.state.value.speakerEnabled)
+            assertEquals(listOf("accepted input"), r.inputs)
+            assertEquals(recordersBeforeMute, r.recorders.size)
+            assertTrue(r.spoken.isEmpty())
+        } finally { r.voice.stopAndJoin() }
+    }
+
+    @Test fun stoppedCallCannotBeRevivedByLateReadyCheck() = runTest {
+        val r = Rig(backgroundScope)
+        var ready = false
+        r.start(checkReady = { ready }); advanceTimeBy(201); runCurrent()
+        r.recorders.last().final("input"); runCurrent()
+        r.replies.single().completeExceptionally(IllegalStateException("pending")); runCurrent()
+        advanceTimeBy(20_000); runCurrent()
+        r.voice.stopAndJoin()
+        val before = r.recorders.size
+        ready = true; advanceTimeBy(60_000); runCurrent()
+        assertFalse(r.voice.state.value.isActive)
+        assertEquals(before, r.recorders.size)
+        assertEquals(listOf("input"), r.inputs)
     }
 
     @Test fun transientPauseDiscardsOldPartialAndNeverDuplicatesOpening() = runTest {

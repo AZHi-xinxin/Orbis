@@ -13,6 +13,7 @@ class WorkspaceManager(
     private val bindMounts: List<WorkspaceBindMount> = emptyList(),
 ) {
     private val fileSystem = WorkspaceFileSystem(config)
+    private val nativeFiles by lazy { WorkspaceNativeFiles(requireNotNull(baseDir.parentFile)) }
 
     // 按 target 长度降序, 保证 /a/b 优先于 /a 匹配
     private val sortedBindMounts = bindMounts.sortedByDescending { it.target.trimEnd('/').length }
@@ -147,6 +148,34 @@ class WorkspaceManager(
 
     fun rootfsFileSize(root: String, path: String): Long =
         resolveRootfsFile(root, path).also { it.requireReadableFile(path) }.length()
+
+    fun readNativeChunk(root: String, path: String, offset: Long, maxBytes: Int, revision: String? = null): WorkspaceFileChunk =
+        nativeFiles.readChunk(nativePath(root, path), offset, maxBytes, revision)
+
+    fun readNativeBytes(root: String, path: String): ByteArray = nativeFiles.readBytes(nativePath(root, path))
+
+    fun writeNativeText(root: String, path: String, text: String, overwrite: Boolean): WorkspaceFileEntry {
+        val stat = nativeFiles.writeText(nativePath(root, path, write = true), text, overwrite)
+        return WorkspaceFileEntry(path, path.substringAfterLast('/'), false, stat.size, stat.updatedAt)
+    }
+
+    fun updateNativeText(root: String, path: String, update: (String) -> String): WorkspaceTextUpdate =
+        nativeFiles.updateText(nativePath(root, path, write = true), update)
+
+    private fun nativePath(root: String, path: String, write: Boolean = false): List<String> {
+        requireValidRoot(root)
+        require(validWorkspaceComponent(root)) { "workspace_path_denied" }
+        require(path.startsWith('/') && path.length <= 4096 && path.substring(1).split('/').all(::validWorkspaceComponent)) {
+            "workspace_path_denied"
+        }
+        require(!write || (path != "/upload" && !path.startsWith("/upload/"))) { "workspace_upload_read_only" }
+        val location = resolveRootfsPath(root, path)
+        // Lexical mapping only. The descriptor backend rejects symlinks component-by-component.
+        val anchor = requireNotNull(baseDir.parentFile).absoluteFile.toPath().normalize()
+        val directory = location.rootDir.absoluteFile.toPath().normalize()
+        require(directory.startsWith(anchor) && directory != anchor) { "workspace_path_denied" }
+        return anchor.relativize(directory).map { it.toString() } + location.relativePath.split('/').filter { it.isNotEmpty() }
+    }
 
     fun exportRootfsFile(root: String, path: String, outputStream: OutputStream) {
         val file = resolveRootfsFile(root, path)

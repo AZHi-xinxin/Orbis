@@ -92,6 +92,13 @@ data class GoogleThoughtMetadata(
     val thoughtSignature: String? = null,
 ) : PartMetadata
 
+/** Gemini's Chat Completions extension, kept separate from native generateContent metadata. */
+@Serializable
+data class GoogleChatCompletionsThoughtMetadata(
+    @SerialName("google_chat_completions_thought_signature")
+    val thoughtSignature: String? = null,
+) : PartMetadata
+
 /**
  * 文件编辑类工具(如 workspace_edit_file)输出部件的元数据,
  * 携带 unified diff 文本供 UI 渲染 diff view, 不会发送给 API

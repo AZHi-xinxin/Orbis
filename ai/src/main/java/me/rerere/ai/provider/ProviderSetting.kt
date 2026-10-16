@@ -66,6 +66,8 @@ sealed class ProviderSetting {
         var useResponseApi: Boolean = false,
         var includeHistoryReasoning: Boolean = true,
         var responsesPath: String = "/responses",
+        // Opaque local registration reference only; OAuth credentials stay in Keystore-protected storage.
+        val chatGptAccountId: String? = null,
     ) : ProviderSetting() {
         override fun addModel(model: Model): ProviderSetting {
             return copy(models = models + model)

@@ -557,6 +557,7 @@ internal fun MessagePartsBlock(
                                 key(indexedStep.index, step.reasoning.createdAt) {
                                     ChatMessageReasoningStep(
                                         reasoning = step.reasoning,
+                                        generating = loading && parts.lastOrNull() == step.reasoning,
                                         model = model,
                                         assistant = assistant,
                                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
@@ -593,7 +594,16 @@ internal fun MessagePartsBlock(
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
                         val textContent = @Composable {
-                            if (BuildConfig.ORBIS_ENABLED) {
+                            if (BuildConfig.ORBIS_ENABLED &&
+                                part.metadata?.get(me.rerere.rikkahub.data.ai.compaction.COMPACTION_SUMMARY_MARKER) ==
+                                kotlinx.serialization.json.JsonPrimitive(true)) {
+                                // A durable summary must remain inspectable even if the assistant's
+                                // visual regexes or roleplay/action parser hide ordinary chat text.
+                                Column {
+                                    Text("上下文整理摘要 · 完整正文", style = MaterialTheme.typography.labelMedium)
+                                    Text(part.text, style = orbisChatTextStyle())
+                                }
+                            } else if (BuildConfig.ORBIS_ENABLED) {
                                 OrbisStickerMessageText(
                                     content = part.text,
                                     allowReference = { reference ->

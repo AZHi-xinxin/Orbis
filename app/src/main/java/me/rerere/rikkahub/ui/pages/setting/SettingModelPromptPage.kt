@@ -24,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.R
@@ -33,6 +35,8 @@ import me.rerere.rikkahub.data.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TITLE_PROMPT
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_TRANSLATION_PROMPT
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.ui.components.ai.ReasoningButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.utils.plus
@@ -45,6 +49,7 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
+            val model = settings.providers.findModelById(settings.translateModeId)
             PromptSettingItem(
                 title = stringResource(R.string.setting_model_page_prompt_translation),
                 promptDescription = stringResource(R.string.setting_model_page_translate_prompt_vars),
@@ -52,6 +57,8 @@ internal fun PromptSettingsPage(settings: Settings, vm: SettingVM, contentPaddin
                 onPromptChange = { vm.updateSettings(settings.copy(translatePrompt = it)) },
                 onResetPrompt = { vm.updateSettings(settings.copy(translatePrompt = DEFAULT_TRANSLATION_PROMPT)) },
                 reasoningLevel = ReasoningLevel.fromBudgetTokens(settings.translateThinkingBudget),
+                model = model,
+                provider = model?.findProvider(settings.providers),
                 onUpdateReasoningLevel = { vm.updateSettings(settings.copy(translateThinkingBudget = it.budgetTokens)) },
             )
         }
@@ -103,6 +110,8 @@ private fun PromptSettingItem(
     onResetPrompt: () -> Unit,
     reasoningLevel: ReasoningLevel? = null,
     onUpdateReasoningLevel: ((ReasoningLevel) -> Unit)? = null,
+    model: Model? = null,
+    provider: ProviderSetting? = null,
 ) {
     var showEditor by remember { mutableStateOf(false) }
 
@@ -123,6 +132,8 @@ private fun PromptSettingItem(
                 headlineContent = { Text(stringResource(R.string.assistant_page_thinking_budget)) },
                 trailingContent = {
                     ReasoningButton(
+                        model = model,
+                        provider = provider,
                         reasoningLevel = reasoningLevel,
                         onUpdateReasoningLevel = onUpdateReasoningLevel,
                     )

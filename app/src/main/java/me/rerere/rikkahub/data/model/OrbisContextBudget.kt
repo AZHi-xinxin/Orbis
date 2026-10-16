@@ -9,7 +9,7 @@ import kotlin.uuid.Uuid
 internal enum class OrbisBudgetReason {
     READY_REFERENCE, GENERATING, NO_ASSISTANT, MODEL_UNKNOWN, MODEL_CHANGED,
     INCOMPLETE, TOOL_CONTINUATION, USAGE_MISSING, USAGE_INVALID, HISTORY_EDITED, LIMIT_UNKNOWN,
-    REMINDERS_DISABLED, CURRENT_ESTIMATE, ESTIMATE_PENDING,
+    REMINDERS_DISABLED, CURRENT_ESTIMATE, ESTIMATE_PENDING, REQUEST_ESTIMATE_UNAVAILABLE,
 }
 
 /** Provenance-labelled current estimate or persisted usage, never a claim of exact capacity. */
@@ -23,6 +23,8 @@ internal data class OrbisContextBudget(
     val reminderThresholdTokens: Int = 0,
     val currentUsageTokens: Long? = null,
     val currentUsageSource: String? = null,
+    val bodyUsageTokens: Long? = null,
+    val requestPreparedAtMillis: Long? = null,
 ) {
     // Percentage is deliberately not clamped: an over-limit reference must not look safe.
     val percentLabel: String
@@ -54,6 +56,9 @@ internal fun deriveOrbisContextBudget(
     currentUsageTokens: Long? = null,
     currentUsageSource: String? = null,
     currentEstimatePending: Boolean = false,
+    requirePreparedRequest: Boolean = false,
+    bodyUsageTokens: Long? = null,
+    requestPreparedAtMillis: Long? = null,
 ): OrbisContextBudget {
     // Do not silently fall back to an older successful response if the latest one lacks usage.
     val last = currentMessages.lastOrNull { it.role == MessageRole.ASSISTANT && !it.isSynthetic }
@@ -84,12 +89,15 @@ internal fun deriveOrbisContextBudget(
     val estimate = currentUsageTokens?.takeIf { it >= 0 }
     val usableReference = referenceReason == OrbisBudgetReason.READY_REFERENCE ||
         referenceReason == OrbisBudgetReason.LIMIT_UNKNOWN
-    val tokens = if (currentEstimatePending) null else estimate ?: usage?.promptTokens?.toLong()?.takeIf { usableReference }
+    val tokens = if (currentEstimatePending) null else estimate ?: usage?.promptTokens?.toLong()?.takeIf {
+        usableReference && !requirePreparedRequest
+    }
     val reason = when {
         isGenerating -> OrbisBudgetReason.GENERATING
         currentEstimatePending -> OrbisBudgetReason.ESTIMATE_PENDING
         threshold == 0 -> OrbisBudgetReason.REMINDERS_DISABLED
         estimate != null -> OrbisBudgetReason.CURRENT_ESTIMATE
+        requirePreparedRequest -> OrbisBudgetReason.REQUEST_ESTIMATE_UNAVAILABLE
         usableReference -> OrbisBudgetReason.READY_REFERENCE
         else -> referenceReason
     }
@@ -99,6 +107,8 @@ internal fun deriveOrbisContextBudget(
         inputRatio = tokens?.takeIf { threshold > 0 && !isGenerating }?.toDouble()?.div(threshold),
         reminderThresholdTokens = threshold,
         currentUsageTokens = tokens,
+        bodyUsageTokens = bodyUsageTokens,
+        requestPreparedAtMillis = requestPreparedAtMillis.takeIf { tokens != null },
         currentUsageSource = if (estimate != null) currentUsageSource?.takeIf { it.isNotBlank() }
             ?: "当前上下文估算（不是供应商精确用量）"
             else if (tokens != null) "最近完成回复的供应商输入用量；新增内容可能尚未计入" else null,

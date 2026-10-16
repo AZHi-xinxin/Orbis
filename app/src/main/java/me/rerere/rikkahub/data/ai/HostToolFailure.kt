@@ -27,6 +27,21 @@ enum class HostToolFailure(
         message = "生成被中断，未收到完整工具结果；是否执行未知。",
         executionPerformed = null,
     ),
+    APPROVAL_CANCELLED(
+        code = "tool_approval_cancelled_before_execution",
+        message = "等待确认的调用已结束，工具未执行。需要时可重新发起调用。",
+        executionPerformed = false,
+    ),
+    APPROVAL_CHANGED(
+        code = "tool_approval_context_changed",
+        message = "工具连接或配置已改变，本次未执行。请重新获取当前工具；无需重复点击旧确认。",
+        executionPerformed = false,
+    ),
+    DEVICE_UNAVAILABLE(
+        code = "toy_connection_unavailable",
+        message = "蓝牙 Toy 尚未连接，或连接已改变，本次未执行。这不是授权失败；请检查连接后重新发起调用。",
+        executionPerformed = false,
+    ),
     USER_CANCELLED(
         code = "generation_cancelled_by_user",
         message = "你已停止生成，未收到完整工具结果；是否执行未知。",
@@ -63,7 +78,14 @@ fun UIMessagePart.Tool.hostToolFailure(): HostToolFailure? {
 /** Neutral by default: a missing result alone never proves a user cancellation. */
 fun UIMessage.finishInterruptedHostTools(
     reason: HostToolFailure = HostToolFailure.INTERRUPTED,
-): UIMessage = finishPendingTools { it.withHostToolFailure(reason) }
+): UIMessage = finishPendingTools { tool ->
+    tool.withHostToolFailure(if (tool.isPending && reason.executionPerformed == null)
+        HostToolFailure.APPROVAL_CANCELLED else reason)
+}
+
+internal fun UIMessagePart.Tool.unavailableApprovalFailure(): UIMessagePart.Tool =
+    withHostToolFailure(if (toolName == "toy_bluetooth_set") HostToolFailure.DEVICE_UNAVAILABLE
+        else HostToolFailure.APPROVAL_CHANGED)
 
 /**
  * Exact dispatch against the tools provided for this generation, without lookup

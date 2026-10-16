@@ -2,6 +2,15 @@ package me.rerere.rikkahub.data.recovery
 
 import java.util.Locale
 
+/** Fixed rejection reason only; never a user's path, provider URI, display name or account. */
+internal fun emergencyDestinationDiagnostic(reason: String?): String = "ORBIS-RESCUE/" + when (reason) {
+    "app_private_directory" -> "E_DESTINATION_PRIVATE"
+    "not_local_provider" -> "E_DESTINATION_PROVIDER"
+    "invalid_document_id" -> "E_DESTINATION_DOCUMENT"
+    "invalid_scheme" -> "E_DESTINATION_SCHEME"
+    else -> "E_DESTINATION_REJECTED"
+} + " stage=destination"
+
 /**
  * Conservative destination policy for a rescue file that must survive uninstalling Orbis.
  * The Activity supplies DocumentsContract.getDocumentId(uri), already decoded by Android.

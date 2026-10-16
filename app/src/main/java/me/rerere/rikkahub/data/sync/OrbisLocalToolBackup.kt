@@ -181,6 +181,8 @@ internal object OrbisLocalToolBackup {
     private fun conflict(path: String) = if (path == SCHEDULE) "local_tool_backup_conflict_schedule" else "local_tool_backup_conflict_kaomoji"
 
     fun publicError(code: String?): String? = when (code) {
+        "character_backup_owner" -> "角色素材与备份中的助手身份不匹配，整次恢复已停止；不会把素材转给当前助手或按名称猜测归属。"
+        "character_backup_path", "character_backup_invalid" -> "角色素材备份的路径、图片或完整性未通过校验，整次恢复已停止；本机角色和其他助手素材保留。"
         "file_protection_invalid", "file_protection_unsafe_path" -> "附件锁定清单校验失败，整次恢复已停止；本机文件与保护状态保留。"
         "space_backup_conflict" -> "共同空间、秘密基地或照片墙存在同编号但不同内容，整次恢复已停止；本机内容保留，请核对备份。"
         "space_backup_invalid", "space_backup_path", "space_backup_unreferenced" -> "空间或照片的备份内容、路径或完整性校验失败，整次恢复已停止；本机内容保留。"

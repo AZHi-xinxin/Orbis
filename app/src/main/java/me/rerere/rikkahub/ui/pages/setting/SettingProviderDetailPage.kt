@@ -104,6 +104,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.chatgpt.ChatGptPlanCapabilities
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.R
@@ -248,6 +249,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel(), showMod
                 0 -> {
                     SettingProviderConfigPage(
                         provider = provider,
+                        currentModelId = settings.getCurrentChatModel()?.id,
                         onEdit = {
                             saveProvider(it, notifySuccess = true)
                         },
@@ -290,6 +292,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel(), showMod
 @Composable
 private fun SettingProviderConfigPage(
     provider: ProviderSetting,
+    currentModelId: Uuid?,
     onEdit: (ProviderSetting) -> Unit,
     onDelete: () -> Unit,
     onAddModels: (ProviderSetting) -> Unit,
@@ -315,7 +318,7 @@ private fun SettingProviderConfigPage(
             }
         )
 
-        if (internalProvider is ProviderSetting.OpenAI) {
+        if (internalProvider is ProviderSetting.OpenAI && (internalProvider as ProviderSetting.OpenAI).chatGptAccountId == null) {
             SettingProviderBalanceOption(
                 provider = internalProvider,
                 balanceOption = internalProvider.balanceOption,
@@ -331,6 +334,7 @@ private fun SettingProviderConfigPage(
         ) {
             ProviderConnectionTester(
                 internalProvider = internalProvider,
+                currentModelId = currentModelId,
             )
 
             Spacer(Modifier.weight(1f))
@@ -569,13 +573,13 @@ private fun ModelSettingsForm(
         val outputModality = ModelRegistry.MODEL_OUTPUT_MODALITIES.getData(id)
         val abilities = ModelRegistry.MODEL_ABILITIES.getData(id)
         onModelChange(
-            model.copy(
+            me.rerere.ai.provider.providers.openai.SeedreamImageApi.modelDefaults(model.copy(
                 modelId = id,
                 displayName = id,
                 inputModalities = inputModality,
                 outputModalities = outputModality,
                 abilities = abilities
-            )
+            ))
         )
     }
 
@@ -678,11 +682,17 @@ private fun ModelSettingsForm(
                         )
 
                         if (model.type == ModelType.CHAT) {
+                            val planReasoning = ChatGptPlanCapabilities.reasoningLevels(model, parentProvider) != null
                             ModalAbilitySelector(
-                                abilities = model.abilities,
+                                abilities = if (planReasoning) ChatGptPlanCapabilities.withKnownModelAbilities(model).abilities else model.abilities,
+                                lockedAbilities = if (planReasoning) setOf(ModelAbility.REASONING) else emptySet(),
                                 onUpdateAbilities = {
                                     onModelChange(model.copy(abilities = it))
                                 }
+                            )
+                            if (planReasoning) Text(
+                                "此套餐模型支持推理，旧配置也会自动适配。请在聊天的推理档位中选择强度；并非所有型号都支持关闭推理。",
+                                style = MaterialTheme.typography.bodySmall,
                             )
                         }
                     }
@@ -725,6 +735,7 @@ private fun ModelSettingsForm(
                     // 内置工具页面
                     BuiltInToolsSettings(
                         tools = model.tools,
+                        usesChatGptPlan = ChatGptPlanCapabilities.usesPlan(model, parentProvider),
                         onUpdateTools = { tools ->
                             onModelChange(model.copy(tools = tools))
                         }
@@ -1181,7 +1192,8 @@ private fun ModelModalitySelector(
 @Composable
 fun ModalAbilitySelector(
     abilities: List<ModelAbility>,
-    onUpdateAbilities: (List<ModelAbility>) -> Unit
+    onUpdateAbilities: (List<ModelAbility>) -> Unit,
+    lockedAbilities: Set<ModelAbility> = emptySet(),
 ) {
     Text(
         stringResource(R.string.setting_provider_page_abilities),
@@ -1193,6 +1205,7 @@ fun ModalAbilitySelector(
         ModelAbility.entries.forEachIndexed { index, ability ->
             SegmentedButton(
                 checked = ability in abilities,
+                enabled = ability !in lockedAbilities,
                 shape = SegmentedButtonDefaults.itemShape(index, ModelAbility.entries.size),
                 onCheckedChange = {
                     if (it) {
@@ -1409,6 +1422,7 @@ private fun ModelCard(
 @Composable
 private fun BuiltInToolsSettings(
     tools: Set<BuiltInTools>,
+    usesChatGptPlan: Boolean,
     onUpdateTools: (Set<BuiltInTools>) -> Unit
 ) {
     Column(
@@ -1429,6 +1443,14 @@ private fun BuiltInToolsSettings(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
+        if (usesChatGptPlan) {
+            Text(
+                text = "ChatGPT 套餐接入与 ChatGPT 网页的能力不同。不支持的旧开关仅在发送时忽略，不会删除原配置，也不影响普通文字聊天；不会自动切换到付费 API。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         val availableTools = listOf(
             BuiltInTools.Search to Pair(
                 stringResource(R.string.setting_page_built_in_tools_search),
@@ -1446,6 +1468,11 @@ private fun BuiltInToolsSettings(
 
         availableTools.forEach { (tool, info) ->
             val (title, description) = info
+            val supported = !usesChatGptPlan || ChatGptPlanCapabilities.supportsBuiltInTool(tool)
+            val effectiveDescription = if (supported) description else when (tool) {
+                BuiltInTools.ImageGeneration -> "当前 ChatGPT 套餐接入不支持原生生图。可让 AI 调用另行配置的生图工坊，工坊使用独立的生图 AI 配置。"
+                else -> "当前 ChatGPT 套餐接入不支持此原生工具。"
+            }
             Card(
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -1465,13 +1492,21 @@ private fun BuiltInToolsSettings(
                             style = MaterialTheme.typography.titleSmall
                         )
                         Text(
-                            text = description,
+                            text = effectiveDescription,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (!supported && tool in tools) {
+                            Text(
+                                text = "此前保存的此项开关不会随套餐请求发送。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     Switch(
-                        checked = tool in tools,
+                        checked = supported && tool in tools,
+                        enabled = supported,
                         onCheckedChange = { checked ->
                             if (checked) {
                                 onUpdateTools(tools + tool)

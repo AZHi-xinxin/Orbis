@@ -27,6 +27,8 @@ import me.rerere.asr.ASRController
 import me.rerere.asr.ASRPcmObserver
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.ASRState
+import me.rerere.asr.ASRFailureKind
+import me.rerere.asr.classifyASRTransportFailure
 import me.rerere.asr.ASRStatus
 import me.rerere.asr.appendAmplitude
 import me.rerere.asr.calculateRmsAmplitude
@@ -112,9 +114,10 @@ class OpenAIRealtimeASRController(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (this@OpenAIRealtimeASRController.webSocket !== webSocket) return
-                Log.e(TAG, "Realtime ASR websocket failed", t)
+                val kind = classifyASRTransportFailure(t, response?.code)
+                Log.e(TAG, "Realtime ASR websocket failed: ${kind.name}")
                 releaseRecorder()
-                setError(t.message ?: "ASR websocket failed")
+                setError("语音识别连接未完成 [ASR_${kind.name}]", kind)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -300,12 +303,13 @@ class OpenAIRealtimeASRController(
         }
     }
 
-    private fun setError(message: String) {
+    private fun setError(message: String, kind: ASRFailureKind = ASRFailureKind.UNKNOWN) {
         pcmObserver.set(null)
         _state.update {
             it.copy(
                 status = ASRStatus.Error,
-                errorMessage = message
+                errorMessage = message,
+                errorKind = kind
             )
         }
     }

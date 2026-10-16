@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.ui.components.ai
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -12,6 +14,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.model.OrbisVoiceAcoustics
+import me.rerere.rikkahub.data.model.measureOrbisVoiceAcoustics
+import me.rerere.rikkahub.data.model.withSharedAcoustics
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRStatus
 import me.rerere.rikkahub.data.files.FilesManager
@@ -41,6 +48,17 @@ internal fun OrbisVoiceNoteRecorder(
     var transcript by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var shareAcoustics by remember { mutableStateOf(false) }
+    var acoustics by remember { mutableStateOf<OrbisVoiceAcoustics?>(null) }
+    var pauseThreshold by remember { mutableDoubleStateOf(-35.0) }
+    var minimumPause by remember { mutableIntStateOf(300) }
+    LaunchedEffect(started, recording, asrState.status, pauseThreshold, minimumPause) {
+        acoustics = null
+        if (started && !recording && asrState.status != ASRStatus.Stopping && asrState.status != ASRStatus.Connecting) {
+            val snapshot = buffer.acousticSnapshot()
+            acoustics = snapshot?.let { withContext(Dispatchers.Default) { measureOrbisVoiceAcoustics(it.first, it.second, pauseThreshold, minimumPause) } }
+        }
+    }
     fun stop() { if (recording) { recording = false; asr.stop() } }
     LaunchedEffect(asrState.status) { if (asrState.status == ASRStatus.Error) stop() }
     DisposableEffect(asr) {
@@ -62,7 +80,7 @@ internal fun OrbisVoiceNoteRecorder(
     }
     AlertDialog(onDismissRequest = { if (!saving) { stop(); onDismiss() } },
         title = { Text("录制语音条") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("使用当前语音识别服务同步转写，发送给 AI 的是转写文字。录音保存在本机；最多 2 分钟。录完先加入草稿，不会立即发送。",
                     style = MaterialTheme.typography.bodySmall)
                 Text(if (recording) "正在录音 · ${elapsed}秒" else if (started) "录音已停止 · ${elapsed}秒" else "点开始后才开启麦克风")
@@ -83,17 +101,34 @@ internal fun OrbisVoiceNoteRecorder(
                 if (!recording && started) OutlinedTextField(value = transcript, onValueChange = { transcript = it },
                     label = { Text("转写文字（可核对修改）") }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 5)
                 notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (started && !recording) {
+                    Text("低能量段判定（不等同于语义停顿）", style = MaterialTheme.typography.labelMedium)
+                    me.rerere.rikkahub.ui.components.ui.SelectTextField(value = "$pauseThreshold dBFS", options = listOf(-30.0,-35.0,-40.0,-45.0), readOnly = true,
+                        optionToString = { "$it dBFS" }, onOptionSelected = { pauseThreshold = it })
+                    me.rerere.rikkahub.ui.components.ui.SelectTextField(value = "$minimumPause 毫秒", options = listOf(200,300,500), readOnly = true,
+                        optionToString = { "$it 毫秒" }, onOptionSelected = { minimumPause = it })
+                }
+                acoustics?.let { measured ->
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(shareAcoustics, { shareAcoustics = it }, enabled = !saving)
+                        Text("本条附带声学数据给 AI（默认不发送）")
+                    }
+                    Text(measured.description(transcript), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }, confirmButton = {
             TextButton(enabled = started && !recording && !saving && transcript.isNotBlank() &&
+                (!shareAcoustics || acoustics != null) &&
                 asrState.status != ASRStatus.Stopping && asrState.status != ASRStatus.Connecting,
                 onClick = {
                     saving = true
+                    val sharedMeasurement = acoustics.takeIf { shareAcoustics }
                     val original = asr.correctionReview.value?.original ?: asr.state.value.transcript
                     scope.launch {
                         try {
                             val (wav, duration) = buffer.finish()
-                            onDraft(OrbisVoiceNotes(context, files).save(wav, "wav", transcript, original, duration))
+                            val audio = OrbisVoiceNotes(context, files).save(wav, "wav", transcript, original, duration)
+                            onDraft(if (sharedMeasurement != null) audio.withSharedAcoustics(sharedMeasurement) else audio)
                             onDismiss()
                         } catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { notice = "未能保存录音，请取消后重新录制；原聊天草稿未改变。" }

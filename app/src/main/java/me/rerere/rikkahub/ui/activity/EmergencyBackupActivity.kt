@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.provider.DocumentsContract
@@ -36,6 +37,9 @@ import me.rerere.rikkahub.data.recovery.validateEmergencyRestore
 import me.rerere.rikkahub.data.recovery.emergencyRecoveryError
 import me.rerere.rikkahub.data.recovery.emergencyRecoveryDiagnostic
 import me.rerere.rikkahub.data.recovery.emergencyExportDestinationRejection
+import me.rerere.rikkahub.data.recovery.emergencyDestinationDiagnostic
+import me.rerere.rikkahub.data.recovery.EmergencyMediaStoreDownload
+import me.rerere.rikkahub.data.recovery.saveEmergencyDownload
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.EmergencyProcessGate
 import java.io.File
@@ -160,6 +164,21 @@ class EmergencyBackupActivity : Activity() {
             if (candidate == null) setStatus("尚无已生成的备份，请先导出。") else {
                 exportFile = candidate
                 chooseExportDestination()
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) button("选择器失败？直接保存到本机下载") {
+            val candidate = exportFile ?: File(root, "exports").listFiles()?.filter {
+                it.isFile && it.name.matches(Regex("Orbis-emergency-[A-Za-z0-9_.-]+\\.zip"))
+            }?.maxByOrNull { it.lastModified() }
+            if (candidate == null) setStatus("尚无已生成的备份，请先导出。") else {
+                confirmPause("会把已经生成的原始包保存到手机本机“下载/Orbis Backups”，不经过文件选择器，不上传云端。\n\n原始包未加密，可能含私人聊天和密钥；请仅自己保管。系统下载目录里的其他文件不会被覆盖。仍需完整写入并读回校验后，才会确认保存成功。") {
+                    runWork("正在校验原始包并保存到本机下载……", stage = "save") {
+                        ensurePaused(); checkNoInterruptedRestore()
+                        val receipt = saveEmergencyDownload(candidate, EmergencyMediaStoreDownload(contentResolver, candidate.name),
+                            onProgress = progressListener(checkPaused = true))
+                        progress("已保存到本机“下载/Orbis Backups”，完整读回校验通过。\n文件：${receipt.displayName}\nSHA-256：${receipt.archive.sha256}\n\n应用内原始包仍保留；请在系统文件管理器确认并另存到电脑。导出成功不等于聊天故障已经修复。")
+                    }
+                }
             }
         }
         button("从紧急备份恢复聊天与助手") {
@@ -302,14 +321,16 @@ class EmergencyBackupActivity : Activity() {
         }
         if (uri.scheme != "content" || uri.authority?.startsWith(packageName) == true) {
             setStatus("请选择系统文件管理器中的本机目录，不能保存到 Orbis 自己的工作区或私有文件。",
-                failed = true, diagnostic = "ORBIS_RECOVERY_DESTINATION_REJECTED · picker")
+                failed = true, diagnostic = emergencyDestinationDiagnostic(if (uri.scheme != "content") "invalid_scheme" else "app_private_directory"))
             return
         }
-        if (requestCode in setOf(EXPORT, EXPORT_REPORT) && emergencyExportDestinationRejection(uri.authority,
-                runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull(), packageName) != null) {
+        val destinationRejection = if (requestCode in setOf(EXPORT, EXPORT_REPORT)) emergencyExportDestinationRejection(uri.authority,
+                runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull(), packageName) else null
+        if (destinationRejection != null) {
             setStatus("请另存到系统文件管理器的手机“下载”或外置存储普通目录。为防卸载时一起删除，不接受应用专属目录；也不向无法确认是本机存储的第三方文件服务写入。" +
-                (if (requestCode == EXPORT_REPORT) "原错误报告仍保留。" else "应用内原始包仍保留。"),
-                failed = true, diagnostic = "ORBIS_RECOVERY_DESTINATION_REJECTED · picker")
+                (if (requestCode == EXPORT_REPORT) "原错误报告仍保留。" else "应用内原始包仍保留。" +
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "也可返回本页点“选择器失败？直接保存到本机下载”。" else ""),
+                failed = true, diagnostic = emergencyDestinationDiagnostic(destinationRejection))
             return
         }
         if (requestCode == EXPORT_REPORT) runWork("正在保存错误文字并读回校验……", stage = "report") {

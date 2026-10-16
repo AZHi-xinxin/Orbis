@@ -27,7 +27,7 @@ class OrbisMemoryRuntime(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    suspend fun begin(assistant: Assistant, conversationId: Uuid?, messages: List<UIMessage>): OrbisMemoryTurn? {
+    suspend fun begin(assistant: Assistant, conversationId: Uuid?, messages: List<UIMessage>, readOnly: Boolean = false): OrbisMemoryTurn? {
         if (conversationId == null) return null
         val human = latestMemoryHuman(messages) ?: return null
         val owner = assistant.id.toString()
@@ -66,11 +66,13 @@ class OrbisMemoryRuntime(
                 }
                 val selection = if (!eligible) OrbisMemorySelection() else selectOrbisMemory(
                     assistant.orbisMemoryMode, human.toText(), notes, ordinal)
-                dao.insert(OrbisMemoryTurnEntity(owner, key, ordinal, json.encodeToString(selection), System.currentTimeMillis()))
-                if (selection.entries.isNotEmpty()) dao.recordSurfacing(selection.entries.map {
-                    OrbisMemorySurfacingEntity(owner, it.id, ordinal)
-                })
-                dao.prune(owner, (ordinal - 63).coerceAtLeast(1))
+                if (!readOnly) {
+                    dao.insert(OrbisMemoryTurnEntity(owner, key, ordinal, json.encodeToString(selection), System.currentTimeMillis()))
+                    if (selection.entries.isNotEmpty()) dao.recordSurfacing(selection.entries.map {
+                        OrbisMemorySurfacingEntity(owner, it.id, ordinal)
+                    })
+                    dao.prune(owner, (ordinal - 63).coerceAtLeast(1))
+                }
                 selection
             }
         } catch (cancel: CancellationException) { throw cancel

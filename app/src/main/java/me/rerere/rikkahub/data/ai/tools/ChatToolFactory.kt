@@ -75,6 +75,7 @@ class ChatToolFactory(
         allowAmbientCallBinding: Boolean = true,
         consultationReferenceOnly: Boolean = false,
         imageSourceMessageIds: Set<kotlin.uuid.Uuid>? = null,
+        onWorkshopAccepted: ((me.rerere.rikkahub.data.orbis.workshop.WorkshopJob) -> Unit)? = null,
     ): List<Tool> = buildList {
         if (BuildConfig.ORBIS_ENABLED && orbisMemoryRepository != null) {
             add(buildOrbisMemoryTool(assistant.id.toString(),
@@ -275,6 +276,13 @@ class ChatToolFactory(
             }
             addAll(createOrbisVoiceCallTools(me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository(context), assistant.id.toString()))
             if (!consultationReferenceOnly) {
+                add(createOrbisCharacterTool(context, assistant.id.toString()) {
+                    settingsStore?.settingsFlow?.value?.let { live -> !live.init && live.assistants.any { it.id == assistant.id } } == true
+                })
+                if (conversationId != null && runCatching {
+                    me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).state.value.allowAi
+                }.getOrDefault(false)) add(createOrbisImageWorkshopTool(context, assistant.id.toString(), conversationId,
+                    onNewAccepted = onWorkshopAccepted))
                 addAll(createOrbisCompanionSpaceTools(context, assistant.id.toString()))
                 if (conversationId != null) addAll(createOrbisScreenShareTools(context, assistant.id.toString(), conversationId))
                 if (conversationId != null) addAll(createOrbisVideoCallTools(context, assistant.id.toString(),
@@ -340,7 +348,7 @@ class ChatToolFactory(
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?, consultationReferenceOnly: Boolean): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()
         val workspace = workspaceRepository.getById(workspaceId) ?: return emptyList()
-        if (workspace.shellStatus != WorkspaceShellStatus.READY.name) {
+        if (consultationReferenceOnly && workspace.shellStatus != WorkspaceShellStatus.READY.name) {
             Log.d(
                 TAG,
                 "createWorkspaceToolsIfReady: skip workspace tools, workspace=$workspaceId, status=${workspace.shellStatus}"

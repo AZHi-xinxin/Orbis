@@ -25,6 +25,8 @@ import me.rerere.rikkahub.data.orbis.OrbisEventBinding
 import me.rerere.rikkahub.data.orbis.OrbisIncomingEvent
 import me.rerere.rikkahub.data.orbis.OrbisInboxEvent
 import me.rerere.rikkahub.data.orbis.isNativeSentinelSource
+import me.rerere.rikkahub.data.orbis.lastWakeAt
+import me.rerere.rikkahub.data.orbis.isDue
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
 import me.rerere.rikkahub.service.OrbisSentinelService
@@ -48,6 +50,9 @@ class OrbisSentinels private constructor(private val context: Context) {
     private val retryAfter = mutableMapOf<String, Long>()
     /** Guarded by tickMutex; slow small-L work must not stall touch/clock/phone observations. */
     private val observing = mutableSetOf<String>()
+    val proactive = atomicStore("orbis-proactive-decision-v1.json", ::ProactiveDecisionStore)
+    private val deciding = mutableSetOf<String>()
+    private val proactiveRunner = ProactiveDecisionRunner(context)
     private val ingress = atomicStore("orbis-sentinel-ingress-v1.json", ::OrbisSentinelIngressStore)
     private val locations = atomicStore("orbis-sentinel-locations-v1.json", ::OrbisSentinelLocationStore)
     private val ownership = context.getSharedPreferences("orbis_sentinel_transport", Context.MODE_PRIVATE)
@@ -148,6 +153,9 @@ class OrbisSentinels private constructor(private val context: Context) {
     suspend fun tick() = tickMutex.withLock {
         rules.refresh().rules.filter { it.pendingBlocked }.forEach(::settlePending)
         val state = rules.refresh()
+        if (state.historyRetention.isDue(System.currentTimeMillis())) {
+            runCatching { GlobalContext.get().get<ChatService>().cleanOrbisHistoryIfDue() }
+        }
         if (!state.enabled) return@withLock
         val active = state.rules.filter { it.enabled }
         if (active.isEmpty()) return@withLock
@@ -178,9 +186,7 @@ class OrbisSentinels private constructor(private val context: Context) {
                     it.role == MessageRole.USER && it.orbisEvent == null &&
                         (it.orbisVoiceCallKind == null || it.orbisVoiceCallKind == "turn")
                 }?.createdAt?.toInstant(TimeZone.currentSystemDefault())?.toEpochMilliseconds() ?: conversation.createAt.toEpochMilli()
-                val lastWake = chat.orbisEvents.inbox.state.value.events.asSequence().filter {
-                    it.conversationId == rule.conversationId && it.state !in setOf("suppressed", "skipped", "failed", "target_invalid")
-                }.maxOfOrNull { it.receivedAt } ?: 0L
+                val lastWake = chat.orbisEvents.inbox.state.value.lastWakeAt(rule.conversationId)
                 val lastMessage = conversation.currentMessages.maxOfOrNull {
                     (it.finishedAt ?: it.createdAt).toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
                 } ?: conversation.createAt.toEpochMilli()
@@ -192,6 +198,16 @@ class OrbisSentinels private constructor(private val context: Context) {
                 val reservation = rules.evaluateAndReserve(rule.id, "native:${UUID.randomUUID()}", facts,
                     expectedUpdatedAtMs = rule.updatedAtMs,
                     expectedMasterGeneration = fresh.masterGeneration) ?: continue
+                val decisionPolicy = proactive.snapshot()
+                val previousDecision = decisionPolicy.receipts.firstOrNull { it.eventId == reservation.rule.pendingEventId }
+                if (previousDecision != null) {
+                    if (reservation.rule.id !in deciding) finishProactiveWithoutDelivery(reservation.rule, "proactive_unknown_no_replay")
+                    continue
+                }
+                if (decisionPolicy.settings.enabled && reservation.rule.id in decisionPolicy.settings.ruleIds && ProactiveDecisionStore.supports(reservation.rule)) {
+                    decideBeforeWake(reservation.rule, chat)
+                    continue
+                }
                 if (rule.type in PHONE_RULES && reservation.rule.pendingText == null) {
                     when (sentinelCondition(reservation.rule, facts, fresh.resumedAtMs)) {
                         OrbisSentinelCondition.UNKNOWN -> {
@@ -223,6 +239,69 @@ class OrbisSentinels private constructor(private val context: Context) {
                 }
                 setRuntime(true, "rule_failed_check_execution_records")
             }
+        }
+    }
+
+    private fun finishProactiveWithoutDelivery(rule: OrbisSentinelRule, reason: String) {
+        val id = rule.pendingEventId ?: return
+        val current = rules.get(rule.id) ?: return
+        if (current.pendingEventId != id) return
+        val state = rules.refresh()
+        if (!state.enabled || !current.enabled || current.pendingBlocked) {
+            rules.abandonPending(rule.id, id, System.currentTimeMillis(), reason)
+            return
+        }
+        if (current.pendingText == null) rules.stageEventText(rule.id, id, "主动联系判断已结束；此项没有向聊天投递。")
+        rules.completeFire(rule.id, id, System.currentTimeMillis(), skippedReason = reason)
+    }
+
+    /** Slow model preflight runs outside scheduler lock, but claims/rechecks are durable and serialized. */
+    private fun decideBeforeWake(initial: OrbisSentinelRule, chat: ChatService) {
+        if (!deciding.add(initial.id)) return
+        scope.launch {
+            val eventId = checkNotNull(initial.pendingEventId)
+            try {
+                val original = proactiveRunner.conversation(initial)
+                val fingerprint = original?.let { proactiveRunner.fingerprint(initial, it) }
+                val receipt = tickMutex.withLock {
+                    val current = rules.get(initial.id)
+                    if (current?.pendingEventId != eventId || current.pendingBlocked || !rules.refresh().enabled || fingerprint == null ||
+                        !chat.mayRunProactiveDecision(Uuid.parse(initial.conversationId), Uuid.parse(initial.assistantId), original) ||
+                        OrbisSentinelPresence.leftAt(initial.conversationId, System.currentTimeMillis()) == null) {
+                        finishProactiveWithoutDelivery(initial, "proactive_target_changed"); return@withLock null
+                    }
+                    proactive.claim(initial, System.currentTimeMillis(), fingerprint).also {
+                        if (it == null) finishProactiveWithoutDelivery(initial, "proactive_quota_or_cooldown")
+                    }
+                } ?: return@launch
+                val answer = withTimeout(90_000) { proactiveRunner.decide(initial, checkNotNull(original)) {
+                    val state = rules.refresh()
+                    val current = state.rules.firstOrNull { it.id == initial.id }
+                    check(state.enabled && current?.enabled == true && !current.pendingBlocked && current.pendingEventId == eventId &&
+                        state.masterGeneration == initial.pendingMasterGeneration && proactive.permits(receipt, receipt.contextFingerprint) &&
+                        chat.mayRunProactiveDecision(Uuid.parse(initial.conversationId), Uuid.parse(initial.assistantId), original)) { "proactive_paused" }
+                } }
+                val after = proactiveRunner.fingerprint(initial)
+                tickMutex.withLock {
+                    val state = rules.refresh()
+                    val current = state.rules.firstOrNull { it.id == initial.id }
+                    val valid = after != null && proactive.permits(receipt, after) && state.enabled && current?.enabled == true &&
+                        !current.pendingBlocked && current.pendingEventId == eventId && current.updatedAtMs == initial.updatedAtMs &&
+                        state.masterGeneration == initial.pendingMasterGeneration &&
+                        chat.mayRunProactiveDecision(Uuid.parse(initial.conversationId), Uuid.parse(initial.assistantId), original) &&
+                        OrbisSentinelPresence.leftAt(initial.conversationId, System.currentTimeMillis()) != null
+                    proactive.finish(eventId, if (!valid) "stale" else when (answer) { true -> "speak"; false -> "no_action"; null -> "failed" })
+                    if (valid && answer == true) deliver(checkNotNull(current), chat)
+                    else finishProactiveWithoutDelivery(initial, if (valid && answer == false) "proactive_no_action" else "proactive_stale_or_failed")
+                }
+            } catch (cancel: CancellationException) {
+                withContext(NonCancellable) { tickMutex.withLock {
+                    proactive.finish(eventId, "unknown"); finishProactiveWithoutDelivery(initial, "proactive_unknown_no_replay")
+                } }
+                throw cancel
+            } catch (_: Exception) { tickMutex.withLock {
+                proactive.finish(eventId, "failed"); finishProactiveWithoutDelivery(initial, "proactive_failed_no_retry")
+            } } finally { withContext(NonCancellable) { tickMutex.withLock { deciding.remove(initial.id) } } }
         }
     }
 

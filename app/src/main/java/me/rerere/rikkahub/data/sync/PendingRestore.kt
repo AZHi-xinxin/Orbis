@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.sync
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
+import me.rerere.rikkahub.data.orbis.character.CharacterBackup
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -19,6 +20,7 @@ internal class PendingRestore(
     private val databaseFile: File,
     private val filesDir: File,
     private val validateBeforeJournal: (File) -> Unit = {},
+    private val noBackupFilesDir: File? = null,
 ) {
     private val pending get() = File(root, "pending")
 
@@ -138,6 +140,11 @@ internal class PendingRestore(
             path.startsWith("files/${ContextPruningBackup.DIRECTORY}/") ->
                 ContextPruningBackup.exactPolicyFile(filesDir, path.removePrefix("files/"))
             path.startsWith("files/") -> resolveInside(filesDir, path.removePrefix("files/"))
+            // Deliberately not a generic no-backup restore: credentials, wake queues and widget
+            // bindings never become portable just because they share this storage directory.
+            path.startsWith("no-backup/${CharacterBackup.DIRECTORY}/") ->
+                CharacterBackup.exactFile(requireNotNull(noBackupFilesDir) { "character_backup_path" },
+                    path.removePrefix("no-backup/"))
             else -> error("Invalid restore path: $path")
         }
     }

@@ -53,7 +53,12 @@ import org.koin.compose.koinInject
 
 /** Existing configuration and connection state only. Opening/expanding never runs a connection test. */
 @Composable
-fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = false) {
+fun OrbisSettingsPage(
+    vm: SettingVM = koinViewModel(),
+    startAtMcp: Boolean = false,
+    ownerAssistantId: String? = null,
+    conversationId: String? = null,
+) {
     val navigator = LocalNavController.current
     val toaster = LocalToaster.current
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -74,10 +79,14 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = orbisSettingsInitialItem(startAtMcp))
 
     // Never fall back to a different assistant when the selected identity is missing.
-    val selected = if (settings.init) null else settings.assistants.find { it.id == settings.assistantId }
+    val selected = orbisSettingsAssistant(settings, ownerAssistantId)
     val selectedId = selected?.id?.toString()
     val selectedLabel = selected?.let { orbisSettingsLabel(it.name, "默认 AI") }
-    val selectedUnavailable = if (settings.init) "正在读取设置" else "没有可用的选中配置"
+    val selectedUnavailable = when {
+        settings.init -> "正在读取设置"
+        ownerAssistantId != null -> "当前会话的 AI 配置已不可用；不会改用其他 AI"
+        else -> "没有可用的选中配置"
+    }
     val model = selected?.let { settings.findModelById(it.chatModelId ?: settings.chatModelId) }
     val provider = model?.findProvider(settings.providers)
     val ttsProvider = if (settings.init) null else settings.ttsProviders.find { it.id == settings.selectedTTSProviderId }
@@ -123,7 +132,7 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
                     navigationIcon = { BackButton() }, modifier = Modifier.statusBarsPadding(),
                 )
             },
-            bottomBar = { OrbisChatDock(currentLabel = "当前 系统设置") },
+            bottomBar = { OrbisChatDock(currentLabel = "当前 系统设置", ownerAssistantId = ownerAssistantId, conversationId = conversationId) },
         ) { innerPadding ->
             LazyColumn(
                 state = listState, modifier = Modifier.fillMaxSize().padding(innerPadding),
@@ -173,7 +182,9 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
                             OrbisSettingsNote("连接健康：尚未检查")
                             OrbisSettingsLink("自定义连接与模型", "管理已有连接，或填写自己的接口地址和模型",
                                 { navigator.navigate(Screen.SettingProvider) })
-                            OrbisGatewayModelEntry()
+                            OrbisGatewayModelEntry(ownerAssistantId = ownerAssistantId)
+                            OrbisChatGptPlanEntry()
+                            OrbisProactiveDecisionEntry()
                         }
                 OrbisCloudSettingsEntry()
                 OrbisIntegrationSettingsEntry(me.rerere.rikkahub.data.orbis.integration.OrbisIntegration.ST_ATLAS)
@@ -185,7 +196,8 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
                     OrbisSettingsSection("MCP 与工具", "服务状态与 AI 选用", "⌁",
                         mcpExpanded, { mcpExpanded = !mcpExpanded }) {
                         OrbisSettingsNote(selectedLabel?.let {
-                            "当前 AI 配置：$it（影响同配置会话）"
+                            if (ownerAssistantId != null) "当前会话的 AI 配置：$it（影响同配置会话）"
+                            else "当前 AI 配置：$it（影响同配置会话）"
                         } ?: selectedUnavailable)
                         if (settings.init) {
                             OrbisSettingsFact("服务列表", "正在读取")
@@ -208,7 +220,7 @@ fun OrbisSettingsPage(vm: SettingVM = koinViewModel(), startAtMcp: Boolean = fal
                                 }
                             }
                         }
-                        OrbisSettingsLink("添加、导入与高级管理", "管理服务连接与授权",
+                        OrbisSettingsLink("添加、导入与高级管理", "管理全局服务连接与授权，不更改 AI 选用",
                             { navigator.navigate(Screen.SettingMcp) })
                         OrbisSettingsLink("管理当前 AI 的选用", selectedLabel?.let { "所选配置：$it" } ?: selectedUnavailable,
                             selectedId?.let { id -> { navigator.navigate(Screen.AssistantMcp(id)) } })

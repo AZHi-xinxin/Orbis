@@ -55,6 +55,71 @@ class VoiceCallAudioRoutingTest {
         assertEquals(VoiceCallAudioMode.NORMAL, backend.mode)
     }
 
+    @Test fun idleModeLossRecoversBuiltInSpeakerWithoutRequiringHeadphones() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        assertTrue(lease.isConfirmed())
+        repeat(320) { // Repeated synthetic mode transitions, not an overnight phone test.
+            backend.mode = VoiceCallAudioMode.NORMAL
+            backend.currentDevice = earpiece
+            assertFalse(lease.isPreferredAndConfirmed())
+            assertTrue(lease.resume(allowSpeakerFallback = false))
+            assertTrue(lease.isPreferredAndConfirmed())
+            assertEquals(speaker, backend.currentDevice)
+        }
+        lease.close()
+        assertEquals(VoiceCallAudioMode.NORMAL, backend.mode)
+    }
+
+    @Test fun idleModeLossRecoversExistingHeadsetButNeverChangesToSpeakerOnItsOwn() {
+        val backend = Backend().apply { currentDevice = wired; availableDevices = listOf(speaker, wired) }
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        assertTrue(lease.resume(allowSpeakerFallback = false))
+        assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        backend.availableDevices = listOf(speaker, earpiece)
+        backend.currentDevice = earpiece
+        assertFalse(lease.resume(allowSpeakerFallback = false))
+        assertTrue(backend.selections.isEmpty())
+        assertTrue(lease.resume())
+        assertTrue(lease.isConfirmed())
+        lease.close()
+    }
+
+    @Test fun idleModeRecoveryStillRequiresActualRouteConfirmation() = runTest {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        backend.currentDevice = earpiece
+        backend.completeSelectionImmediately = false
+        assertTrue(lease.resume(allowSpeakerFallback = false))
+        val signal = VoiceCallRouteConfirmation()
+        val waiting = async { signal.awaitReady(lease::isConfirmed) }
+        runCurrent()
+        assertFalse(waiting.isCompleted)
+        backend.currentDevice = speaker
+        signal.changed()
+        assertTrue(waiting.await())
+        lease.close()
+    }
+
+    @Test fun rejectedIdleModeRecoveryNeverReportsSuccess() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        backend.refuseMode = true
+        assertFalse(lease.resume(allowSpeakerFallback = false))
+        assertFalse(lease.isConfirmed())
+        lease.close()
+    }
+
     @Test fun currentExternalRouteWinsEvenWhenAnotherHeadsetIsListedFirst() {
         val backend = Backend().apply {
             availableDevices = listOf(speaker, wired, bluetooth)

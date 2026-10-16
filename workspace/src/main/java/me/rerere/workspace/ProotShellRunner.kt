@@ -1,6 +1,7 @@
 package me.rerere.workspace
 
 import java.io.File
+import java.io.IOException
 
 data class WorkspaceBindMount(
     val source: File,
@@ -21,6 +22,7 @@ class ProotShellRunner(
                 exitCode = 127,
                 stdout = "",
                 stderr = "Rootfs is not installed",
+                capabilityError = "workspace_rootfs_missing",
             )
         }
 
@@ -31,6 +33,7 @@ class ProotShellRunner(
                 exitCode = 127,
                 stdout = "",
                 stderr = "proot executable not found: ${proot.absolutePath}",
+                capabilityError = "workspace_proot_missing",
             )
         }
         if (!loader.isFile) {
@@ -38,12 +41,13 @@ class ProotShellRunner(
                 exitCode = 127,
                 stdout = "",
                 stderr = "proot loader not found: ${loader.absolutePath}",
+                capabilityError = "workspace_proot_missing",
             )
         }
 
         context.tempDir.mkdirs()
         patcher.patch(context.linuxDir)
-        val process = ProcessBuilder(buildCommand(context, proot))
+        val process = try { ProcessBuilder(buildCommand(context, proot))
             .directory(context.filesDir)
             .redirectErrorStream(false)
             .apply {
@@ -51,9 +55,12 @@ class ProotShellRunner(
                 environment()["PROOT_TMP_DIR"] = context.tempDir.absolutePath
                 environment()["TMPDIR"] = context.tempDir.absolutePath
             }
-            .start()
+            .start() } catch (_: IOException) {
+                return WorkspaceCommandResult(127, "", "当前环境无法启动 PRoot；原生文件工具不依赖此运行时。",
+                    capabilityError = "workspace_proot_start_failed")
+            }
 
-        return process.readResult(context.timeoutMillis, context.stdin)
+        return classifyWorkspaceShellResult(process.readResult(context.timeoutMillis, context.stdin))
     }
 
     private fun buildCommand(
@@ -128,4 +135,11 @@ class ProotShellRunner(
         private const val PROOT_LOADER = "libproot_loader.so"
         private val WORKSPACE_DIR = WorkspaceManager.ROOTFS_WORKSPACE_DIR
     }
+}
+
+/** Diagnose the existing result, never probe/replay a user command or run a host shell. */
+internal fun classifyWorkspaceShellResult(result: WorkspaceCommandResult): WorkspaceCommandResult {
+    val unsupportedCwd = result.stderr.contains("Function not implemented", ignoreCase = true) &&
+        listOf("getcwd", "chdir", "cd:").any { result.stderr.contains(it, ignoreCase = true) }
+    return if (unsupportedCwd) result.copy(capabilityError = "workspace_proot_cwd_unsupported") else result
 }

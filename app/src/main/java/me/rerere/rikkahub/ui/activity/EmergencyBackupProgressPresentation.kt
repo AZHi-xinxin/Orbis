@@ -114,6 +114,10 @@ private val emergencySavedFailureReasons = mapOf(
     "E_UNCLASSIFIED" to "尚未确认备份或恢复结果，请保留数据并联系维护者。",
     "E_PICKER_UNAVAILABLE" to "无法打开系统文件选择器，请确认文件管理器可用。",
     "E_DESTINATION_REJECTED" to "请选择系统文件管理器中的本机普通目录，不能使用应用私有目录。",
+    "E_DESTINATION_PRIVATE" to "所选位置属于应用专属目录。请改选本机下载目录，或使用“直接保存到本机下载”。",
+    "E_DESTINATION_PROVIDER" to "无法确认所选文件服务是受支持的本机提供器。请改选系统下载，或使用“直接保存到本机下载”。",
+    "E_DESTINATION_DOCUMENT" to "系统返回的目标文件标识无法安全识别。请重新选择普通目录，或使用“直接保存到本机下载”。",
+    "E_DESTINATION_SCHEME" to "选择器没有返回受支持的文档目标。请使用系统文件管理器，或使用“直接保存到本机下载”。",
 )
 
 internal fun emergencyBackupSavedDiagnostic(value: String?): String? {

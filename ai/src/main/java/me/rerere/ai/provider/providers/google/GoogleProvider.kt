@@ -62,7 +62,6 @@ import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
-import me.rerere.ai.util.removeElements
 import me.rerere.ai.util.stringSafe
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
@@ -410,16 +409,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                                         key = "parameters",
                                         element = json.encodeToJsonElement(tool.parameters())
                                             .validateToolSchemaReferences(tool.name)
-                                            .removeElements(
-                                                listOf(
-                                                    "const",
-                                                    "exclusiveMaximum",
-                                                    "exclusiveMinimum",
-                                                    "format",
-                                                    "additionalProperties",
-                                                    "enum",
-                                                )
-                                            )
+                                            .forGoogleToolParameters()
                                     )
                                 })
                             }

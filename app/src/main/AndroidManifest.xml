@@ -84,8 +84,34 @@
       android:launchMode="singleTop" android:theme="@style/Theme.Rikkahub" />
     <activity android:name=".ui.activity.OrbisScreenShareActivity" android:exported="false"
       android:theme="@style/Theme.Rikkahub" />
+    <activity android:name=".ui.activity.OrbisCharacterActivity" android:exported="false"
+      android:theme="@style/Theme.Rikkahub" />
+    <activity android:name=".ui.widget.CharacterWidgetConfigActivity" android:exported="true"
+      android:theme="@style/Theme.Rikkahub">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" /></intent-filter>
+    </activity>
+    <receiver android:name=".ui.widget.OrbisCharacterWidget" android:exported="false" android:label="Orbis 互动">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/orbis_character_widget_info" />
+    </receiver>
     <service android:name=".service.OrbisScreenShareService" android:exported="false"
       android:foregroundServiceType="mediaProjection" />
+    <!-- Ordinary launcher first: also works in hosts exposing only one package launch entry.
+         This native process must never contain app providers, receivers, services or data writers. -->
+    <activity
+      android:name=".ui.activity.OrbisLauncherActivity"
+      android:process=":launcher"
+      android:exported="true"
+      android:taskAffinity="${applicationId}.launcher"
+      android:excludeFromRecents="true"
+      android:launchMode="singleTask"
+      android:theme="@style/Theme.Orbis.LaunchRouter">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+      <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+    </activity>
     <!-- Independent, native rescue UI: does not initialize Compose, Koin, settings or databases. -->
     <activity
       android:name=".ui.activity.EmergencyBackupActivity"
@@ -119,11 +145,6 @@
       android:theme="@style/Theme.Rikkahub"
       android:windowSoftInputMode="adjustResize">
       <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-
-        <category android:name="android.intent.category.LAUNCHER" />
-      </intent-filter>
-      <intent-filter>
         <action android:name="android.intent.action.SEND" />
 
         <category android:name="android.intent.category.DEFAULT" />
@@ -138,9 +159,6 @@
         <data android:mimeType="text/plain" />
       </intent-filter>
 
-      <meta-data
-        android:name="android.app.shortcuts"
-        android:resource="@xml/shortcuts" />
     </activity>
     <activity
       android:name=".ui.activity.ShortcutHandlerActivity"
@@ -205,6 +223,8 @@
         <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
       </intent-filter>
     </provider>
+    <service android:name="androidx.work.impl.foreground.SystemForegroundService"
+      android:foregroundServiceType="dataSync" tools:node="merge" />
     <provider
       android:name="androidx.startup.InitializationProvider"
       android:authorities="${applicationId}.androidx-startup"

@@ -41,7 +41,7 @@ internal fun createOrbisGamesRecordsTool(
     execute = { arguments ->
         val (limit, failure) = parseRecordsLimit(arguments)
         val result = if (failure != null) recordsError(failure) else try {
-            val gameId = ((arguments as JsonObject)["game_id"] as? JsonPrimitive)?.content
+            val gameId = ((arguments as JsonObject)["game_id"] as? JsonPrimitive)?.content?.takeIf { it.isNotEmpty() }
             publicGameRecords(
                 if (gameId == null || gameId == "gomoku") readState() else OrbisGameState(),
                 if (gameId != "gomoku") readLibrary() else OrbisMiniGameState(),
@@ -57,7 +57,7 @@ private fun parseRecordsLimit(value: JsonElement): Pair<Int?, String?> {
     val obj = value as? JsonObject ?: return null to "orbis_games_records_invalid_parameters"
     if (obj.keys.any { it !in setOf("limit", "game_id") }) return null to "orbis_games_records_unknown_parameter"
     obj["game_id"]?.let {
-        if (it !is JsonPrimitive || !it.isString || !it.content.matches(Regex("[A-Za-z0-9_-]{1,100}")))
+        if (it !is JsonPrimitive || !it.isString || it.content.isNotEmpty() && !it.content.matches(Regex("[A-Za-z0-9_-]{1,100}")))
             return null to "orbis_games_records_invalid_game_id"
     }
     val raw = obj["limit"] ?: return 20 to null

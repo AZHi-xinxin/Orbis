@@ -5,7 +5,6 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.db.entity.WorkspaceEntity
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
-import me.rerere.workspace.WorkspaceShellStatus
 
 /**
  * Workspace 系统提示注入转换器
@@ -22,9 +21,6 @@ class WorkspaceReminderTransformer(
     ): List<UIMessage> {
         val workspaceId = ctx.assistant.workspaceId?.toString() ?: return messages
         val workspace = workspaceRepository.getById(workspaceId) ?: return messages
-        // 与 ChatService.createWorkspaceToolsIfReady 保持一致: 仅在 shell 就绪时注入
-        if (workspace.shellStatus != WorkspaceShellStatus.READY.name) return messages
-
         val prompt = buildWorkspacePrompt(workspace, ctx.workspaceCwd)
 
         // 追加到第一条 system 消息; 若不存在则插入一条
@@ -43,14 +39,14 @@ class WorkspaceReminderTransformer(
 
 private fun buildWorkspacePrompt(workspace: WorkspaceEntity, cwd: String? = null): String = buildString {
     appendLine("<workspace>")
-    appendLine("You have access to a persistent Linux workspace named \"${workspace.name}\", running in a sandboxed proot rootfs environment.")
+    appendLine("You have a persistent app-private file workspace named \"${workspace.name}\". File tools do not require the Linux shell.")
     appendLine("- The workspace files area is mounted at `/workspace`. Use it as your working directory; files written there persist across turns of this conversation.")
     appendLine("- All paths passed to workspace tools must be absolute and inside the Rootfs (for example `/workspace/notes.md`).")
     appendLine("- Available tools:")
-    appendLine("  - `workspace_read_file`: read file contents.")
+    appendLine("  - `workspace_read_file`: read UTF-8 text in bounded byte chunks (default 65536, maximum 262144 bytes). Use returned next_offset_bytes and file_revision for the next chunk; a chunk is not necessarily a complete JSON document. An offset inside a UTF-8 character is rejected.")
     appendLine("  - `workspace_write_file` / `workspace_edit_file`: create files, or make precise edits to existing files.")
-    appendLine("  - `workspace_shell`: run shell commands (the files area is mounted at /workspace).")
-    appendLine("- Prefer `workspace_shell` for tasks that standard Unix tools handle well, and prefer `workspace_edit_file` for targeted edits over rewriting whole files.")
+    appendLine("  - `workspace_shell`: requires an installed AND compatible PRoot runtime. Installation state is ${workspace.shellStatus}; READY does not prove runtime compatibility. If unavailable, continue with file tools, do not keep retrying shell or assume a host shell fallback exists.")
+    appendLine("- Prefer native file tools for reads/writes. Writes and precise edits are atomic and limited to 8 MiB. Symlinks and special files are rejected. Do not repeat a write whose execution result is unknown; first inspect the target.")
     appendLine("- The skills directory is mounted at `/skills`. Each skill is a subdirectory `/skills/<skill-name>/` containing a `SKILL.md` (with `name` and `description` frontmatter) plus any supporting files. Read a skill's `SKILL.md` before using it, and follow its instructions.")
     appendLine("- Files the user uploaded are mounted at `/upload`. Treat `/upload` as READ-ONLY: read uploaded files from `/upload/<file-name>`, but never modify, overwrite, or delete anything there. If you need to change an uploaded file, copy it into `/workspace` first and edit the copy.")
     if (!cwd.isNullOrBlank()) {

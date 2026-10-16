@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.db.SQLiteConfiguration
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
 import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
+import me.rerere.rikkahub.data.orbis.character.CharacterBackup
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -122,6 +123,13 @@ class BackupManager(
                         coroutine.ensureActive()
                         addFile(zip, file, name) { coroutine.ensureActive() }
                     }
+                    val characters = CharacterBackup.stageSnapshot(context.noBackupFilesDir,
+                        File(staging, "character-snapshot"), settings.assistants.map { it.id.toString() }.toSet(),
+                        checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    for ((name, file) in characters) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
                 }
             }
             // Exactly the restore metadata policy, after ZIP footer has been written. No false success
@@ -140,7 +148,7 @@ class BackupManager(
         withContext(Dispatchers.IO) {
             ArchiveCapacity.requireSize(archive.length(), ArchiveCapacity.MAX_ZIP_BYTES)
             restoreMutex.withLock {
-                val restore = pendingRestore(context)
+                val restore = pendingRestore(context, json)
                 val staging = restore.createStagingDirectory()
                 try {
                     val payload = File(staging, "payload")
@@ -164,7 +172,9 @@ class BackupManager(
                                 DatabaseBackup.ARCHIVE_DATABASE -> if (includeDatabase) stagedDatabase else null
                                 DatabaseBackup.WAL -> if (includeDatabase) stagedWal else null
                                 DatabaseBackup.SHM -> null // Rebuilt by SQLite; never restore shared-memory state.
-                                else -> if (includeFiles && (OrbisLocalToolBackup.maxBytes(entry.name) != null || isAttachment(entry.name))) {
+                                else -> if (includeFiles && entry.name.startsWith("${CharacterBackup.DIRECTORY}/")) {
+                                    CharacterBackup.exactFile(File(payload, "no-backup"), entry.name)
+                                } else if (includeFiles && (OrbisLocalToolBackup.maxBytes(entry.name) != null || isAttachment(entry.name))) {
                                     PendingRestore.resolveInside(File(payload, "files"), entry.name)
                                 } else null
                             } ?: continue
@@ -222,6 +232,7 @@ class BackupManager(
                         ArchiveCapacity.requireSize(migrated.toByteArray(Charsets.UTF_8).size.toLong(), NativeBackupBudget.MAX_SETTINGS_BYTES)
                         PendingRestore.writeDurably(settingsFile, migrated)
                     }
+                    validateCharacters(payload, settingsFile, json)
                     currentCoroutineContext().ensureActive()
                     restore.publish(staging)
                 } finally {
@@ -251,11 +262,13 @@ class BackupManager(
     }
 
     companion object {
-        private fun pendingRestore(context: Context) = PendingRestore(
+        private fun pendingRestore(context: Context, json: Json) = PendingRestore(
             root = File(context.noBackupFilesDir, "backup-restore"),
             databaseFile = context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME),
             filesDir = context.filesDir,
+            noBackupFilesDir = context.noBackupFilesDir,
             validateBeforeJournal = { payload ->
+                validateCharacters(payload, File(payload.parentFile, "settings.json"), json)
                 if (ContextPruningBackup.hasStagedPolicies(payload)) {
                     val staged = File(payload, "database/${SQLiteConfiguration.DATABASE_NAME}")
                     val selected = if (staged.exists()) staged else context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME)
@@ -264,9 +277,33 @@ class BackupManager(
             },
         )
 
+        private fun validateCharacters(payload: File, settingsFile: File, json: Json) {
+            if (!CharacterBackup.hasStagedCharacters(payload)) return
+            require(settingsFile.isFile && settingsFile.length() in 1..NativeBackupBudget.MAX_SETTINGS_BYTES) {
+                "character_backup_owner"
+            }
+            val settings = json.decodeFromString<Settings>(settingsFile.readText(Charsets.UTF_8))
+            require(!settings.init) { "character_backup_owner" }
+            CharacterBackup.validateStaged(payload, settings.assistants.map { it.id.toString() }.toSet(),
+                verifyPixels = { file, width, height ->
+                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeFile(file.path, bounds)
+                    require(bounds.outMimeType == "image/png" && bounds.outWidth == width && bounds.outHeight == height) {
+                        "character_backup_invalid"
+                    }
+                    val image = android.graphics.BitmapFactory.decodeFile(file.path)
+                    requireNotNull(image) { "character_backup_invalid" }.recycle()
+                })
+        }
+
         /** Must finish before Koin, Room, SettingsStore or any background consumers are initialized. */
         suspend fun applyPendingRestore(context: Context, json: Json): Boolean = withContext(Dispatchers.IO) {
-            pendingRestore(context).apply { settingsJson ->
+            // A pending restore may replace assistant identities. Invalidate only device-local
+            // widget bindings before it starts; never carry a desktop route through restoration.
+            if (File(context.noBackupFilesDir, "backup-restore/pending").isDirectory) {
+                me.rerere.rikkahub.ui.widget.CharacterWidgetBindings.invalidateForRestore(context)
+            }
+            pendingRestore(context, json).apply { settingsJson ->
                 SettingsStore.restoreBeforeInitialization(context, json.decodeFromString<Settings>(settingsJson))
             }
         }

@@ -27,6 +27,7 @@ internal class AndroidVoiceCallAudioRouting(
     private var requestEpoch = 0L
     private var routeJob: Job? = null
     private var removeCommunicationListener: (() -> Unit)? = null
+    private var removeModeListener: (() -> Unit)? = null
     private val confirmation = VoiceCallRouteConfirmation()
     private val handler = Handler(Looper.getMainLooper())
     private val callback = object : AudioDeviceCallback() {
@@ -41,6 +42,11 @@ internal class AndroidVoiceCallAudioRouting(
             val listener = AudioManager.OnCommunicationDeviceChangedListener { update() }
             audio.addOnCommunicationDeviceChangedListener({ command -> handler.post(command); Unit }, listener)
             removeCommunicationListener = { audio.removeOnCommunicationDeviceChangedListener(listener) }
+            // Android may relinquish communication mode between active capture/playback.
+            // Device presence alone does not report that change (e.g. built-in speaker).
+            val modeListener = AudioManager.OnModeChangedListener { update() }
+            audio.addOnModeChangedListener({ command -> handler.post(command); Unit }, modeListener)
+            removeModeListener = { audio.removeOnModeChangedListener(modeListener) }
         }
         return requestAndConfirm { routing.start() }
     }
@@ -54,7 +60,9 @@ internal class AndroidVoiceCallAudioRouting(
         // must not automatically continue private speech through the speaker.
         onWaiting()
         routeJob = scope.launch(start = CoroutineStart.LAZY) {
-            val ready = requestAndConfirm { routing.refresh(allowSpeakerFallback = false) }
+            // Still our live, focused call: reacquire NORMAL -> COMMUNICATION as well as
+            // the route. refresh alone rejected NORMAL forever after idle mode loss.
+            val ready = requestAndConfirm { routing.resume(allowSpeakerFallback = false) }
             if (!closed && mayUpdate()) {
                 if (ready) onReady() else onUnavailable()
             }
@@ -93,6 +101,8 @@ internal class AndroidVoiceCallAudioRouting(
         registered = false
         removeCommunicationListener?.let { runCatching(it) }
         removeCommunicationListener = null
+        removeModeListener?.let { runCatching(it) }
+        removeModeListener = null
         routing.close()
     }
 }

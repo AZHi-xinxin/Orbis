@@ -35,6 +35,7 @@ data class OrbisCompactionMetadata(
     val eventId: Uuid = Uuid.random(),
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
     val captureLocalMemory: Boolean = false,
+    val retainOriginals: Boolean = false,
 )
 
 data class OrbisCompactionCommit(val conversation: Conversation, val event: OrbisCompactionEvent)

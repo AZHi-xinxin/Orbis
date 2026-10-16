@@ -24,7 +24,6 @@ import me.rerere.tts.controller.TtsController
 import me.rerere.tts.provider.TTSManager
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.findModelById
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.asr.ASRController
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.asr.correctDeviceAsrTranscript
@@ -83,11 +82,8 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings, video: Boolean = fa
             video && me.rerere.ai.provider.Modality.IMAGE !in model?.inputModalities.orEmpty() ->
                 "视频通话需要当前助手使用支持看图的模型，请先在模型设置确认图片输入能力。"
             asr.state.value.isRecording -> context.getString(R.string.chat_page_voice_finish_dictation)
-            vm.messageQueue.value.paused ->
-                context.getString(R.string.chat_page_voice_resume_queue)
-            vm.conversation.value.currentMessages.any { message ->
-                message.parts.any { it is UIMessagePart.Tool && it.isPending }
-            } -> context.getString(R.string.chat_page_voice_pending_tools)
+            // Explicit new calls use the same fresh-human ingress as answered calls.
+            // Historical pending tools / a paused queue are not active audio owners.
             else -> null
         }
         when {
@@ -163,7 +159,7 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings, video: Boolean = fa
                             },
                             stopSpeaking = callPlayer::stop,
                             setOutputMuted = callPlayer::setOutputMuted,
-                            onConnected = { chatService.connectVoiceCall(call.id, it) },
+                            onConnected = { chatService.connectVoiceCall(call.id, it, freshHumanCall = true) },
                             onEnded = ::finishOnce,
                         )
                         check(accepted) { "已有另一通电话进行中。" }

@@ -24,6 +24,35 @@ import kotlin.uuid.Uuid
 
 /** Synthetic conversations and private temporary files only; no app, Room, model, or tools. */
 class GenerationCheckpointJournalTest {
+    @Test fun `contained baseline is acknowledged without replacing appended human turns`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); j.begin(original)
+        val current = original.copy(messageNodes = original.messageNodes + UIMessage.user("new independent input").toMessageNode() +
+            response(UIMessagePart.Text("new independent answer")))
+        assertTrue(j.clearContainedInDurableContinuation(current))
+        assertFalse(j.hasCheckpoint(original.id))
+        assertEquals(original.messageNodes.size + 2, current.messageNodes.size)
+        assertFalse(j.clearContainedInDurableContinuation(current))
+    }
+
+    @Test fun `contained acknowledgement rejects altered prefix tail owner epoch and unknown effects`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
+        val current = original.copy(messageNodes = original.messageNodes + UIMessage.user("new input").toMessageNode())
+        val bytes = store.bytes.getValue(original.id).copyOf()
+        assertFalse(j.clearContainedInDurableContinuation(current.copy(assistantId = Uuid.random())))
+        assertFalse(j.clearContainedInDurableContinuation(current.copy(compactionEpoch = 1)))
+        original.messageNodes.indices.forEach { changed ->
+            assertFalse(j.clearContainedInDurableContinuation(current.copy(messageNodes = current.messageNodes.mapIndexed { i, n ->
+                if (i == changed) UIMessage.user("changed").toMessageNode() else n
+            })))
+        }
+        assertArrayEquals(bytes, store.bytes.getValue(original.id))
+        val pending = response(tool())
+        j.checkpoint(h, original.assistantId, 0, original.messageNodes.takeLast(1) + pending,
+            transition(status = GenerationToolStatus.STARTED))
+        assertFalse(j.clearContainedInDurableContinuation(current.copy(messageNodes = original.messageNodes + pending +
+            UIMessage.user("next human").toMessageNode())))
+        assertTrue(j.hasCheckpoint(original.id))
+    }
     @Test fun `rescue returns only the single exact tail node and does not clear journal`() {
         val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
         val added = response(UIMessagePart.Text("a complete synthetic reply"))
@@ -215,8 +244,7 @@ class GenerationCheckpointJournalTest {
         assertTrue(store.bytes.containsKey(original.id))
     }
 
-    /** Stage46 characterization: passing proves the current conflict, not that it is repaired. */
-    @Test fun `stage46 changing only old event read or collapsed during generation conflicts with protected prefix`() = runBlocking {
+    @Test fun `event read or collapsed during generation preserves UI state and restores reply`() = runBlocking {
         listOf(true to true, false to false).forEach { (read, collapsed) ->
             val seed = base()
             val event = seed.currentMessages.first().copy(orbisEvent = OrbisEventMetadata(
@@ -236,12 +264,12 @@ class GenerationCheckpointJournalTest {
             }
             assertEquals(original.currentMessages.first().parts, stored.currentMessages.first().parts)
             assertEquals(original.messageNodes.map { it.id }, stored.messageNodes.map { it.id })
-            val before = store.bytes.getValue(original.id).copyOf()
-            reject("database_prefix_changed") { j.recover(stored) }
-            reject("database_prefix_changed") { j.clearAfterDurableCommit(h, live.value) }
-            assertArrayEquals(before, store.bytes.getValue(original.id))
-            assertEquals(read, stored.currentMessages.first().orbisEvent!!.read)
-            assertEquals(collapsed, stored.currentMessages.first().orbisEvent!!.collapsed)
+            val recovered = checkNotNull(j.recover(stored))
+            assertEquals(tail, recovered.conversation.messageNodes.takeLast(2))
+            assertEquals(read, recovered.conversation.currentMessages.first().orbisEvent!!.read)
+            assertEquals(collapsed, recovered.conversation.currentMessages.first().orbisEvent!!.collapsed)
+            j.clearAfterDurableCommit(h, recovered.conversation)
+            assertFalse(j.hasCheckpoint(original.id))
         }
     }
 

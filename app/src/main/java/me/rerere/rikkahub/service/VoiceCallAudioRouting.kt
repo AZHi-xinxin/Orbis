@@ -53,7 +53,7 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
         return resume()
     }
 
-    fun resume(): Boolean {
+    fun resume(allowSpeakerFallback: Boolean = true): Boolean {
         if (!started || closed) return false
         return runCatching {
             if (backend.mode == VoiceCallAudioMode.NORMAL) {
@@ -61,7 +61,7 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
                 backend.mode = VoiceCallAudioMode.COMMUNICATION
             }
             // setMode can be silently refused by Android; assignment is not confirmation.
-            backend.mode == VoiceCallAudioMode.COMMUNICATION && refresh()
+            backend.mode == VoiceCallAudioMode.COMMUNICATION && refresh(allowSpeakerFallback)
         }.getOrDefault(false)
     }
 

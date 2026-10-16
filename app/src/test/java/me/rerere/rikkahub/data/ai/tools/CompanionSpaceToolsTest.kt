@@ -10,6 +10,15 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 class CompanionSpaceToolsTest {
+    @Test fun listAcceptsOnlyKnownEmptyReadPlaceholders() {
+        val raw = """{"action":"list","id":"","image_id":"","reply_to":"","text":"","offset":0,"expected_revision":0,"position":0,"liked":false,"image_ids":[]}"""
+        for (module in listOf("secret_base", "shared_space", "photo_wall")) {
+            val result = (call(module, raw).single() as UIMessagePart.Text).text
+            assertTrue(Json.parseToJsonElement(result).jsonObject.getValue("ok").jsonPrimitive.boolean)
+            assertThrows(IllegalArgumentException::class.java) { call(module, """{"action":"list","id":"real-id"}""") }
+            assertThrows(IllegalArgumentException::class.java) { call(module, """{"action":"list","liked":true}""") }
+        }
+    }
     @get:Rule val temp = TemporaryFolder()
     private fun store() = OrbisCompanionSpacesStore(File(temp.root, "orbis-companion-spaces/1c66025d-e84f-4c0e-9f08-b2ca044be81a"))
     private fun call(module: String, raw: String) = executeCompanionSpaceTool(store(), module, Json.parseToJsonElement(raw))

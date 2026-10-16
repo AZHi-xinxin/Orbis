@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Mutex
@@ -109,6 +111,7 @@ import me.rerere.rikkahub.data.model.requireCompactionEpoch
 import me.rerere.rikkahub.data.repository.OrbisCompactionRepository
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.data.ai.HostToolFailure
+import me.rerere.rikkahub.data.ai.unavailableApprovalFailure
 import me.rerere.rikkahub.data.ai.hostToolFailure
 import me.rerere.rikkahub.data.ai.finishInterruptedHostTools
 import me.rerere.rikkahub.data.ai.TranslationHandler
@@ -342,6 +345,7 @@ class ChatService(
     private fun gatewaySubmissionBlocked(id: Uuid, input: QueuedMessage? = null): Boolean {
         if (gatewayStopInFlight.contains(id) || queueControls.isResetting(id)) return true
         val session = sessions[id] ?: return false
+        if (session.humanContinuation.value != null) return true // Human lane has its own admission.
         // A newly claimed sentinel input has its own request identity. Old remote/tool failure
         // evidence remains intact, but cannot veto every later notification/model attempt.
         if (independentEventPermitted(session, input)) return false
@@ -402,6 +406,8 @@ class ChatService(
         !queueControls.isResetting(binding.conversationId)
     private val voiceReplyBindings = ConcurrentHashMap<Deferred<String?>, VoiceReplyBinding>()
     private val voiceGenerationJobs = ConcurrentHashMap<Uuid, Job>()
+    // Bound before capture starts; new speech must not wait on the archive's disk mutex.
+    private val liveVoiceContexts = ConcurrentHashMap<String, OrbisVoiceCallRecord>()
     // RAM-only scope for calls created after dismissal (empty means no new call yet).
     // Old calls never inherit it;
     // process restart independently interrupts call runtime rather than restoring capture.
@@ -433,6 +439,7 @@ class ChatService(
             modelId = (assistant.chatModelId ?: settings.chatModelId)?.toString(),
             video = video,
         ))
+        liveVoiceContexts[record.id] = record
         if ((freshHumanStatus(getOrCreateSession(conversationId)) == FreshHumanRecoveryStatus.DETACHED ||
             detachedNewCalls.containsKey(conversationId)) && !queueControls.isResetting(conversationId)) {
             detachedNewCalls[conversationId] = record.id
@@ -440,14 +447,28 @@ class ChatService(
         return record
     }
 
-    suspend fun connectVoiceCall(callId: String, connectedAt: Long, onPersisted: suspend () -> Unit = {}) {
+    suspend fun connectVoiceCall(callId: String, connectedAt: Long, freshHumanCall: Boolean = false,
+        onPersisted: suspend () -> Unit = {}) {
         val record = voiceCalls.update(callId) { it.copy(status = OrbisVoiceCallStatus.ACTIVE, connectedAtMs = connectedAt) }
+        liveVoiceContexts[callId] = record
         // Incoming-call tool execution owns this chat's queue until its result is returned.
         // Acknowledge the durable connected archive BEFORE waiting for the queued begin marker.
         onPersisted()
-        // Persist the start event before the first dictated utterance; no extra greeting request.
-        enqueueCallMessage(Uuid.parse(record.conversationId), callId, OrbisVoiceCallProtocol.begin(callId, video = record.video),
-            "begin", answer = false).await()
+        // A new call may follow an interrupted text turn. Its begin marker must not wait on
+        // that turn's held queue. It is context only, never an extra greeting request.
+        val session = getOrCreateSession(Uuid.parse(record.conversationId))
+        val begin = OrbisVoiceCallProtocol.begin(callId, video = record.video)
+        val continued = synchronized(session) {
+            // Incoming calls may still be owned by the live calling tool. Only an explicit
+            // outbound human call may detach that producer; answering must return its receipt.
+            if (session.humanContinuation.value != null || session.messageQueue.state.value.paused ||
+                (freshHumanCall && needsHumanContinuation(session))) {
+                startHumanContinuation(session, QueuedMessage(parts = listOf(UIMessagePart.Text(begin)),
+                    voiceCallId = callId, voiceCallKind = "begin", answer = false), record)
+                true
+            } else false
+        }
+        if (!continued) enqueueCallMessage(session.id, callId, begin, "begin", answer = false).await()
     }
 
     fun enqueueCallMessage(conversationId: Uuid, callId: String, text: String,
@@ -513,36 +534,40 @@ class ChatService(
         return observer
     }
 
-    /** Accepted speech survives process death even if it has not yet left the chat queue. */
+    /** Human speech is accepted in memory immediately; archive saving never gates the next turn. */
     fun enqueueVoiceCallUtterance(conversationId: Uuid, callId: String, text: String,
         originalTranscript: String? = null): Deferred<String?> {
         val binding = newVoiceReplyBinding(conversationId, callId)
         val acceptingSession = getOrCreateSession(conversationId)
-        val freshPermit = synchronized(acceptingSession) {
-            issueFreshHumanPermit(acceptingSession, binding.messageId, callId, "turn")
-        }
+        binding.cancelled = false // A queue reset is not a lock on a new human utterance.
         val acceptedAt = System.currentTimeMillis()
         val capturedTime = captureHumanMessageTime(getOrCreateSession(conversationId), acceptedAt)
-        val observer = appScope.async(start = CoroutineStart.LAZY) {
-            val queued = voiceIngressMutex.withLock {
-                voiceCalls.update(callId) { it.copy(transcript = it.transcript +
-                    OrbisVoiceTranscriptEntry(binding.messageId.toString(), "USER", text, acceptedAt, binding.messageId.toString(),
-                        originalTranscript = originalTranscript?.takeIf { it != text })) }
-                if (!voiceBindingCurrent(binding)) return@async null
-                // Speech can finish while its interrupted predecessor is still saving or
-                // proving remote idle. Wait for that exact job, then run normal admission.
-                awaitCancelledVoiceGeneration(acceptingSession.getJob())
-                if (!voiceBindingCurrent(binding)) return@async null
-                enqueueCallMessage(conversationId, callId, text, messageId = binding.messageId,
-                    shouldEnqueue = { voiceBindingCurrent(binding) }, orbisUserMessageTime = capturedTime,
-                    freshHumanInputPermit = freshPermit)
-            }
-            queued.await()
+        val record = liveVoiceContexts[callId]
+        check(record != null && record.conversationId == conversationId.toString() &&
+            record.assistantId == acceptingSession.state.value.assistantId.toString() &&
+            record.status == OrbisVoiceCallStatus.ACTIVE) { "通话所属窗口或状态已改变，未发送给其他 AI。" }
+        check(text.isNotBlank()) { context.getString(R.string.chat_page_voice_empty) }
+        val reply = synchronized(acceptingSession) {
+            if (needsHumanContinuation(acceptingSession)) {
+                val result = CompletableDeferred<String?>()
+                startHumanContinuation(acceptingSession, QueuedMessage(
+                    id = binding.messageId, parts = listOf(UIMessagePart.Text(voiceTurnForModel(callId, text))),
+                    voiceCallId = callId, voiceCallKind = "turn", reply = result, orbisUserMessageTime = capturedTime), record)
+                result
+            } else enqueueCallMessage(conversationId, callId, text, messageId = binding.messageId,
+                orbisUserMessageTime = capturedTime)
         }
-        voiceReplyBindings[observer] = binding
-        observer.invokeOnCompletion { voiceReplyBindings.remove(observer, binding) }
-        observer.start()
-        return observer
+        voiceReplyBindings[reply] = binding
+        reply.invokeOnCompletion { voiceReplyBindings.remove(reply, binding) }
+        // Archive observer is separate from inference and cancellation; preserve the same ID.
+        appScope.launch(Dispatchers.IO) {
+            runCatching { voiceCalls.update(callId) { old ->
+                if (old.transcript.any { it.messageId == binding.messageId.toString() }) old else
+                    old.copy(transcript = old.transcript + OrbisVoiceTranscriptEntry(binding.messageId.toString(),
+                        "USER", text, acceptedAt, binding.messageId.toString(), originalTranscript = originalTranscript?.takeIf { it != text }))
+            } }
+        }
+        return reply
     }
 
     /** Accept the opening durably, then return without waiting for the model or the current tool. */
@@ -603,7 +628,9 @@ class ChatService(
         val session = sessions[conversationId] ?: return
         synchronized(session) {
             val exactJob = voiceGenerationJobs[binding.messageId]
-            if (exactJob != null && session.getJob() === exactJob) {
+            if (exactJob != null && session.humanContinuation.value?.job?.value === exactJob) {
+                session.humanContinuation.value?.stop()
+            } else if (exactJob != null && session.getJob() === exactJob) {
                 exactJob.cancel(VoiceBargeInCancellation(binding.messageId, callId))
             } else {
                 session.messageQueue.state.value.messages.firstOrNull {
@@ -696,6 +723,7 @@ class ChatService(
         }
 
     suspend fun endVoiceCall(callId: String, end: OrbisVoiceCallEnd) {
+        liveVoiceContexts.remove(callId)
         val record = voiceCalls.update(callId) { old -> old.copy(
             status = if (end.reason in setOf(OrbisVoiceCallEndReason.USER, OrbisVoiceCallEndReason.AI_END))
                 OrbisVoiceCallStatus.ENDED else OrbisVoiceCallStatus.INTERRUPTED,
@@ -939,6 +967,7 @@ class ChatService(
     @Volatile private var queuePauseRecoveryReady = false
 
     private fun automaticWakeRestriction(session: ConversationSession): String? {
+        if (session.humanContinuation.value != null) return "human_continuation_old_turn_held"
         val id = session.id.toString()
         return AutomaticWakeReadiness(
             resetting = queueControls.isResetting(session.id) || gatewayStopInFlight.contains(session.id),
@@ -954,6 +983,61 @@ class ChatService(
     }
 
     private fun automaticWakeAllowed(session: ConversationSession): Boolean = automaticWakeRestriction(session) == null
+
+    /** Read-only admission for an opted-in background decision. Never initializes or resumes a chat. */
+    fun mayRunProactiveDecision(conversationId: Uuid, assistantId: Uuid, persistedSnapshot: Conversation? = null): Boolean = try {
+        val session = sessions[conversationId]
+        val snapshot = session?.state?.value ?: persistedSnapshot
+        if (!queuePauseRecoveryReady || snapshot == null || snapshot.id != conversationId || snapshot.assistantId != assistantId ||
+            snapshot.isConsultation || session?.isInitialized == false ||
+            settingsStore.settingsFlow.value.getAssistantById(assistantId) == null || generationJournal.hasCheckpoint(conversationId)) false
+        else if (session == null) {
+            // Scheduler supplied a read-only repository snapshot. Idle chats need not stay in RAM.
+            val id = conversationId.toString()
+            sessions[conversationId] == null &&
+                queuePauseStore.status(id) == QueuePauseStatus.UNPAUSED &&
+                gatewayRecoveryHoldStore.status(id) == QueuePauseStatus.UNPAUSED &&
+                gatewayRecoveryScopeStore.hasUnresolvedScope(id) == false &&
+                endedGatewayRecoveries[conversationId].orEmpty().all { it.settled } &&
+                AutomaticWakeReadiness(
+                    resetting = queueControls.isResetting(conversationId) || gatewayStopInFlight.contains(conversationId),
+                    freshStatus = freshHumanRecoveryStore.status(id, assistantId.toString()),
+                    pauseStorageReady = queuePauseRecoveryReady,
+                    queueStatus = queuePauseStore.status(id),
+                    recoveryGuard = futureAutomaticWakeRecoveryGuard.status(id),
+                    automaticHold = automaticWakeHoldStore.status(id),
+                    automaticHoldReason = automaticWakeHoldStore.pauseReason(id),
+                ).restriction() == null &&
+                snapshot.currentMessages.none { it.getTools().any { tool -> !tool.isExecuted } }
+        } else synchronized(session) {
+            val id = conversationId.toString()
+            sessions[conversationId] === session && session.state.value.assistantId == assistantId &&
+                !session.messageQueue.state.value.paused &&
+                queuePauseStore.status(id) == QueuePauseStatus.UNPAUSED &&
+                session.messageQueue.state.value.messages.isEmpty() &&
+                session.automaticWakeQueue.pending.isEmpty() &&
+                gatewayRecoveryHoldStore.status(id) == QueuePauseStatus.UNPAUSED &&
+                gatewayRecoveryScopeStore.hasUnresolvedScope(id) == false &&
+                endedGatewayRecoveries[conversationId].orEmpty().all { it.settled } &&
+                automaticWakeAdmissionReason(
+                    restriction = AutomaticWakeReadiness(
+                        resetting = queueControls.isResetting(conversationId) || gatewayStopInFlight.contains(conversationId),
+                        localRecoveryBlocked = session.generationRecoveryBlocked,
+                        gatewayRecoveryBlocked = session.gatewayRecoveryBlocked,
+                        freshStatus = freshHumanStatus(session),
+                        pauseStorageReady = queuePauseRecoveryReady,
+                        queueStatus = queuePauseStore.status(id),
+                        recoveryGuard = futureAutomaticWakeRecoveryGuard.status(id),
+                        automaticHold = automaticWakeHoldStore.status(id),
+                        automaticHoldReason = automaticWakeHoldStore.pauseReason(id),
+                    ).restriction(),
+                    busy = session.hasUnfinishedJobs() || session.submittingMessage != null || session.processingStatus.value != null,
+                    saving = session.manualContextWriteInProgress,
+                    pendingApproval = session.state.value.currentMessages.any { it.getTools().any { tool -> !tool.isExecuted } },
+                    readyHumanInput = false,
+                ) == null
+        }
+    } catch (_: Exception) { false }
 
     private fun automaticWakeAdmissionReason(session: ConversationSession): String? = automaticWakeAdmissionReason(
         restriction = automaticWakeRestriction(session),
@@ -1021,6 +1105,31 @@ class ChatService(
     }
 
     /** Explicit binding; never follow another AI merely because it is visible in the UI. */
+    suspend fun previewOrbisHistory(keepDays: Int) = orbisEventDispatchMutex.withLock {
+        withContext(Dispatchers.IO) { me.rerere.rikkahub.data.orbis.previewOrbisHistory(
+            orbisEvents.inbox, nativeSentinels.rules, System.currentTimeMillis(), keepDays) }
+    }
+
+    suspend fun cleanOrbisHistory(keepDays: Int, operationId: String = java.util.UUID.randomUUID().toString()) =
+        withContext(kotlinx.coroutines.NonCancellable) { orbisEventDispatchMutex.withLock {
+            withContext(Dispatchers.IO) { me.rerere.rikkahub.data.orbis.cleanOrbisHistory(
+                orbisEvents.inbox, nativeSentinels.rules, System.currentTimeMillis(), keepDays, operationId) }
+        } }
+
+    /** Runs only after human opt-in; it creates no timer, network call, or model wake. */
+    suspend fun cleanOrbisHistoryIfDue() = withContext(Dispatchers.IO) {
+        orbisEventDispatchMutex.withLock {
+            val now = System.currentTimeMillis()
+            val retention = nativeSentinels.rules.refresh().historyRetention
+            if (retention.automatic && (retention.lastAttemptAt == null ||
+                    now >= retention.lastAttemptAt && now - retention.lastAttemptAt >= 86_400_000L)) {
+                nativeSentinels.rules.markHistoryAttempt(now)
+                me.rerere.rikkahub.data.orbis.cleanOrbisHistory(orbisEvents.inbox, nativeSentinels.rules,
+                    now, retention.keepDays, java.util.UUID.randomUUID().toString())
+            }
+        }
+    }
+
     suspend fun bindOrbisEvents(sources: Set<String>, binding: OrbisEventBinding) = orbisEventDispatchMutex.withLock {
         val target = conversationRepo.getConversationById(Uuid.parse(binding.conversationId))
         require(target != null && target.assistantId.toString() == binding.assistantId) { "event_target_invalid" }
@@ -1089,8 +1198,30 @@ class ChatService(
             withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "target_invalid", "target_changed_before_queue") }
             return
         }
+        sessions[id]?.let { existing -> existing.humanContinuation.value?.let { lane ->
+            if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source)) {
+                queueContinuationWorkshopResult(existing, lane, event)
+                return
+            }
+            if (event.independentDelivery) {
+                queueContinuationSentinel(existing, lane, event)
+                return
+            }
+        } }
         initializeConversation(id, selectAssistant = false)
         val session = getOrCreateSession(id)
+        // Initialization may suspend while a human opens the continuation lane.
+        // Re-check before claiming a notification; that lane owns the current snapshot.
+        session.humanContinuation.value?.let { lane ->
+            if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source)) {
+                queueContinuationWorkshopResult(session, lane, event)
+                return
+            }
+            if (event.independentDelivery) {
+                queueContinuationSentinel(session, lane, event)
+                return
+            }
+        }
         val messageId = Uuid.parse(event.id)
         if (session.state.value.messageNodes.any { node -> node.messages.any { it.id == messageId } }) {
             withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "displayed", "recovered_message_no_auto_reply") }
@@ -1101,7 +1232,8 @@ class ChatService(
             synchronized(session) {
                 // The card is already durably delivered. Wait only for an active local writer,
                 // not for the previous reply to succeed or its historical hold to be cleared.
-                if (session.hasUnfinishedJobs() || session.submittingMessage != null ||
+                if (session.humanContinuation.value != null ||
+                    session.hasUnfinishedJobs() || session.submittingMessage != null ||
                     session.manualContextWriteInProgress || queueControls.isResetting(id) ||
                     gatewayStopInFlight.contains(id)) return
                 val parts = buildList {
@@ -1109,6 +1241,10 @@ class ChatService(
                     event.localImage?.let { name ->
                         val image = nativeSentinels.imageFile(name)
                         check(image.isFile) { "event_image_missing" }
+                        add(UIMessagePart.Image(android.net.Uri.fromFile(image).toString()))
+                    }
+                    event.workshopImages.forEach { name ->
+                        val image = me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).assetFileForEvent(event.source, event.assistantId, event.conversationId, name)
                         add(UIMessagePart.Image(android.net.Uri.fromFile(image).toString()))
                     }
                 }
@@ -1134,6 +1270,10 @@ class ChatService(
                     check(image.isFile) { "event_image_missing" }
                     add(UIMessagePart.Image(android.net.Uri.fromFile(image).toString()))
                 }
+                event.workshopImages.forEach { name ->
+                    val image = me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).assetFileForEvent(event.source, event.assistantId, event.conversationId, name)
+                    add(UIMessagePart.Image(android.net.Uri.fromFile(image).toString()))
+                }
             }
             dispatchAutomaticWakeOnce(automaticWakeAdmissionReason(session), skip = { reason ->
                 recordAutomaticReceiptSafely(session) { orbisEvents.inbox.mark(event.id, "skipped", reason) }
@@ -1145,6 +1285,128 @@ class ChatService(
                 sendQueuedMessage(session, input, requireImageInput = eventParts.any { it is UIMessagePart.Image })
             })
         }
+    }
+
+    /** New sentinel work uses the same isolated snapshot as the next human send, not the blocked old writer. */
+    private suspend fun queueContinuationSentinel(session: ConversationSession,
+        lane: HumanContinuationLane, event: OrbisInboxEvent) {
+        val reservation = lane.reserveSentinel(event,
+            targetMatches = sessions[session.id] === session && session.humanContinuation.value === lane,
+            deliveryAllowed = nativeSentinels.mayDeliver(event),
+            resetting = queueControls.isResetting(session.id) || gatewayStopInFlight.contains(session.id)) ?: return
+        var claimed = false
+        var started = false
+        try {
+            claimed = withContext(Dispatchers.IO) { orbisEvents.inbox.claimIndependentDispatch(event.id) }
+            if (!claimed) return
+            val input = withContext(Dispatchers.IO) {
+                check(nativeSentinels.mayDeliver(event)) { "sentinel_wake_paused" }
+                check(orbisEvents.inbox.targetStillMatches(event) &&
+                    conversationRepo.getConversationById(session.id)?.assistantId?.toString() == event.assistantId) {
+                    "sentinel_target_changed"
+                }
+                UIMessage(id = Uuid.parse(event.id), role = MessageRole.USER,
+                    parts = buildList {
+                        add(UIMessagePart.Text(event.text))
+                        event.localImage?.let { name ->
+                            val file = nativeSentinels.imageFile(name)
+                            check(file.isFile) { "event_image_missing" }
+                            add(UIMessagePart.Image(android.net.Uri.fromFile(file).toString()))
+                        }
+                    }, orbisEvent = OrbisEventMetadata(event.id, event.source, event.eventId, event.receivedAt,
+                        occurredAt = event.occurredAt))
+            }
+            started = lane.sendSentinel(reservation, input,
+                claimConfirmed = sessions[session.id] === session && session.humanContinuation.value === lane) {
+                snapshot, owner, publish ->
+                var status = "unknown"
+                try {
+                    withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, if (event.wake) "generating" else "displayed") }
+                    if (event.wake) {
+                        generateHumanContinuation(session, lane, snapshot, owner, publish,
+                            continuationEvent = event, requireImageInput = event.localImage != null)
+                        if (lane.isCurrent(owner)) status = orbisEventCompletionState(
+                            lane.state.value.currentMessages, event.id, false)
+                    } else status = "displayed"
+                } finally {
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        runCatching { orbisEvents.inbox.mark(event.id, status) }
+                    }
+                }
+            } != null
+        } finally {
+            lane.releaseSentinel(reservation)
+            if (claimed && !started) withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                runCatching { orbisEvents.inbox.mark(event.id, "skipped", "sentinel_not_started_no_replay") }
+            }
+        }
+    }
+
+    /** A new lane-created workshop job may return once to its exact origin. No old hold is cleared. */
+    private suspend fun queueContinuationWorkshopResult(session: ConversationSession,
+        lane: HumanContinuationLane, event: OrbisInboxEvent) {
+        val workshop = me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context)
+        val completed = withContext(Dispatchers.IO) {
+            workshop.ledger.get(event.source.removePrefix("image_workshop."))
+        }
+        if (completed == null || !lane.matchesWorkshopReturn(event, completed)) {
+            withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "skipped", "workshop_not_created_in_current_lane") }
+            return
+        }
+        val settings = settingsStore.settingsFlow.value
+        val assistant = settings.getAssistantById(lane.baseline.assistantId)
+        val model = assistant?.let { settings.findModelById(it.chatModelId ?: settings.chatModelId) }
+        if (model == null || event.workshopImages.isNotEmpty() &&
+            me.rerere.ai.provider.Modality.IMAGE !in model.inputModalities) {
+            withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "failed", "workshop_result_requires_image_model") }
+            return
+        }
+        val reservation = lane.reserveWorkshopReturn(event, completed,
+            targetMatches = sessions[session.id] === session && session.humanContinuation.value === lane,
+            deliveryAllowed = me.rerere.rikkahub.data.orbis.sentinel.sentinelMayDeliver(nativeSentinels.rules.state.value, event),
+            imageInputSupported = me.rerere.ai.provider.Modality.IMAGE in model.inputModalities,
+            resetting = queueControls.isResetting(session.id) || gatewayStopInFlight.contains(session.id)) ?: return
+        try {
+            // No session/lane lock spans storage. Human sends invalidate the reservation immediately.
+            val claimed = withContext(Dispatchers.IO) { orbisEvents.inbox.claimIndependentDispatch(event.id) }
+            if (!claimed) return
+            val input = withContext(Dispatchers.IO) {
+                check(nativeSentinels.mayDeliver(event)) { "workshop_wake_paused" }
+                check(orbisEvents.inbox.targetStillMatches(event) &&
+                    conversationRepo.getConversationById(session.id)?.assistantId?.toString() == event.assistantId) {
+                    "workshop_result_target_changed"
+                }
+                UIMessage(id = Uuid.parse(event.id), role = MessageRole.USER,
+                    parts = listOf(UIMessagePart.Text(event.text)) + event.workshopImages.map { name ->
+                        UIMessagePart.Image(android.net.Uri.fromFile(workshop.assetFileForEvent(
+                            event.source, event.assistantId, event.conversationId, name)).toString())
+                    }, orbisEvent = OrbisEventMetadata(event.id, event.source, event.eventId, event.receivedAt,
+                        occurredAt = event.occurredAt))
+            }
+            val generation = lane.sendWorkshopReturn(reservation, input,
+                claimConfirmed = sessions[session.id] === session && session.humanContinuation.value === lane) {
+                snapshot, owner, publish ->
+                var status = "unknown"
+                try {
+                    withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, if (event.wake) "generating" else "displayed") }
+                    if (event.wake) {
+                        generateHumanContinuation(session, lane, snapshot, owner, publish,
+                            requireFreshToolApproval = true, continuationEvent = event,
+                            requireImageInput = event.workshopImages.isNotEmpty())
+                        if (lane.isCurrent(owner)) status = orbisEventCompletionState(
+                            lane.state.value.currentMessages, event.id, false)
+                    } else status = "displayed"
+                } finally {
+                    // Receipt failure never joins the human send path or retries this model/tool turn.
+                    withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                        runCatching { orbisEvents.inbox.mark(event.id, status) }
+                    }
+                }
+            }
+            if (generation == null) withContext(Dispatchers.IO) {
+                orbisEvents.inbox.mark(event.id, "skipped", "human_input_preempted_workshop_wake")
+            }
+        } finally { lane.releaseWorkshopReturn(reservation) }
     }
     /** A human stop applies to legacy and native events, never to a human-authored conversation. */
     suspend fun pauseOrbisAutomaticWakes(pausedGeneration: Long) = withContext(Dispatchers.Main.immediate) {
@@ -1158,7 +1420,8 @@ class ChatService(
                     session.automaticWakeQueue.remove(queued.id)
                     withContext(Dispatchers.IO) { orbisEvents.inbox.mark(checkNotNull(queued.orbisEventId), "suppressed", "human_master_paused") }
                 }
-                val active = session.state.value.currentMessages.lastOrNull { it.role == MessageRole.USER }?.orbisEvent
+                val visible = session.humanContinuation.value?.state?.value ?: session.state.value
+                val active = visible.currentMessages.lastOrNull { it.role == MessageRole.USER }?.orbisEvent
                     ?.recordId?.let { orbisEvents.inbox.get(it) }
                 if (active?.state == "generating" && affected(active)) {
                     val humanWasPaused = session.messageQueue.state.value.paused
@@ -1213,6 +1476,7 @@ class ChatService(
     val generationDoneFlow: SharedFlow<Uuid> = _generationDoneFlow.asSharedFlow()
 
     fun cleanup() = runCatching {
+        sessions.values.forEach { it.humanContinuation.value?.stop() }
         sessions.values.forEach { it.cleanup() }
         sessions.clear()
     }
@@ -1302,9 +1566,27 @@ class ChatService(
         return getOrCreateSession(conversationId).state
     }
 
+    /** UI sees the independent lane; old producers only see their original session state. */
+    fun getDisplayedConversationFlow(conversationId: Uuid): StateFlow<Conversation> {
+        val session = getOrCreateSession(conversationId)
+        return session.humanContinuation.flatMapLatest { it?.state ?: session.state }
+            .stateIn(appScope, SharingStarted.Eagerly, session.humanContinuation.value?.state?.value ?: session.state.value)
+    }
+
+    fun getHumanContinuationNotice(conversationId: Uuid): Flow<String?> =
+        getOrCreateSession(conversationId).humanContinuation.flatMapLatest { lane ->
+            if (lane == null) flowOf(null) else combine(lane.notice, lane.contextNotice) { save, context -> "$save\n$context" }
+        }
+
+    /** Only an unsuccessful save needs a brief UI warning, never ordinary recovery status. */
+    fun getHumanContinuationPersistenceWarning(conversationId: Uuid): Flow<String?> =
+        getOrCreateSession(conversationId).humanContinuation.flatMapLatest { lane ->
+            lane?.persistenceWarning ?: flowOf(null)
+        }
+
     fun getGenerationJobStateFlow(conversationId: Uuid): Flow<Job?> {
         val session = sessions[conversationId] ?: return flowOf(null)
-        return session.generationJob
+        return session.humanContinuation.flatMapLatest { it?.job ?: session.generationJob }
     }
 
     fun getProcessingStatusFlow(conversationId: Uuid): StateFlow<String?> {
@@ -1419,6 +1701,7 @@ class ChatService(
         persisted: Conversation,
         voiceInterruption: VoiceBargeInCancellation? = null,
         preserveUnpausedQueueOnSafeFailure: Boolean = false,
+        explicitFreshInput: Boolean = false,
     ): Conversation {
         // A public build may retain an internal build's Room rows; loading is not permission to recover them.
         if (persisted.isConsultation && !consultationFeature.enabled) return persisted
@@ -1445,7 +1728,10 @@ class ChatService(
             if (voiceInterruption == null && !preserveUnpausedQueueOnSafeFailure) session.messageQueue.pause()
             val recovery = withContext(Dispatchers.IO) {
                 generationJournal.discardSupersededByDurableEpoch(persisted)
-                generationJournal.recover(persisted)
+                // An interrupted baseline may already be wholly saved before independent
+                // human replies were appended. Acknowledge it without merging or replaying.
+                generationJournal.clearContainedInDurableContinuation(persisted)
+                generationJournal.recover(persisted, allowAlreadyCommittedTail = explicitFreshInput)
             }
             if (recovery == null) {
                 session.generationRecoveryBlocked = false
@@ -1466,7 +1752,10 @@ class ChatService(
                     requireExistingOwner = persisted.assistantId)
             }
             val stored = checkNotNull(conversationRepo.getConversationById(persisted.id))
-            withContext(Dispatchers.IO) { generationJournal.clearAfterDurableCommit(recovery.handle, stored) }
+            withContext(Dispatchers.IO) {
+                generationJournal.clearAfterDurableCommit(recovery.handle, stored,
+                    allowAlreadyCommittedTail = explicitFreshInput)
+            }
             session.generationRecoveryBlocked = false
             if (voiceInterruption != null && canAcknowledgeVoiceInterruption(true, session.messageQueue.state.value.paused,
                     session.generationRecoveryBlocked, recovery.unknownToolIds)) {
@@ -1491,12 +1780,28 @@ class ChatService(
     }
 
     /** Called only after the previous generation has ended, before mutating its conversation. */
-    private suspend fun settlePreviousGeneration(session: ConversationSession) {
+    private suspend fun settlePreviousGeneration(session: ConversationSession, explicitFreshInput: Boolean = false) {
         session.orbisPromptEditMutex.withLock {
             if (withContext(Dispatchers.IO) { generationJournal.hasCheckpoint(session.id) }) {
                 val persisted = checkNotNull(conversationRepo.getConversationById(session.id))
-                val recovered = recoverGenerationCheckpoint(session, persisted)
+                val recovered = recoverGenerationCheckpoint(session, persisted, explicitFreshInput = explicitFreshInput)
                 updateConversation(session.id, recovered, restoreCommittedPrompt = true)
+            } else if (explicitFreshInput && session.generationRecoveryBlocked) {
+                // Absence of a file alone does not prove a saved reply. This explicit reset
+                // has joined all producers; prove Room matches before releasing the RAM latch.
+                check(queueControls.isResetting(session.id) && !session.hasUnfinishedJobs() &&
+                    session.submittingMessage == null && !session.manualContextWriteInProgress)
+                val persisted = checkNotNull(conversationRepo.getConversationById(session.id))
+                check(sameDurableGenerationSnapshot(session.state.value, persisted)) {
+                    "可见回复与已保存记录仍不一致，未丢弃未保存内容。"
+                }
+                check(gatewayRecoveryHoldStore.status(session.id.toString()) != QueuePauseStatus.UNAVAILABLE)
+                // Preserve uncertainty about old external effects, even if its earlier hold
+                // write failed. Fresh human input must not reactivate old automatic work.
+                requireAutomaticRecoveryHold { holdAutomaticWakes(session, "local_recovery_rechecked") }
+                check(!withContext(Dispatchers.IO) { generationJournal.hasCheckpoint(session.id) })
+                updateConversation(session.id, persisted, restoreCommittedPrompt = true)
+                session.generationRecoveryBlocked = false
             }
             check(!session.generationRecoveryBlocked) {
                 "回复恢复记录待核对，暂不开始新请求；原聊天与恢复文件均保留。"
@@ -1551,7 +1856,7 @@ class ChatService(
                 val currentSessions = sessions.values.toList()
                 val unusedFiles = unreferencedQueuedAttachmentUrls(
                     previous = previous,
-                    conversations = currentSessions.map { it.state.value },
+                    conversations = currentSessions.flatMap { listOfNotNull(it.state.value, it.humanContinuation.value?.state?.value) },
                     pendingMessages = currentSessions.flatMap {
                         it.messageQueue.state.value.messages + it.automaticWakeQueue.pending + listOfNotNull(it.submittingMessage)
                     },
@@ -1848,7 +2153,7 @@ class ChatService(
             queueControls.awaitInterrupted(conversationId)
             jobs.forEach { it.join() }
             initializeConversation(conversationId, selectAssistant = false)
-            settlePreviousGeneration(session)
+            settlePreviousGeneration(session, explicitFreshInput = true)
             finishInterruptedPendingTools(conversationId, HostToolFailure.USER_CANCELLED,
                 stoppedSession = session, stoppedAssistantId = assistantId)
             // Only old envelopes are suppressed durably. New events created after dismissal
@@ -1897,7 +2202,7 @@ class ChatService(
         } catch (failure: Exception) {
             session.messageQueue.pause()
             queueRecoveries.update { it + (conversationId to QueueRecoveryState(QueueRecoveryPhase.FAILURE,
-                "提示已关闭，但本地记录尚未确认保存。原聊天和待发内容仍保留，请勿清除数据。")) }
+                "聊天尚未恢复：本地记录还未确认保存。原聊天和待发内容均保留，请勿清除数据。")) }
             addError(IllegalStateException("本地记录未确认保存，暂未开始新回复；原内容仍保留。"), conversationId)
             Log.w(TAG, "Fresh input dismissal incomplete (${failure.javaClass.simpleName}); private data withheld")
         } finally {
@@ -2578,21 +2883,246 @@ class ChatService(
         if (content.isEmptyInputMessage()) return false
         val session = getOrCreateSession(conversationId)
         synchronized(session) {
-            if (session.manualContextWriteInProgress ||
-                gatewaySubmissionBlocked(conversationId) && !freshHumanReady(session)) return false
+            if (needsHumanContinuation(session, freshHumanInput = true)) {
+                startHumanContinuation(session, QueuedMessage(parts = content.toList(), answer = answer,
+                    orbisQuote = orbisQuote, orbisUserMessageTime = captureHumanMessageTime(session)))
+                return true
+            }
             val messageId = Uuid.random()
             val freshPermit = issueFreshHumanPermit(session, messageId)
             if (orbisQuote != null) {
                 check(session.isInitialized) { "聊天尚未读完，请稍后发送引用。" }
                 session.state.value.requireCurrentQuote(orbisQuote)
             }
-            if (freshPermit != null) prepareExplicitFreshInput(session)
+            if (freshPermit != null || session.messageQueue.state.value.paused) prepareExplicitFreshInput(session)
             else if (session.messageQueue.state.value.messages.isEmpty()) session.messageQueue.resume()
             session.messageQueue.enqueue(content, answer, id = messageId, orbisQuote = orbisQuote,
                 orbisUserMessageTime = captureHumanMessageTime(session), freshHumanInputPermit = freshPermit)
             dispatchNextQueuedMessage(conversationId)
         }
         return true
+    }
+
+    private fun needsHumanContinuation(session: ConversationSession, freshHumanInput: Boolean = false): Boolean =
+        session.humanContinuation.value != null || session.manualContextWriteInProgress ||
+            session.generationRecoveryBlocked || session.hasUnfinishedJobs() || session.submittingMessage != null ||
+            (!freshHumanInput && session.messageQueue.state.value.paused) || queueControls.isResetting(session.id) ||
+            (gatewaySubmissionBlocked(session.id) && !(freshHumanInput && freshHumanReady(session))) || session.state.value.currentMessages.any {
+                it.getTools().any { tool -> !tool.isExecuted }
+            }
+
+    private fun humanContinuationFor(session: ConversationSession): HumanContinuationLane =
+        session.humanContinuation.value ?: run {
+            val baseline = session.state.value
+            var lastSaved = baseline
+            val created = HumanContinuationLane(baseline, appScope, persist = { snapshot ->
+                withContext(Dispatchers.IO) {
+                    // Saving may fail or wait; neither can suspend the model request or next send.
+                    kotlinx.coroutines.withTimeoutOrNull(1_500) {
+                        session.orbisPromptEditMutex.withLock {
+                            if (queueControls.isResetting(session.id) || gatewayStopInFlight.contains(session.id) ||
+                                session.hasUnfinishedJobs() || session.submittingMessage != null ||
+                                session.manualContextWriteInProgress) return@withLock false
+                            // Atomic compare/write in Room, also preserving newer title/prompt/folder
+                            // metadata. Never replace an unseen edit or touch a damaged checkpoint.
+                            val readBack = conversationRepo.commitHumanContinuation(lastSaved, snapshot) ?: return@withLock false
+                            if (!sameDurableGenerationSnapshot(snapshot, readBack)) return@withLock false
+                            lastSaved = readBack
+                            session.state.value = readBack
+                            true
+                        }
+                    } == true
+                }
+            }, onFailure = { failure ->
+                addError(failure, session.id, title = "本轮回复未完成，可直接发送新消息")
+            }, onIdleSaved = { lane ->
+                // Saving/producer completion only schedules a local handoff. Never replay an
+                // input or clear a remote/automatic safety hold as a consequence of becoming idle.
+                appScope.launch(Dispatchers.Main) {
+                    session.orbisPromptEditMutex.withLock {
+                        if (sessions[session.id] === session && session.humanContinuation.value === lane) {
+                            try { requireWritableHistoryLocked(session) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { /* A real writer/checkpoint still owns history. */ }
+                        }
+                    }
+                }
+            })
+            session.humanContinuation.value = created
+            // Keep old queue entries and receipts for management; do not silently replay them.
+            session.messageQueue.holdAllInputsForFreshRecovery()
+            session.generationRecoveryBlocked = true
+            session.cancelJobs().forEach { old -> old.invokeOnCompletion { created.requestSave() } }
+            created
+        }
+
+    /** Human interruption is normal conversation control, not a queue recovery operation.
+     * Fence the displayed producer immediately. Its cleanup and old tools remain separate;
+     * neither a remote-idle check nor a failed save may gate the human's next message.
+     */
+    fun interruptGenerationForHuman(conversationId: Uuid) {
+        val session = sessions[conversationId] ?: return
+        synchronized(session) { humanContinuationFor(session).stop() }
+    }
+
+    /** Synchronous acceptance, no disk call, no old-job join, and no recovery permission gate. */
+    private fun startHumanContinuation(session: ConversationSession, input: QueuedMessage,
+        voiceRecord: OrbisVoiceCallRecord? = null): Job {
+        val lane = humanContinuationFor(session)
+        session.messageQueue.remove(input.id) // Only the exact accepted input, never the old queue.
+        val userMessage = UIMessage(id = input.id, role = MessageRole.USER, parts = input.parts,
+            orbisQuote = input.orbisQuote, orbisUserMessageTime = input.orbisUserMessageTime,
+            orbisVoiceCallId = input.voiceCallId, orbisVoiceCallKind = input.voiceCallKind)
+        val generation = lane.send(userMessage, input.answer) { snapshot, owner, publish ->
+            try {
+                generateHumanContinuation(session, lane, snapshot, owner, publish, voiceRecord)
+                if (lane.isCurrent(owner)) {
+                    val previousIds = snapshot.currentMessages.map { it.id }.toSet()
+                    val messages = lane.state.value.currentMessages.filter { it.id !in previousIds }
+                    // Waiting for a decision is a normal suspended turn, not a failed reply.
+                    input.reply?.complete(messages.filter { it.role == MessageRole.ASSISTANT }
+                        .mapNotNull { it.privateRoomAutomaticSpeechText() }.joinToString("\n").ifBlank { null })
+                }
+            } catch (error: Exception) {
+                input.reply?.completeExceptionally(error)
+                throw error
+            }
+        }
+        generation.invokeOnCompletion { input.reply?.complete(null) }
+        if (input.voiceCallId != null) {
+            voiceGenerationJobs[input.id] = generation
+            generation.invokeOnCompletion { voiceGenerationJobs.remove(input.id, generation) }
+        }
+        return generation
+    }
+
+    /** Optional tool/memory preparation must not lock out a human text request. */
+    private suspend fun <T> freshContextOr(fallback: T, action: suspend () -> T): T {
+        // Optional SDK/file preparation has a separate owner. Its cancellation cleanup cannot
+        // hold up the caller's timeout or the next human request.
+        val preparation = appScope.async(Dispatchers.IO) { action() }
+        return try { kotlinx.coroutines.withTimeoutOrNull(2_000) { preparation.await() } ?: fallback }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { fallback }
+        finally { preparation.cancel() }
+    }
+
+    private suspend fun generateHumanContinuation(session: ConversationSession, lane: HumanContinuationLane,
+        snapshot: Conversation, owner: Long, publish: (Conversation) -> Unit,
+        voiceRecord: OrbisVoiceCallRecord? = null,
+        requireFreshToolApproval: Boolean = false,
+        continuationEvent: OrbisInboxEvent? = null,
+        requireImageInput: Boolean = false,
+    ) {
+        fun requireOwner() {
+            if (!lane.isCurrent(owner)) throw CancellationException("已由新的人类消息接替")
+            continuationEvent?.let { event ->
+                val binding = orbisEvents.inbox.state.value.bindings[event.source]
+                if (sessions[session.id] !== session || session.humanContinuation.value !== lane ||
+                    binding?.enabled != true || binding.assistantId != event.assistantId ||
+                    binding.conversationId != event.conversationId ||
+                    !me.rerere.rikkahub.data.orbis.sentinel.sentinelMayDeliver(nativeSentinels.rules.state.value, event))
+                    throw CancellationException("通知已暂停或原对话绑定改变")
+            }
+        }
+        val settings = settingsStore.settingsFlow.value
+        val configured = settings.getAssistantById(snapshot.assistantId) ?: error("当前 AI 已不存在，请重新选择。")
+        val assistant = voiceRecord?.modelId?.let { configured.copy(chatModelId = Uuid.parse(it)) } ?: configured
+        check(voiceRecord == null || voiceRecord.assistantId == assistant.id.toString()) { "通话所属 AI 已改变。" }
+        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+            ?: error("请先选择可用的聊天模型。")
+        check(!requireImageInput || me.rerere.ai.provider.Modality.IMAGE in model.inputModalities) {
+            "当前模型不支持查看通知中的图片，原图已保留，没有降级成纯文字。"
+        }
+        check(voiceRecord?.video != true || me.rerere.ai.provider.Modality.IMAGE in model.inputModalities) {
+            "当前通话模型不支持图片，未将视频通话静默降级。"
+        }
+        val preparedTools = freshContextOr(emptyList<me.rerere.ai.core.Tool>()) {
+            chatToolFactory.createTools(settings, assistant, model, snapshot.workspaceCwd,
+                snapshot.id.toString(), voiceCallId = voiceRecord?.id, allowAmbientCallBinding = false,
+                onWorkshopAccepted = { accepted -> lane.registerWorkshopReturn(owner, accepted) })
+        }.map { definition -> definition.copy(execute = { arguments ->
+            requireOwner()
+            definition.execute(arguments)
+        }) }
+        val memories = freshContextOr(emptyList<me.rerere.rikkahub.data.model.AssistantMemory>()) {
+            if (!me.rerere.rikkahub.data.ai.legacyMemoryEnabled(assistant.enableMemory)) emptyList()
+            else if (assistant.useGlobalMemory) memoryRepository.getGlobalMemories()
+            else memoryRepository.getMemoriesOfAssistant(assistant.id.toString())
+        }
+        // Honour the already-saved request projection even in the isolated lane. Reading it
+        // is bounded and does not rewrite history; a failed read must not resend pruned parts.
+        val pruning = if (BuildConfig.ORBIS_ENABLED) checkNotNull(
+            freshContextOr<me.rerere.rikkahub.data.ai.contextpruning.ContextPruningState?>(null) {
+                me.rerere.rikkahub.data.ai.contextpruning.AndroidContextPruning
+                    .open(context, assistant.id, snapshot.id).snapshot()
+            }
+        ) { "上下文整理设置暂未读完，本轮未发送；聊天已保留，可以稍后重试。" } else null
+        val continuationInputs = buildList<me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer> {
+            if (pruning != null) add(object : me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer {
+                override suspend fun transform(ctx: me.rerere.rikkahub.data.ai.transformers.TransformerContext,
+                    messages: List<UIMessage>): List<UIMessage> =
+                    me.rerere.rikkahub.data.ai.contextpruning.projectContextPruningForRequest(messages, pruning)
+            })
+            add(TimeReminderTransformer)
+            add(PromptInjectionTransformer)
+            add(PlaceholderTransformer)
+            add(me.rerere.rikkahub.data.ai.transformers.OrbisEventTransformer)
+            // The active call does not require the old call-archive writer to finish.
+            if (voiceRecord != null) add(me.rerere.rikkahub.data.ai.transformers.OrbisVideoCallTransformer)
+            add(templateTransformer)
+            add(me.rerere.rikkahub.data.ai.transformers.OrbisQuotedReplyTransformer)
+            add(me.rerere.rikkahub.data.ai.transformers.OrbisUserMessageTimeTransformer)
+        }
+        requireOwner()
+        var current = snapshot
+        val generationId = Uuid.random()
+        val foregroundStarted = runCatching { ChatGenerationForegroundService.acquire(context,
+            generationId, session.id) }.getOrDefault(false)
+        try {
+            generationLoop.generateText(
+                settings = settings.copy(networkSetting = settings.networkSetting.copy(enableAutoRetry = false)),
+                model = model, assistant = assistant, messages = snapshot.currentMessages,
+                memories = memories, tools = reviewUncertainContinuationTools(preparedTools, snapshot.currentMessages,
+                    requireFreshApproval = requireFreshToolApproval, hasCurrentGrant = { tool ->
+                        val approvals = ToolApprovalStore.get(context)
+                        tool.isApprovalCurrent() && (approvals.allowsAll(assistant.id.toString()) ||
+                            tool.hostApproval?.let { approvals.permits(assistant.id.toString(), it) } == true)
+                    }),
+                conversationId = snapshot.id, conversationSystemPrompt = snapshot.customSystemPrompt,
+                orbisPrompt = snapshot.orbisPrompt, conversationModeInjectionIds = snapshot.modeInjectionIds,
+                conversationLorebookIds = snapshot.lorebookIds, workspaceCwd = snapshot.workspaceCwd,
+                initialContextEpoch = snapshot.compactionEpoch,
+                // Pure prompt/reply transformations must not disappear merely because a
+                // previous request is finishing. File-backed history rewrites remain separate.
+                inputTransformers = continuationInputs,
+                outputTransformers = listOf(ThinkTagTransformer, RegexOutputTransformer),
+                allowLocalMemory = false, durableCheckpoints = false, stopOnUnknownToolOutcome = true,
+                maxAutomaticContinuations = 0,
+                outputFrozenPrefixCount = frozenOutputPrefixCount(snapshot.currentMessages),
+                requireActiveTurn = ::requireOwner,
+                onGatewayRequest = { gatewayRequests.remember(it) },
+            ).collect { chunk ->
+                requireOwner()
+                when (chunk) {
+                    is GenerationChunk.Messages -> {
+                        val baselineIds = snapshot.currentMessages.map { it.id }.toSet()
+                        current = current.updateCurrentMessages(chunk.messages.map { message ->
+                            if (voiceRecord != null && message.id !in baselineIds)
+                                message.copy(orbisVoiceCallId = voiceRecord.id, orbisVoiceCallKind = "turn") else message
+                        })
+                        publish(current)
+                    }
+                    is GenerationChunk.DurableBoundary -> chunk.result.completeExceptionally(
+                        IllegalStateException("独立续聊不接管旧轮的保存确认"))
+                    is GenerationChunk.CompactionCommit -> chunk.result.completeExceptionally(
+                        IllegalStateException("旧轮核对期间不自动重写历史"))
+                    else -> Unit
+                }
+            }
+        } finally {
+            if (foregroundStarted) ChatGenerationForegroundService.release(context, generationId)
+        }
     }
 
     /** Native garden drawer only. No page text, solution, bridge payload or auto-send path. */
@@ -2711,6 +3241,7 @@ class ChatService(
     private fun dispatchNextQueuedMessage(conversationId: Uuid): Job? {
         val session = sessions[conversationId] ?: return null
         synchronized(session) {
+            if (session.humanContinuation.value != null) return null
             // Check BEFORE takeNext removes an input. Recovery-blocked human messages must not disappear.
             if (session.generationRecoveryBlocked || session.manualContextWriteInProgress || session.submittingMessage != null ||
                 gatewayStopInFlight.contains(conversationId) || queueControls.isResetting(conversationId)) return null
@@ -2776,6 +3307,7 @@ class ChatService(
         var eventInputCommitted = false
         var inputSaveAttempted = false
         var attemptedInputConversation: Conversation? = null
+        var generationAttempted = false
         val answer = queued.answer
         val bodyEntered = java.util.concurrent.atomic.AtomicBoolean(false)
         val voiceSettlement = VoiceTurnSettlement()
@@ -2942,6 +3474,7 @@ class ChatService(
                         return@launchGenerationJob
                     }
                     if (event != null) withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "generating") }
+                    generationAttempted = true
                     completed = handleMessageComplete(conversationId, requireImageInput = effectiveImageInput, realWake = true,
                         voiceCallId = queued.voiceCallId, voiceCallKind = queued.voiceCallKind,
                         allowAmbientCallBinding = expectedAssistantId == null,
@@ -3006,6 +3539,15 @@ class ChatService(
                 // The ordinary autoplay collector must not read a late voice reply again.
                 if (queued.reply == null) _generationDoneFlow.emit(conversationId)
             } catch (e: Exception) {
+                if (e !is CancellationException && !generationAttempted && queued.orbisEventId == null &&
+                    (queued.voiceCallId == null && queued.voiceCallKind == null ||
+                        queued.voiceCallKind == "turn" && liveVoiceContexts.containsKey(queued.voiceCallId)) &&
+                    !session.state.value.isConsultation) {
+                    // This input has NOT reached a model/tool. Its first send can fall back once
+                    // without a second tap, including initialization and save failures.
+                    startHumanContinuation(session, queued, queued.voiceCallId?.let { liveVoiceContexts[it] })
+                    return@launchGenerationJob
+                }
                 if (e is CancellationException && queueControls.isResetting(conversationId) &&
                     queued.orbisEventId == null && queued.voiceCallKind in setOf(null, "turn") && !eventInputCommitted) {
                     withContext(kotlinx.coroutines.NonCancellable) {
@@ -3188,6 +3730,30 @@ class ChatService(
     ) = synchronized(getOrCreateSession(conversationId)) {
         val session = getOrCreateSession(conversationId)
         if (session.state.value.isConsultation) consultationFeature.requireEnabled()
+        if (needsHumanContinuation(session)) {
+            if (message.role != MessageRole.USER && !regenerateAssistantMsg) {
+                session.humanContinuation.value?.requestSave()
+                return@synchronized
+            }
+            // Decide before creating/cancelling any lane. A refused old-tool retry is only a
+            // short local notice, not a pause, a recovery error, or permission to replay tools.
+            val current = session.humanContinuation.value?.state?.value ?: session.state.value
+            val plan = prepareHumanContinuationRegeneration(current, message)
+            val rejection = if (plan is HumanContinuationRegeneration.Blocked) plan.notice else {
+                val lane = humanContinuationFor(session)
+                lane.regenerate(message) { snapshot, owner, publish ->
+                    generateHumanContinuation(session, lane, snapshot, owner, publish,
+                        // An old producer may not have published its tool yet. A retry button
+                        // never silently authorizes a newly proposed side effect either.
+                        requireFreshToolApproval = true)
+                    if (lane.isCurrent(owner)) _generationDoneFlow.emit(conversationId)
+                }
+            }
+            if (rejection != null) appScope.launch(Dispatchers.Main.immediate) {
+                android.widget.Toast.makeText(context, rejection, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return@synchronized
+        }
         if (gatewaySubmissionBlocked(conversationId)) {
             addError(IllegalStateException("旧轮正在核对，暂不重新生成。"), conversationId)
             return@synchronized
@@ -3250,9 +3816,16 @@ class ChatService(
         expectedAssistantId: Uuid? = null,
     ) = synchronized(getOrCreateSession(conversationId)) {
         val session = getOrCreateSession(conversationId)
+        session.humanContinuation.value?.let { lane ->
+            approveHumanContinuation(session, lane, toolCallId, approved, reason, answer, remember, expectedAssistantId)
+            return@synchronized
+        }
         val independentInput = independentEventApprovalInput(session, toolCallId)
         if (gatewaySubmissionBlocked(conversationId, independentInput)) {
-            addError(IllegalStateException("旧轮正在核对，本次审批未保存或执行。"), conversationId)
+            if (!session.state.value.isConsultation) {
+                approveHumanContinuation(session, humanContinuationFor(session), toolCallId, approved,
+                    reason, answer, remember, expectedAssistantId)
+            } else addError(IllegalStateException("旧轮正在核对，本次审批未保存或执行。"), conversationId)
             return@synchronized
         }
         if (session.state.value.isConsultation) consultationFeature.requireEnabled()
@@ -3290,6 +3863,7 @@ class ChatService(
                     val voiceBinding = checkNotNull(voiceToolContinuationBinding(conversation.currentMessages, toolCallId))
                     require(answer == null || pending.toolName == "ask_user") { "只有提问工具可以提交回答。" }
                     require(pending.toolName != "ask_user" || answer != null || !approved) { "请先回答问题，不能跳过提问。" }
+                    var unavailableApproval = false
                     if (approved && answer == null) {
                         val settings = settingsStore.settingsFlow.first()
                         val assistant = settings.getAssistantById(conversation.assistantId)
@@ -3301,12 +3875,11 @@ class ChatService(
                             imageSourceMessageIds = conversation.currentMessages.takeWhile { it.id != pendingOwner.id }
                                 .map { it.id }.toSet())
                             .firstOrNull { it.name == pending.toolName }
-                            ?: error("工具已停用或配置已变化，请重新发起调用。")
-                        check(withContext(Dispatchers.IO) { pending.matchesHostApproval(definition) }) {
-                            "审批快照已过期或参数、连接已改变；未执行，请拒绝旧调用并重新发起。"
+                        unavailableApproval = definition == null || !withContext(Dispatchers.IO) {
+                            pending.matchesHostApproval(definition)
                         }
-                        if (remember) {
-                            val approval = definition.hostApproval ?: error("此工具不支持记住授权。")
+                        if (remember && !unavailableApproval) {
+                            val approval = definition?.hostApproval ?: error("此工具不支持记住授权。")
                             check(approval.rememberable) { "此工具需要你提供回答，不是执行授权。" }
                             ToolApprovalStore.get(context).allow(assistant.id.toString(), approval)
                         }
@@ -3325,7 +3898,8 @@ class ChatService(
                                     parts = msg.parts.map { part ->
                                         when {
                                             part is UIMessagePart.Tool && part.toolCallId == toolCallId -> {
-                                                part.copy(approvalState = newApprovalState)
+                                                if (unavailableApproval) part.unavailableApprovalFailure()
+                                                else part.copy(approvalState = newApprovalState)
                                             }
 
                                             else -> part
@@ -3390,6 +3964,63 @@ class ChatService(
         }
 
         session.setJob(job, cancelPrevious = false)
+    }
+
+    private fun approveHumanContinuation(session: ConversationSession, lane: HumanContinuationLane,
+        toolCallId: String, approved: Boolean, reason: String, answer: String?, remember: Boolean, expectedAssistantId: Uuid?,
+    ) {
+        val target = lane.captureApproval(toolCallId) ?: return
+        val snapshot = target.snapshot
+        val pending = target.tool
+        val voiceId = snapshot.currentMessages.lastOrNull { it.role == MessageRole.USER }?.orbisVoiceCallId
+        val voiceRecord = voiceId?.let { liveVoiceContexts[it] }
+        appScope.launch {
+            try {
+                check(expectedAssistantId == null || snapshot.assistantId == expectedAssistantId)
+                check(voiceId == null || voiceRecord?.status == OrbisVoiceCallStatus.ACTIVE) {
+                    "这通通话已结束，旧工具不会转交给其他通话；可以发新消息继续。"
+                }
+                require(answer == null || pending.toolName == "ask_user")
+                require(pending.toolName != "ask_user" || answer != null || !approved)
+                var definition: me.rerere.ai.core.Tool? = null
+                if (approved && answer == null) {
+                    val settings = settingsStore.settingsFlow.value
+                    val configured = settings.getAssistantById(snapshot.assistantId) ?: error("当前 AI 不存在")
+                    val assistant = voiceRecord?.modelId?.let { configured.copy(chatModelId = Uuid.parse(it)) } ?: configured
+                    val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId) ?: error("未选择模型")
+                    val tools = withContext(Dispatchers.IO) {
+                        chatToolFactory.createTools(settings, assistant, model, snapshot.workspaceCwd,
+                            snapshot.id.toString(), voiceCallId = voiceRecord?.id, allowAmbientCallBinding = false)
+                    }
+                    definition = tools.firstOrNull { it.name == pending.toolName }
+                }
+                val approval = when {
+                    answer != null -> ToolApprovalState.Answered(answer)
+                    approved -> ToolApprovalState.Approved
+                    else -> ToolApprovalState.Denied(reason)
+                }
+                if (session.humanContinuation.value !== lane) return@launch
+                lane.resolveApproval(target, resolve = { tool ->
+                    val live = definition
+                    if (approved && answer == null && (live == null || !tool.matchesHostApproval(live))) {
+                        // Settle this card with a precise non-execution receipt; never leave an
+                        // impossible approval pending or dispatch it against another target.
+                        tool.unavailableApprovalFailure()
+                    } else {
+                        if (remember && approved && answer == null) {
+                            val grant = checkNotNull(live?.hostApproval) { "工具授权定义暂不可用。" }
+                            ToolApprovalStore.get(context).allow(snapshot.assistantId.toString(), grant)
+                        }
+                        tool.copy(approvalState = approval)
+                    }
+                }) {
+                    current, owner, publish -> generateHumanContinuation(session, lane, current, owner, publish, voiceRecord,
+                        requireFreshToolApproval = current.currentMessages.lastOrNull { it.role == MessageRole.USER }
+                            ?.orbisEvent?.source?.let { me.rerere.rikkahub.data.orbis.isImageWorkshopSource(it) } == true)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { addError(failure, session.id, title = "工具未继续；仍可发送新消息") }
+        }
     }
 
     // ---- 处理消息补全 ----
@@ -3851,6 +4482,12 @@ class ChatService(
                     }
                 })
 
+            // A human has already fenced this producer and kept its visible partial snapshot.
+            // Its private journal remains evidence; do not merge it into the new lane or report
+            // an ordinary user interruption as a failed-save/recovery error. The new lane's
+            // independent writer reports its own persistence truth without blocking new input.
+            if (it is CancellationException && initialSession.humanContinuation.value != null) throw it
+
             // Stream updates live in memory. A continuation can fail AFTER a real tool write,
             // so keep those results durably before releasing any following independent input.
             // This does not mark the event successful or replay its request/tools.
@@ -4284,7 +4921,7 @@ class ChatService(
     // ---- Human-confirmed whole-node batch edits; no generation or queue dispatch ----
 
     private suspend fun requireMessageBatchReadyLocked(session: ConversationSession) {
-        requireWritableHistoryLocked(session)
+        requireWritableHistoryLocked(session, allowPendingApprovals = true)
         val call = OrbisVoiceCallRuntime.get(context).callState.value
         check(call.conversationId != session.id || (!call.isActive && !call.ending)) {
             "请结束当前通话并等记录保存完成，再批量整理消息。"
@@ -4460,6 +5097,8 @@ class ChatService(
                         eventId = replacement.eventId,
                         createdAtEpochMillis = replacement.createdAtEpochMillis,
                         captureLocalMemory = captureLocalMemory && BuildConfig.ORBIS_ENABLED,
+                        retainOriginals = BuildConfig.ORBIS_ENABLED && settingsStore.settingsFlow.value
+                            .getAssistantById(originalWithReceipt.assistantId)?.retainCompactionOriginals == true,
                     ),
                     persistedBaseline = baseline,
                 )
@@ -4779,13 +5418,16 @@ class ChatService(
                 session?.automaticWakeQueue?.pending.orEmpty() +
                 listOfNotNull(session?.submittingMessage))
             .flatMap { it.parts }.localFileUrls().map { it.toUri() }
-        val newFiles = newConversation.files + queuedFiles
+        val newFiles = newConversation.files + queuedFiles + session?.humanContinuation?.value?.state?.value?.files.orEmpty()
         val deletedFiles = oldFiles.filter { file ->
             newFiles.none { it == file }
         }
         if (deletedFiles.isNotEmpty()) {
             appScope.launch(Dispatchers.IO) {
-                val unreferenced = deletedFiles.filterNot { conversationRepo.hasExternalFileReference(it.toString(), newConversation.id) }
+                val unreferenced = deletedFiles.filterNot { file ->
+                    conversationRepo.hasExternalFileReference(file.toString(), newConversation.id) ||
+                        sessions.values.any { file in it.humanContinuation.value?.state?.value?.files.orEmpty() }
+                }
                 if (unreferenced.isNotEmpty()) filesManager.deleteChatFiles(unreferenced)
             }
         }
@@ -4806,6 +5448,7 @@ class ChatService(
 
     /** Caller holds this session's edit mutex. Does not dispatch or reacquire the mutex. */
     private suspend fun saveConversationLocked(session: ConversationSession, conversation: Conversation) {
+        check(session.humanContinuation.value == null) { "旧轮记录仍保留；独立续聊的保存由新通道处理。" }
         val conversationId = session.id
         require(conversation.id == conversationId)
         if (session.isInitialized) requireCompactionEpoch(conversation.compactionEpoch, session.state.value.compactionEpoch)
@@ -4857,7 +5500,37 @@ class ChatService(
     }
 
     /** Caller retains the edit mutex through the following write; new jobs wait for that mutex. */
-    private suspend fun requireWritableHistoryLocked(session: ConversationSession) {
+    private suspend fun requireWritableHistoryLocked(session: ConversationSession, allowPendingApprovals: Boolean = false) {
+        session.humanContinuation.value?.let { lane ->
+            val expected = lane.state.value
+            fun quiet() = !session.hasUnfinishedJobs() && session.submittingMessage == null &&
+                !session.manualContextWriteInProgress && !queueControls.isResetting(session.id) &&
+                !gatewayStopInFlight.contains(session.id)
+            check(quiet()) { "旧轮仍在收尾，请稍后整理历史；新消息仍可发送。" }
+            val stored = kotlinx.coroutines.withTimeoutOrNull(1_500) { withContext(Dispatchers.IO) {
+                val saved = conversationRepo.getConversationById(session.id)
+                if (saved != null && sameDurableGenerationSnapshot(expected, saved))
+                    generationJournal.clearContainedInDurableContinuation(saved)
+                check(!generationJournal.hasCheckpoint(session.id)) {
+                    "旧轮恢复记录尚未核对，原历史仍保留；新消息仍可发送。"
+                }
+                saved
+            } }
+            check(stored != null && sameDurableGenerationSnapshot(expected, stored)) {
+                "续聊保存尚未核对完成，暂不改写历史；新消息仍可发送。"
+            }
+            synchronized(session) {
+                check(session.humanContinuation.value === lane && quiet() &&
+                    lane.retireForHistoryEdit(expected, allowPendingApprovals)) {
+                    "续聊仍有生成、工具或保存任务，请结束后再整理历史。"
+                }
+                session.state.value = stored
+                session.humanContinuation.value = null
+                // Only the local lane flag is released. Remote holds, old queue entries and
+                // automatic-wake restrictions remain intact, with no automatic dispatch.
+                session.generationRecoveryBlocked = false
+            }
+        }
         fun busy() = synchronized(session) {
             session.getJob() != null || session.submittingMessage != null || session.manualContextWriteInProgress
         }
@@ -5166,6 +5839,7 @@ class ChatService(
         reason: HostToolFailure = HostToolFailure.INTERRUPTED,
         stopGatewayWait: Boolean = false,
     ) {
+        sessions[conversationId]?.humanContinuation?.value?.let { it.stop(); return }
         if (stopGatewayWait) queueControls.run(conversationId) {
             stopGenerationInternal(conversationId, reason, true)
         } else stopGenerationInternal(conversationId, reason, false)

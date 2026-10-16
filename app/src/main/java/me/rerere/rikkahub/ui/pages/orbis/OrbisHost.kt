@@ -144,7 +144,7 @@ internal fun OrbisOfflineHomeOverlay(visible: Boolean, homeRevision: Int, onOpen
 }
 
 @Composable
-fun OrbisChatDock(currentLabel: String = "当前 聊天") {
+fun OrbisChatDock(currentLabel: String = "当前 聊天", ownerAssistantId: String? = null, conversationId: String? = null) {
     val openHome = LocalOpenOrbisHome.current
     val returnToChat = LocalReturnToOrbisChat.current
     val navigator = LocalNavController.current
@@ -207,7 +207,7 @@ fun OrbisChatDock(currentLabel: String = "当前 聊天") {
                 OrbisNavigationItem("memory", "记忆星图", "本机与 ST · 只读元信息", HugeIcons.Sparkles,
                     { go(Screen.OrbisMemoryAtlas) }),
                 OrbisNavigationItem("tools", "工具娱乐", "工作区、文件与本地工具", HugeIcons.Command,
-                    { go(Screen.OrbisTools) }),
+                    { go(orbisToolsRoute(ownerAssistantId, conversationId)) }),
                 OrbisNavigationItem("permissions", "后台与权限", "哨兵与手机设备能力", HugeIcons.SecurityCheck,
                     { go(Screen.OrbisPhone) }),
                 OrbisNavigationItem("settings", "系统设置", "模型、MCP、声音与数据", HugeIcons.Settings01,

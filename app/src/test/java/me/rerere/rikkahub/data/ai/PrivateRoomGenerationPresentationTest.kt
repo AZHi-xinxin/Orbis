@@ -137,7 +137,7 @@ class PrivateRoomGenerationPresentationTest {
                 UIMessagePart.Tool("read", "orbis_private_room_read", "private input", listOf(UIMessagePart.Text("private result")))))
         val prepared = me.rerere.rikkahub.data.ai.compaction.prepareCompaction(
             Json.parseToJsonElement("{\"use_last_message\":true,\"keep_recent\":0}"),
-            listOf(visible, private), UIMessage.assistant(""))
+            listOf(visible), private)
         assertEquals("public operation summary", prepared.summary.toText())
         assertEquals(private.id, prepared.sourceMessageId)
         assertFalse(prepared.summary.toText().contains("private"))

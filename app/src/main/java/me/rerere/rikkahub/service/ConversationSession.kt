@@ -30,6 +30,8 @@ class ConversationSession(
 ) {
     // 会话状态
     val state = MutableStateFlow(initial)
+    // Independent human continuation is retained even when old recovery cannot finish.
+    internal val humanContinuation = MutableStateFlow<HumanContinuationLane?>(null)
     // Initialization, whole-conversation saves and prompt commits share this mutex.
     val orbisPromptEditMutex = Mutex()
     // Guarded by orbisPromptEditMutex; a new fork may seed its inherited prompt exactly once.
@@ -68,7 +70,7 @@ class ConversationSession(
     val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
     val isInUse: Boolean
-        get() = refCount.get() > 0 || hasUnfinishedJobs() || gatewayRecoveryBlocked ||
+        get() = humanContinuation.value != null || refCount.get() > 0 || hasUnfinishedJobs() || gatewayRecoveryBlocked ||
                 messageQueue.state.value.messages.isNotEmpty() || automaticWakeQueue.pending.isNotEmpty()
 
     // 空闲检查任务

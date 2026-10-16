@@ -33,6 +33,46 @@ class ToySessionTest {
             assertThrows(IllegalArgumentException::class.java) { ToyProtocol.set(it) }
         }
     }
+    @Test fun `public five levels preserve the original five wire values`() {
+        val bytes = listOf(50, 100, 160, 210, 255)
+        for (level in 1..5) {
+            val intensity = ToyProtocol.legacyIntensityForLevel(level)
+            assertEquals(level, ToyProtocol.level(intensity))
+            assertArrayEquals(byteArrayOf(0x55, 4, 0, 0, 1, bytes[level - 1].toByte(), 0xAA.toByte()),
+                ToyProtocol.set(intensity))
+        }
+        assertEquals(0, ToyProtocol.legacyIntensityForLevel(0))
+    }
+    @Test fun `invalid public levels never reach a connected transport`() = runTest {
+        val session = ToySession(backgroundScope); val link = FakeLink(); session.attach("fixture", link)
+        for (level in listOf(-1, 6, 30, 35, 100, Int.MAX_VALUE)) {
+            try { session.setLevel(level); fail("must reject $level") } catch (_: IllegalArgumentException) { }
+        }
+        assertTrue(link.packets.isEmpty()); assertNull(session.state.value.requestedIntensity)
+    }
+    @Test fun `same public level reports no change and distinct levels produce distinct wire values`() = runTest {
+        val session = ToySession(backgroundScope); val link = FakeLink(); session.attach("fixture", link)
+        session.setLevel(2)
+        assertTrue(session.setLevel(2).message.contains("档位未变化"))
+        val changed = session.setLevel(3)
+        assertEquals(3, changed.level); assertFalse(changed.message.contains("档位未变化"))
+        assertArrayEquals(link.packets[0], link.packets[1])
+        assertFalse(link.packets[1].contentEquals(link.packets[2])); session.stop()
+    }
+    @Test fun `public zero is stop and works even with a stale activation grant`() = runTest {
+        val session = ToySession(backgroundScope); val link = FakeLink(); session.attach("fixture", link)
+        session.setLevel(2); session.setLevel(0) { false }
+        assertArrayEquals(ToyProtocol.stop, link.packets.last())
+        assertEquals(0, session.state.value.level); assertNull(session.state.value.requestedIntensity)
+        val count = link.packets.size; advanceTimeBy(5000); runCurrent(); assertEquals(count, link.packets.size)
+    }
+    @Test fun `public level cannot bypass connection membership or activation guard`() = runTest {
+        val session = ToySession(backgroundScope)
+        try { session.setLevel(1); fail("must refuse disconnected") } catch (_: IllegalStateException) { }
+        val link = FakeLink(); session.attach("fixture", link)
+        try { session.setLevel(1) { false }; fail("must refuse stale") } catch (_: IllegalStateException) { }
+        assertTrue(link.packets.isEmpty())
+    }
     @Test fun `new session has no selected device or running command`() = runTest {
         val session = ToySession(backgroundScope)
         assertFalse(session.state.value.connected); assertNull(session.state.value.requestedIntensity)

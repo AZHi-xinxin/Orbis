@@ -43,7 +43,7 @@ internal fun createOrbisScheduleTools(executeRequest: suspend (OrbisScheduleRequ
                         put("kind", scheduleKindSchema())
                         put("offset", scheduleIntegerSchema(0, ORBIS_SCHEDULE_MAX_ENTRIES, "分页偏移"))
                         put("limit", scheduleIntegerSchema(1, 20, "单页最多20条"))
-                        put("expected_revision", scheduleIntegerSchema(0, Int.MAX_VALUE, "offset>0必须提供上一页revision"))
+                        put("expected_revision", scheduleIntegerSchema(0, Int.MAX_VALUE, "第一次list请省略本字段，不能填占位0；offset>0必须提供上一页返回的真实revision"))
                     }
                     "read" -> put("id", scheduleStringSchema("目录中的稳定id", 80))
                     else -> {
@@ -218,7 +218,7 @@ private val SCHEDULE_SAFE_ERRORS = setOf("schedule_invalid_parameters", "schedul
     "schedule_invalid_storage", "schedule_storage_disappeared", "schedule_write_unverified")
 
 fun orbisScheduleErrorText(code: String?): String = when (code) {
-    "schedule_revision_changed" -> "日程已在别处更新，本次没有覆盖。请刷新后重新核对修改。"
+    "schedule_revision_changed" -> "提供的版本与当前日程不一致，本次没有覆盖。首次 list 请省略 expected_revision，不要填占位0；后续翻页和写入须使用刚读取的真实 revision。"
     "schedule_not_found" -> "这条日程已不存在，请刷新列表。"
     "schedule_invalid_time", "schedule_time_order" -> "请填写同一天内的有效时间，如08:00至09:00；跨午夜事项请分成两条。"
     "schedule_invalid_date", "schedule_date_order" -> "请使用有效日期（YYYY-MM-DD），截止日不能早于开始日。"

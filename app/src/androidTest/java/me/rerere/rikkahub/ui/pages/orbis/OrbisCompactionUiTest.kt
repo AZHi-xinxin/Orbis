@@ -80,6 +80,8 @@ class OrbisCompactionUiTest {
             .assert(hasClickAction().not())
         compose.onNodeWithTag("orbis-compaction-rollback-latest").assertDoesNotExist()
         compose.onNodeWithTag("orbis-compaction-delete-$eventId").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(deleted.isEmpty()) }
+        compose.onNodeWithTag("orbis-compaction-delete-confirm").performClick()
         compose.runOnIdle {
             assertEquals(listOf(eventId), deleted)
             assertEquals(0, rollbackCalls)
