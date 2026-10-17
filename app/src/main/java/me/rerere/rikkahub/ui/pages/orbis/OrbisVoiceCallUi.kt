@@ -176,6 +176,9 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
                             else -> "当前轮流说话；耳机或可用回声处理支持播放时插话"
                         }, color = cream.copy(alpha = .65f), fontSize = 12.sp,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        OrbisStopPlaybackControl(voice.playbackToken, cream) {
+                            runtime.voiceSession.requestStopPlayback(it)
+                        }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                             verticalAlignment = Alignment.Top) {
                             OrbisCallRoundControl(label = if (voice.microphoneEnabled) "关闭麦克风" else "开启麦克风",
@@ -209,6 +212,20 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
             }
         }
     }
+}
+
+/** Explicit, playback-only control. The captured token cannot target a later reply. */
+@Composable
+internal fun OrbisStopPlaybackControl(playbackToken: String?, contentColor: Color, onStop: (String) -> Unit) {
+    OutlinedButton(
+        onClick = { playbackToken?.let(onStop) },
+        enabled = playbackToken != null,
+        modifier = Modifier.testTag("orbis-call-stop-playback").semantics {
+            contentDescription = "停止本条播报，保留文字，不挂断通话"
+        },
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = contentColor,
+            disabledContentColor = contentColor.copy(alpha = .35f)),
+    ) { Text("停止本条播报") }
 }
 
 /** Compact phone controls: microphone / hang up / playback, with explicit off glyphs and labels. */

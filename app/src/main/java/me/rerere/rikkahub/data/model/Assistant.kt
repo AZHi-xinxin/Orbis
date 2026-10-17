@@ -30,6 +30,9 @@ data class Assistant(
     val compactionThresholdTokens: Int = 0,
     // Human-only opt-in; not an AI tool argument and never retroactively reconstructs originals.
     val retainCompactionOriginals: Boolean = false,
+    // Default on for missing/old settings; an explicit human opt-out remains persisted.
+    // Save an independent local chat at AI compaction commit, never a new tool.
+    val preserveCompactionBranch: Boolean = true,
     val streamOutput: Boolean = true,
     val enableMemory: Boolean = false,
     // Orbis notes are independent of legacy/global RikkaHub memory. Light never injects.

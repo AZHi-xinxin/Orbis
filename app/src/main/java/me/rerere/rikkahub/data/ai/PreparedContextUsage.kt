@@ -13,7 +13,7 @@ import kotlin.uuid.Uuid
 
 private val receiptJson = Json { encodeDefaults = true }
 
-/** Display evidence only. Changing the threshold merely recomputes the ratio, not the input. */
+/** Display evidence only. Local threshold/retention settings do not alter model input. */
 internal fun preparedContextConfiguration(
     assistant: Assistant,
     model: Model?,
@@ -23,7 +23,8 @@ internal fun preparedContextConfiguration(
     lorebookIds: Set<Uuid>,
     workspaceCwd: String?,
 ): String = digestStrings(listOf(
-    assistant.copy(compactionThresholdTokens = 0).toString(), model.toString(),
+    assistant.copy(compactionThresholdTokens = 0, retainCompactionOriginals = false,
+        preserveCompactionBranch = false).toString(), model.toString(),
     systemPrompt.orEmpty(), orbisPrompt.toString(),
     modeIds.map { it.toString() }.sorted().joinToString(","),
     lorebookIds.map { it.toString() }.sorted().joinToString(","), workspaceCwd.orEmpty(),

@@ -44,6 +44,8 @@ data class VoiceSessionState(
     val lastReplyText: String = "",
     // Capability only: quiet-voice/AEC quality still requires device acceptance testing.
     val canInterruptPlayback: Boolean = false,
+    /** Identifies one playback, not a model turn; stale taps must not stop the next sentence/call. */
+    val playbackToken: String? = null,
     /** Original ASR only when changed; UI/audit only, never a second model message. */
     val originalTranscript: String? = null,
     val correctionNotice: ASRCorrectionNotice = ASRCorrectionNotice(),
@@ -89,6 +91,7 @@ class VoiceSessionController(
         data class CaptureFailed(val epoch: Long, val error: Exception) : Event
         data class Reply(val id: Long, val text: String?, val error: Exception? = null) : Event
         data class PlaybackEnded(val id: Long, val error: Exception? = null) : Event
+        data class StopPlayback(val token: String) : Event
         data class TailEnded(val id: Long) : Event
         data object Connected : Event
         data class MicrophoneChanged(val enabled: Boolean) : Event
@@ -113,7 +116,8 @@ class VoiceSessionController(
         var completed = false
         var text: String? = null
     }
-    private data class Playback(val id: Long, val text: String, val reply: Deferred<String?>? = null)
+    private data class Playback(val id: Long, val text: String, val reply: Deferred<String?>? = null,
+        val token: String = java.util.UUID.randomUUID().toString())
 
     fun start(
         createAsr: () -> ASRController,
@@ -167,7 +171,7 @@ class VoiceSessionController(
                     else -> VoiceRecoveryPolicy.failure(VoiceFailureStage.CONNECT, e).message
                 }
                 mutableState.update { it.copy(phase = VoicePhase.Error, error = terminalError,
-                    canInterruptPlayback = false) }
+                    canInterruptPlayback = false, playbackToken = null) }
             } finally {
                 stopPlayback()
                 if (stopCurrentPlayback === stopPlayback) {
@@ -425,6 +429,7 @@ class VoiceSessionController(
                 else -> VoicePhase.Listening
             }
             mutableState.update { it.copy(phase = phase, canInterruptPlayback = duplexSafe(),
+                playbackToken = playing?.token,
                 pendingReplies = pending.values.count { reply -> !reply.completed },
                 humanTurnInProgress = asr?.state?.value?.voiceTurn?.itemId != null) }
         }
@@ -621,6 +626,12 @@ class VoiceSessionController(
                             it.text = event.text
                         }
                     }
+                    is Event.StopPlayback -> if (playing?.token == event.token) {
+                        // Deliberate playback-only action. Preserve text, unrelated replies, microphone
+                        // and call ownership; never cancel a chat generation or repeat any tool.
+                        stopPlayback()
+                        if (capture == null) waitForTail()
+                    }
                     is Event.PlaybackEnded -> if (playing?.id == event.id) {
                         playing = null
                         playback = null
@@ -740,6 +751,13 @@ class VoiceSessionController(
         } finally {
             try { asr.dispose() } finally { if (activeAsr === asr) activeAsr = null }
         }
+    }
+
+    /** Acceptance only; the session's event owner checks this exact playback again before stopping. */
+    fun requestStopPlayback(expectedToken: String): Boolean {
+        val current = mutableState.value
+        if (!current.isActive || current.playbackToken != expectedToken) return false
+        return controls?.trySend(Event.StopPlayback(expectedToken))?.isSuccess == true
     }
 
     fun setMicrophoneEnabled(enabled: Boolean) {

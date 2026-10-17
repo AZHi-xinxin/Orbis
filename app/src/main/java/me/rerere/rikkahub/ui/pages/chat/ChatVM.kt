@@ -356,7 +356,10 @@ class ChatVM(
     }
 
     // 生成完成
-    val generationDoneFlow: SharedFlow<Uuid> = chatService.generationDoneFlow
+    val generationDoneFlow = chatService.generationDoneFlow
+
+    fun isCurrentGenerationDone(event: me.rerere.rikkahub.service.ChatGenerationDone): Boolean =
+        event.conversationId == _conversationId && chatService.isCurrentGenerationDone(event)
 
     // MCP管理器
     val mcpManager = chatService.mcpManager

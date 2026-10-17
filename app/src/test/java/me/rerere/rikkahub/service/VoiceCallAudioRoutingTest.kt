@@ -72,6 +72,63 @@ class VoiceCallAudioRoutingTest {
         assertEquals(VoiceCallAudioMode.NORMAL, backend.mode)
     }
 
+    @Test fun mutedIdleModeReleaseKeepsTheSameConfirmedSpeakerEligibleWithoutChangingUnmutedPolicy() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        assertFalse(lease.isMutedSpeakerIdleRelease(true)) // Must have confirmed once.
+        assertTrue(lease.isConfirmed())
+        repeat(50) {
+            backend.mode = VoiceCallAudioMode.NORMAL
+            backend.currentDevice = earpiece // Android has temporarily released our idle route.
+            assertTrue(lease.isMutedSpeakerIdleRelease(true))
+            assertFalse(lease.isMutedSpeakerIdleRelease(false))
+            assertTrue(lease.resume(allowSpeakerFallback = false))
+            assertTrue(lease.isConfirmed())
+            assertFalse(lease.isMutedSpeakerIdleRelease(true))
+            assertTrue(lease.mayPreserveMutedSpeakerOutput(true))
+        }
+        lease.close()
+        assertFalse(lease.mayPreserveMutedSpeakerOutput(true))
+    }
+
+    @Test fun mutedIdleExceptionNeverCoversHeadsetLossOrNewDevicesOrAnotherCall() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start()); assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        backend.availableDevices = listOf(speaker, wired)
+        assertFalse(lease.mayPreserveMutedSpeakerOutput(true))
+        assertTrue(lease.resume()); assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        assertFalse(lease.isMutedSpeakerIdleRelease(true)) // Even a present headset uses original path.
+        backend.availableDevices = listOf(speaker, earpiece)
+        backend.currentDevice = earpiece
+        assertFalse(lease.mayPreserveMutedSpeakerOutput(true))
+        assertFalse(lease.resume(allowSpeakerFallback = false))
+        assertTrue(lease.resume()); assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.OTHER
+        assertFalse(lease.mayPreserveMutedSpeakerOutput(true))
+        lease.close()
+        assertEquals(VoiceCallAudioMode.OTHER, backend.mode)
+    }
+
+    @Test fun mutedIdleRecoveryStillRequiresReadbackAndDoesNotClaimSuccessOnRefusal() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start()); assertTrue(lease.isConfirmed())
+        backend.mode = VoiceCallAudioMode.NORMAL
+        backend.refuseMode = true
+        assertTrue(lease.isMutedSpeakerIdleRelease(true))
+        assertFalse(lease.resume(allowSpeakerFallback = false))
+        assertFalse(lease.isConfirmed())
+        lease.close()
+        val legacy = VoiceCallAudioRouting(Backend(modernRouting = false))
+        assertTrue(legacy.start()); assertTrue(legacy.isConfirmed())
+        assertFalse(legacy.mayPreserveMutedSpeakerOutput(true))
+        legacy.close()
+    }
+
     @Test fun idleModeLossRecoversExistingHeadsetButNeverChangesToSpeakerOnItsOwn() {
         val backend = Backend().apply { currentDevice = wired; availableDevices = listOf(speaker, wired) }
         val lease = VoiceCallAudioRouting(backend)

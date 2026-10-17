@@ -41,6 +41,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -210,6 +212,9 @@ private fun SearchServiceOptionsEditor(
         }
         is SearchServiceOptions.BochaOptions -> {
             BochaOptions(options) { onUpdateOptions(it) }
+        }
+        is SearchServiceOptions.DeepSeekOptions -> {
+            DeepSeekOptions(options) { onUpdateOptions(it) }
         }
         is SearchServiceOptions.RikkaHubOptions -> {
             RikkaHubOptions(options) { onUpdateOptions(it) }
@@ -390,6 +395,24 @@ internal fun TavilyOptions(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun DeepSeekOptions(
+    options: SearchServiceOptions.DeepSeekOptions,
+    onUpdateOptions: (SearchServiceOptions.DeepSeekOptions) -> Unit,
+) {
+    FormItem(label = { Text("DeepSeek 官方 API Key") }) {
+        OutlinedTextField(
+            value = options.apiKey,
+            onValueChange = { onUpdateOptions(options.copy(apiKey = it)) },
+            modifier = Modifier.fillMaxWidth().testTag("deepseek-search-key"),
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            singleLine = true,
+            supportingText = { Text("独立于聊天模型配置；不是 ST 网关密钥。配置后，请在聊天的「联网」中选择此服务。") },
+        )
     }
 }
 

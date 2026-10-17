@@ -218,6 +218,63 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         )
     }
 
+    /** Read-only proof of the exact gap between Room and a cancelled producer's visible tail.
+     * Node IDs alone are insufficient: prove the original database hash AND every streamed byte.
+     * No recovery is written, no journal is cleared, and no tool is executed here.
+     */
+    @Synchronized
+    fun provesInFlightBaseline(persisted: Conversation, visible: Conversation): Boolean = guarded {
+        val record = read(persisted.id) ?: return@guarded false
+        if (visible.consultation != persisted.consultation) return@guarded false
+        val recovery = recover(persisted) ?: return@guarded false
+        validateBaseIdentity(record, visible)
+        if (visible.messageNodes.size != record.prefixCount + record.tail.size + record.suffixCount)
+            return@guarded false
+        val visibleHash = protectedNodesHash(visible.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount), record.version)
+        visibleHash == protectedNodesHash(record.tail, record.version) ||
+            visibleHash == protectedNodesHash(recovery.conversation.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount), record.version)
+    }
+
+    /** A fresh human turn settles old tools as interrupted, not successful. Once that exact
+     * settled tail is in Room, retain uncertainty separately and release only its local journal.
+     * Caller must have joined/fenced the producer and verified the durable automatic-wake hold.
+     */
+    @Synchronized
+    fun clearSettledInDurableContinuation(persisted: Conversation, unknownEffectsRetained: Boolean): Boolean = guarded {
+        val record = read(persisted.id) ?: return@guarded false
+        if (record.suffixCount != 0 || persisted.assistantId != record.ownerId ||
+            persisted.compactionEpoch != record.epoch ||
+            record.tools.any { it.status == GenerationToolStatus.STARTED } && !unknownEffectsRetained ||
+            persisted.messageNodes.size.toLong() < record.prefixCount.toLong() + record.tail.size ||
+            persisted.messageNodes.map { it.id }.distinct().size != persisted.messageNodes.size) return@guarded false
+        if (protectedNodesHash(persisted.messageNodes.take(record.prefixCount), record.version) != record.prefixHash)
+            return@guarded false
+        val storedTail = persisted.messageNodes.drop(record.prefixCount).take(record.tail.size)
+        val expected = record.tail.zip(storedTail).map { (oldNode, storedNode) ->
+            if (oldNode.messages.size != storedNode.messages.size) return@guarded false
+            oldNode.copy(messages = oldNode.messages.zip(storedNode.messages).map { (old, stored) ->
+                if (old.parts.size != stored.parts.size) return@guarded false
+                val interrupted = old.getTools().any { !it.isExecuted }
+                if (interrupted && stored.finishedAt == null) return@guarded false
+                old.copy(finishedAt = if (interrupted) stored.finishedAt else old.finishedAt,
+                    parts = old.parts.zip(stored.parts).map { (part, saved) ->
+                        when {
+                            part is UIMessagePart.Tool && !part.isExecuted -> part.withHostToolFailure(
+                                if (part.isPending) HostToolFailure.APPROVAL_CANCELLED else HostToolFailure.INTERRUPTED)
+                            part is UIMessagePart.Reasoning && part.finishedAt == null -> {
+                                if (saved !is UIMessagePart.Reasoning || saved.finishedAt == null) return@guarded false
+                                part.copy(finishedAt = saved.finishedAt)
+                            }
+                            else -> part
+                        }
+                    })
+            })
+        }
+        if (protectedNodesHash(storedTail, record.version) != protectedNodesHash(expected, record.version)) return@guarded false
+        store.delete(persisted.id)
+        true
+    }
+
     /** Emergency read-only preview. The caller supplies exactly one undecodable node as an
      * empty placeholder, never publishes that Conversation, and separately proves a narrow
      * encoding-only difference against the raw damaged cell. No tail is appended or replayed. */

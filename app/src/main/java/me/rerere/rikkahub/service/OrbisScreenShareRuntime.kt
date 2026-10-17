@@ -334,6 +334,13 @@ class OrbisScreenShareRuntime private constructor(private val context: Context) 
             !context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
     }
 
+    internal fun requireFrameAccess(owner: String, conversation: String, session: String?, epoch: Long?) {
+        val current = mutableState.value
+        requireScreenFrameAccess(owner, conversation, session, epoch, current.assistantId,
+            current.conversationId, current.sessionId, current.screenEpoch, current.screenEnabled,
+            authorizationValid, context.getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked)
+    }
+
     @Synchronized internal fun retainTurn(frame: String?): String {
         val token = Uuid.random().toString()
         turnPins[token] = mutableSetOf<String>().also { if (frame != null && buffer.pin(frame)) it.add(frame) }
@@ -346,27 +353,30 @@ class OrbisScreenShareRuntime private constructor(private val context: Context) 
 
     internal suspend fun captureNow(owner: String, conversation: String, session: String, force: Boolean = true,
         expectedEpoch: Long? = null): ScreenShareFrame? = withContext(Dispatchers.Main.immediate) { captureMutex.withLock {
-        check(permits(owner, conversation, session)) { "共享画面已关闭或已结束。" }
+        requireFrameAccess(owner, conversation, session, expectedEpoch)
         val captureEpoch = mutableState.value.screenEpoch
-        check(expectedEpoch == null || expectedEpoch == captureEpoch) { "共享画面授权已更新，请开始新的对话。" }
-        check(System.currentTimeMillis() - lastCapture >= 3000) { "请至少间隔 3 秒再看。" }
+        requireScreenCaptureInterval(System.currentTimeMillis(), lastCapture)
+        val source = capture ?: throw ScreenShareFrameFailure(ScreenShareFrameReason.NOT_READY)
         lastCapture = System.currentTimeMillis()
-        val result = try { withTimeout(5000) { checkNotNull(capture).invoke().also {
+        val result = try { withTimeout(5000) { source.invoke().also {
             if (it.first.size !in 1..2_000_000) { it.first.fill(0); error("screen_frame_size_invalid") }
         } } }
         catch (cancelled: CancellationException) {
             currentCoroutineContext().ensureActive()
+            requireFrameAccess(owner, conversation, session, captureEpoch)
             if (mutableState.value.sessionId == session && mutableState.value.screenEpoch == captureEpoch) {
                 captureRetry = captureRetry.failed(System.currentTimeMillis()); refreshHealth()
             }
             throw cancelled
         } catch (error: Exception) {
+            requireFrameAccess(owner, conversation, session, captureEpoch)
             if (mutableState.value.sessionId == session && mutableState.value.screenEpoch == captureEpoch) {
                 captureRetry = captureRetry.failed(System.currentTimeMillis()); refreshHealth()
             }
             throw error
         }
-        if (!permits(owner, conversation, session) || mutableState.value.screenEpoch != captureEpoch) { result.first.fill(0); error("画面已关闭。") }
+        try { requireFrameAccess(owner, conversation, session, captureEpoch) }
+        catch (error: Exception) { result.first.fill(0); throw error }
         val frame = ScreenShareFrame(Uuid.random().toString(), System.currentTimeMillis(), result.first, result.second)
         captureRetry = ScreenShareRetry()
         mutableState.value = mutableState.value.copy(lastFrameAt = frame.capturedAt)
@@ -376,9 +386,10 @@ class OrbisScreenShareRuntime private constructor(private val context: Context) 
         buffer.get(frame.id)
     } }
 
-    internal fun back(owner: String, conversation: String, session: String, index: Int): ScreenShareFrame {
-        check(permits(owner, conversation, session)); require(index in 0..7)
-        return checkNotNull(buffer.back(index)) { "这张临时画面已不在缓冲中。" }
+    internal fun back(owner: String, conversation: String, session: String, index: Int, expectedEpoch: Long? = null): ScreenShareFrame {
+        requireFrameAccess(owner, conversation, session, expectedEpoch)
+        if (index !in 0..7) throw ScreenShareFrameFailure(ScreenShareFrameReason.INVALID_INDEX)
+        return buffer.back(index) ?: throw ScreenShareFrameFailure(ScreenShareFrameReason.EXPIRED)
     }
     internal fun image(owner: String, conversation: String, session: String, frameId: String, expectedEpoch: Long? = null): String {
         check(permits(owner, conversation, session))

@@ -44,6 +44,7 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
     private var lastSpeaker: Boolean? = null
     private var requestedDevice: VoiceCallAudioDevice? = null
     private var lastConfirmedExternal = false
+    private var lastConfirmedDevice: VoiceCallAudioDevice? = null
     private var requestedLegacySpeaker: Boolean? = null
 
     fun start(): Boolean {
@@ -103,7 +104,10 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
             val requested = requestedDevice ?: return false
             val actual = backend.currentDevice
             val ready = actual?.id == requested.id && backend.availableDevices.any { it.id == requested.id }
-            if (ready) lastConfirmedExternal = requested.kind == VoiceCallAudioDeviceKind.EXTERNAL
+            if (ready) {
+                lastConfirmedExternal = requested.kind == VoiceCallAudioDeviceKind.EXTERNAL
+                lastConfirmedDevice = requested
+            }
             ready
         } else {
             val speaker = requestedLegacySpeaker ?: return false
@@ -117,6 +121,22 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
 
     fun isPreferredAndConfirmed(): Boolean = isConfirmed() && (!backend.modernRouting ||
         preferredVoiceCallDevice(backend.availableDevices, backend.currentDevice)?.id == requestedDevice?.id)
+
+    /** A muted, already-confirmed built-in speaker can survive Android's idle mode release.
+     * This does not permit switching from headphones to speaker or accepting a new route.
+     * Used again during confirmation so a real device change still stops playback promptly.
+     */
+    fun mayPreserveMutedSpeakerOutput(microphoneMuted: Boolean): Boolean = runCatching {
+        if (!microphoneMuted || !started || closed || !ownsMode || !backend.modernRouting ||
+            backend.mode == VoiceCallAudioMode.OTHER) return false
+        val confirmed = lastConfirmedDevice ?: return false
+        confirmed.kind == VoiceCallAudioDeviceKind.SPEAKER && requestedDevice == confirmed &&
+            preferredVoiceCallDevice(backend.availableDevices, backend.currentDevice) == confirmed
+    }.getOrDefault(false)
+
+    fun isMutedSpeakerIdleRelease(microphoneMuted: Boolean): Boolean = runCatching {
+        mayPreserveMutedSpeakerOutput(microphoneMuted) && backend.mode == VoiceCallAudioMode.NORMAL
+    }.getOrDefault(false)
 
     fun suspendRouting() {
         if (!started || closed) return

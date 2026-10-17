@@ -171,6 +171,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                 session.focus = focus
                 session.audioRouting = AndroidVoiceCallAudioRouting(audio, scope,
                     mayUpdate = { current === session && !session.ending && session.focusState == VoiceAudioFocusState.AVAILABLE },
+                    microphoneMuted = { !voiceSession.state.value.microphoneEnabled },
                     onWaiting = {
                         if (current === session && !session.ending) {
                             voiceSession.setAudioFocusSuspended(true)

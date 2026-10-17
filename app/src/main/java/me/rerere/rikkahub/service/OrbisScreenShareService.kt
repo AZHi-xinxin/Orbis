@@ -192,7 +192,9 @@ class OrbisScreenShareService : Service() {
     private suspend fun captureFrame(): Pair<ByteArray, IntArray> {
         captureMask = overlayUi?.currentBoundsOnScreen()?.let(::Rect) ?: overlayMask?.let(::Rect)
         val request = CompletableDeferred<Pair<ByteArray, IntArray>>()
-        check(pendingCapture.compareAndSet(null, request)) { "画面仍在读取。" }
+        if (!pendingCapture.compareAndSet(null, request)) throw
+            me.rerere.rikkahub.data.orbis.screenshare.ScreenShareFrameFailure(
+                me.rerere.rikkahub.data.orbis.screenshare.ScreenShareFrameReason.BUSY)
         return try { withTimeout(4500) { request.await() } }
         finally { pendingCapture.compareAndSet(request, null); request.cancel(); captureMask = null }
     }

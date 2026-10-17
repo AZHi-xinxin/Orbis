@@ -39,12 +39,7 @@ class OrbisCompactionRepository(
             if (preview.operation == OrbisMessageBatchOperation.ARCHIVE) {
                 val metadata = checkNotNull(preview.archiveMetadata)
                 val archive = createManualContextArchive(expected, Instant.ofEpochMilli(metadata.createdAtEpochMillis))
-                database.conversationDao().insert(encodeConversationEntity(archive))
-                database.messageNodeDao().insertAll(archive.messageNodes.mapIndexed { index, node ->
-                    MessageNodeEntity(node.id.toString(), archive.id.toString(), index,
-                        encodeMessageNodeMessages(node.messages), node.selectIndex)
-                })
-                messageFtsManager.indexConversationInTransaction(archive)
+                insertIndependentArchive(archive)
                 val committed = commit(expected, preview.replacementNodes, metadata, persistedBaseline = baseline)
                 OrbisMessageBatchCommit(committed.conversation,
                     OrbisMessageBatchResult(preview.operation, preview.affectedCount, archive.id))
@@ -82,12 +77,7 @@ class OrbisCompactionRepository(
         validateManualContextReplacement(expected, replacementNodes, metadata)
         val archive = createManualContextArchive(expected, Instant.ofEpochMilli(metadata.createdAtEpochMillis))
         // Insert-only. New conversation, node and message IDs retain every alternative and file URL.
-        database.conversationDao().insert(encodeConversationEntity(archive))
-        database.messageNodeDao().insertAll(archive.messageNodes.mapIndexed { index, node ->
-            MessageNodeEntity(node.id.toString(), archive.id.toString(), index,
-                encodeMessageNodeMessages(node.messages), node.selectIndex)
-        })
-        messageFtsManager.indexConversationInTransaction(archive)
+        insertIndependentArchive(archive)
         val committed = commit(expected, replacementNodes, metadata, persistedBaseline = baseline)
         OrbisManualContextCommit(archive.id, committed)
     }
@@ -116,6 +106,14 @@ class OrbisCompactionRepository(
         val nextEpoch = Math.addExact(stored.compactionEpoch, 1L)
         require(metadata.createdAtEpochMillis > 0) { "compaction_invalid_event_time" }
         val now = Instant.ofEpochMilli(metadata.createdAtEpochMillis)
+        // Saving a branch is part of this same transaction, not another tool/model round.
+        // Use current persisted header settings plus the exact live completed message snapshot.
+        // Any later write failure rolls back the branch too; repeated old commits fail baseline
+        // validation (or the unique event ID) instead of creating duplicate windows.
+        val branch = if (metadata.preserveBranch && stored.consultationBinding.isBlank()) {
+            createAiCompactionBranch(decodeConversationEntity(stored, expected.messageNodes), now)
+                .also { insertIndependentArchive(it) }
+        } else null
         val updated = decodeConversationEntity(stored, replacementNodes).copy(
             compactionEpoch = nextEpoch, chatSuggestions = emptyList(), updateAt = now,
         )
@@ -164,7 +162,7 @@ class OrbisCompactionRepository(
             }
         }
         replacePage(updated)
-        OrbisCompactionCommit(updated, event.toModel(rollbackAvailable = true))
+        OrbisCompactionCommit(updated, event.toModel(rollbackAvailable = true), branch?.id)
     }
 
     /** No event ID is accepted: historical events can never be selected for restore. */
@@ -305,6 +303,16 @@ class OrbisCompactionRepository(
             addAll(page.map { MessageNode(Uuid.parse(it.nodeId), JsonInstant.decodeFromString<List<UIMessage>>(it.messages), it.selectIndex) })
             offset += page.size
         }
+    }
+
+    /** Insert-only normal conversation; attachment URLs are retained, not copied or removed. */
+    private suspend fun insertIndependentArchive(archive: Conversation) {
+        database.conversationDao().insert(encodeConversationEntity(archive))
+        database.messageNodeDao().insertAll(archive.messageNodes.mapIndexed { index, node ->
+            MessageNodeEntity(node.id.toString(), archive.id.toString(), index,
+                encodeMessageNodeMessages(node.messages), node.selectIndex)
+        })
+        messageFtsManager.indexConversationInTransaction(archive)
     }
 
     private suspend fun replacePage(conversation: Conversation) {

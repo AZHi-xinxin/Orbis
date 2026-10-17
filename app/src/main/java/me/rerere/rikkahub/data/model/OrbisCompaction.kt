@@ -36,9 +36,15 @@ data class OrbisCompactionMetadata(
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
     val captureLocalMemory: Boolean = false,
     val retainOriginals: Boolean = false,
+    val preserveBranch: Boolean = false,
 )
 
-data class OrbisCompactionCommit(val conversation: Conversation, val event: OrbisCompactionEvent)
+data class OrbisCompactionCommit(
+    val conversation: Conversation,
+    val event: OrbisCompactionEvent,
+    // Host-side receipt only; not serialized into model-visible history or compact tool output.
+    val preservedBranchId: Uuid? = null,
+)
 
 /** A stale stream/full-state save must not resurrect pre-compaction messages. */
 class OrbisCompactionConflictException : IllegalStateException("conversation_compaction_changed_reload_required")

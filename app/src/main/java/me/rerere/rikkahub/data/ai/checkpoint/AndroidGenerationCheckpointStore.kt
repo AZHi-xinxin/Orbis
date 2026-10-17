@@ -65,5 +65,8 @@ class AndroidGenerationCheckpointStore private constructor(private val directory
     companion object {
         fun create(noBackupFilesDir: File): AndroidGenerationCheckpointStore =
             AndroidGenerationCheckpointStore(File(noBackupFilesDir, "orbis-generation-journal-v1"))
+
+        fun createHumanContinuation(noBackupFilesDir: File): AndroidGenerationCheckpointStore =
+            AndroidGenerationCheckpointStore(File(noBackupFilesDir, "orbis-human-continuation-v1"))
     }
 }

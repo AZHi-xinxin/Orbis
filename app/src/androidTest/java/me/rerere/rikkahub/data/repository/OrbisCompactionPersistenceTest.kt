@@ -61,11 +61,112 @@ class OrbisCompactionPersistenceTest {
             (if (i % 2 == 0) UIMessage.user("synthetic original $i") else UIMessage.assistant("synthetic reply $i")).toMessageNode()
         })
     private suspend fun compact(f: Fixture, before: Conversation, summary: String = "I wrote this synthetic summary", keep: Int = 2,
-        captureLocalMemory: Boolean = false, retainOriginals: Boolean = false): OrbisCompactionCommit {
+        captureLocalMemory: Boolean = false, retainOriginals: Boolean = false, preserveBranch: Boolean = false): OrbisCompactionCommit {
         val start = UIMessage.assistant(summary).toMessageNode()
         return f.repository.commit(before, listOf(start) + before.messageNodes.takeLast(keep),
             OrbisCompactionMetadata(start.currentMessage.id, summary, keep, 350_000, 2_000, "synthetic estimate", "synthetic estimate",
-                captureLocalMemory = captureLocalMemory, retainOriginals = retainOriginals))
+                captureLocalMemory = captureLocalMemory, retainOriginals = retainOriginals, preserveBranch = preserveBranch))
+    }
+
+    @Test fun branchDisabledOrEnabledDoesNotChangeCompactedContextOrReadOnlyRetention() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            val first = compact(f, before)
+            assertNull(first.preservedBranchId)
+            assertEquals(1, f.db.conversationDao().getAllIds().size)
+            val second = compact(f, first.conversation, preserveBranch = true)
+            val archive = f.load(checkNotNull(second.preservedBranchId))
+            assertEquals(2, f.db.conversationDao().getAllIds().size)
+            assertEquals(first.conversation.currentMessages.map { it.parts }, archive.currentMessages.map { it.parts })
+            assertEquals(first.conversation.assistantId, archive.assistantId)
+            assertEquals(0L, archive.compactionEpoch)
+            assertEquals("synthetic window · AI 压缩前原文", archive.title)
+            assertEquals(3, second.conversation.messageNodes.size)
+            assertEquals(first.conversation.messageNodes.takeLast(2), second.conversation.messageNodes.drop(1))
+            assertEquals(0, f.repository.originalArchiveStats(before.assistantId).count)
+            assertNull(f.repository.latestRollback(archive.id, archive.assistantId))
+            assertStored(second.conversation, f.load(before.id))
+            // It is a normal conversation and can persist a new human turn independently.
+            val continued = archive.copy(messageNodes = archive.messageNodes + UIMessage.user("continue here").toMessageNode())
+            f.save(continued)
+            assertStored(continued, f.load(archive.id))
+            assertStored(second.conversation, f.load(before.id))
+        }
+    }
+
+    @Test fun failedBranchInsertOrLaterActiveWriteKeepsOriginalAndNoOrphanWindow() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            f.db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fail_branch BEFORE INSERT ON ConversationEntity BEGIN SELECT RAISE(ABORT, 'synthetic branch failure'); END")
+            assertTrue(runCatching { compact(f, before, preserveBranch = true) }.isFailure)
+            assertStored(before, f.load(before.id))
+            assertEquals(listOf(before.id.toString()), f.db.conversationDao().getAllIds())
+            assertTrue(f.repository.listHistory(before.assistantId).isEmpty())
+            f.db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_branch")
+            // The branch (including FTS) is inserted first; failing the later main write undoes both.
+            f.db.openHelper.writableDatabase.execSQL("CREATE TRIGGER fail_active_fts BEFORE INSERT ON message_fts WHEN NEW.conversation_id = '${before.id}' BEGIN SELECT RAISE(ABORT, 'synthetic active failure'); END")
+            assertTrue(runCatching { compact(f, before, preserveBranch = true) }.isFailure)
+            assertStored(before, f.load(before.id))
+            assertEquals(listOf(before.id.toString()), f.db.conversationDao().getAllIds())
+            assertTrue(f.repository.listHistory(before.assistantId).isEmpty())
+            f.db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM message_fts").use {
+                assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+            }
+        }
+    }
+
+    @Test fun repeatedOldCommitCreatesNoDuplicateAndOldBranchSurvivesLaterCompactionAndDeletion() = runBlocking {
+        Fixture().use { f ->
+            val before = original(); f.save(before, true)
+            val first = compact(f, before, preserveBranch = true, retainOriginals = true)
+            val archive = f.load(checkNotNull(first.preservedBranchId))
+            assertEquals(1, f.repository.originalArchiveStats(before.assistantId).count)
+            assertTrue(runCatching { compact(f, before, preserveBranch = true) }.isFailure)
+            assertEquals(2, f.db.conversationDao().getAllIds().size)
+            val second = compact(f, first.conversation, preserveBranch = true)
+            assertNotEquals(first.preservedBranchId, second.preservedBranchId)
+            assertEquals(3, f.db.conversationDao().getAllIds().size)
+            f.repository.deleteHistory(before.assistantId, first.event.id)
+            f.repository.deleteHistory(before.assistantId, second.event.id)
+            f.db.conversationDao().deleteById(before.id.toString())
+            assertStored(archive, f.load(archive.id))
+            assertEquals(2, f.db.conversationDao().getAllIds().size)
+        }
+    }
+
+    @Test fun branchPreservesAlternativesFilesAndCompletedLiveToolReceiptWithoutOldHostBindings() = runBlocking {
+        Fixture().use { f ->
+            val url = "file:///synthetic/branch-only.png"
+            val image = UIMessage.user("").copy(parts = listOf(UIMessagePart.Image(url)))
+            val before = original().let { it.copy(messageNodes = listOf(MessageNode(
+                messages = listOf(UIMessage.user("alternative"), image), selectIndex = 1)) + it.messageNodes) }
+            f.save(before, true)
+            val tool = UIMessage.assistant("live summary").copy(orbisVoiceCallId = "voice", orbisVoiceCallKind = "turn",
+                parts = listOf(UIMessagePart.Tool("already-done", "compact", "{}", listOf(UIMessagePart.Text("complete")))))
+            val live = before.copy(messageNodes = before.messageNodes + tool.toMessageNode())
+            val summary = UIMessage.assistant("summary").toMessageNode()
+            val result = f.repository.commit(live, listOf(summary, live.messageNodes.last()),
+                OrbisCompactionMetadata(summary.currentMessage.id, "summary", 1, 1000, 100, "test", "test", preserveBranch = true), before)
+            val archive = f.load(checkNotNull(result.preservedBranchId))
+            assertEquals(1, archive.messageNodes.first().selectIndex)
+            assertEquals(2, archive.messageNodes.first().messages.size)
+            assertEquals(live.currentMessages.map { it.parts }, archive.currentMessages.map { it.parts })
+            assertNull(archive.currentMessages.last().orbisVoiceCallId)
+            assertTrue(archive.currentMessages.last().getTools().single().isExecuted)
+            assertNotEquals(tool.id, archive.currentMessages.last().id)
+            compact(f, result.conversation) // Replace the single old undo slot.
+            assertTrue(f.repository.retainedFileReferences(listOf(url)).isEmpty())
+            assertTrue(f.db.messageNodeDao().hasFileReferenceOutsideConversation(JsonInstant.encodeToString(url), before.id.toString()))
+        }
+    }
+
+    @Test fun consultationCompactionDoesNotCreateAnOrdinaryChatBranch() = runBlocking {
+        Fixture().use { f ->
+            val before = original().copy(consultation = ConsultationConversationBinding("session", "subject"))
+            f.save(before, true)
+            assertNull(compact(f, before, preserveBranch = true).preservedBranchId)
+            assertEquals(1, f.db.conversationDao().getAllIds().size)
+        }
     }
 
     @Test fun optionalOriginalsDefaultOffAndDeleteDoesNotTouchCurrentOrRollback() = runBlocking {

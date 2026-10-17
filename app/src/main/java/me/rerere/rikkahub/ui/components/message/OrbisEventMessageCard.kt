@@ -111,7 +111,7 @@ internal fun OrbisEventMessageCard(
             Text(time.compactLabel, modifier = Modifier.testTag("orbis-event-time"),
                 color = ink.copy(alpha = .64f), style = smallStyle)
         }
-        if (updateFailed) Text("未更新显示状态；正在回复时请等回复结束后再试。若有恢复提示，请先处理恢复记录。", modifier = Modifier.padding(horizontal = 12.dp),
+        if (updateFailed) Text("未能保存展开／折叠状态，原消息仍保留；这不代表 AI 仍在回复。", modifier = Modifier.padding(horizontal = 12.dp),
             style = smallStyle, color = ink)
         if (!event.collapsed) {
             Surface(

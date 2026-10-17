@@ -180,9 +180,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             onConfirm = { options ->
                 showAddDialog = false
                 vm.updateSettings(
-                    settings.copy(
-                        searchServices = listOf(options) + settings.searchServices
-                    )
+                    settingsWithAddedSearchService(settings, options)
                 )
                 scope.launch {
                     lazyListState.animateScrollToItem(0)

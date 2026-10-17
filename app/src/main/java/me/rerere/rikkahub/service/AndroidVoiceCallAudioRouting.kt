@@ -9,6 +9,8 @@ import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 /** Platform adapter; callbacks are owner-checked by the runtime and never outlive the call. */
@@ -16,6 +18,7 @@ internal class AndroidVoiceCallAudioRouting(
     private val audio: AudioManager,
     private val scope: CoroutineScope,
     private val mayUpdate: () -> Boolean,
+    private val microphoneMuted: () -> Boolean,
     private val onWaiting: () -> Unit,
     private val onReady: () -> Unit,
     private val onUnavailable: () -> Unit,
@@ -24,6 +27,8 @@ internal class AndroidVoiceCallAudioRouting(
     private var registered = false
     private var closed = false
     private var waiting = false
+    private var preservingMutedOutput = false
+    private var refreshPending = false
     private var requestEpoch = 0L
     private var routeJob: Job? = null
     private var removeCommunicationListener: (() -> Unit)? = null
@@ -48,25 +53,55 @@ internal class AndroidVoiceCallAudioRouting(
             audio.addOnModeChangedListener({ command -> handler.post(command); Unit }, modeListener)
             removeModeListener = { audio.removeOnModeChangedListener(modeListener) }
         }
-        return requestAndConfirm { routing.start() }
+        val ready = requestAndConfirm { routing.start() }
+        if (refreshPending && mayUpdate()) update()
+        return ready
     }
 
     private fun update() {
         if (closed) return
         confirmation.changed()
-        if (waiting || routeJob?.isActive == true || !mayUpdate()) return
+        if (waiting || routeJob?.isActive == true) {
+            refreshPending = true
+            // An actual device change during the short idle-mode confirmation is not
+            // covered by the exception: retain the existing pause behavior immediately.
+            if (preservingMutedOutput && !routing.mayPreserveMutedSpeakerOutput(microphoneMuted())) {
+                preservingMutedOutput = false
+                onWaiting()
+            }
+            return
+        }
+        refreshPending = false
+        if (!mayUpdate()) return
         if (runCatching { routing.isPreferredAndConfirmed() }.getOrDefault(false)) return
         // Pause before requesting another route. In particular, unplugging headphones
         // must not automatically continue private speech through the speaker.
-        onWaiting()
-        routeJob = scope.launch(start = CoroutineStart.LAZY) {
+        // Stopping TTS here also cancels synthesis. While the mic is intentionally off,
+        // Android can release idle communication mode every six seconds, indefinitely
+        // cancelling a slow synthesis before it gets a chance to produce any audio.
+        preservingMutedOutput = routing.isMutedSpeakerIdleRelease(microphoneMuted())
+        if (!preservingMutedOutput) onWaiting()
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             // Still our live, focused call: reacquire NORMAL -> COMMUNICATION as well as
             // the route. refresh alone rejected NORMAL forever after idle mode loss.
-            val ready = requestAndConfirm { routing.resume(allowSpeakerFallback = false) }
-            if (!closed && mayUpdate()) {
-                if (ready) onReady() else onUnavailable()
+            try {
+                val ready = requestAndConfirm { routing.resume(allowSpeakerFallback = false) }
+                preservingMutedOutput = false
+                if (!closed && mayUpdate()) {
+                    if (ready) onReady() else onUnavailable()
+                }
+            } finally {
+                if (routeJob === currentCoroutineContext().job) {
+                    preservingMutedOutput = false
+                    routeJob = null
+                    // A cancelled old owner must not clear or restart a replacement job.
+                    if (refreshPending && !closed && mayUpdate()) update()
+                }
             }
-        }.also { it.start() }
+        }
+        // Main.immediate may finish synchronously. Publish ownership before starting.
+        routeJob = job
+        job.start()
     }
 
     private suspend fun requestAndConfirm(request: () -> Boolean): Boolean {
@@ -83,6 +118,8 @@ internal class AndroidVoiceCallAudioRouting(
 
     suspend fun resume(): Boolean = requestAndConfirm { routing.resume() }
     fun suspendRouting() {
+        preservingMutedOutput = false
+        refreshPending = false
         requestEpoch++
         confirmation.changed()
         routeJob?.cancel()
@@ -93,6 +130,7 @@ internal class AndroidVoiceCallAudioRouting(
     fun close() {
         if (closed) return
         closed = true
+        preservingMutedOutput = false
         requestEpoch++
         confirmation.changed()
         routeJob?.cancel()

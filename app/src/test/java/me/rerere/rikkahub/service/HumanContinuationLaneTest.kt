@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
@@ -25,6 +26,62 @@ import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HumanContinuationLaneTest {
+    @Test fun `streaming human tail checkpoints independently of a hung main history writer`() = runTest {
+        val blockedRoom = CompletableDeferred<Boolean>()
+        var durable: Conversation? = null
+        var owner = -1L
+        val lane = HumanContinuationLane(base(), backgroundScope, { blockedRoom.await() }, { fail(it.toString()) },
+            checkpoint = { durable = it; true })
+        val waitingModel = CompletableDeferred<Unit>()
+        lane.send(UIMessage.user("new input")) { snapshot, turn, publish ->
+            owner = turn
+            publish(snapshot.answer("partial reply"))
+            waitingModel.await()
+        }
+        runCurrent(); advanceTimeBy(251); runCurrent()
+        assertEquals("partial reply", durable!!.currentMessages.last().toText())
+        assertTrue(lane.notice.value.contains("本机恢复副本"))
+        lane.publish(owner, lane.state.value.answer("newer streamed chunk"))
+        advanceTimeBy(251); runCurrent()
+        assertEquals("newer streamed chunk", durable!!.currentMessages.last().toText())
+        lane.stop(); blockedRoom.complete(false); waitingModel.complete(Unit); runCurrent()
+        advanceTimeBy(251); runCurrent()
+        assertTrue(lane.persistenceWarning.value!!.contains("本机恢复副本"))
+        assertFalse(lane.retireForHistoryEdit(lane.state.value))
+    }
+
+    @Test fun `blocked checkpoint cannot delay new sends and coalesces to latest revision`() = runTest {
+        val disk = CompletableDeferred<Boolean>()
+        var writes = 0
+        var durable: Conversation? = null
+        val lane = HumanContinuationLane(base(), backgroundScope, { false }, { fail(it.toString()) },
+            checkpoint = { snapshot -> if (++writes == 1) disk.await(); durable = snapshot; true })
+        lane.send(UIMessage.user("first")) { c, _, publish -> publish(c.answer("first answer")) }
+        runCurrent(); advanceTimeBy(251); runCurrent()
+        lane.send(UIMessage.user("second")) { c, _, publish -> publish(c.answer("second answer")) }
+        runCurrent()
+        assertEquals("second answer", lane.state.value.currentMessages.last().toText())
+        assertEquals(1, writes)
+        disk.complete(true); runCurrent(); advanceTimeBy(251); runCurrent()
+        assertEquals(2, writes)
+        assertEquals("second answer", durable!!.currentMessages.last().toText())
+    }
+
+    @Test fun `stop closes unfinished reasoning timer without waiting for the producer`() = runTest {
+        val held = CompletableDeferred<Unit>()
+        val lane = HumanContinuationLane(base(), backgroundScope, { false }, { fail(it.toString()) })
+        lane.send(UIMessage.user("first")) { c, _, publish ->
+            publish(c.copy(messageNodes = c.messageNodes + UIMessage(role = MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Reasoning("thinking", finishedAt = null))).toMessageNode()))
+            withContext(NonCancellable) { held.await(); publish(c.answer("late")) }
+        }
+        runCurrent(); lane.stop(); runCurrent()
+        assertNull(lane.job.value)
+        assertNotNull((lane.state.value.currentMessages.last().parts.single() as UIMessagePart.Reasoning).finishedAt)
+        held.complete(Unit); runCurrent()
+        assertEquals("thinking", (lane.state.value.currentMessages.last().parts.single() as UIMessagePart.Reasoning).reasoning)
+    }
+
     private fun pendingConversation() = base().let { c -> c.copy(messageNodes = c.messageNodes +
         UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
             UIMessagePart.Tool("approve-a", "orbis_context_prune", "{}", approvalState = ToolApprovalState.Pending),

@@ -167,9 +167,9 @@ internal fun OrbisContextBudgetSheet(
                 OrbisScrollablePanel(modifier = Modifier.weight(1f), windowInsets = WindowInsets(0, 0, 0, 0),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 20.dp)) {
                     if (onOriginalArchives != null) BudgetCard {
-                        Text("可选原文档案", fontWeight = FontWeight.Bold)
-                        Text("默认不额外保留 AI 压缩原文。仅由你开启，可查看、单份删除或批量清理。", fontSize = 12.sp)
-                        TextButton(onClick = onOriginalArchives) { Text("原文保留开关与管理") }
+                        Text("压缩前原文保留", fontWeight = FontWeight.Bold)
+                        Text("AI 压缩前默认另存完整原文窗口，可关闭；只读档案独立可选。原文不会自动加入当前上下文。", fontSize = 12.sp)
+                        TextButton(onClick = onOriginalArchives) { Text("分支、原文保留开关与管理") }
                     }
                     if (onManualContext != null) BudgetCard {
                         Text("人类手动整理", fontWeight = FontWeight.Bold, fontSize = 14.sp)

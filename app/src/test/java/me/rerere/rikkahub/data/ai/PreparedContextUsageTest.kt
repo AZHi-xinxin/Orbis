@@ -74,6 +74,8 @@ class PreparedContextUsageTest {
         assertNull(valid(messages, configuration = config(assistant.copy(systemPrompt = "changed"))))
         assertNull(valid(messages, configuration = config(m = model.copy(modelId = "other-model"))))
         assertNotNull(valid(messages, configuration = config(assistant.copy(compactionThresholdTokens = 500_000))))
+        assertNotNull(valid(messages, configuration = config(assistant.copy(preserveCompactionBranch = true))))
+        assertNotNull(valid(messages, configuration = config(assistant.copy(retainCompactionOriginals = true))))
     }
 
     @Test fun `history edits appended input branches and incomplete replies do not reuse an old receipt`() {

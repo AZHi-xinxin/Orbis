@@ -17,6 +17,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.completeWith
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -385,6 +387,10 @@ class ChatService(
     }
     private val generationJournal by lazy {
         GenerationCheckpointJournal(AndroidGenerationCheckpointStore.create(context.noBackupFilesDir))
+    }
+    private val humanContinuationJournal by lazy {
+        me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal(
+            AndroidGenerationCheckpointStore.createHumanContinuation(context.noBackupFilesDir))
     }
     val voiceCalls = OrbisVoiceCallRepository(context)
     private val consultationStore by lazy { ConsultationRuntimeStore.open(context) }
@@ -1472,8 +1478,19 @@ class ChatService(
     }
 
     // 生成完成流
-    private val _generationDoneFlow = MutableSharedFlow<Uuid>()
-    val generationDoneFlow: SharedFlow<Uuid> = _generationDoneFlow.asSharedFlow()
+    private val _generationDoneFlow = MutableSharedFlow<ChatGenerationDone>()
+    val generationDoneFlow: SharedFlow<ChatGenerationDone> = _generationDoneFlow.asSharedFlow()
+
+    private suspend fun notifyGenerationDone(session: ConversationSession, completed: Boolean) {
+        currentCoroutineContext().ensureActive()
+        val snapshot = session.humanContinuation.value?.state?.value ?: session.state.value
+        completedSpeechReply(snapshot, completed)?.let { _generationDoneFlow.emit(it) }
+    }
+
+    fun isCurrentGenerationDone(event: ChatGenerationDone): Boolean {
+        val session = sessions[event.conversationId] ?: return false
+        return event.matches(session.humanContinuation.value?.state?.value ?: session.state.value)
+    }
 
     fun cleanup() = runCatching {
         sessions.values.forEach { it.humanContinuation.value?.stop() }
@@ -1675,6 +1692,24 @@ class ChatService(
             }
             val conversation = conversationRepo.getConversationById(conversationId)
             if (conversation != null) {
+                val continuation = try {
+                    withContext(Dispatchers.IO) {
+                        humanContinuationJournal.recover(conversation, generationJournal::provesInFlightBaseline)
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    addError(failure, conversationId)
+                    null
+                }
+                if (continuation != null) {
+                    // The independent human tail is newer than the old generation checkpoint.
+                    // Restore it without executing anything, and leave Room/old receipts intact.
+                    updateConversation(conversationId, conversation, restoreCommittedPrompt = true)
+                    session.isInitialized = true
+                    synchronized(session) { humanContinuationFor(session, continuation).requestSave() }
+                    if (selectAssistant) settingsStore.updateAssistant(conversation.assistantId)
+                    return@withLock
+                }
                 val recovered = recoverGenerationCheckpoint(session, conversation)
                 updateConversation(conversationId, recovered, restoreCommittedPrompt = true)
                 session.isInitialized = true
@@ -2911,10 +2946,13 @@ class ChatService(
                 it.getTools().any { tool -> !tool.isExecuted }
             }
 
-    private fun humanContinuationFor(session: ConversationSession): HumanContinuationLane =
+    private fun humanContinuationFor(session: ConversationSession,
+        recovered: me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal.Recovery? = null,
+    ): HumanContinuationLane =
         session.humanContinuation.value ?: run {
-            val baseline = session.state.value
-            var lastSaved = baseline
+            val baseline = recovered?.baseline ?: session.state.value
+            val checkpointId = recovered?.runId ?: Uuid.random()
+            var lastSaved = recovered?.durableBaseline ?: baseline
             val created = HumanContinuationLane(baseline, appScope, persist = { snapshot ->
                 withContext(Dispatchers.IO) {
                     // Saving may fail or wait; neither can suspend the model request or next send.
@@ -2925,8 +2963,10 @@ class ChatService(
                                 session.manualContextWriteInProgress) return@withLock false
                             // Atomic compare/write in Room, also preserving newer title/prompt/folder
                             // metadata. Never replace an unseen edit or touch a damaged checkpoint.
-                            val readBack = conversationRepo.commitHumanContinuation(lastSaved, snapshot) ?: return@withLock false
-                            if (!sameDurableGenerationSnapshot(snapshot, readBack)) return@withLock false
+                            val readBack = commitHumanContinuationSnapshot(lastSaved, snapshot,
+                                read = { conversationRepo.getConversationById(session.id) },
+                                proveInFlightBaseline = generationJournal::provesInFlightBaseline,
+                                commit = conversationRepo::commitHumanContinuation) ?: return@withLock false
                             lastSaved = readBack
                             session.state.value = readBack
                             true
@@ -2946,6 +2986,12 @@ class ChatService(
                             catch (_: Exception) { /* A real writer/checkpoint still owns history. */ }
                         }
                     }
+                }
+            }, initial = recovered?.snapshot ?: baseline, checkpointId = checkpointId, checkpoint = { snapshot ->
+                // No old-job join, history mutex or Room operation may precede this write.
+                withContext(Dispatchers.IO) {
+                    humanContinuationJournal.checkpoint(checkpointId, baseline, snapshot)
+                    true
                 }
             })
             session.humanContinuation.value = created
@@ -2975,13 +3021,14 @@ class ChatService(
             orbisVoiceCallId = input.voiceCallId, orbisVoiceCallKind = input.voiceCallKind)
         val generation = lane.send(userMessage, input.answer) { snapshot, owner, publish ->
             try {
-                generateHumanContinuation(session, lane, snapshot, owner, publish, voiceRecord)
+                val completed = generateHumanContinuation(session, lane, snapshot, owner, publish, voiceRecord)
                 if (lane.isCurrent(owner)) {
                     val previousIds = snapshot.currentMessages.map { it.id }.toSet()
                     val messages = lane.state.value.currentMessages.filter { it.id !in previousIds }
                     // Waiting for a decision is a normal suspended turn, not a failed reply.
                     input.reply?.complete(messages.filter { it.role == MessageRole.ASSISTANT }
                         .mapNotNull { it.privateRoomAutomaticSpeechText() }.joinToString("\n").ifBlank { null })
+                    if (input.reply == null && input.voiceCallId == null) notifyGenerationDone(session, completed)
                 }
             } catch (error: Exception) {
                 input.reply?.completeExceptionally(error)
@@ -3013,7 +3060,7 @@ class ChatService(
         requireFreshToolApproval: Boolean = false,
         continuationEvent: OrbisInboxEvent? = null,
         requireImageInput: Boolean = false,
-    ) {
+    ): Boolean {
         fun requireOwner() {
             if (!lane.isCurrent(owner)) throw CancellationException("已由新的人类消息接替")
             continuationEvent?.let { event ->
@@ -3076,6 +3123,7 @@ class ChatService(
         }
         requireOwner()
         var current = snapshot
+        var completed = false
         val generationId = Uuid.random()
         val foregroundStarted = runCatching { ChatGenerationForegroundService.acquire(context,
             generationId, session.id) }.getOrDefault(false)
@@ -3099,6 +3147,7 @@ class ChatService(
                 outputTransformers = listOf(ThinkTagTransformer, RegexOutputTransformer),
                 allowLocalMemory = false, durableCheckpoints = false, stopOnUnknownToolOutcome = true,
                 maxAutomaticContinuations = 0,
+                emitTerminalEvidence = true,
                 outputFrozenPrefixCount = frozenOutputPrefixCount(snapshot.currentMessages),
                 requireActiveTurn = ::requireOwner,
                 onGatewayRequest = { gatewayRequests.remember(it) },
@@ -3117,12 +3166,14 @@ class ChatService(
                         IllegalStateException("独立续聊不接管旧轮的保存确认"))
                     is GenerationChunk.CompactionCommit -> chunk.result.completeExceptionally(
                         IllegalStateException("旧轮核对期间不自动重写历史"))
+                    is GenerationChunk.TerminalResponse -> completed = true
                     else -> Unit
                 }
             }
         } finally {
             if (foregroundStarted) ChatGenerationForegroundService.release(context, generationId)
         }
+        return completed
     }
 
     /** Native garden drawer only. No page text, solution, bridge payload or auto-send path. */
@@ -3537,7 +3588,7 @@ class ChatService(
                 })
                 // Voice owns playback, including when its observer has already left the page.
                 // The ordinary autoplay collector must not read a late voice reply again.
-                if (queued.reply == null) _generationDoneFlow.emit(conversationId)
+                if (queued.reply == null) notifyGenerationDone(session, completed)
             } catch (e: Exception) {
                 if (e !is CancellationException && !generationAttempted && queued.orbisEventId == null &&
                     (queued.voiceCallId == null && queued.voiceCallKind == null ||
@@ -3742,11 +3793,11 @@ class ChatService(
             val rejection = if (plan is HumanContinuationRegeneration.Blocked) plan.notice else {
                 val lane = humanContinuationFor(session)
                 lane.regenerate(message) { snapshot, owner, publish ->
-                    generateHumanContinuation(session, lane, snapshot, owner, publish,
+                    val completed = generateHumanContinuation(session, lane, snapshot, owner, publish,
                         // An old producer may not have published its tool yet. A retry button
                         // never silently authorizes a newly proposed side effect either.
                         requireFreshToolApproval = true)
-                    if (lane.isCurrent(owner)) _generationDoneFlow.emit(conversationId)
+                    if (lane.isCurrent(owner)) notifyGenerationDone(session, completed)
                 }
             }
             if (rejection != null) appScope.launch(Dispatchers.Main.immediate) {
@@ -3770,7 +3821,7 @@ class ChatService(
                 settlePreviousGeneration(session)
                 val conversation = session.state.value
 
-                if (message.role == MessageRole.USER) {
+                val completed = if (message.role == MessageRole.USER) {
                     // 如果是用户消息，则截止到当前消息
                     val node = conversation.getMessageNodeByMessage(message)
                     val indexAt = conversation.messageNodes.indexOf(node)
@@ -3790,10 +3841,11 @@ class ChatService(
                             allowAmbientCallBinding = false)
                     } else {
                         saveConversation(conversationId, conversation)
+                        false
                     }
                 }
 
-                _generationDoneFlow.emit(conversationId)
+                notifyGenerationDone(session, completed)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 session.messageQueue.pause()
@@ -3919,6 +3971,7 @@ class ChatService(
                         }
                     }
 
+                    var replyCompleted = false
                     // Only continue generation when all pending tools are handled
                     if (!hasPendingTools) {
                         val event = updatedConversation.currentMessages.lastOrNull { it.role == MessageRole.USER }
@@ -3932,6 +3985,7 @@ class ChatService(
                                 allowAmbientCallBinding = voiceBinding.allowAmbientCallBinding,
                                 expectedAssistantId = expectedAssistantId,
                                 onConsultationTerminal = { requestId, evidence -> terminalProof = requestId to evidence })
+                            replyCompleted = completed
                             if (updatedConversation.consultation != null)
                                 persistConsultationOutcome(conversationId, completed, terminalProof)
                             if (event != null) withContext(Dispatchers.IO) {
@@ -3954,7 +4008,7 @@ class ChatService(
                         persistConsultationOutcome(conversationId, succeeded = true)
                     }
 
-                    if (updatedConversation.consultation == null) _generationDoneFlow.emit(conversationId)
+                    if (updatedConversation.consultation == null) notifyGenerationDone(session, replyCompleted)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -4014,9 +4068,11 @@ class ChatService(
                         tool.copy(approvalState = approval)
                     }
                 }) {
-                    current, owner, publish -> generateHumanContinuation(session, lane, current, owner, publish, voiceRecord,
+                    current, owner, publish ->
+                    val completed = generateHumanContinuation(session, lane, current, owner, publish, voiceRecord,
                         requireFreshToolApproval = current.currentMessages.lastOrNull { it.role == MessageRole.USER }
                             ?.orbisEvent?.source?.let { me.rerere.rikkahub.data.orbis.isImageWorkshopSource(it) } == true)
+                    if (voiceRecord == null && lane.isCurrent(owner)) notifyGenerationDone(session, completed)
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { addError(failure, session.id, title = "工具未继续；仍可发送新消息") }
@@ -4131,6 +4187,7 @@ class ChatService(
         suspend fun admitGenerationMessages(messages: List<UIMessage>): Boolean {
             val session = getOrCreateSession(conversationId)
             return session.orbisPromptEditMutex.withLock {
+                if (session.humanContinuation.value != null) throw CancellationException("旧生成已交给独立续聊")
                 val handle = checkNotNull(checkpointHandle)
                 withContext(Dispatchers.IO) {
                     val projected = projectGenerationMessages(session.state.value, messages)
@@ -4145,6 +4202,7 @@ class ChatService(
         ) {
             val session = getOrCreateSession(conversationId)
             session.orbisPromptEditMutex.withLock {
+                if (session.humanContinuation.value != null) throw CancellationException("旧生成已交给独立续聊")
                 val current = session.state.value
                 epoch?.let { requireCompactionEpoch(it, current.compactionEpoch) }
                 val handle = checkNotNull(checkpointHandle)
@@ -5099,6 +5157,8 @@ class ChatService(
                         captureLocalMemory = captureLocalMemory && BuildConfig.ORBIS_ENABLED,
                         retainOriginals = BuildConfig.ORBIS_ENABLED && settingsStore.settingsFlow.value
                             .getAssistantById(originalWithReceipt.assistantId)?.retainCompactionOriginals == true,
+                        preserveBranch = BuildConfig.ORBIS_ENABLED && settingsStore.settingsFlow.value
+                            .getAssistantById(originalWithReceipt.assistantId)?.preserveCompactionBranch == true,
                     ),
                     persistedBaseline = baseline,
                 )
@@ -5509,10 +5569,22 @@ class ChatService(
             check(quiet()) { "旧轮仍在收尾，请稍后整理历史；新消息仍可发送。" }
             val stored = kotlinx.coroutines.withTimeoutOrNull(1_500) { withContext(Dispatchers.IO) {
                 val saved = conversationRepo.getConversationById(session.id)
-                if (saved != null && sameDurableGenerationSnapshot(expected, saved))
+                if (saved != null && sameDurableGenerationSnapshot(expected, saved)) {
                     generationJournal.clearContainedInDurableContinuation(saved)
+                    if (generationJournal.hasCheckpoint(session.id)) {
+                        // A settled MCP result remains explicitly unknown. Retaining that fact
+                        // must not leave the saved conversation permanently "generating".
+                        requireAutomaticRecoveryHold { holdAutomaticWakes(session, "interrupted_continuation_saved") }
+                        generationJournal.clearSettledInDurableContinuation(saved, unknownEffectsRetained = true)
+                    }
+                }
                 check(!generationJournal.hasCheckpoint(session.id)) {
                     "旧轮恢复记录尚未核对，原历史仍保留；新消息仍可发送。"
+                }
+                if (saved != null && sameDurableGenerationSnapshot(expected, saved)) {
+                    check(humanContinuationJournal.clearCommitted(lane.checkpointId, saved)) {
+                        "续聊恢复副本仍在更新，请稍后整理历史。"
+                    }
                 }
                 saved
             } }

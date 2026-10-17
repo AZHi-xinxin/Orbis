@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.finishReasoning
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.finishInterruptedHostTools
@@ -89,8 +90,11 @@ internal class HumanContinuationLane(
     private val persist: suspend (Conversation) -> Boolean,
     private val onFailure: (Exception) -> Unit,
     private val onIdleSaved: (HumanContinuationLane) -> Unit = {},
+    initial: Conversation = baseline,
+    val checkpointId: kotlin.uuid.Uuid = kotlin.uuid.Uuid.random(),
+    private val checkpoint: (suspend (Conversation) -> Boolean)? = null,
 ) {
-    val state = MutableStateFlow(baseline)
+    val state = MutableStateFlow(initial)
     val job = MutableStateFlow<Job?>(null)
     val notice = MutableStateFlow("已启用独立续聊，旧错误不阻挡新消息。正在核对保存状态。")
     val contextNotice = MutableStateFlow("恢复通道保留角色设定和可读聊天；暂不自动整理历史或自动注入本机长期记忆。")
@@ -102,6 +106,9 @@ internal class HumanContinuationLane(
     private var retired = false
     private val activeJobs = mutableSetOf<Job>()
     private var persistenceJob: Job? = null
+    private var checkpointJob: Job? = null
+    private var checkpointRevision = -1L
+    private var failedRevision = -1L
     private val workshopReturns = mutableMapOf<String, WorkshopJob>()
     private var workshopReservation: WorkshopReturnReservation? = null
     private var sentinelReservation: SentinelReservation? = null
@@ -248,7 +255,7 @@ internal class HumanContinuationLane(
     /** The caller separately verifies disk history, no journal and no old session job while
      * holding the history edit mutex. This is a CAS handoff, never a queue resume or replay.
      */
-    private fun idleAndSaved(allowPendingApprovals: Boolean = false): Boolean = !retired && savedRevision == revision && persistenceJob == null &&
+    private fun idleAndSaved(allowPendingApprovals: Boolean = false): Boolean = !retired && savedRevision == revision && persistenceJob == null && checkpointJob == null &&
         activeJobs.none { !it.isCompleted } && job.value == null && workshopReservation == null &&
         sentinelReservation == null && workshopReturns.isEmpty() &&
         state.value.currentMessages.none { it.getTools().any { tool ->
@@ -271,6 +278,7 @@ internal class HumanContinuationLane(
         require(conversation.id == baseline.id && conversation.assistantId == baseline.assistantId)
         state.value = conversation
         revision++
+        requestCheckpoint()
     }
 
     @Synchronized fun send(input: UIMessage?, answer: Boolean = true,
@@ -283,7 +291,7 @@ internal class HumanContinuationLane(
         job.value?.cancel()
         val current = state.value
         val settled = if (input == null) current else current.copy(messageNodes = current.messageNodes.map { node ->
-            node.copy(messages = node.messages.map { it.finishInterruptedHostTools() })
+            node.copy(messages = node.messages.map { it.finishInterruptedHostTools().finishReasoning() })
         })
         val next = if (input == null || settled.currentMessages.any { it.id == input.id }) settled else
             settled.copy(messageNodes = settled.messageNodes + input.toMessageNode())
@@ -339,7 +347,7 @@ internal class HumanContinuationLane(
         job.value?.cancel()
         job.value = null
         state.value = state.value.copy(messageNodes = state.value.messageNodes.map { node ->
-            node.copy(messages = node.messages.map { it.finishInterruptedHostTools() })
+            node.copy(messages = node.messages.map { it.finishInterruptedHostTools().finishReasoning() })
         })
         revision++
         requestSave()
@@ -348,6 +356,7 @@ internal class HumanContinuationLane(
     /** A stuck disk observer is not joined or cancelled by a human send. At most one writer. */
     @Synchronized fun requestSave() {
         if (retired) return
+        requestCheckpoint(immediate = true)
         if (persistenceJob?.isCompleted == false) return
         val snapshot = state.value
         val savingRevision = revision
@@ -358,10 +367,8 @@ internal class HumanContinuationLane(
             synchronized(this@HumanContinuationLane) {
                 if (savingRevision == revision) {
                     savedRevision = if (saved) savingRevision else -1L
-                    notice.value = if (saved)
-                        "续聊已保存；旧轮仍单独保留，不会自动重跑旧工具。" else
-                        "临时续聊：保存仍有问题，但可以继续发送。离开或重启前请复制重要内容。"
-                    persistenceWarning.value = if (saved) null else notice.value
+                    failedRevision = if (saved) -1L else savingRevision
+                    refreshPersistenceNotice()
                 }
             }
         }
@@ -374,5 +381,55 @@ internal class HumanContinuationLane(
             }
         }
         writer.start()
+    }
+
+    /** Independent from a possibly hung Room observer. Coalesce streaming updates instead of
+     * rewriting a long conversation for every token; sends/stops/finalization also request it.
+     */
+    @Synchronized private fun requestCheckpoint(immediate: Boolean = false) {
+        val write = checkpoint ?: return
+        if (retired || checkpointJob?.isCompleted == false || checkpointRevision == revision) return
+        var savingRevision = -1L
+        val writer = scope.launch(start = CoroutineStart.LAZY) {
+            if (!immediate) kotlinx.coroutines.delay(250)
+            val snapshot = synchronized(this@HumanContinuationLane) {
+                savingRevision = revision
+                state.value
+            }
+            val saved = try { write(snapshot) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
+            synchronized(this@HumanContinuationLane) {
+                if (saved) checkpointRevision = savingRevision
+                if (savingRevision == revision) refreshPersistenceNotice()
+            }
+        }
+        checkpointJob = writer
+        writer.invokeOnCompletion { cause ->
+            synchronized(this) {
+                checkpointJob = null
+                if (cause is CancellationException) return@synchronized
+                if (savingRevision != revision) requestCheckpoint()
+                else notifyIdleSaved()
+            }
+        }
+        writer.start()
+    }
+
+    private fun refreshPersistenceNotice() {
+        when {
+            savedRevision == revision -> {
+                notice.value = "续聊已保存；旧轮仍单独保留，不会自动重跑旧工具。"
+                persistenceWarning.value = null
+            }
+            checkpointRevision == revision -> {
+                notice.value = "续聊已保存在本机恢复副本，主历史仍待合并；请勿清除应用数据。"
+                persistenceWarning.value = notice.value
+            }
+            failedRevision == revision -> {
+                notice.value = "临时续聊：保存仍有问题，但可以继续发送。离开或重启前请复制重要内容。"
+                persistenceWarning.value = notice.value
+            }
+        }
     }
 }

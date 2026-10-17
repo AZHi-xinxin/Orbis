@@ -140,3 +140,13 @@ internal fun createManualContextArchive(original: Conversation, at: Instant): Co
     chatSuggestions = emptyList(), isPinned = false, createAt = at, updateAt = at,
     compactionEpoch = 0, newConversation = false,
 )
+
+/** Reuse manual archival identities, attachments and routing without creating a model request.
+ * Consultation windows are not ordinary chats and keep their existing archival policy.
+ */
+internal fun createAiCompactionBranch(original: Conversation, at: Instant): Conversation {
+    require(!original.isConsultation) { "consultation_is_not_a_resumable_chat_branch" }
+    return createManualContextArchive(original, at).copy(
+        title = original.title.ifBlank { "未命名窗口" } + " · AI 压缩前原文",
+    )
+}

@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -30,7 +31,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.uuid.Uuid
 
-/** Human-only retention and read-only local viewer. No AI requests, tool execution or remote images. */
+/** Human-only branch/archive retention and read-only archive viewer. No model requests. */
 @Composable
 internal fun OrbisOriginalArchives(owner: Uuid, onDismiss: () -> Unit) {
     val repository: OrbisCompactionRepository = koinInject()
@@ -72,28 +73,35 @@ internal fun OrbisOriginalArchives(owner: Uuid, onDismiss: () -> Unit) {
         Surface(Modifier.fillMaxWidth(.96f).fillMaxHeight(.92f), shape = MaterialTheme.shapes.large) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("可选原文档案", style = MaterialTheme.typography.titleLarge)
+                    Text("压缩前原文保留", style = MaterialTheme.typography.titleLarge)
                     TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
                 }
-                Row(Modifier.fillMaxWidth()) {
-                    Text("为 ${assistant?.name ?: "当前助手"} 保留后续压缩原文", Modifier.weight(1f))
-                    Switch(checked = assistant?.retainCompactionOriginals == true,
-                        enabled = !busy && assistant != null && !settings.init,
-                        onCheckedChange = { enabled ->
-                            if (enabled) confirmEnable = true
-                            else perform { settingsStore.updateOriginalArchiveRetention(owner, false) }
-                        })
-                }
-                Text("默认关闭，仅由你开启。关闭后不再新增；已有档案可删除，不补存以前的聊天，也不发送给 AI。最近一次压缩撤销点独立保留。", style = MaterialTheme.typography.bodySmall)
-                Text("${stats.count} 份 · 原文数据 ${archiveSize(stats.bytes)}（不含附件和数据库开销）", style = MaterialTheme.typography.bodySmall)
                 if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
                 if (loading || busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Row {
-                    TextButton(onClick = { selected = records.map { it.eventId }.toSet() }, enabled = !loading && !busy) { Text("选中本页") }
-                    TextButton(onClick = { deletion = selected to false }, enabled = selected.isNotEmpty() && !busy) { Text("删除选中 (${selected.size})") }
-                    TextButton(onClick = { deletion = emptySet<String>() to true }, enabled = stats.count > 0 && !busy) { Text("清空此助手") }
-                }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OrbisCompactionBranchSetting(
+                        checked = assistant?.preserveCompactionBranch == true,
+                        writable = !busy && assistant != null && !settings.init,
+                        onCheckedChange = { enabled -> perform { settingsStore.updateCompactionBranchRetention(owner, enabled) } },
+                    )
+                    HorizontalDivider()
+                    Text("只读原文档案", style = MaterialTheme.typography.titleMedium)
+                    Row(Modifier.fillMaxWidth()) {
+                        Text("为 ${assistant?.name ?: "当前助手"} 保留只读档案", Modifier.weight(1f))
+                        Switch(checked = assistant?.retainCompactionOriginals == true,
+                            enabled = !busy && assistant != null && !settings.init,
+                            onCheckedChange = { enabled ->
+                                if (enabled) confirmEnable = true
+                                else perform { settingsStore.updateOriginalArchiveRetention(owner, false) }
+                            })
+                    }
+                    Text("默认关闭，仅由你开启。关闭后不再新增；已有档案可删除，不补存以前的聊天，也不发送给 AI。最近一次压缩撤销点独立保留。", style = MaterialTheme.typography.bodySmall)
+                    Text("${stats.count} 份 · 原文数据 ${archiveSize(stats.bytes)}（不含附件和数据库开销）", style = MaterialTheme.typography.bodySmall)
+                    Row {
+                        TextButton(onClick = { selected = records.map { it.eventId }.toSet() }, enabled = !loading && !busy) { Text("选中本页") }
+                        TextButton(onClick = { deletion = selected to false }, enabled = selected.isNotEmpty() && !busy) { Text("删除选中 (${selected.size})") }
+                        TextButton(onClick = { deletion = emptySet<String>() to true }, enabled = stats.count > 0 && !busy) { Text("清空此助手") }
+                    }
                     if (records.isEmpty() && !loading) Text("本页没有原文档案。关闭保留时，这是正常状态。")
                     records.forEach { record ->
                         OutlinedCard(Modifier.fillMaxWidth()) {
@@ -133,6 +141,20 @@ internal fun OrbisOriginalArchives(owner: Uuid, onDismiss: () -> Unit) {
             dismissButton = { TextButton(onClick = { deletion = null }) { Text("取消") } })
     }
     reading?.let { record -> OriginalArchiveReader(owner, record, repository) { reading = null } }
+}
+
+/** A direct, assistant-scoped local preference; toggling it never compacts or starts a chat. */
+@Composable
+internal fun OrbisCompactionBranchSetting(checked: Boolean, writable: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth()) {
+        Text("AI 压缩前自动开分支", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        Switch(checked = checked, enabled = writable, onCheckedChange = onCheckedChange,
+            modifier = Modifier.testTag("orbis-compaction-branch-switch"))
+    }
+    Text("默认开启，可随时关闭，仅对当前助手生效。AI 执行压缩时，先将压缩前的完整对话另存为“AI 压缩前原文”窗口；当前窗口继续压缩，不自动切换。关闭只停止新增，已有分支在会话列表管理，不补存旧原文。",
+        style = MaterialTheme.typography.bodySmall)
+    Text("保存分支只在本机完成，不增加工具、模型请求或工具回传字段，也不自动注入上下文。会占用本机存储；切回续聊或通过已开启的聊天检索读取时，原文才可能计入请求 token。与下方只读档案可分别开关，两项都开会保留两种副本。",
+        style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
