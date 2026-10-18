@@ -3,7 +3,18 @@ package me.rerere.rikkahub.data.recovery
 import me.rerere.rikkahub.utils.EmergencyProcessGate
 
 internal enum class EmergencyLauncherState {
-    READY, RECOVERY_REQUESTED, PREVIOUS_CRASH, BUSINESS_BUSY, CHECK_FAILED,
+    READY, RECOVERY_REQUESTED, PREVIOUS_CRASH, BUSINESS_BUSY, CHECK_FAILED, LEGACY_RESTORE_BLOCKED,
+}
+
+internal fun inspectNoRescueLauncher(
+    gate: EmergencyProcessGate,
+    checkLegacyState: () -> Unit,
+): EmergencyLauncherState = try {
+    val lease = gate.tryAcquireNoRescueBusinessLease(checkLegacyState)
+    if (lease == null) EmergencyLauncherState.BUSINESS_BUSY
+    else lease.use { EmergencyLauncherState.READY }
+} catch (_: Exception) {
+    EmergencyLauncherState.LEGACY_RESTORE_BLOCKED
 }
 
 /**

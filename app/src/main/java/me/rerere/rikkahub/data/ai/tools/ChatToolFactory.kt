@@ -76,6 +76,7 @@ class ChatToolFactory(
         consultationReferenceOnly: Boolean = false,
         imageSourceMessageIds: Set<kotlin.uuid.Uuid>? = null,
         onWorkshopAccepted: ((me.rerere.rikkahub.data.orbis.workshop.WorkshopJob) -> Unit)? = null,
+        readActiveConversation: (suspend () -> me.rerere.rikkahub.data.model.Conversation?)? = null,
     ): List<Tool> = buildList {
         if (BuildConfig.ORBIS_ENABLED && orbisMemoryRepository != null) {
             add(buildOrbisMemoryTool(assistant.id.toString(),
@@ -134,13 +135,20 @@ class ChatToolFactory(
                     "mcp__${store.second}__${store.third.name}")
             }
         val imageConversationId = conversationId?.let(kotlin.uuid.Uuid::parse)
+        // The active continuation can be newer than Room. Use the SAME owner-bound source
+        // for discovery and invocation; never consult the currently selected UI tab.
+        val readBoundConversation: suspend () -> me.rerere.rikkahub.data.model.Conversation? = {
+            (if (readActiveConversation != null) readActiveConversation()
+            else imageConversationId?.let { conversationRepository.getConversationById(it) })
+                ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
+        }
         val imageScope = if (imageDestinations.isEmpty() || imageConversationId == null) null else
-            conversationRepository.getConversationById(imageConversationId)
+            readBoundConversation()
                 ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
                 ?.takeIf { current -> current.currentMessages.map { it.id }.toSet().containsAll(imageSourceMessageIds!!) }
                 ?.let { StImageAttachmentScope.capture(assistant.id, imageConversationId, it, imageSourceMessageIds!!) }
         val readImageConversation: suspend () -> me.rerere.rikkahub.data.model.Conversation? = {
-            imageConversationId?.let { conversationRepository.getConversationById(it) }
+            readBoundConversation()
         }
         val readImageOriginal: suspend (String) -> StImageOriginal = { url ->
             readStMemoryImageOriginal(url, context.filesDir.resolve("upload"),
@@ -193,13 +201,13 @@ class ChatToolFactory(
         if (BuildConfig.ORBIS_ENABLED) {
             if (!consultationReferenceOnly && conversationId != null && imageSourceMessageIds != null) {
                 val zipConversationId = kotlin.uuid.Uuid.parse(conversationId)
-                val zipLastUserId = conversationRepository.getConversationById(zipConversationId)
+                val zipLastUserId = readBoundConversation()
                     ?.currentMessages?.lastOrNull { it.role == me.rerere.ai.core.MessageRole.USER }?.id
                 addAll(createOrbisZipAttachmentTools(
                     assistantId = assistant.id,
                     conversationId = zipConversationId,
                     sourceMessageIds = imageSourceMessageIds,
-                    readConversation = { conversationRepository.getConversationById(zipConversationId) },
+                    readConversation = readBoundConversation,
                     readArchiveFile = { document -> readManagedZipAttachment(document,
                         context.filesDir.resolve("upload"),
                         org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.files.FilesManager>()) },
@@ -208,7 +216,7 @@ class ChatToolFactory(
                     scopeCurrent = {
                         val ownerExists = (settingsStore?.settingsFlow?.value ?: settings)
                             .getAssistantById(assistant.id) != null
-                        val live = conversationRepository.getConversationById(zipConversationId)
+                        val live = readBoundConversation()
                         ownerExists && isZipCreationScopeCurrent(assistant.id, zipConversationId,
                             zipLastUserId, imageSourceMessageIds, live)
                     }))
@@ -236,7 +244,7 @@ class ChatToolFactory(
                 val boundId = kotlin.uuid.Uuid.parse(conversationId)
                 add(createOrbisContextPruningTool(
                     me.rerere.rikkahub.data.ai.contextpruning.AndroidContextPruning.open(context, assistant.id, boundId),
-                    readConversation = { conversationRepository.getConversationById(boundId) },
+                    readConversation = readBoundConversation,
                     isEnabled = {
                         val live = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
                         live != null && LocalToolOption.ContextPruning in live.localTools

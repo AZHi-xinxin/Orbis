@@ -92,13 +92,11 @@ class OpenAIStreamSafetyTest {
 
     private fun both(block: (Boolean) -> Unit) = listOf(false, true).forEach(block)
     private fun data(json: String) = "data: $json\n\n"
-    private fun assertEmptyFailure(result: Result) {
-        assertTrue(result.failure is HttpException)
-        assertEquals("upstream_empty_stream", (result.failure as HttpException).code)
-        assertEquals("openai_stream_error", result.failure.errorType)
-        assertFalse(IOException::class.java.isInstance(result.failure)) // GenerationLoop retries only IOException.
+    private fun assertSilentCompletion(result: Result) {
+        assertNull(result.failure)
         assertEquals(1, result.completions)
-        assertTrue(result.chunks.none { it is StreamChunk.Finish })
+        assertEquals(1, result.chunks.filterIsInstance<StreamChunk.Finish>().size)
+        assertTrue(result.chunks.none { it is StreamChunk.TextDelta || it is StreamChunk.ReasoningDelta || it is StreamChunk.ToolCallStart })
     }
 
     @Test(timeout = 10_000) fun `502 without content type or body fails with preserved HTTP status in both protocols`() = both {
@@ -141,22 +139,31 @@ class OpenAIStreamSafetyTest {
         }
     }
 
-    @Test(timeout = 10_000) fun `200 empty event stream cannot report successful completion`() = both {
-        assertEmptyFailure(replay(it, body = ""))
+    @Test(timeout = 10_000) fun `normally closed 200 empty event stream completes without judging silence`() = both {
+        assertSilentCompletion(replay(it, body = ""))
     }
 
-    @Test(timeout = 10_000) fun `200 only DONE cannot report successful completion`() = both {
-        assertEmptyFailure(replay(it, body = data("[DONE]")))
+    @Test(timeout = 10_000) fun `200 only DONE completes without invented output`() = both {
+        assertSilentCompletion(replay(it, body = data("[DONE]")))
     }
 
-    @Test(timeout = 10_000) fun `heartbeat only SSE is not model output`() = both {
-        assertEmptyFailure(replay(it, body = ": synthetic heartbeat\n\n: synthetic heartbeat\n\n"))
+    @Test(timeout = 10_000) fun `normally closed heartbeat only SSE does not become an empty output error`() = both {
+        assertSilentCompletion(replay(it, body = ": synthetic heartbeat\n\n: synthetic heartbeat\n\n"))
     }
 
-    @Test(timeout = 10_000) fun `role usage and lifecycle metadata cannot stand in for an output delta`() = both { responses ->
+    @Test(timeout = 10_000) fun `role usage and lifecycle metadata can finish without an output delta`() = both { responses ->
         val metadata = if (responses) """{"type":"response.created","response":{"id":"synthetic"}}"""
         else """{"choices":[{"delta":{"role":"assistant","content":""}}],"usage":{"prompt_tokens":5,"completion_tokens":0}}"""
-        assertEmptyFailure(replay(responses, body = data(metadata) + data("[DONE]")))
+        assertSilentCompletion(replay(responses, body = data(metadata) + data("[DONE]")))
+    }
+
+    @Test(timeout = 10_000) fun `whitespace output is preserved and never classified as failure`() = both { responses ->
+        val payload = if (responses) """{"type":"response.output_text.delta","item_id":"synthetic","delta":" "}"""
+        else """{"choices":[{"delta":{"content":" "}}]}"""
+        val result = replay(responses, body = data(payload) + data("[DONE]"))
+        assertNull(result.failure)
+        assertEquals(1, result.completions)
+        assertEquals(" ", result.chunks.filterIsInstance<StreamChunk.TextDelta>().joinToString("") { it.text })
     }
 
     @Test(timeout = 10_000) fun `real text delta completes once and is preserved`() = both { responses ->

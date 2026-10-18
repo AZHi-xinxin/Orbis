@@ -23,6 +23,114 @@ import java.time.Instant
 /** Entirely in-memory Room, synthetic messages and fake FTS table; no Koin, cloud or real files. */
 @RunWith(AndroidJUnit4::class)
 class OrbisCompactionPersistenceTest {
+    @Test fun lateCheckpointChunkAndLongContinuationMergeThenCompactAndRollbackInRoom() = runBlocking {
+        Fixture().use { f ->
+            val room = original(75); f.save(room, true)
+            fun bytes() = object : me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointStore {
+                val records = mutableMapOf<Uuid, ByteArray>()
+                override fun read(conversationId: Uuid) = records[conversationId]?.copyOf()
+                override fun writeAtomic(conversationId: Uuid, bytes: ByteArray) { records[conversationId] = bytes.copyOf() }
+                override fun delete(conversationId: Uuid) { records.remove(conversationId) }
+            }
+            val old = me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointJournal(bytes())
+            val oldHandle = old.begin(room)
+            val reasoning = UIMessagePart.Reasoning("r".repeat(23_877), finishedAt = null)
+            val done = List(3) { UIMessagePart.Tool("done-$it", "synthetic_tool", "{}", output = listOf(UIMessagePart.Text("success $it"))) }
+            val reply = UIMessage.assistant("").copy(parts = done + reasoning).toMessageNode()
+            val visible = room.copy(messageNodes = room.messageNodes + reply)
+            val full = visible.copy(messageNodes = room.messageNodes + reply.copy(messages = listOf(
+                reply.currentMessage.copy(parts = done + reasoning.copy(reasoning = reasoning.reasoning + "tail")))))
+            old.checkpoint(oldHandle, room.assistantId, room.compactionEpoch, full.messageNodes.drop(oldHandle.prefixCount))
+            val settled = reply.copy(messages = listOf(reply.currentMessage.copy(parts = done + reasoning.copy(finishedAt = kotlin.time.Clock.System.now()))))
+            val later = List(135) { UIMessage.user("synthetic continuation $it").toMessageNode() }
+            val latest = room.copy(messageNodes = room.messageNodes + settled + later)
+            val journal = me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal(bytes())
+            val runId = Uuid.random(); journal.checkpoint(runId, visible, latest)
+            val recovery = journal.recover(f.load(room.id), old::provesInFlightBaseline)!!
+            assertNull(recovery.durableBaseline)
+            val job = kotlinx.coroutines.SupervisorJob()
+            val scope = kotlinx.coroutines.CoroutineScope(job + kotlinx.coroutines.Dispatchers.Default)
+            lateinit var lane: me.rerere.rikkahub.service.HumanContinuationLane
+            val store = me.rerere.rikkahub.service.HumanContinuationContextStore(recovery.baseline,
+                recovery.baseline, runId, kotlinx.coroutines.sync.Mutex(), journal, read = { f.load(room.id) },
+                proveBaseline = old::provesInFlightBaseline,
+                commit = { expected, next ->
+                    if (f.load(room.id).messageNodes == expected.messageNodes) { f.save(next); f.load(room.id) } else null
+                }, canWrite = { true }, project = { lane.projectContext(it) }, latest = { lane.state.value },
+                onStored = {}, onRebased = { a,b -> lane.acceptCompaction(a,b) },
+                retireOldJournal = { assertTrue(old.clearSettledInDurableContinuation(it, true)) },
+                reconcileStream = old::streamedContinuationEnrichment, onEnriched = { lane.acceptStreamEnrichment(it) })
+            lane = me.rerere.rikkahub.service.HumanContinuationLane(recovery.baseline, scope, persist = { false },
+                onFailure = { throw it }, initial = recovery.snapshot, checkpointId = runId)
+            try {
+                // Compact's own save also bridges the mismatch, without requiring a restart or another model call.
+                val after = store.compact({ lane.state.value }) { source,durable ->
+                    assertEquals(source.messageNodes, durable.messageNodes)
+                    assertEquals(211, durable.messageNodes.size)
+                    assertEquals(23_881, (durable.currentMessages[75].parts.last() as UIMessagePart.Reasoning).reasoning.length)
+                    assertEquals(done, durable.currentMessages[75].getTools())
+                    compact(f, source, retainOriginals = true).conversation
+                }
+                assertEquals(1L, after.compactionEpoch)
+                assertFalse(old.hasCheckpoint(room.id))
+                assertTrue(store.save(latest)) // A stale producer cannot resurrect the old page.
+                assertEquals(after.messageNodes, f.load(room.id).messageNodes)
+                val restored = f.repository.rollbackLatest(f.load(room.id), 0, { 1000 }).conversation
+                assertEquals(211, restored.messageNodes.size)
+                assertEquals(later, restored.messageNodes.takeLast(135))
+                assertEquals(23_881, (restored.currentMessages[75].parts.last() as UIMessagePart.Reasoning).reasoning.length)
+                assertEquals(done, restored.currentMessages[75].getTools())
+            } finally { job.cancel() }
+        }
+    }
+
+    @Test fun interruptedLaneCompactsInRoomWhileNewInputContinuesAndOriginalsRemainRecoverable() = runBlocking {
+        Fixture().use { f ->
+            val source = original(); f.save(source, true)
+            val ownerJob = kotlinx.coroutines.SupervisorJob()
+            val scope = kotlinx.coroutines.CoroutineScope(ownerJob + kotlinx.coroutines.Dispatchers.Default)
+            val journalStore = object : me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointStore {
+                val records = mutableMapOf<Uuid, ByteArray>()
+                override fun read(conversationId: Uuid) = records[conversationId]?.copyOf()
+                override fun writeAtomic(conversationId: Uuid, bytes: ByteArray) { records[conversationId] = bytes.copyOf() }
+                override fun delete(conversationId: Uuid) { records.remove(conversationId) }
+            }
+            val journal = me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal(journalStore)
+            val runId = Uuid.random()
+            lateinit var lane: me.rerere.rikkahub.service.HumanContinuationLane
+            val store = me.rerere.rikkahub.service.HumanContinuationContextStore(source, source, runId,
+                kotlinx.coroutines.sync.Mutex(), journal, read = { f.load(source.id) }, proveBaseline = { _, _ -> false },
+                commit = { expected, next ->
+                    if (f.load(source.id).messageNodes == expected.messageNodes) { f.save(next); f.load(next.id) } else null
+                }, canWrite = { true }, project = { lane.projectContext(it) }, latest = { lane.state.value },
+                onStored = {}, onRebased = { a, b -> lane.acceptCompaction(a, b) }, retireOldJournal = {})
+            // Deliberately withhold ordinary saves: exercise the independent recovery tail.
+            lane = me.rerere.rikkahub.service.HumanContinuationLane(source, scope, persist = { false },
+                onFailure = { throw it }, checkpointId = runId)
+            try {
+                val replied = kotlinx.coroutines.CompletableDeferred<Unit>()
+                val after = store.compact({ lane.state.value }) { before, durable ->
+                    assertEquals(before.messageNodes, durable.messageNodes)
+                    lane.send(UIMessage.user("new human during compact")) { snapshot, _, publish ->
+                        publish(snapshot.copy(messageNodes = snapshot.messageNodes + UIMessage.assistant("already replying").toMessageNode()))
+                        replied.complete(Unit)
+                    }
+                    kotlinx.coroutines.withTimeout(2_000) { replied.await() }
+                    compact(f, before, retainOriginals = true).conversation
+                }
+                assertStored(after, f.load(source.id))
+                assertEquals(1L, after.compactionEpoch)
+                val recovered = journal.recover(f.load(source.id))!!.snapshot
+                assertEquals(listOf("new human during compact", "already replying"), recovered.currentMessages.takeLast(2).map { it.toText() })
+                assertTrue(store.save(lane.state.value))
+                assertEquals(recovered.messageNodes, f.load(source.id).messageNodes)
+                val rolledBack = f.repository.rollbackLatest(f.load(source.id), 0, { 1000 }).conversation
+                assertEquals(source.messageNodes + recovered.messageNodes.takeLast(2), rolledBack.messageNodes)
+                assertEquals(1, f.repository.originalArchiveStats(source.assistantId).count)
+            } finally { ownerJob.cancel() }
+        }
+    }
+
     private fun assertStored(expected: Conversation, actual: Conversation) {
         fun normalize(value: Conversation) = value.copy(
             createAt = Instant.ofEpochMilli(value.createAt.toEpochMilli()),

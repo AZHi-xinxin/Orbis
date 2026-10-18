@@ -11,6 +11,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import me.rerere.rikkahub.data.recovery.removeRetiredOrbisTasks
 import android.view.KeyEvent
 import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
 import me.rerere.rikkahub.service.dispatchChatVolumeKey
@@ -81,7 +82,6 @@ import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
 import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
-import me.rerere.rikkahub.ui.activity.SafeModeActivity
 import me.rerere.rikkahub.ui.components.ui.TTSController
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -203,12 +203,8 @@ class RouteActivity : ComponentActivity() {
         enableEdgeToEdge()
         disableNavigationBarContrast()
         super.onCreate(savedInstanceState)
+        removeRetiredOrbisTasks()
         pendingWorkshopOwner = intent.getStringExtra("orbis_image_workshop_owner")
-        if (CrashHandler.hasCrashed(this)) {
-            startActivity(Intent(this, SafeModeActivity::class.java))
-            finish()
-            return
-        }
         // Consume on the first Activity, even a special entry. Warm returns, rotation,
         // shares and notification navigation must never unexpectedly replay an intro.
         val firstActivity = OrbisStartupProcess.gate.claim()
@@ -293,6 +289,7 @@ class RouteActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        removeRetiredOrbisTasks()
         intent.getStringExtra("orbis_image_workshop_owner")?.let { pendingWorkshopOwner = it }
         if (intent.action == Intent.ACTION_MAIN || intent.hasExtra("conversationId")) {
             orbisHomeNavigation.returnToChat()

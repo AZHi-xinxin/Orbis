@@ -104,6 +104,7 @@
       android:exported="true"
       android:taskAffinity="${applicationId}.launcher"
       android:excludeFromRecents="true"
+      android:autoRemoveFromRecents="true"
       android:launchMode="singleTask"
       android:theme="@style/Theme.Orbis.LaunchRouter">
       <intent-filter>
@@ -112,31 +113,7 @@
       </intent-filter>
       <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
     </activity>
-    <!-- Independent, native rescue UI: does not initialize Compose, Koin, settings or databases. -->
-    <activity
-      android:name=".ui.activity.EmergencyBackupActivity"
-      android:process=":recovery"
-      android:exported="true"
-      android:label="Orbis 紧急备份"
-      android:taskAffinity="${applicationId}.recovery"
-      android:launchMode="singleTask"
-      android:configChanges="keyboardHidden|orientation|screenSize"
-      android:theme="@android:style/Theme.Material.Light.NoActionBar">
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-        <category android:name="android.intent.category.LAUNCHER" />
-      </intent-filter>
-    </activity>
-      <activity
-        android:name=".ui.activity.SafeModeActivity"
-      android:exported="false"
-      android:label="@string/title_activity_safe_mode"
-        android:theme="@style/Theme.Rikkahub" />
-      <activity
-        android:name=".ui.activity.ConversationRescueActivity"
-        android:exported="false"
-        android:label="会话检查与恢复"
-        android:theme="@style/Theme.Rikkahub" />
+    <!-- Rescue activities exist only in the opt-in rescue manifest. -->
     <activity
       android:name=".RouteActivity"
       android:configChanges="keyboardHidden|orientation|screenSize"

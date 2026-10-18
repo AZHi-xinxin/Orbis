@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -52,6 +54,23 @@ class PrivateRoomPresentationUiTest {
     @get:Rule val compose = createShellComposeRule()
     private val secret = "SYNTHETIC_PRIVATE_TEXT_NOT_VISIBLE"
     private val publicReply = "已完成操作，请打开设置查看恢复指引。"
+    private var spoken: String? = null
+    private val tts = object : me.rerere.rikkahub.ui.hooks.CustomTtsState {
+        override val isAvailable = kotlinx.coroutines.flow.MutableStateFlow(true)
+        override val isSpeaking = kotlinx.coroutines.flow.MutableStateFlow(false)
+        override val error = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+        override val currentChunk = kotlinx.coroutines.flow.MutableStateFlow(0)
+        override val totalChunks = kotlinx.coroutines.flow.MutableStateFlow(0)
+        override val playbackState = kotlinx.coroutines.flow.MutableStateFlow(me.rerere.tts.model.PlaybackState())
+        override fun speak(text: String, flushCalled: Boolean) { spoken = text }
+        override fun stop() {}
+        override fun pause() {}
+        override fun resume() {}
+        override fun skipNext() {}
+        override fun fastForward(ms: Long) {}
+        override fun setSpeed(speed: Float) {}
+        override fun cleanup() {}
+    }
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun source() = UIMessage.assistant(publicReply).copy(parts = listOf(
         UIMessagePart.Text(publicReply),
@@ -65,6 +84,7 @@ class PrivateRoomPresentationUiTest {
                     DisplaySetting(enableMessageGenerationHapticEffect = false,
                         showThinkingContent = true, autoCloseThinking = true)),
                 LocalNavController provides Navigator(mutableListOf()),
+                me.rerere.rikkahub.ui.context.LocalTTSState provides tts,
             ) { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), content = { content() })
             } } }
@@ -87,14 +107,64 @@ class PrivateRoomPresentationUiTest {
         compose.onNodeWithText(publicReply, useUnmergedTree = true).assertExists()
         assertPrivateRecordsAbsent()
         compose.onNodeWithText(context.getString(R.string.edit)).assertDoesNotExist()
-        compose.onNodeWithText(context.getString(R.string.copy)).performClick()
+        compose.onNodeWithContentDescription(context.getString(R.string.copy)).performScrollTo().performClick()
         compose.runOnIdle {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             assertEquals(publicReply, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
         }
         compose.runOnIdle { assertEquals(0, actions); assertEquals(originalText, message.toText()) }
+        compose.onNodeWithText(context.getString(R.string.copy)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.tts)).performClick()
+        compose.runOnIdle { assertEquals(publicReply, spoken) }
+        compose.onNodeWithContentDescription(context.getString(R.string.regenerate)).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.more_options)).performClick()
+        compose.onNodeWithText(context.getString(R.string.edit)).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.share)).performClick()
         compose.runOnIdle { assertEquals(1, actions) }
+    }
+
+    @Test fun longMixedToolChainKeepsStandardIconToolbarAndOriginalBranches() {
+        val original = source().copy(parts = List(24) { index ->
+            UIMessagePart.Tool("tool-$index", "ordinary_tool", "{}", listOf(UIMessagePart.Text("result-$index")))
+        } + source().parts)
+        var regeneration = 0
+        show { ChatMessage(original.toMessageNode(), onFork = {}, onRegenerate = { regeneration++ },
+            onEdit = {}, onShare = {}, onDelete = {}, onUpdate = {}) }
+        compose.onNodeWithContentDescription(context.getString(R.string.copy)).performScrollTo().assertExists()
+        compose.onNodeWithText(context.getString(R.string.copy)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.share)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(context.getString(R.string.more_options)).assertExists()
+        compose.onNodeWithContentDescription(context.getString(R.string.regenerate)).performClick()
+        compose.runOnIdle { assertEquals(1, regeneration); assertEquals(25, original.getTools().size) }
+        assertPrivateRecordsAbsent()
+    }
+
+    @Test fun previousBranchRemainsBrowsableWithUnavailableHistoryWriter() {
+        val versions = listOf(UIMessage.assistant("first saved reply"), UIMessage.assistant("second saved reply"),
+            UIMessage.assistant("third saved reply"))
+        val node = versions.first().toMessageNode().copy(messages = versions, selectIndex = 2)
+        val conversation = me.rerere.rikkahub.data.model.Conversation(assistantId = kotlin.uuid.Uuid.random(),
+            messageNodes = listOf(UIMessage.user("synthetic question").toMessageNode(), node))
+        val owner = kotlinx.coroutines.SupervisorJob()
+        val lane = me.rerere.rikkahub.service.HumanContinuationLane(conversation,
+            kotlinx.coroutines.CoroutineScope(owner + kotlinx.coroutines.Dispatchers.Main.immediate),
+            persist = { false }, onFailure = { throw it }, checkpoint = { false })
+        try {
+            show {
+                val selected = lane.state.collectAsState().value.messageNodes.last()
+                ChatMessage(selected, onFork = {}, onRegenerate = {}, onEdit = {}, onShare = {}, onDelete = {},
+                    onUpdate = { lane.selectBranch(it.id, it.selectIndex) })
+            }
+            compose.onNodeWithText("3/3").assertExists()
+            compose.onNodeWithContentDescription("上一分支").performScrollTo().performClick()
+            compose.onNodeWithText("second saved reply", useUnmergedTree = true).assertExists()
+            compose.onNodeWithText("2/3").assertExists()
+            compose.onNodeWithContentDescription("上一分支").performClick()
+            compose.onNodeWithText("first saved reply", useUnmergedTree = true).assertExists()
+            compose.onNodeWithContentDescription("下一分支").performClick()
+            compose.onNodeWithText("2/3").assertExists()
+            compose.runOnIdle { assertEquals(versions, lane.state.value.messageNodes.last().messages) }
+        } finally { owner.cancel() }
     }
 
     @Test fun pendingStreamShowsProseBeforeToolNameButNotReasoningOrPartialArguments() {
@@ -169,7 +239,8 @@ class PrivateRoomPresentationUiTest {
             ?.firstNotNullOfOrNull { titlePattern.matchEntire(it.text)?.groupValues?.get(1) }
             ?.replace(',', '.')?.toDoubleOrNull()
         show { MessagePartsBlock(assistant = null, role = MessageRole.ASSISTANT, model = null,
-            parts = listOf(normal, UIMessagePart.Text(publicReply)), annotations = emptyList(), loading = true) }
+            // Only the live tail can keep reasoning time. Prose after reasoning closes that step.
+            parts = listOf(UIMessagePart.Text(publicReply), normal), annotations = emptyList(), loading = true) }
         compose.onNode(timerTitle, useUnmergedTree = true).assertExists()
         val first = requireNotNull(displayedSeconds()) { "Live reasoning elapsed title is missing" }
         // Wall time drives the production timer; observe it rather than advancing a fake timer.

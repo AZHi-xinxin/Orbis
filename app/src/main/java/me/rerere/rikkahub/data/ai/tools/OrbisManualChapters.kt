@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools
 
 import kotlinx.serialization.json.*
+import me.rerere.rikkahub.BuildConfig
 
 /** Public, authored help only: no Context, Settings, repository, callbacks, clock or network. */
 internal data class OrbisManualSection(val title: String, val text: String)
@@ -143,10 +144,14 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("四季主题", "春·樱信、夏·萤夏、秋·枫笺、冬·雪灯提供各自默认壁纸与漂浮装饰；自定义壁纸仍可覆盖默认背景。四季分别以花瓣、萤光、叶片和雪为装饰，沿用漂浮物开关；关闭动态效果仍可使用主题。主题不会修改助手提示词、模型、聊天或记忆。"),
         OrbisManualSection("轻量与银河", "记忆星盘可切换轻量与银河，并在本机记住选择。银河采用倾斜星盘、细密星尘和柔光，装饰星尘不可点击，不会伪造记忆；可点击星点仍只来自当前真实元信息快照。演示模式另行标识，不与真实记忆混为一谈。低性能设备可改用轻量；切换只改变展示，不修改 ST 记录，也不保证所有机型都同样流畅。"),
     )),
-    OrbisManualChapter("rescue", "紧急备份与 Orbis 是同一个应用", "桌面 → Orbis 紧急备份", emptyList(), listOf(
+    if (!BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) OrbisManualChapter("rescue", "当前为无紧急救援版", "系统设置 → 数据与本地备份", emptyList(), listOf(
+        OrbisManualSection("本包的选择", "主版本完全取消紧急救援、安全模式和手动自救入口，不因上次崩溃标记或旧救援请求拦住正常及后台启动。不要指导用户打开不存在的紧急备份图标。可选救援版 OrbisRescue 单独下载，由用户自行选择，不按手机品牌强制切换。"),
+        OrbisManualSection("仍然保留", "正常聊天保存、回复检查点、普通备份和导入不变。无救援不等于不会闪退，也不修复系统兼容层或原始崩溃；正常页面打不开时，本包没有独立的救援导出入口。请定期将普通备份保存到应用外并核对，未保存的内存内容不能保证找回。"),
+        OrbisManualSection("切换和旧恢复", "两种正式包使用相同包名、签名与数据格式，切换请覆盖安装兼容的同版或更高版，不要卸载或清数据。若旧版文件恢复尚未完成，仍会阻止打开半恢复的数据；请保留原件联系维护者，当前备用包只导出备份、不执行恢复。两版都不因历史崩溃记录拦截启动。应用内更新只匹配当前类型，不静默切到救援版。旧桌面快捷方式若还在，不要选择卸载应用；仅在系统明确区分时移除该快捷方式。"),
+    )) else OrbisManualChapter("rescue", "紧急备份与 Orbis 是同一个应用", "桌面 → Orbis 紧急备份", emptyList(), listOf(
         OrbisManualSection("不要卸载救援入口", "Orbis 与‘Orbis 紧急备份’是同一个应用的两个入口，不是两个可独立卸载的软件。卸载任意一个图标，都会卸载整个 Orbis 并删除本机聊天、助手与未导出资料；不要为关闭救援或处理闪退而卸载、清数据。覆盖安装也应先做可验证备份。"),
-        OrbisManualSection("先保住数据", "救援页不打开聊天和助手外观，可在正常页面打不开时导出。备份保存在应用内部还不足以抵抗卸载，必须另存到手机‘下载’等应用外位置并完成校验。临时视频抽帧不进入普通备份或紧急救援包，避免绕过通话结束后 10 分钟的保留期限；已正式保留到照片墙的图片仍按照片资料备份。诊断错误 TXT 不是聊天备份，分享前自行脱敏；生成备份不表示故障已修复，也不会自动恢复生成。"),
-        OrbisManualSection("系统卸载的限制", "救援页有明显提醒，从救援页进入 Android 应用设置前还会再次弹窗。但 Orbis 无法拦截系统卸载：从桌面或系统设置直接卸载时，不能保证再出现 Orbis 自定义提醒。不要把有提醒误认为有防卸载保护。"),
+        OrbisManualSection("先保住数据", "备用页只提供本地备份导出，不打开聊天和助手外观，不提供会话修复、导入恢复、安全模式或错误报告导出；不承诺所有故障下都可导出。备份保存在应用内部还不足以抵抗卸载，必须另存到手机‘下载’等应用外位置并完成校验。临时视频抽帧不进入普通备份或紧急备份包，已正式保留到照片墙的图片仍按照片资料备份。生成备份不表示故障已修复，也不会自动恢复生成。两版均不因旧崩溃标记拦截启动。"),
+        OrbisManualSection("系统卸载的限制", "Orbis 无法拦截系统卸载：从桌面或系统设置直接卸载时，不能保证再出现 Orbis 自定义提醒。不要把备用入口当作可单独卸载的插件；退出备用版请手动覆盖安装主版。"),
     )),
     OrbisManualChapter("consultation", "咨询室当前未开放", "系统设置 → 咨询室（待开发提示）", emptyList(), listOf(
         OrbisManualSection("公开版本边界", "咨询室显示‘正在开发，暂未开放’。不要指导公开版用户配对、开启待命、重试旧场或调用内部咨询工具，也不要用哨兵或普通私聊替代内部协议。已保留的历史数据不代表功能已验收；其它本地功能不依赖咨询室。"),

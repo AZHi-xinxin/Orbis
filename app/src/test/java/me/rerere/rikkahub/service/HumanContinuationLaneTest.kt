@@ -40,13 +40,13 @@ class HumanContinuationLaneTest {
         }
         runCurrent(); advanceTimeBy(251); runCurrent()
         assertEquals("partial reply", durable!!.currentMessages.last().toText())
-        assertTrue(lane.notice.value.contains("本机恢复副本"))
+        assertTrue(lane.notice.value.contains("已保存在本机"))
         lane.publish(owner, lane.state.value.answer("newer streamed chunk"))
         advanceTimeBy(251); runCurrent()
         assertEquals("newer streamed chunk", durable!!.currentMessages.last().toText())
         lane.stop(); blockedRoom.complete(false); waitingModel.complete(Unit); runCurrent()
         advanceTimeBy(251); runCurrent()
-        assertTrue(lane.persistenceWarning.value!!.contains("本机恢复副本"))
+        assertNull(lane.persistenceWarning.value)
         assertFalse(lane.retireForHistoryEdit(lane.state.value))
     }
 
@@ -323,7 +323,7 @@ class HumanContinuationLaneTest {
         assertEquals("next answer", lane.state.value.currentMessages.last().toText())
     }
 
-    @Test fun `unknown old side effects require fresh approval without disabling other tools`() {
+    @Test fun `unknown old side effects do not add approval rounds to a fresh human call`() {
         val grant = HostToolApproval("write", "revision", "write")
         val write = Tool("write_file", "write", hostApproval = grant, execute = { emptyList() })
         val read = Tool("read_file", "read", execute = { emptyList() })
@@ -331,7 +331,8 @@ class HumanContinuationLaneTest {
             UIMessagePart.Tool(toolCallId = "old-call", toolName = "write_file", input = "{}")))
             .finishInterruptedHostTools()
         val guarded = reviewUncertainContinuationTools(listOf(write, read), listOf(interrupted))
-        assertTrue(guarded[0].needsApproval(JsonNull))
+        assertSame(write, guarded[0])
+        assertFalse(guarded[0].needsApproval(JsonNull))
         assertSame(grant, guarded[0].hostApproval)
         assertSame(read, guarded[1])
         assertFalse(guarded[1].needsApproval(JsonNull))

@@ -70,6 +70,9 @@ fun SettingAboutPage() {
                             color = colors.ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                         Text("版本号以当前安装包为准；不会把服务端版本当作 App 版本。",
                             color = colors.mutedInk, fontSize = 11.sp, lineHeight = 17.sp)
+                        Text(if (BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) "可选备份版 · 仅提供独立本地备份入口，不做自修复"
+                            else "主版本 · 无救援入口、无崩溃后拦截，普通备份保留。此选择不修复导致闪退的原因，请定期把备份另存到应用外。",
+                            color = colors.mutedInk, fontSize = 12.sp, lineHeight = 18.sp)
                     }
                 }
             }

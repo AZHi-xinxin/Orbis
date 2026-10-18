@@ -75,7 +75,6 @@ internal class OpenAIStreamListener(
     private val observeResponse: (Response) -> Unit = {},
     private val closeStream: (Throwable?) -> Unit,
 ) : EventSourceListener() {
-    private var hasOutput = false
     private var closed = false
 
     override fun onOpen(eventSource: EventSource, response: Response) {
@@ -86,8 +85,6 @@ internal class OpenAIStreamListener(
         if (closed) return
         try {
             val result = decoder.accept(SseEvent(id = id, event = type, data = data))
-            observe(result.chunks)
-            if (result.completed) requireOutput()
             sendChunks(result.chunks)
             if (result.completed) finish(null)
         } catch (error: Throwable) { finish(error) }
@@ -101,33 +98,14 @@ internal class OpenAIStreamListener(
         if (closed) return
         try {
             val chunks = decoder.onClosed()
-            observe(chunks)
-            requireOutput()
             sendChunks(chunks)
             finish(null)
         } catch (error: Throwable) { finish(error) }
     }
 
-    private fun observe(chunks: List<StreamChunk>) {
-        if (chunks.any { chunk -> when (chunk) {
-            is StreamChunk.TextDelta -> chunk.text.isNotEmpty()
-            is StreamChunk.ReasoningDelta -> chunk.text.isNotEmpty() || chunk.metadata != null
-            is StreamChunk.ReasoningStart -> chunk.metadata != null
-            is StreamChunk.ToolCallStart, is StreamChunk.ToolCallDelta,
-            is StreamChunk.ServerToolStart, is StreamChunk.ServerToolEnd -> true
-            is StreamChunk.ImageDelta -> chunk.data.isNotEmpty()
-            is StreamChunk.ImageSnapshot -> chunk.data.isNotEmpty()
-            else -> false // Role-only, usage, empty starts, heartbeat and Finish are not output.
-        } }) hasOutput = true
-    }
-
-    private fun requireOutput() {
-        if (!hasOutput) throw HttpException(
-            "响应流已结束，但没有返回正文、思考或工具内容；本轮未完成，未自动重发。",
-            code = "upstream_empty_stream", errorType = "openai_stream_error",
-        ) // Deliberately not IOException: an empty continuation must not replay prior tool work.
-    }
-
+    // A normally closed transport may carry no visible output. Do not infer
+    // failure or spend another model request trying to make the assistant speak.
+    // Explicit provider errors and real transport failures still use their own paths.
     private fun finish(error: Throwable?) {
         if (closed) return
         closed = true

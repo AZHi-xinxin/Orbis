@@ -454,7 +454,8 @@ class GenerationLoopLoopbackTest {
 
     @Test(timeout = 30_000)
     fun interruptedContinuationDoesNotProduceTerminalEvidenceOrReplayTools() = runBlocking<Unit> {
-        fixture(streaming = true, approval = false, expectedRequests = 2, emptyContinuation = true) { fixture ->
+        fixture(streaming = true, approval = false, expectedRequests = 2, emptyContinuation = true,
+            continuationFailureCode = "upstream_unavailable") { fixture ->
             assertTrue(runCatching { fixture.collect(emitTerminalEvidence = true) }.isFailure)
             assertEquals(listOf(1), fixture.executions.toList())
             assertTrue(fixture.terminalEvidence.isEmpty())
@@ -823,17 +824,15 @@ class GenerationLoopLoopbackTest {
     }
 
     @Test(timeout = 30_000)
-    fun gatewayReasoningOnlyContinuationDoesNotReplayPreviouslyExecutedTool() = runBlocking<Unit> {
+    fun legacyGatewayReasoningOnlyContinuationCompletesWithoutErrorOrToolReplay() = runBlocking<Unit> {
         fixture(streaming = true, approval = false, expectedRequests = 2, emptyContinuation = true, enableAutoRetry = true) { fixture ->
-            val failure = runCatching { fixture.collect(collectorDelayMs = 20) }.exceptionOrNull()
-            assertTrue(failure is KnownEmptyCompletionFailure)
+            val final = fixture.collect(collectorDelayMs = 20)
             assertEquals(listOf(1), fixture.executions.toList())
             assertEquals(2, fixture.server.requests.size)
             val continued = fixture.server.requests.last().json.getValue("messages").jsonArray
             assertTrue(continued.any { it.jsonObject["role"] == JsonPrimitive("tool") })
-            // The completed write's receipt remains in the last emitted state, even though the
-            // next provider response was empty. ChatService must persist this on its failure path.
-            assertTrue(fixture.lastPublished.flatMap { it.getTools() }.any {
+            // Silent completion follows the normal persistence path and retains the receipt.
+            assertTrue(final.flatMap { it.getTools() }.any {
                 it.toolCallId == "synthetic-call-1" && it.isExecuted
             })
             assertEquals(0, fixture.context.privateStorageAccesses.get())
@@ -1088,6 +1087,7 @@ class GenerationLoopLoopbackTest {
         compactionMode: String? = null,
         reminderOnly: Boolean = false,
         emptyContinuation: Boolean = false,
+        continuationFailureCode: String = "upstream_empty_completion",
         enableAutoRetry: Boolean = false,
         busyFirst: Boolean = false,
         finalText: String = "synthetic final answer",
@@ -1101,7 +1101,7 @@ class GenerationLoopLoopbackTest {
             "Synthetic fixture must not start the real application."
         }
         val context = NoPrivateStorageContext(instrumentation.context)
-        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, busyFirst, finalText, privateMode, memoryMode)
+        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, continuationFailureCode, busyFirst, finalText, privateMode, memoryMode)
         val requestBudget = AtomicInteger()
         val client = OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
@@ -1338,6 +1338,7 @@ class GenerationLoopLoopbackTest {
         private val compactionMode: String?,
         private val reminderOnly: Boolean,
         private val emptyContinuation: Boolean,
+        private val continuationFailureCode: String,
         private val busyFirst: Boolean,
         private val finalText: String,
         private val privateMode: Boolean,
@@ -1438,7 +1439,7 @@ class GenerationLoopLoopbackTest {
                 check(stream) { "Empty-completion fixture is a streaming gateway response." }
                 return "text/event-stream" to
                     "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"synthetic unfinished reasoning\"}}]}\n\n" +
-                    "data: {\"error\":{\"message\":\"Only reasoning returned\",\"type\":\"stiller_gateway_error\",\"code\":\"upstream_empty_completion\"}}\n\n" +
+                    "data: {\"error\":{\"message\":\"Synthetic provider ending\",\"type\":\"stiller_gateway_error\",\"code\":\"$continuationFailureCode\"}}\n\n" +
                     "data: [DONE]\n\n"
             }
             val toolSteps = if (compactionMode != null) {

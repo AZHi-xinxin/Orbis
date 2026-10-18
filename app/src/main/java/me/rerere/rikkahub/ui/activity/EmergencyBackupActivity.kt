@@ -11,7 +11,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
-import android.provider.Settings
 import android.provider.DocumentsContract
 import android.text.TextUtils
 import android.view.View
@@ -31,19 +30,14 @@ import me.rerere.rikkahub.data.recovery.EmergencyArchiveRoot
 import me.rerere.rikkahub.data.recovery.EmergencyArchiveProgress
 import me.rerere.rikkahub.data.recovery.createEmergencyArchiveWithMountAccess
 import me.rerere.rikkahub.data.recovery.emergencyMountPointLease
-import me.rerere.rikkahub.data.recovery.EmergencyCrashReportExport
-import me.rerere.rikkahub.data.recovery.EmergencyRestore
-import me.rerere.rikkahub.data.recovery.validateEmergencyRestore
 import me.rerere.rikkahub.data.recovery.emergencyRecoveryError
 import me.rerere.rikkahub.data.recovery.emergencyRecoveryDiagnostic
 import me.rerere.rikkahub.data.recovery.emergencyExportDestinationRejection
 import me.rerere.rikkahub.data.recovery.emergencyDestinationDiagnostic
 import me.rerere.rikkahub.data.recovery.EmergencyMediaStoreDownload
 import me.rerere.rikkahub.data.recovery.saveEmergencyDownload
-import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.EmergencyProcessGate
 import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -58,7 +52,6 @@ class EmergencyBackupActivity : Activity() {
     private var exportFile: File? = null
     private var pendingRequest = 0
     private var pendingExport: File? = null
-    private var pendingReport: EmergencyCrashReportExport? = null
     private lateinit var statusPanel: EmergencyBackupStatusPanel
     private lateinit var statusDetails: TextView
     private var operationStage = "prepare"
@@ -74,13 +67,10 @@ class EmergencyBackupActivity : Activity() {
         exportFile = savedInstanceState?.getString("preparedExport")?.let { name ->
             if (name.matches(Regex("Orbis-emergency-[A-Za-z0-9_.-]+\\.zip"))) File(root, "exports/$name") else null
         }?.takeIf { it.isFile }
-        pendingRequest = savedInstanceState?.getInt("pendingRequest", 0)?.takeIf { it in setOf(EXPORT, IMPORT, EXPORT_REPORT) } ?: 0
+        pendingRequest = savedInstanceState?.getInt("pendingRequest", 0)?.takeIf { it in setOf(EXPORT) } ?: 0
         pendingExport = savedInstanceState?.getString("pendingExport")?.let { name ->
             if (name.matches(Regex("Orbis-emergency-[A-Za-z0-9_.-]+\\.zip"))) File(root, "exports/$name") else null
         }?.takeIf { it.isFile }
-        pendingReport = if (pendingRequest == EXPORT_REPORT) runCatching {
-            EmergencyCrashReportExport.fromSaved(savedInstanceState?.getString("pendingReport"))
-        }.getOrNull() else null
         val padding = (20 * resources.displayMetrics.density).toInt()
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -115,31 +105,10 @@ class EmergencyBackupActivity : Activity() {
             val button = Button(this).apply { this.text = label; setOnClickListener { action() } }
             controls += button; column.addView(button)
         }
-        button("导出错误报告（仅文字）") {
-            confirmPause("只导出上次已保存的错误文字、版本与设备信息，不导出聊天数据库或整个备份，不会清除崩溃记录。错误文字本身可能包含私人内容、地址或密钥，请检查并遮去后再自行分享；不会自动发送或上传。\n\n读取前会暂停 Orbis 的通话、生成与后台任务，完成后仍处于救援保护。") {
-                runWork("正在读取已保存的错误报告……", stage = "report") {
-                    // SharedPreferences can restore a .bak file on read: take the same cold lease first.
-                    ensurePaused()
-                    val report = EmergencyCrashReportExport.fromSaved(CrashHandler.getStackTrace(this))
-                    if (report == null) {
-                        progress("目前没有已保存的错误文字。不会为取报告重新触发崩溃；仍可导出内容备份。")
-                    } else runOnUiThread {
-                        if (isDestroyed || isFinishing) return@runOnUiThread
-                        pendingReport = report
-                        launchPicker(EXPORT_REPORT, Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE); type = EmergencyCrashReportExport.MIME_TYPE
-                            putExtra(Intent.EXTRA_TITLE, "Orbis-crash-report-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.txt")
-                            putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-                        })
-                    }
-                }
-            }
-        }
         button("导出崩溃前内容备份到本机") {
             confirmPause("备份可能包含聊天、咨询记录、文件、服务地址和密钥，未加密，请只保存在自己控制的本机目录，不要发到群或 GitHub。\n\n继续会暂停 Orbis 的通话、生成和后台任务；只备份已经落盘的内容。已发到外部的工具操作不会撤销，也不会自动重放。") {
                 runWork("正在暂停后台并保存原始文件……") {
                     ensurePaused()
-                    checkNoInterruptedRestore()
                     val directory = File(root, "exports").apply { check(isDirectory || mkdirs()) }
                     val name = "Orbis-emergency-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}-${UUID.randomUUID()}.zip"
                     val archive = File(directory, name)
@@ -173,7 +142,7 @@ class EmergencyBackupActivity : Activity() {
             if (candidate == null) setStatus("尚无已生成的备份，请先导出。") else {
                 confirmPause("会把已经生成的原始包保存到手机本机“下载/Orbis Backups”，不经过文件选择器，不上传云端。\n\n原始包未加密，可能含私人聊天和密钥；请仅自己保管。系统下载目录里的其他文件不会被覆盖。仍需完整写入并读回校验后，才会确认保存成功。") {
                     runWork("正在校验原始包并保存到本机下载……", stage = "save") {
-                        ensurePaused(); checkNoInterruptedRestore()
+                        ensurePaused()
                         val receipt = saveEmergencyDownload(candidate, EmergencyMediaStoreDownload(contentResolver, candidate.name),
                             onProgress = progressListener(checkPaused = true))
                         progress("已保存到本机“下载/Orbis Backups”，完整读回校验通过。\n文件：${receipt.displayName}\nSHA-256：${receipt.archive.sha256}\n\n应用内原始包仍保留；请在系统文件管理器确认并另存到电脑。导出成功不等于聊天故障已经修复。")
@@ -181,46 +150,12 @@ class EmergencyBackupActivity : Activity() {
                 }
             }
         }
-        button("从紧急备份恢复聊天与助手") {
-            AlertDialog.Builder(this).setTitle("选择 Orbis 紧急备份")
-                .setMessage("这是原始救援包的专用恢复入口，不是普通备份导入。会先校验文件，再让你确认；仅恢复可验证的聊天、助手设置、附件、作品和通话记录。旧工具等待、后台任务、权限批准、加密服务连接不会自动恢复。")
-                .setNegativeButton("取消", null).setPositiveButton("选择文件") { _, _ ->
-                    launchPicker(IMPORT, Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE); type = "application/zip"
-                        putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-                    })
-                }.show()
-        }
-        button("撤回尚未完成的恢复") {
-            confirmPause("仅撤回意外中断、尚未完成的恢复，回到本次恢复前保存的原数据。不撤销已完成的恢复，也不删除外部备份。") {
-                runWork("正在检查恢复日志……", stage = "restore") {
-                    ensurePaused()
-                    val pending = unfinishedTransactions()
-                    check(pending.isNotEmpty()) { "没有需要撤回的未完成恢复。" }
-                    pending.forEach { EmergencyRestore.rollback(it, roots(), { EmergencyAndroidRuntime.checkPaused(this) }) }
-                    progress("已撤回未完成恢复；原始包和恢复前副本仍保留。可以重新导出。")
-                }
+        button("结束备份并打开 Orbis") {
+            confirmPause("将尝试正常打开 Orbis，不修复或替换数据。未知故障不会因导出自动消失。建议先把备份保存到应用外。") {
+                leaveBackup()
             }
         }
-        button("系统设置：强行停止 Orbis") {
-            AlertDialog.Builder(this).setTitle("两个图标属于同一个应用")
-                .setMessage("接下来是 Android 系统设置。可以强行停止 Orbis，但请不要点卸载或清除数据：紧急备份图标不是独立应用，卸载它也会删除 Orbis 的本机内容。Orbis 无法拦截系统卸载。")
-                .setNegativeButton("留在这里", null)
-                .setPositiveButton("我知道了，打开系统设置") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-                }.show()
-        }
-        button("已备份，尝试会话检查与恢复") {
-            confirmPause("建议先完成应用外备份。此操作会退出救援保护并启动原有的会话检查页面；它仍依赖正常的数据库和界面组件，未知故障可能使它打不开。它不会自动修复或打开聊天，但正常后台服务可能恢复运行。") {
-                leaveRecovery(ConversationRescueActivity::class.java)
-            }
-        }
-        button("退出救援并打开 Orbis") {
-            confirmPause("退出保护后将尝试正常打开 Orbis。若仍崩溃，请再次进入紧急备份；未知故障不会因导出自动消失。建议先把备份保存到应用外。") {
-                leaveRecovery(RouteActivity::class.java)
-            }
-        }
-        text("只有看到“已保存到所选位置并读回校验通过”，才算完成外部备份。建议在文件管理器确认文件确实存在，再另存一份到电脑。外部附件原文件、Android 密钥库中的密钥可能无法随包恢复；运行环境链接和特殊节点仅留清单。隐私室只保留密文，恢复后必须输入另行保管的恢复码，不会自动解锁。MCP 服务恢复后保持关闭、工具需重新审批；连接服务可能需要再授权。", 14f)
+        text("此包只提供本地备份导出，不检查修复会话、不替换数据库、不恢复旧任务。导出成功不代表故障已修复；原始数据和已导出的备份不会自动删除。外部附件、Android 密钥库中的密钥及尚未落盘内容可能不在包内。请另存一份到电脑。", 14f)
         controls.forEach { it.isEnabled = pendingRequest == 0 }
         if (savedInstanceState != null) {
             val previous = emergencyBackupRebuiltPresentation(
@@ -232,16 +167,15 @@ class EmergencyBackupActivity : Activity() {
         } else if (pendingRequest != 0) setStatus(EMERGENCY_PICKER_WAITING_MESSAGE)
     }
 
-    private fun leaveRecovery(destination: Class<out Activity>) {
+    private fun leaveBackup() {
         runWork("正在退出救援保护……", stage = "resume") {
-            ensurePaused(); checkNoInterruptedRestore()
-            check(CrashHandler.acknowledgeCrashed(this)) { "无法确认启动状态，请检查空间。" }
+            ensurePaused()
             val current = checkNotNull(lease)
             check(EmergencyAndroidRuntime.gate(this).clearRecoveryRequest(current)) { "无法退出救援保护。" }
             current.close(); lease = null
             runOnUiThread {
                 if (isDestroyed || isFinishing) return@runOnUiThread
-                startActivity(Intent(this, destination).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                startActivity(Intent(this, RouteActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 finish()
             }
         }
@@ -257,24 +191,6 @@ class EmergencyBackupActivity : Activity() {
         operationStage = "permission_restore"
         emergencyMountPointLease(this).recoverInterrupted()
         operationStage = nextStage
-    }
-
-    private fun unfinishedTransactions(): List<File> {
-        val parent = File(root, "transactions")
-        if (!parent.exists()) return emptyList()
-        return checkNotNull(parent.listFiles()) { "无法读取恢复日志，暂不允许正常启动。" }.filter { directory ->
-            val journal = File(directory, EmergencyRestore.JOURNAL)
-            if (!journal.exists()) return@filter false // Preparation failed before any live move.
-            val state = EmergencyRestore.readJournal(directory).status
-            check(state in setOf("PREPARED", "INSTALLING", "ROLLING_BACK", "COMMITTED", "ROLLED_BACK")) {
-                "恢复日志无法确认，暂不允许正常启动。"
-            }
-            state in setOf("PREPARED", "INSTALLING", "ROLLING_BACK")
-        }
-    }
-
-    private fun checkNoInterruptedRestore() {
-        check(unfinishedTransactions().isEmpty()) { "有未完成的恢复，请先点“撤回尚未完成的恢复”。原始包和恢复前副本仍在。" }
     }
 
     private fun confirmPause(message: String, action: () -> Unit) {
@@ -298,7 +214,7 @@ class EmergencyBackupActivity : Activity() {
         controls.forEach { it.isEnabled = false }
         setStatus(EMERGENCY_PICKER_WAITING_MESSAGE)
         try { startActivityForResult(intent, code) } catch (_: Exception) {
-            pendingRequest = 0; pendingExport = null; pendingReport = null
+            pendingRequest = 0; pendingExport = null
             controls.forEach { it.isEnabled = !busy }
             setStatus("无法打开系统文件选择器。原数据和应用内副本仍保留；请确认系统文件管理器可用。",
                 failed = true, diagnostic = "ORBIS_RECOVERY_PICKER_UNAVAILABLE · picker")
@@ -308,15 +224,13 @@ class EmergencyBackupActivity : Activity() {
     @Deprecated("Native isolated rescue deliberately uses Activity results without Compose dependencies")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pendingRequest || requestCode !in setOf(EXPORT, IMPORT, EXPORT_REPORT)) return
+        if (requestCode != pendingRequest || requestCode !in setOf(EXPORT)) return
         val selectedExport = pendingExport
-        val selectedReport = pendingReport
-        pendingRequest = 0; pendingExport = null; pendingReport = null
+        pendingRequest = 0; pendingExport = null
         controls.forEach { it.isEnabled = !busy }
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) {
-            setStatus(if (requestCode == EXPORT_REPORT) "已取消错误报告导出，原报告仍保留，未清除崩溃记录。"
-                else "已取消文件选择。应用内副本若已生成仍保留，但尚未确认保存到应用外。")
+            setStatus("已取消文件选择。应用内副本若已生成仍保留，但尚未确认保存到应用外。")
             return
         }
         if (uri.scheme != "content" || uri.authority?.startsWith(packageName) == true) {
@@ -324,76 +238,22 @@ class EmergencyBackupActivity : Activity() {
                 failed = true, diagnostic = emergencyDestinationDiagnostic(if (uri.scheme != "content") "invalid_scheme" else "app_private_directory"))
             return
         }
-        val destinationRejection = if (requestCode in setOf(EXPORT, EXPORT_REPORT)) emergencyExportDestinationRejection(uri.authority,
-                runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull(), packageName) else null
+        val destinationRejection = emergencyExportDestinationRejection(uri.authority,
+                runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull(), packageName)
         if (destinationRejection != null) {
             setStatus("请另存到系统文件管理器的手机“下载”或外置存储普通目录。为防卸载时一起删除，不接受应用专属目录；也不向无法确认是本机存储的第三方文件服务写入。" +
-                (if (requestCode == EXPORT_REPORT) "原错误报告仍保留。" else "应用内原始包仍保留。" +
+                ("应用内原始包仍保留。" +
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "也可返回本页点“选择器失败？直接保存到本机下载”。" else ""),
                 failed = true, diagnostic = emergencyDestinationDiagnostic(destinationRejection))
             return
         }
-        if (requestCode == EXPORT_REPORT) runWork("正在保存错误文字并读回校验……", stage = "report") {
-            val report = checkNotNull(selectedReport) { "crash_report_snapshot_missing" }
-            contentResolver.openOutputStream(uri, "wt").use { target ->
-                report.writeTo(checkNotNull(target) { "crash_report_output_unavailable" })
-            }
-            operationStage = "readback"
-            contentResolver.openInputStream(uri).use { input ->
-                report.verify(checkNotNull(input) { "crash_report_readback_unavailable" })
-            }
-            progress("错误报告已保存为 TXT，并读回校验通过；原崩溃记录仍保留。请检查并遮去私人内容后，再自行分享。\n\n这只是诊断文字，不是聊天内容备份，不能作为卸载或清除数据的依据。")
-        } else if (requestCode == EXPORT) runWork("正在写入所选位置并读回校验……") {
+        runWork("正在写入所选位置并读回校验……") {
             val archive = checkNotNull(selectedExport) { "没有匹配的待导出文件，请重新选择备份。" }
             val receipt = EmergencyArchiveExport.saveVerified(archive,
                 openDestination = { checkNotNull(contentResolver.openOutputStream(uri, "wt")) { "无法写入所选位置。" } },
                 reopenDestination = { checkNotNull(contentResolver.openInputStream(uri)) { "无法读回备份，尚未确认保存成功。" } },
                 onProgress = progressListener(checkPaused = false))
             progress("已保存到所选位置并读回校验通过。\n文件：${archive.name}\nSHA-256：${receipt.sha256}\n\n原始文件没有被修复或删除；请在文件管理器确认并另存一份。备份的可读性不保证所有内容都能自动恢复。")
-        } else if (requestCode == IMPORT) confirmPause("将暂停 Orbis 并检查这个紧急包。恢复会替换当前聊天与设置，当前四类数据目录会完整保存在本机恢复前副本里；不会自动运行旧任务。建议先导出当前数据，不能把本机副本当作卸载后仍保留的备份。") {
-            runWork("正在校验紧急包和准备恢复副本……", stage = "restore") {
-                ensurePaused(); checkNoInterruptedRestore()
-                val imports = File(root, "imports").apply { check(isDirectory || mkdirs()) }
-                val archive = File(imports, "${UUID.randomUUID()}.zip")
-                contentResolver.openInputStream(uri).use { input ->
-                    checkNotNull(input) { "无法读取所选备份。" }
-                    FileOutputStream(archive).use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            check(imports.usableSpace > count + 4L * 1024 * 1024) { "本机空间不足；没有替换当前数据。" }
-                            output.write(buffer, 0, count)
-                        }
-                        output.fd.sync()
-                    }
-                }
-                val transactions = File(root, "transactions").apply { check(isDirectory || mkdirs()) }
-                val transaction = File(transactions, UUID.randomUUID().toString())
-                val plan = EmergencyRestore.prepare(archive, transaction, packageName, BuildConfig.VERSION_CODE.toLong(), roots(),
-                    { EmergencyAndroidRuntime.checkPaused(this) }, { validateEmergencyRestore(this, it) })
-                runOnUiThread {
-                    if (isDestroyed || isFinishing) return@runOnUiThread
-                    setStatus("校验通过，等待你的最终恢复确认；还没有替换当前数据。")
-                    AlertDialog.Builder(this).setTitle("确认恢复聊天与助手？")
-                        .setMessage("将还原 ${plan.selectedFiles.size} 个选中文件，其余原始数据仍保留在救援包中，不会自动启用旧后台任务。当前内容会保存在本机恢复前副本。恢复后不会自动打开聊天。" +
-                            if (plan.restoredPrivateVaults + plan.retainedPrivateVaults > 0)
-                                "\n\n隐私室：${plan.restoredPrivateVaults} 个密文副本可恢复，但必须输入独立恢复码才可重新启用；${plan.retainedPrivateVaults} 个暂不能自动恢复，原始密文仍完整保留在救援包中。" else "")
-                        .setCancelable(false)
-                        .setNegativeButton("暂不恢复") { _, _ ->
-                            runWork("正在撤回准备……", stage = "restore") {
-                                EmergencyRestore.rollback(transaction, roots(), { EmergencyAndroidRuntime.checkPaused(this) })
-                                progress("已取消恢复，当前数据未被替换；原始救援包保留。")
-                            }
-                        }
-                        .setPositiveButton("确认恢复") { _, _ ->
-                            runWork("正在还原已验证副本……", stage = "restore") {
-                                EmergencyRestore.commit(transaction, roots(), { EmergencyAndroidRuntime.checkPaused(this) })
-                                progress("聊天与助手的恢复事务已完成，原始包和恢复前副本保留。旧后台任务未恢复。仍处于救援保护，请点“退出救援并打开 Orbis”手动验收；若旧数据仍触发崩溃，不要清除备份。")
-                            }
-                        }.show()
-                }
-            }
         }
     }
 
@@ -436,7 +296,7 @@ class EmergencyBackupActivity : Activity() {
         worker.execute {
             try { operation() } catch (error: Exception) {
                 // Do not display raw provider paths or serialized content; no private data in logs.
-                val message = "${emergencyRecoveryError(error)}\n\n操作未完成，不能据此卸载或清数据。原始备份与恢复前副本不会自动删除。"
+                val message = "${emergencyRecoveryError(error)}\n\n操作未完成，不能据此卸载或清数据。原数据和已生成的备份不会自动删除。"
                 val diagnostic = emergencyRecoveryDiagnostic(error, operationStage)
                 runOnUiThread {
                     if (!isDestroyed && !isFinishing) {
@@ -464,7 +324,6 @@ class EmergencyBackupActivity : Activity() {
         exportFile?.let { outState.putString("preparedExport", it.name) }
         outState.putInt("pendingRequest", pendingRequest)
         pendingExport?.let { outState.putString("pendingExport", it.name) }
-        if (pendingRequest == EXPORT_REPORT) pendingReport?.let { outState.putString("pendingReport", it.text) }
         super.onSaveInstanceState(outState)
     }
 
@@ -481,7 +340,7 @@ class EmergencyBackupActivity : Activity() {
         super.onDestroy()
     }
 
-    companion object { private const val EXPORT = 7401; private const val IMPORT = 7402; private const val EXPORT_REPORT = 7403 }
+    companion object { private const val EXPORT = 7401 }
 }
 
 /** Native presentation only; constructing this panel cannot start recovery or any app service. */

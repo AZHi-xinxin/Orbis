@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -222,32 +223,33 @@ class OrbisEventMessageCardTest {
             "来源提供的触发时间 · 2026-09-22 15:42:38，点按折叠消息")
     }
 
-    @Test fun failedPresentationWriteDoesNotPretendToReadAndCanRetry() {
+    @Test fun failedPresentationWriteDoesNotBlockReadingBatteryReminderOrShowChatError() {
         val original = expanded().copy(collapsed = true, read = false)
         var event by mutableStateOf(original)
         var attempts = 0
         compose.setContent { MaterialTheme {
-            OrbisEventMessageCard(event, "not read until saved", onOpacityChange = {}, onUpdate = {
+            OrbisEventMessageCard(event, "电量 20% · 合成哨兵事件", onOpacityChange = {}, onUpdate = {
                 attempts++
                 if (attempts == 1) throw IllegalStateException("synthetic-private-error")
                 event = it
             }, now = now, zone = zone)
         } }
         compose.onNodeWithTag("orbis-event-collapse").performClick()
-        compose.onNodeWithText("未更新显示状态；正在回复时请等回复结束后再试。若有恢复提示，请先处理恢复记录。").assertExists()
+        compose.onNodeWithText("未能保存展开", substring = true).assertDoesNotExist()
         compose.onNodeWithText("synthetic-private-error", substring = true).assertDoesNotExist()
-        compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
+        compose.onNodeWithTag("orbis-event-original").assertTextEquals("电量 20% · 合成哨兵事件")
         compose.runOnIdle { assertEquals(original, event) }
         compose.onNodeWithTag("orbis-event-collapse").assertIsEnabled().performClick()
-        compose.onNodeWithTag("orbis-event-original").assertTextEquals("not read until saved")
-        compose.onNodeWithText("未更新显示状态；正在回复时请等回复结束后再试。若有恢复提示，请先处理恢复记录。").assertDoesNotExist()
+        compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(2, attempts)
-            assertEquals(original.copy(collapsed = false, read = true), event)
+            assertEquals(original.copy(collapsed = true, read = true), event)
         }
+        compose.onNodeWithTag("orbis-event-collapse").performClick()
+        compose.onNodeWithTag("orbis-event-original").assertTextEquals("电量 20% · 合成哨兵事件")
     }
 
-    @Test fun presentationUpdateAwaitsPersistenceAndPreventsRepeatedClicks() {
+    @Test fun slowPresentationWriteNeverBlocksToggleAndCoalescesToLatestChoice() {
         val gate = CompletableDeferred<Unit>()
         val original = expanded().copy(collapsed = true, read = false)
         var event by mutableStateOf(original)
@@ -259,15 +261,40 @@ class OrbisEventMessageCardTest {
                 event = it
             }, now = now, zone = zone)
         } }
-        compose.onNodeWithTag("orbis-event-collapse").performClick().assertIsNotEnabled()
+        compose.onNodeWithTag("orbis-event-collapse").performClick().assertIsEnabled()
+        compose.onNodeWithTag("orbis-event-original").assertTextEquals("saved text")
+        compose.onNodeWithTag("orbis-event-collapse").performClick().assertIsEnabled()
         compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
+        compose.onNodeWithTag("orbis-event-collapse").performClick()
+        compose.onNodeWithTag("orbis-event-original").assertTextEquals("saved text")
+        compose.onNodeWithTag("orbis-event-collapse").performClick()
         compose.runOnIdle {
             assertEquals(1, calls)
             assertEquals(original, event)
             gate.complete(Unit)
         }
-        compose.onNodeWithTag("orbis-event-original").assertTextEquals("saved text")
+        compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
         compose.onNodeWithTag("orbis-event-collapse").assertIsEnabled()
+        compose.runOnIdle {
+            assertEquals(2, calls)
+            assertEquals(original.copy(collapsed = true, read = true), event)
+        }
+    }
+
+    @Test fun locallyExpandedReminderSurvivesRecreationWhenHistoryWriterIsUnavailable() {
+        val restoration = StateRestorationTester(compose)
+        var calls = 0
+        restoration.setContent { MaterialTheme {
+            OrbisEventMessageCard(expanded().copy(collapsed = true, read = false), "电量提醒原文",
+                onOpacityChange = {}, onUpdate = { calls++; error("history busy") })
+        } }
+        compose.onNodeWithTag("orbis-event-collapse").performClick()
+        compose.onNodeWithTag("orbis-event-original").assertTextEquals("电量提醒原文")
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("orbis-event-original").assertTextEquals("电量提醒原文")
+        compose.runOnIdle { assertEquals(1, calls) }
+        compose.onNodeWithTag("orbis-event-collapse").performClick()
+        compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
     }
 
     private fun expanded() = OrbisEventMetadata("synthetic-receipt", "lc_sentinel", "synthetic-event", receipt,

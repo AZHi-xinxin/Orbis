@@ -12,7 +12,6 @@ import me.rerere.ai.ui.finishReasoning
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.finishInterruptedHostTools
-import me.rerere.rikkahub.data.ai.hostToolFailure
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.orbis.OrbisInboxEvent
@@ -27,10 +26,9 @@ internal fun reviewUncertainContinuationTools(
     tools: List<Tool>, messages: List<UIMessage>, requireFreshApproval: Boolean = false,
     hasCurrentGrant: (Tool) -> Boolean = { false },
 ): List<Tool> {
-    val uncertainNames = messages.flatMap { it.getTools() }.filter {
-        it.hostToolFailure()?.let { failure -> failure.executionPerformed == null } == true
-    }.map { it.toolName }.toSet()
-    return tools.map { tool -> if (!requireFreshApproval && (tool.name !in uncertainNames || hasCurrentGrant(tool))) tool else tool.copy(
+    // A fresh human turn uses the normal tool permissions. An unknown OLD call
+    // is history, not a reason to add confirmation rounds to every NEW call.
+    return tools.map { tool -> if (!requireFreshApproval) tool else tool.copy(
         needsApproval = { true },
     ) }
 }
@@ -93,6 +91,7 @@ internal class HumanContinuationLane(
     initial: Conversation = baseline,
     val checkpointId: kotlin.uuid.Uuid = kotlin.uuid.Uuid.random(),
     private val checkpoint: (suspend (Conversation) -> Boolean)? = null,
+    val contextStore: HumanContinuationContextStore? = null,
 ) {
     val state = MutableStateFlow(initial)
     val job = MutableStateFlow<Job?>(null)
@@ -108,10 +107,85 @@ internal class HumanContinuationLane(
     private var persistenceJob: Job? = null
     private var checkpointJob: Job? = null
     private var checkpointRevision = -1L
+    private var checkpointFailedRevision = -1L
     private var failedRevision = -1L
     private val workshopReturns = mutableMapOf<String, WorkshopJob>()
     private var workshopReservation: WorkshopReturnReservation? = null
     private var sentinelReservation: SentinelReservation? = null
+    private val contextRebases = mutableListOf<ContinuationContextRebase>()
+    private val streamEnrichments = mutableListOf<me.rerere.rikkahub.data.ai.checkpoint.ContinuationStreamEnrichment>()
+    private val selectedBranches = mutableMapOf<kotlin.uuid.Uuid, kotlin.uuid.Uuid>()
+
+    /** Selecting an existing alternative is not a tool retry or a history-body edit. */
+    @Synchronized fun selectBranch(nodeId: kotlin.uuid.Uuid, index: Int) {
+        check(!retired)
+        val node = state.value.messageNodes.firstOrNull { it.id == nodeId } ?: error("回复已不存在。")
+        require(index in node.messages.indices)
+        selectedBranches[nodeId] = node.messages[index].id
+        state.value = applyBranchSelection(state.value)
+        revision++
+        requestSave()
+    }
+
+    private fun applyBranchSelection(snapshot: Conversation): Conversation = if (selectedBranches.isEmpty()) snapshot else snapshot.copy(
+        messageNodes = snapshot.messageNodes.map { node ->
+            val selected = selectedBranches[node.id]
+            val index = node.messages.indexOfFirst { it.id == selected }
+            if (index < 0 || index == node.selectIndex) node else node.copy(selectIndex = index)
+        },
+    )
+
+    /** Storage observers can hold snapshots captured just before a local compact. */
+    @Synchronized fun projectContext(snapshot: Conversation): Conversation? {
+        var projected = snapshot
+        for (enrichment in streamEnrichments) {
+            if (projected.compactionEpoch == enrichment.baseline.compactionEpoch)
+                projected = enrichment.project(projected) ?: return null
+        }
+        for (rebase in contextRebases) {
+            if (projected.compactionEpoch == rebase.fromEpoch)
+                projected = rebase.project(projected) ?: return null
+        }
+        return projected.takeIf { it.compactionEpoch == state.value.compactionEpoch }?.let(::applyBranchSelection)
+    }
+
+    @Synchronized fun acceptStreamEnrichment(enrichment: me.rerere.rikkahub.data.ai.checkpoint.ContinuationStreamEnrichment) {
+        state.value = checkNotNull(enrichment.project(state.value))
+        streamEnrichments += enrichment
+        revision++
+        requestSave()
+    }
+
+    @Synchronized fun enrichMessages(messages: List<UIMessage>, epoch: Long): List<UIMessage> {
+        var result = messages
+        streamEnrichments.filter { it.baseline.compactionEpoch == epoch }.forEach {
+            result = checkNotNull(it.projectMessages(result))
+        }
+        return result
+    }
+
+    @Synchronized fun captureCompaction(owner: Long, before: List<UIMessage>): Conversation {
+        check(isCurrent(owner)) { "此轮已被新消息接替。" }
+        fun UIMessage.withoutCallOwnership() = copy(orbisVoiceCallId = null, orbisVoiceCallKind = null)
+        val snapshot = state.value
+        check(snapshot.currentMessages.map { it.withoutCallOwnership() } ==
+            enrichMessages(before, snapshot.compactionEpoch).map { it.withoutCallOwnership() }) {
+            "活动消息已变化，本次未整理；请基于最新上下文重试。"
+        }
+        return snapshot
+    }
+
+    /** A committed result is adopted even if a new human turn arrived while Room was writing.
+     * New generation never waits here: its old-context updates are projected on publication.
+     */
+    @Synchronized fun acceptCompaction(before: Conversation, after: Conversation) {
+        val rebase = ContinuationContextRebase(before, after)
+        val rebased = checkNotNull(rebase.project(state.value)) { "续聊前缀在整理期间改变。" }
+        contextRebases += rebase
+        state.value = applyBranchSelection(rebased)
+        revision++
+        requestSave()
+    }
 
     internal data class SentinelReservation(val owner: Long, val event: OrbisInboxEvent)
 
@@ -276,7 +350,7 @@ internal class HumanContinuationLane(
     @Synchronized fun publish(owner: Long, conversation: Conversation) {
         if (!isCurrent(owner)) return
         require(conversation.id == baseline.id && conversation.assistantId == baseline.assistantId)
-        state.value = conversation
+        state.value = projectContext(conversation) ?: return
         revision++
         requestCheckpoint()
     }
@@ -330,6 +404,7 @@ internal class HumanContinuationLane(
     ): String? = when (val plan = prepareHumanContinuationRegeneration(state.value, message)) {
         is HumanContinuationRegeneration.Blocked -> plan.notice
         is HumanContinuationRegeneration.Ready -> {
+            plan.original.messageNodes.drop(plan.request.messageNodes.size).forEach { selectedBranches.remove(it.id) }
             send(null) { _, owner, publish ->
                 generate(plan.request, owner) { generated ->
                     if (isCurrent(owner)) publish(plan.merge(generated))
@@ -401,6 +476,7 @@ internal class HumanContinuationLane(
             catch (_: Exception) { false }
             synchronized(this@HumanContinuationLane) {
                 if (saved) checkpointRevision = savingRevision
+                checkpointFailedRevision = if (saved) -1L else savingRevision
                 if (savingRevision == revision) refreshPersistenceNotice()
             }
         }
@@ -423,10 +499,10 @@ internal class HumanContinuationLane(
                 persistenceWarning.value = null
             }
             checkpointRevision == revision -> {
-                notice.value = "续聊已保存在本机恢复副本，主历史仍待合并；请勿清除应用数据。"
-                persistenceWarning.value = notice.value
+                notice.value = "续聊已保存在本机，聊天记录正在后台更新。"
+                persistenceWarning.value = null
             }
-            failedRevision == revision -> {
+            failedRevision == revision && (checkpoint == null || checkpointFailedRevision == revision) -> {
                 notice.value = "临时续聊：保存仍有问题，但可以继续发送。离开或重启前请复制重要内容。"
                 persistenceWarning.value = notice.value
             }

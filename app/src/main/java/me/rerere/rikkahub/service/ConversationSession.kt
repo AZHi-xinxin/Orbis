@@ -9,6 +9,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
@@ -32,6 +35,11 @@ class ConversationSession(
     val state = MutableStateFlow(initial)
     // Independent human continuation is retained even when old recovery cannot finish.
     internal val humanContinuation = MutableStateFlow<HumanContinuationLane?>(null)
+    // Phone and Web observe the same current producer, including before Room catches up.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    internal val displayedState = humanContinuation.flatMapLatest { it?.state ?: state }
+        .stateIn(scope, SharingStarted.Eagerly, initial)
+    internal fun displayedSnapshot(): Conversation = humanContinuation.value?.state?.value ?: state.value
     // Initialization, whole-conversation saves and prompt commits share this mutex.
     val orbisPromptEditMutex = Mutex()
     // Guarded by orbisPromptEditMutex; a new fork may seed its inherited prompt exactly once.

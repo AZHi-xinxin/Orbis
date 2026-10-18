@@ -12,6 +12,34 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 class HumanContinuationJournalTest {
+    @Test fun `browsing three existing replies widens recovery tail without changing any version`() {
+        val store = Store(); val id = Uuid.random()
+        val source = base().let { c -> c.copy(messageNodes = c.messageNodes.dropLast(1) +
+            c.messageNodes.last().copy(messages = listOf(UIMessage.assistant("one"), UIMessage.assistant("two"),
+                UIMessage.assistant("three")), selectIndex = 2)) }.append()
+        val journal = HumanContinuationJournal(store)
+        journal.checkpoint(id, source, source)
+        val selected = source.copy(messageNodes = source.messageNodes.mapIndexed { index, node ->
+            if (index == 1) node.copy(selectIndex = 0) else node
+        })
+        journal.checkpoint(id, source, selected)
+        val recovery = HumanContinuationJournal(store).recover(source)!!
+        assertEquals("one", recovery.snapshot.currentMessages[1].toText())
+        assertEquals(source.messageNodes[1].messages, recovery.snapshot.messageNodes[1].messages)
+        assertEquals(source.messageNodes.takeLast(2), recovery.snapshot.messageNodes.takeLast(2))
+        assertTrue(journal.clearCommitted(id, selected))
+    }
+
+    @Test fun `selection checkpoint cannot smuggle a modified body in the protected prefix`() {
+        val store = Store(); val id = Uuid.random(); val source = base().append()
+        val journal = HumanContinuationJournal(store); journal.checkpoint(id, source, source)
+        val forged = source.copy(messageNodes = source.messageNodes.mapIndexed { index, node ->
+            if (index == 0) node.copy(messages = node.messages + UIMessage.user("replaced"), selectIndex = 1) else node
+        })
+        val old = store.read(source.id)
+        assertTrue(runCatching { journal.checkpoint(id, source, forged) }.isFailure)
+        assertArrayEquals(old, store.read(source.id))
+    }
     private class Store : GenerationCheckpointStore {
         val values = mutableMapOf<Uuid, ByteArray>()
         var fail = false

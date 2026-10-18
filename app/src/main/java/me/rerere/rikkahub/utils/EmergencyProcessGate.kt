@@ -66,6 +66,20 @@ class EmergencyProcessGate(directory: File) {
         return lease
     }
 
+    /** Current editions. An old request/crash flag is not an admission veto.
+     * Still exclude a live restore writer and inspect its durable transaction BEFORE data
+     * initialization. Never erase old flags/journals or roll back user files automatically. */
+    fun tryAcquireNoRescueBusinessLease(checkLegacyState: () -> Unit): Lease? {
+        val lease = tryAcquire(shared = true) ?: return null
+        try {
+            checkLegacyState()
+            return lease
+        } catch (error: Throwable) {
+            lease.close()
+            throw error
+        }
+    }
+
     /**
      * Null means a participating business process still owns a lease. The caller must not
      * export until it owns this lease AND has independently excluded native child writers.

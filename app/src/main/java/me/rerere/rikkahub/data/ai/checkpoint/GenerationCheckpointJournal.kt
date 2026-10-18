@@ -235,6 +235,22 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
             visibleHash == protectedNodesHash(recovery.conversation.messageNodes.drop(record.prefixCount).dropLast(record.suffixCount), record.version)
     }
 
+    /** Read-only bridge for a chunk durable just after interruption captured RAM. The old
+     * Room anchor and protected history still need exact proof; only appended prose/reasoning
+     * can enrich the visible baseline. Tool inputs, receipts and all other fields are exact.
+     */
+    @Synchronized
+    internal fun streamedContinuationEnrichment(persisted: Conversation, visible: Conversation): ContinuationStreamEnrichment? = guarded {
+        val record = read(persisted.id) ?: return@guarded null
+        if (visible.consultation != persisted.consultation) return@guarded null
+        recover(persisted) ?: return@guarded null
+        validateBaseIdentity(record, visible)
+        if (visible.messageNodes.size != record.prefixCount + record.tail.size + record.suffixCount) return@guarded null
+        val exact = visible.copy(messageNodes = visible.messageNodes.take(record.prefixCount) + record.tail +
+            visible.messageNodes.takeLast(record.suffixCount))
+        ContinuationStreamEnrichment.create(visible, exact)
+    }
+
     /** A fresh human turn settles old tools as interrupted, not successful. Once that exact
      * settled tail is in Room, retain uncertainty separately and release only its local journal.
      * Caller must have joined/fenced the producer and verified the durable automatic-wake hold.

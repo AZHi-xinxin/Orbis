@@ -25,7 +25,6 @@ import androidx.core.content.ContextCompat
 import com.lover.connect.LCAccessibilityService
 import com.lover.connect.LcExternalRecoveryGate
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.ui.activity.SafeModeActivity
 import me.rerere.rikkahub.utils.CrashHandler
 import java.lang.ref.WeakReference
 
@@ -224,7 +223,6 @@ internal class AccessibilityHealthMonitor private constructor(private val app: A
     }
 
     override fun onActivityResumed(activity: Activity) {
-        if (activity is SafeModeActivity) return
         foregroundActivity = WeakReference(activity)
         requestCheck()
     }

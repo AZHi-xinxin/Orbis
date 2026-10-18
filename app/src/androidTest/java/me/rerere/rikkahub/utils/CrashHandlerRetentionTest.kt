@@ -50,7 +50,7 @@ class CrashHandlerRetentionTest {
         try {
             assertTrue(real.edit().putBoolean("crashed", true).putString("stacktrace", "retained").commit())
             assertFalse(CrashHandler.acknowledgeCrashed(context))
-            assertTrue(CrashHandler.hasCrashed(context))
+            assertFalse(CrashHandler.hasCrashed(context))
             assertEquals("retained", CrashHandler.getStackTrace(context))
             assertTrue(CrashHandler.acknowledgeCrashed(context))
             assertFalse(CrashHandler.hasCrashed(context))
@@ -79,10 +79,11 @@ class CrashHandlerRetentionTest {
             val report = "Orbis fixture\nThread: main\nSyntheticException: retained"
             assertTrue(preferences.edit().putBoolean("crashed", true).putString("stacktrace", report).commit())
             val firstActivity = wrappedContext()
-            assertTrue(CrashHandler.hasCrashed(firstActivity))
+            assertFalse(CrashHandler.hasCrashed(firstActivity))
+            assertTrue(preferences.getBoolean("crashed", false))
             assertEquals(report, CrashHandler.getStackTrace(firstActivity))
             val recreatedActivity = wrappedContext()
-            assertTrue(CrashHandler.hasCrashed(recreatedActivity))
+            assertFalse(CrashHandler.hasCrashed(recreatedActivity))
             assertEquals(report, CrashHandler.getStackTrace(recreatedActivity))
             assertTrue(CrashHandler.acknowledgeCrashed(recreatedActivity))
             assertFalse(CrashHandler.hasCrashed(wrappedContext()))

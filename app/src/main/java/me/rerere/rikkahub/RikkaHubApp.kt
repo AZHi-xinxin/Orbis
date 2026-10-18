@@ -64,14 +64,13 @@ class RikkaHubApp : Application() {
         CrashHandler.install(base)
         try {
             val gate = me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.gate(base)
-            emergencyBusinessLease = gate.tryAcquireBusinessLease()
-            // Even a SharedPreferences read can restore its .bak file. Never read it before the fence.
-            if (emergencyBusinessLease != null) {
-                if (!CrashHandler.hasCrashed(base)) return
-                gate.requestRecovery()
-                emergencyBusinessLease?.close()
-                emergencyBusinessLease = null
+            // Both editions ignore stale crash/request flags. An active backup file lease
+            // and actual unfinished legacy file moves are the only startup exclusions.
+            emergencyBusinessLease = gate.tryAcquireNoRescueBusinessLease {
+                me.rerere.rikkahub.data.recovery.requireSafeNoRescueStartup(
+                    File(base.applicationInfo.dataDir, "orbis-emergency"))
             }
+            if (emergencyBusinessLease != null) return
         } catch (_: Exception) {
             // Do not initialize data writers if the recovery fence cannot be checked.
         }

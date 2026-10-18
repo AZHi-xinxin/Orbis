@@ -39,6 +39,37 @@ class OrbisUpdatePolicyTest {
         assertNull(parsed.body)
     }
 
+    @Test fun noRescueVersionStillReceivesStableUpdatesButNotAnEqualVersionSwitch() {
+        assertTrue(orbisReleaseIsNewer("v2.6.11", "2.6.10-no-rescue"))
+        assertFalse(orbisReleaseIsNewer("v2.6.10", "2.6.10-no-rescue"))
+        assertFalse(orbisReleaseIsNewer("v2.6.11", "2.6.10-orbis-dev.98-no-rescue"))
+        assertTrue(orbisReleaseIsNewer("v2.6.12", "2.6.11-rescue"))
+        assertFalse(orbisReleaseIsNewer("v2.6.11", "2.6.11-rescue"))
+        assertFalse(orbisReleaseIsNewer("v2.6.12", "2.6.11-rescue-no-rescue"))
+    }
+
+    @Test fun updateSelectionPreservesVariantAndNeverFallsBackToTheOtherVariant() {
+        val standard = asset()
+        fun rescueAsset(abi: String): OrbisReleaseAsset {
+            val base = asset(abi)
+            return base.copy(name = base.name.replace("Orbis-", "OrbisRescue-"),
+                downloadUrl = base.downloadUrl.replace("Orbis-", "OrbisRescue-"))
+        }
+        val rescue = rescueAsset("arm64-v8a")
+        val universal = rescueAsset("universal")
+        val mixed = release(listOf(standard, rescue, universal))
+        validateOrbisRelease(mixed)
+        // The published pre-variant updater must still see exactly one standard ARM APK.
+        assertEquals(listOf(standard), mixed.assets.filter {
+            it.name.startsWith("Orbis-") && it.name.endsWith("-arm64-v8a.apk") })
+        assertEquals(standard, orbisApkForDevice(mixed, listOf("arm64-v8a"), false))
+        assertEquals(rescue, orbisApkForDevice(mixed, listOf("arm64-v8a"), true))
+        assertEquals(universal, orbisApkForDevice(mixed, listOf("x86_64"), true))
+        assertNull(orbisApkForDevice(release(listOf(standard)), listOf("arm64-v8a"), true))
+        assertNull(orbisApkForDevice(release(listOf(rescue, universal)), listOf("arm64-v8a"), false))
+        assertNull(orbisApkForDevice(mixed, listOf("armeabi-v7a"), false))
+    }
+
     @Test fun draftsPrereleasesWrongRepositoriesAndPathTraversalAreRejected() {
         val examples = listOf(release().copy(draft = true), release().copy(prerelease = true),
             release().copy(pageUrl = "https://github.com/rikkahub/rikkahub/releases/tag/v2.6.1"),

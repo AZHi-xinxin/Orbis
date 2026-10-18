@@ -29,8 +29,9 @@ object CrashHandler {
     }
 
     fun hasCrashed(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_CRASHED, false)
+        // Diagnostics are not startup policy. Neither edition intercepts a later launch
+        // for an old crash; the optional edition adds only a manually opened backup UI.
+        return false
     }
 
     fun getStackTrace(context: Context): String? {

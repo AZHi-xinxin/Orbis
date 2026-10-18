@@ -47,7 +47,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         check(baseline.id == snapshot.id && baseline.assistantId == snapshot.assistantId &&
             baseline.compactionEpoch == snapshot.compactionEpoch && baseline.consultation == snapshot.consultation)
         val previous = read(snapshot.id)
-        val record = previous ?: run {
+        var record = previous ?: run {
             // Sending fresh input settles unfinished tools/reasoning, potentially before the last node.
             val pending = baseline.messageNodes.indexOfFirst { node ->
                 node.messages.any { message -> message.getTools().any { !it.isExecuted } ||
@@ -61,6 +61,19 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         }
         check(record.runId == runId && record.assistantId == snapshot.assistantId && record.epoch == snapshot.compactionEpoch)
         check(snapshot.messageNodes.size >= record.prefixCount)
+        // Browsing a prior reply selects an EXISTING alternative, not a destructive edit.
+        // Widen the journal tail to include that selection. All original versions remain in
+        // baseTail/tail, and restart recovery still compares every message body and identity.
+        val changedSelection = snapshot.messageNodes.take(record.prefixCount).zip(baseline.messageNodes)
+            .indexOfFirst { (next, base) -> next.selectIndex != base.selectIndex }
+        if (changedSelection >= 0) {
+            check(snapshot.messageNodes.take(record.prefixCount).zip(baseline.messageNodes).all { (next, base) ->
+                next.copy(selectIndex = base.selectIndex) == base
+            })
+            record = record.copy(prefixCount = changedSelection,
+                prefixHash = hashNodes(baseline.messageNodes.take(changedSelection)),
+                baseTail = baseline.messageNodes.drop(changedSelection))
+        }
         // The lane cannot mutate protected history. Reference equality avoids hashing a long
         // immutable prefix on every chunk; restored/equal values still get an exact comparison.
         check(snapshot.messageNodes.take(record.prefixCount).zip(baseline.messageNodes).all { (a, b) -> a == b })

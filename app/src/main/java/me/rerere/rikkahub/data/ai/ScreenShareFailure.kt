@@ -21,7 +21,7 @@ private fun sanitizeScreenShareFailureDetails(error: Throwable): Throwable = whe
     is ScreenShareFrameRevokedException, is CancellationException, is GenerationDurabilityException,
     is GenerationToolOutcomeUnknownException -> error
     is HttpException -> HttpException("屏幕共享模型请求未完成${error.httpStatus?.let { "（HTTP $it）" }.orEmpty()}，请检查服务连接或模型配置。",
-        code = error.code?.takeIf { it == "upstream_empty_completion" },
+        code = error.code?.takeIf { it in setOf("upstream_empty_completion", "upstream_output_limit_reached") },
         errorType = error.errorType?.takeIf { it == "stiller_gateway_error" },
         httpStatus = error.httpStatus, rejectedParameter = safeRejectedParameter(error.rejectedParameter),
         gatewayBusyBeforeGeneration = error.gatewayBusyBeforeGeneration)

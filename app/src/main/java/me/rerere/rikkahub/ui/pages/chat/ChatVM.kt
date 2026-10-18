@@ -540,9 +540,11 @@ class ChatVM(
         }
     }
 
-    suspend fun forkMessage(message: UIMessage): Conversation {
-        return chatService.forkConversationAtMessage(_conversationId, message.id)
-    }
+    suspend fun forkMessage(message: UIMessage): Conversation? = forkOrReportFailure(
+        fork = { chatService.forkConversationAtMessage(_conversationId, message.id) },
+        report = { error -> chatService.addError(error, _conversationId,
+            title = context.getString(R.string.error_title_operation)) },
+    )
 
     fun deleteMessage(message: UIMessage) {
         viewModelScope.launch {

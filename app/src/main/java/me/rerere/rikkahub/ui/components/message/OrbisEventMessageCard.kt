@@ -23,11 +23,15 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +46,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.OrbisEventMetadata
 import me.rerere.hugeicons.HugeIcons
@@ -76,34 +81,44 @@ internal fun OrbisEventMessageCard(
         fontFamily = LocalTextStyle.current.fontFamily, shadow = shadow,
     )
     var showAppearance by remember(event.recordId) { mutableStateOf(false) }
-    var updating by remember(event.recordId) { mutableStateOf(false) }
-    var updateFailed by remember(event.recordId) { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    // Expanding an already-received event is a local view action, not a history edit or
+    // a new sentinel delivery. An active reply / slow writer must never hide its text.
+    // Keep the user's choice across recreation; stale persistence callbacks cannot undo it.
+    var localCollapsed by rememberSaveable(event.recordId) { mutableStateOf<Boolean?>(null) }
+    var locallyRead by rememberSaveable(event.recordId) { mutableStateOf(false) }
+    val collapsed = localCollapsed ?: event.collapsed
+    val updates = remember(event.recordId) { Channel<OrbisEventMetadata>(Channel.CONFLATED) }
+    val savePresentation by rememberUpdatedState(onUpdate)
+    DisposableEffect(updates) { onDispose { updates.close() } }
+    LaunchedEffect(updates) {
+        // One observer, latest choice wins. Storage is best effort for these cosmetic flags;
+        // it never controls visibility and never changes the original event or reply.
+        for (update in updates) {
+            try {
+                savePresentation(update)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The local saved-state choice still works. Chat persistence failures are
+                // reported by the chat writer, not by opening a timestamp.
+            }
+        }
+    }
     Column(modifier.fillMaxWidth().testTag("orbis-event-card")) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("orbis-event-collapse")
                 .semantics {
-                    stateDescription = if (event.collapsed) "已折叠" else "已展开"
-                    contentDescription = "${time.detailLabel}，${if (event.collapsed) "点按展开消息" else "点按折叠消息"}"
+                    stateDescription = if (collapsed) "已折叠" else "已展开"
+                    contentDescription = "${time.detailLabel}，${if (collapsed) "点按展开消息" else "点按折叠消息"}"
                 }
-                .clickable(enabled = !updating, role = Role.Button,
-                    onClickLabel = if (event.collapsed) "展开消息" else "折叠消息") {
-                    if (!updating) {
-                        updating = true
-                        updateFailed = false
-                        scope.launch {
-                            try {
-                                onUpdate(toggleOrbisEventPresentation(event))
-                                showAppearance = false
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                updateFailed = true
-                            } finally {
-                                updating = false
-                            }
-                        }
-                    }
+                .clickable(role = Role.Button,
+                    onClickLabel = if (collapsed) "展开消息" else "折叠消息") {
+                    val next = toggleOrbisEventPresentation(event.copy(
+                        collapsed = collapsed, read = event.read || locallyRead))
+                    localCollapsed = next.collapsed
+                    locallyRead = next.read
+                    showAppearance = false
+                    updates.trySend(next)
                 }.padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
@@ -111,9 +126,7 @@ internal fun OrbisEventMessageCard(
             Text(time.compactLabel, modifier = Modifier.testTag("orbis-event-time"),
                 color = ink.copy(alpha = .64f), style = smallStyle)
         }
-        if (updateFailed) Text("未能保存展开／折叠状态，原消息仍保留；这不代表 AI 仍在回复。", modifier = Modifier.padding(horizontal = 12.dp),
-            style = smallStyle, color = ink)
-        if (!event.collapsed) {
+        if (!collapsed) {
             Surface(
                 modifier = Modifier.fillMaxWidth().testTag("orbis-event-details"),
                 shape = RoundedCornerShape(12.dp),
@@ -141,7 +154,7 @@ internal fun OrbisEventMessageCard(
             }
         }
     }
-    if (showAppearance && !event.collapsed) {
+    if (showAppearance && !collapsed) {
         EventAppearanceDialog(normalized.eventOpacity, onOpacityChange) { showAppearance = false }
     }
 }

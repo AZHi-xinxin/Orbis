@@ -27,6 +27,7 @@ private const val RESCUE_WINDOW_PAGE_SIZE = 50
 
 @Composable
 internal fun ConversationRescueEntry(enabled: Boolean) {
+    if (!me.rerere.rikkahub.BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) return
     var opened by remember { mutableStateOf(false) }
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

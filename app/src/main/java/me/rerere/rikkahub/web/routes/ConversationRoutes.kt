@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
-import me.rerere.rikkahub.data.ai.HostToolFailure
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.data.repository.FolderRepository
@@ -158,8 +157,9 @@ fun Route.conversationRoutes(
         // GET /api/conversations/{id} - Get single conversation
         get("/{id}") {
             val uuid = call.parameters["id"].toUuid("conversation id")
-            val conversation = conversationRepo.getConversationById(uuid)
-                ?: throw NotFoundException("Conversation not found")
+            if (!conversationRepo.existsConversationById(uuid)) throw NotFoundException("Conversation not found")
+            chatService.initializeDisplayedConversation(uuid)
+            val conversation = chatService.getDisplayedConversationSnapshot(uuid)
 
             val isGenerating = chatService.getGenerationJobStateFlow(uuid).first() != null
             call.respond(conversation.toDto(isGenerating))
@@ -287,7 +287,7 @@ fun Route.conversationRoutes(
             val uuid = call.parameters["id"].toUuid("conversation id")
             val request = call.receive<SendMessageRequest>()
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeDisplayedConversation(uuid)
             applyInitialConversationInjections(
                 chatService = chatService,
                 settingsStore = settingsStore,
@@ -356,7 +356,8 @@ fun Route.conversationRoutes(
             val request = call.receive<RegenerateRequest>()
             val messageId = request.messageId.toUuid("message id")
 
-            val conversation = chatService.getConversationFlow(uuid).first()
+            chatService.initializeDisplayedConversation(uuid)
+            val conversation = chatService.getDisplayedConversationSnapshot(uuid)
             val node = conversation.getMessageNodeByMessageId(messageId)
             val message = node?.messages?.find { it.id == messageId }
                 ?: throw NotFoundException("Message not found")
@@ -368,7 +369,9 @@ fun Route.conversationRoutes(
         // POST /api/conversations/{id}/stop - Stop generation
         post("/{id}/stop") {
             val uuid = call.parameters["id"].toUuid("conversation id")
-            chatService.stopGeneration(uuid, HostToolFailure.USER_CANCELLED)
+            // Same human interruption path as the phone: fence immediately,
+            // never join an old tool or wait for remote cleanup in this HTTP request.
+            chatService.interruptGenerationForHuman(uuid)
             call.respond(HttpStatusCode.OK, mapOf("status" to "stopped"))
         }
 
@@ -385,7 +388,7 @@ fun Route.conversationRoutes(
             val id = call.parameters["id"] ?: return@sse
             val uuid = runCatching { Uuid.parse(id) }.getOrNull() ?: return@sse
 
-            chatService.initializeConversation(uuid)
+            chatService.initializeDisplayedConversation(uuid)
             chatService.addConversationReference(uuid)
 
             heartbeat {
@@ -399,7 +402,7 @@ fun Route.conversationRoutes(
                 val knownErrorIds = chatService.errors.value.map { it.id }.toMutableSet()
 
                 val conversationEvents = combine(
-                    chatService.getConversationFlow(uuid),
+                    chatService.getDisplayedConversationFlow(uuid),
                     chatService
                         .getGenerationJobStateFlow(uuid)
                         .map { it != null }
@@ -413,7 +416,7 @@ fun Route.conversationRoutes(
                         .asSequence()
                         .filter { it.conversationId == uuid && knownErrorIds.add(it.id) }
                         .map { chatError ->
-                            chatService.getConversationFlow(uuid).value.webPresentationError(chatError.error)
+                            chatService.getDisplayedConversationSnapshot(uuid).webPresentationError(chatError.error)
                         }
                         .toList()
                 }.map { events ->

@@ -144,7 +144,6 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         if (rikkaState.storageWarning) item {
             Text("本机导入回执未确认保存，重新打开后显示的计数可能不完整；已导入的聊天不会因此撤销。可重新选择原包，已有窗口会跳过。", fontSize = 12.sp)
         }
-        item { ConversationRescueEntry(!busy && !deepSeekState.busy && !operitState.busy && !kelivoState.busy && !polarisState.busy && !claudeState.busy && !chatGptState.busy) }
         item { BackupCard("ChatGPT 聊天记录", "选择官方导出包解压后的 conversations.json 或 conversations-NNN.json，分片逐个选择。先预览并选择完整路径，各分支另建窗口；全选保留全部可见分支，公共前文会重复。不导入系统设置，历史工具仅作文字，媒体仅留未恢复说明，不下载附件。请保留全部原始资料。", !busy && !chatGptState.busy, "选择 ChatGPT JSON") {
             openChatGpt.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }

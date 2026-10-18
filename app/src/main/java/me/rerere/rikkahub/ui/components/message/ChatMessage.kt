@@ -152,11 +152,8 @@ fun ChatMessage(
     // Render public prose, but keep mutations/branch selection attached to the ORIGINAL node.
     // Saving a presentation copy would erase the assistant's tool context.
     val message = originalMessage.privateRoomSafePresentation()
-    if (privateOperation) {
-        PrivateRoomPublicReply(message, node, modifier, loading, assistant, model, onShare, onUpdate,
-            onToolApproval, onToolAnswer, onDeleteToolRecord, onRestoreToolRecord)
-        return
-    }
+    // A private tool anywhere in a long chain changes ONLY the content projection, not
+    // the toolbar/layout. Actions below keep the original node and sanitize exports.
     val pruning = remember(message, contextPruningState) {
         if (privateOperation) null else contextPruningState?.let {
             me.rerere.rikkahub.data.ai.contextpruning.projectContextPruningForDisplay(message, it)
@@ -412,58 +409,6 @@ fun ChatMessage(
                 showSelectCopySheet = false
             }
         )
-    }
-}
-
-/** Public reply and ordinary tool controls; mutations remain bound to original call IDs, not the projection. */
-@Composable
-private fun PrivateRoomPublicReply(
-    message: UIMessage,
-    originalNode: MessageNode,
-    modifier: Modifier,
-    loading: Boolean,
-    assistant: Assistant?,
-    model: Model?,
-    onShare: () -> Unit,
-    onUpdate: (MessageNode) -> Unit,
-    onToolApproval: ((String, Boolean, String, Boolean) -> Unit)?,
-    onToolAnswer: ((String, String) -> Unit)?,
-    onDeleteToolRecord: ((String) -> Unit)?,
-    onRestoreToolRecord: ((String) -> Unit)?,
-) {
-    val context = LocalContext.current
-    val appearance = LocalSettings.current.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
-    val segmented = BuildConfig.ORBIS_ENABLED && message.role == MessageRole.ASSISTANT && appearance.chatFlow.enabled
-    val textStyle = rememberChatMessageTextStyle()
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        val body: @Composable () -> Unit = {
-            ProvideTextStyle(textStyle) {
-                MessagePartsBlock(assistant, message.role, model, message.parts, emptyList(), loading,
-                    segmentedReply = segmented, messageKey = message.id.toString(),
-                    onToolApproval = onToolApproval, onToolAnswer = onToolAnswer,
-                    onDeleteToolRecord = onDeleteToolRecord,
-                    deletedCitationTools = message.deletedToolRecords.map { it.tool })
-                if (BuildConfig.ORBIS_ENABLED && message.deletedToolRecords.isNotEmpty()) {
-                    OrbisDeletedToolRecords(
-                        records = message.deletedToolRecords.map { it.tool.toolCallId to it.tool.toolName },
-                        onRestore = onRestoreToolRecord,
-                    )
-                }
-            }
-        }
-        if (BuildConfig.ORBIS_ENABLED) OrbisChatMessageLayout(message, model, assistant, loading, segmented, body)
-        else body()
-        if (!loading) Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { context.copyMessageToClipboard(message) }) { Text(stringResource(R.string.copy)) }
-            TextButton(onClick = onShare) { Text(stringResource(R.string.share)) }
-            if (originalNode.messages.size > 1) {
-                TextButton(enabled = originalNode.selectIndex > 0,
-                    onClick = { onUpdate(originalNode.copy(selectIndex = originalNode.selectIndex - 1)) }) { Text("上一分支") }
-                Text("${originalNode.selectIndex + 1}/${originalNode.messages.size}")
-                TextButton(enabled = originalNode.selectIndex < originalNode.messages.lastIndex,
-                    onClick = { onUpdate(originalNode.copy(selectIndex = originalNode.selectIndex + 1)) }) { Text("下一分支") }
-            }
-        }
     }
 }
 

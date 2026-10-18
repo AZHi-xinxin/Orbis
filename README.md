@@ -8,8 +8,8 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 
 ## 从这里开始
 
-- [下载 Orbis 2.6.10 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.10)：普通用户直接下载 APK，不需要自行编译。
-- [本版说明](docs/RELEASE-2.6.10.md)：对话可靠保存、语音修复、点击停止播放、压缩前保留分支与 DeepSeek 官方搜索。
+- [下载 Orbis 2.6.11 安装包](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.11)：日常使用选择 `Orbis-` 主包；`OrbisRescue-` 备份入口包按需单独下载。
+- [本版说明](docs/RELEASE-2.6.11.md)：中断后续聊与工具衔接、长窗口压缩、历史切换和哨兵显示修复；主包移除紧急入口，正常备份保留。
 - [给 AI 的使用说明](docs/AI-QUICKSTART.md)：如何邀请共享、看图、读写 ZIP、保存真实经历及处理失败；应用内也可查询 `orbis_help`。
 - [上手指南](docs/GETTING_STARTED.md)：配置模型、选择本地或自建云端、导书和开始游戏。
 - [隐私与权限](docs/PRIVACY.md)：什么保存在手机，什么可能发给外部服务，以及备份的范围。
@@ -64,7 +64,7 @@ Orbis 不附送模型账号、API Key 或调用额度。请自行配置可信的
 
 ## 安装与备份
 
-请从 [GitHub 发布页](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.10) 下载签名 APK。最低需要 Android 8.0；通常选择 `arm64-v8a`，不确定设备架构时选择 `universal`。通用包包含 `arm64-v8a` 和 `x86_64`，不包含 32 位 ARM；`x86_64` 主要用于对应架构设备或模拟器。发布页中的源码压缩包不是安装包。上游 RikkaHub 的安装包也不是 Orbis。
+请从 [GitHub 发布页](https://github.com/AZHi-xinxin/Orbis/releases/tag/v2.6.11) 下载签名 APK。最低需要 Android 8.0；通常选择 `arm64-v8a`，不确定设备架构时选择 `universal`。通用包包含 `arm64-v8a` 和 `x86_64`，不包含 32 位 ARM；`x86_64` 主要用于对应架构设备或模拟器。主包与 Rescue 备份包同包名同签名，可互相覆盖，不是可单独卸载的插件；不要卸载或清数据。发布页中的源码压缩包不是安装包。上游 RikkaHub 的安装包也不是 Orbis。
 
 正式版包名为 `org.orbis.agent`。`Orbis Dev` 使用 `org.orbis.agent.dev`，与正式版是两个独立应用，不会自动共享或迁移聊天、书库及设置。不要为安装正式版先卸载仍需保留数据的开发版。
 

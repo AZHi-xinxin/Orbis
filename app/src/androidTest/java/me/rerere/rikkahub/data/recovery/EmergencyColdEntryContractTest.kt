@@ -11,6 +11,7 @@ import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
 import me.rerere.rikkahub.ui.activity.EmergencyBackupActivity
 import me.rerere.rikkahub.ui.activity.OrbisLauncherActivity
 import me.rerere.rikkahub.RouteActivity
+import me.rerere.rikkahub.BuildConfig
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,7 +39,9 @@ class EmergencyColdEntryContractTest {
             setPackage(context.packageName)
         }, 0).map { it.activityInfo.name }
         assertTrue(name in launchers)
-        assertTrue(EmergencyBackupActivity::class.java.name in launchers)
+        assertEquals(BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED,
+            EmergencyBackupActivity::class.java.name in launchers)
+        assertEquals(if (BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) 2 else 1, launchers.size)
         assertFalse(RouteActivity::class.java.name in launchers)
         val components = manager.getPackageInfo(context.packageName,
             PackageManager.GET_PROVIDERS or PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS)
@@ -55,6 +58,21 @@ class EmergencyColdEntryContractTest {
         assertEquals(Application::class.java, context.applicationContext.javaClass)
         val name = EmergencyBackupActivity::class.java.name
         val manager = context.packageManager
+        for (removed in listOf("me.rerere.rikkahub.ui.activity.SafeModeActivity",
+            "me.rerere.rikkahub.ui.activity.ConversationRescueActivity")) {
+            assertThrows(PackageManager.NameNotFoundException::class.java) {
+                manager.getActivityInfo(ComponentName(context.packageName, removed), PackageManager.GET_META_DATA)
+            }
+        }
+        if (!BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) {
+            for (removed in listOf(name, "me.rerere.rikkahub.ui.activity.SafeModeActivity",
+                "me.rerere.rikkahub.ui.activity.ConversationRescueActivity")) {
+                assertThrows(PackageManager.NameNotFoundException::class.java) {
+                    manager.getActivityInfo(ComponentName(context.packageName, removed), PackageManager.GET_META_DATA)
+                }
+            }
+            return
+        }
         val activity = manager.getActivityInfo(ComponentName(context.packageName, name), PackageManager.GET_META_DATA)
         assertTrue(activity.enabled)
         assertTrue(activity.exported)

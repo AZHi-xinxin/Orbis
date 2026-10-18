@@ -35,7 +35,7 @@ internal fun orbisReleaseIsNewer(tag: String, installed: String): Boolean {
     fun parse(value: String): List<Long>? = Regex("v?(\\d{1,8})\\.(\\d{1,8})\\.(\\d{1,8})")
         .matchEntire(value)?.groupValues?.drop(1)?.map(String::toLong)
     val candidate = parse(tag) ?: return false
-    val current = parse(installed) ?: return false
+    val current = parse(installed.replace(Regex("(?:-no-rescue|-rescue)$"), "")) ?: return false
     return candidate.zip(current).firstOrNull { it.first != it.second }?.let { it.first > it.second } ?: false
 }
 
@@ -54,10 +54,17 @@ internal fun validateOrbisRelease(release: OrbisPublishedRelease): OrbisPublishe
     return release
 }
 
-internal fun orbisApkForDevice(release: OrbisPublishedRelease, supportedAbis: List<String>): OrbisReleaseAsset? {
+internal fun orbisApkForDevice(
+    release: OrbisPublishedRelease,
+    supportedAbis: List<String>,
+    emergencyRescueEnabled: Boolean = false,
+): OrbisReleaseAsset? {
     val supported = supportedAbis.filter { it == "arm64-v8a" || it == "x86_64" }.distinct()
     if (supported.isEmpty()) return null // The current universal build does not contain 32-bit native libraries.
-    val candidates = release.assets.filter { it.name.startsWith("Orbis-") && it.name.endsWith(".apk") &&
+    // Old standard updaters keep selecting the new ordinary (no-rescue) release.
+    // Only explicit rescue installs follow the distinct rescue asset family.
+    val prefix = if (emergencyRescueEnabled) "OrbisRescue-" else "Orbis-"
+    val candidates = release.assets.filter { it.name.startsWith(prefix) && it.name.endsWith(".apk") &&
         it.size in 1..ORBIS_MAX_APK_BYTES && !it.name.contains("debug", true) && !it.name.contains("unsigned", true) }
     for (abi in supported) {
         val matching = candidates.filter { it.name.endsWith("-$abi.apk") }

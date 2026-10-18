@@ -73,7 +73,7 @@ private fun manualLimits(): JsonObject = buildJsonObject {
     put("native_st_star_map", "available_when_metadata_endpoint_explicitly_configured; remote_health_not_checked")
     put("native_st_star_map_scope", "星盘→连接设置：已有ST连接配对只读授权，或专用地址/Token；不把聊天/MCP高权限凭证当星图Token。仅类型、时间、关联，最多2000星/5000边并标截断；无正文或摘要、无写入。演示另选，保存不证明连通。")
     put("companion_spaces_and_video", "本地空间、5种信纸、4种照片布局及抽帧视频用法见guide/secret_base、shared_space、photo_wall、video。AI耳朵仅计划，未实现。")
-    put("local_presentation_and_files", "四季壁纸/漂浮物、轻量/银河切换见guide/appearance；附件多选锁定和备份范围见guide/attachments；多行emoji见guide/expressions；救援与主程序是同一应用，勿卸载，见guide/rescue。")
+    put("local_presentation_and_files", "四季壁纸/漂浮物、轻量/银河切换见guide/appearance；附件多选锁定和备份范围见guide/attachments；多行emoji见guide/expressions；当前安装包的救援能力与限制见guide/rescue，勿卸载或清数据。")
     put("native_st_star_map_demo_ui", "available_local_synthetic_demo_only")
     put("native_st_star_map_demo_scope", manualStarMapDemoScope)
     put("sentinel", "available_when_explicitly_bound_and_server_cutover_verified")

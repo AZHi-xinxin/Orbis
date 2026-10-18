@@ -214,8 +214,12 @@ class OrbisManualChaptersTest {
         listOf("默认折叠", "收起不清空筛选", "春·樱信", "夏·萤夏", "秋·枫笺", "冬·雪灯", "自定义壁纸",
             "轻量与银河", "在本机记住选择", "装饰星尘不可点击", "不会伪造记忆").forEach { assertTrue(it, appearance.contains(it)) }
         val rescue = guide("rescue")
-        listOf("同一个应用的两个入口", "卸载整个 Orbis", "应用外位置", "诊断错误 TXT 不是聊天备份",
-            "无法拦截系统卸载", "不能保证再出现", "不表示故障已修复").forEach { assertTrue(it, rescue.contains(it)) }
+        val expected = if (me.rerere.rikkahub.BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED)
+            listOf("同一个应用的两个入口", "卸载整个 Orbis", "应用外位置", "只提供本地备份导出",
+                "不提供会话修复", "不承诺所有故障下都可导出",
+                "无法拦截系统卸载", "不能保证再出现", "不表示故障已修复")
+        else listOf("完全取消", "普通备份", "不等于不会闪退", "不要卸载", "不静默切到救援版", "半恢复的数据")
+        expected.forEach { assertTrue(it, rescue.contains(it)) }
     }
 
     @Test fun `new chapters remain read only and expose only exactly registered new tools`() {

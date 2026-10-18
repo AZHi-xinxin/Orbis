@@ -856,6 +856,9 @@ class GenerationLoop(
                         }
                         // Only the successful attempt becomes a continuation segment.
                         // A failed partial stream is never automatically replayed.
+                        // Also publish an assistant boundary when a clean stream contains no
+                        // chunks: silence must not mark the preceding human message as a reply.
+                        if (!sawAnyChunk) onUpdateMessages(attemptMessages)
                         return copyGenerationMessage(attemptResponse.last().finishReasoning())
                     } catch (error: Throwable) {
                         if (error is StreamChunkHandlingException) {
@@ -871,11 +874,11 @@ class GenerationLoop(
                             delay(busyDelay)
                             continue
                         }
-                        val classified = KnownEmptyCompletionFailure.classify(safeError, attemptResponse.last())
-                        if (classified is KnownEmptyCompletionFailure) {
-                            // ST may have already closed its wake. Replaying this tool continuation
-                            // could lose context or repeat earlier side effects; never restart it.
-                            throw classified
+                        KnownEmptyCompletionFailure.completionOrNull(safeError, attemptResponse.last())?.let { completed ->
+                            // Older ST versions treated silence as a synthetic failure. Complete
+                            // normally, preserving this bubble's thinking and prior tool receipts.
+                            if (!sawAnyChunk) onUpdateMessages(attemptMessages)
+                            return copyGenerationMessage(completed)
                         }
                         retryCount = awaitNetworkRetryOrThrow(
                             error = safeError,
@@ -902,7 +905,15 @@ class GenerationLoop(
                     }
                 } catch (error: Throwable) {
                     currentCoroutineContext().ensureActive()
-                    throw KnownEmptyCompletionFailure.classify(error, null)
+                    KnownEmptyCompletionFailure.completionOrNull(error, null)?.let { completed ->
+                        val response = completed.copy(modelId = model.id)
+                        val completedMessages = if (messages.lastOrNull()?.role == MessageRole.ASSISTANT) {
+                            messages.dropLast(1) + messages.last().finishReasoning()
+                        } else messages + response
+                        onUpdateMessages(completedMessages)
+                        return copyGenerationMessage(response)
+                    }
+                    throw error
                 }
                 messages = messages.handleTextGenerationResult(result = result, model = model)
                 onUpdateMessages(messages)

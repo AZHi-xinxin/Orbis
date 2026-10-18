@@ -83,6 +83,9 @@ fun OrbisUpdateDialog(onDismiss: () -> Unit, initialRelease: OrbisPublishedRelea
     AlertDialog(onDismissRequest = ::close, title = { Text("Orbis 更新与历史版本") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("当前版本 ${BuildConfig.VERSION_NAME} · ${BuildConfig.VERSION_CODE}", style = MaterialTheme.typography.bodySmall)
+            Text(if (BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) "可选救援版：更新只匹配 OrbisRescue 包；如需取消救援，请到发布页手动覆盖安装主版本。"
+                else "主版本：更新只匹配 Orbis 包，不会自动切换到救援版。没有救援入口或崩溃后启动拦截，普通备份仍可使用。",
+                style = MaterialTheme.typography.bodySmall)
             Text("只检查 AZHi-xinxin/Orbis 的正式发布。自动检查最多每天一次，不会自动下载或安装，也不发送聊天或模型密钥。", style = MaterialTheme.typography.bodySmall)
             if (!service.canReplaceCurrentApp) Text("你当前使用的是 Dev／其他包名。正式版与它的数据独立，这里只提供正式发布页，不把正式 APK 当作 Dev 的覆盖更新。")
             if (busy) {
@@ -127,7 +130,7 @@ fun OrbisUpdateDialog(onDismiss: () -> Unit, initialRelease: OrbisPublishedRelea
                         }
                     }) { Text("安装／允许安装来源") }
                 } else if (service.canReplaceCurrentApp && asset == null) {
-                    Text("没有找到适合本机的唯一 APK，可到发布页查看。32 位手机不能安装当前的 64 位通用包。")
+                    Text("没有找到适合本机且与当前救援类型一致的唯一 APK，可到发布页查看；不会替你切换版本类型。32 位手机不能安装当前的 64 位通用包。")
                 }
             }
             TextButton(enabled = !busy, onClick = { action { selected = service.check(force = true).latest; prepared = null; backedUp = false } }) { Text("重新检查最新版本") }

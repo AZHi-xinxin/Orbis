@@ -21,12 +21,13 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 273
-        versionName = "2.6.10"
+        versionCode = 274
+        versionName = "2.6.11"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
         buildConfigField("boolean", "ORBIS_ENABLED", "true")
+        buildConfigField("boolean", "ORBIS_EMERGENCY_RESCUE_ENABLED", "false")
 
         // Explicit synthetic-test opt-in. Keep normal builds on the existing runner.
         // The Android plugin generates this instrumentation name and overrides the
@@ -104,10 +105,22 @@ android {
             buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED",
                 (providers.gradleProperty("orbisInternalConsultation").orNull == "true").toString())
             applicationIdSuffix = ".dev"
-            versionNameSuffix = "-orbis-dev.98"
+            versionNameSuffix = "-orbis-dev.100"
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$versionNameSuffix\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
+        // The ordinary release has no rescue entry or crash-marker startup interception.
+        // Rescue is a separately downloaded opt-in, never inferred from device brand.
+        create("rescue") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            versionNameSuffix = "-rescue"
+            buildConfigField("boolean", "ORBIS_EMERGENCY_RESCUE_ENABLED", "true")
+            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}-rescue\"")
+        }
+    }
+    testBuildType = providers.gradleProperty("orbisTestBuildType").orElse("debug").get().also {
+        require(it in setOf("debug", "rescue")) { "Unsupported instrumentation build type" }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

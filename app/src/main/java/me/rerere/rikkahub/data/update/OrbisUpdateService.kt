@@ -61,7 +61,8 @@ class OrbisUpdateService(context: Context) {
     }
 
     fun matchingAsset(release: OrbisPublishedRelease): OrbisReleaseAsset? =
-        orbisApkForDevice(validateOrbisRelease(release), Build.SUPPORTED_ABIS.toList())
+        orbisApkForDevice(validateOrbisRelease(release), Build.SUPPORTED_ABIS.toList(),
+            BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED)
 
     suspend fun downloadAndVerify(release: OrbisPublishedRelease,
         progress: (downloaded: Long, total: Long) -> Unit = { _, _ -> }): OrbisPreparedUpdate = withContext(Dispatchers.IO) {
