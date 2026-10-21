@@ -94,6 +94,8 @@ private fun publicGameRecords(state: OrbisGameState, library: OrbisMiniGameState
             put("started_at_epoch_ms", session.startedAt); put("finished_at_epoch_ms", session.finishedAt)
             put("duration_ms", session.finishedAt - session.startedAt)
             put("result", session.result); put("move_count", session.moveCount)
+            session.score?.let { put("score", it) }; session.maxTile?.let { put("max_tile", it) }
+            session.scoringVersion?.let { put("scoring_version", it) }
             put("opponent", "game_defined"); put("verification", "game_reported_host_timed")
         }
     }
@@ -127,6 +129,19 @@ private fun publicGameRecords(state: OrbisGameState, library: OrbisMiniGameState
         put("unfinished_match_meaning", "仅表示存在未结算记录，不是用户正在玩的在线状态。HTML页面关闭也可能留下未结算局；没有保存作品内部局面，不保证可继续该局。原生五子棋可恢复已存局面。")
         put("statistics", buildJsonObject {
             results.forEach { result -> put(result, native.count { it.result == result } + mini.count { it.result == result }) }
+        })
+        put("score_records", buildJsonArray {
+            mini.groupBy { Triple(it.gameId, it.scoringVersion, if(it.scoringVersion == null) it.gameSha256 else "versioned") }.forEach { (key, sessions) ->
+                val bestScore = sessions.filter { it.score != null }.maxByOrNull { it.score!! }
+                val bestTile = sessions.filter { it.maxTile != null }.maxByOrNull { it.maxTile!! }
+                if(bestScore != null || bestTile != null) add(buildJsonObject {
+                    put("game_id", key.first); key.second?.let { put("scoring_version", it) }
+                    if(key.second == null) put("game_sha256", key.third)
+                    bestScore?.let { put("highest_score", it.score); put("highest_score_at_epoch_ms", it.finishedAt) }
+                    bestTile?.let { put("highest_max_tile", it.maxTile); put("highest_max_tile_at_epoch_ms", it.finishedAt) }
+                    put("verification", "game_reported_not_host_scoring")
+                })
+            }
         })
         put("records", buildJsonArray {
             sorted.take(limit).forEach { (_, record) -> add(record) }

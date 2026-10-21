@@ -39,8 +39,13 @@ data class Assistant(
     val orbisMemoryMode: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode =
         me.rerere.rikkahub.data.orbis.memory.OrbisMemoryMode.LIGHT,
     val orbisMemoryAutoInject: Boolean = true,
+    val orbisSemanticRecall: Boolean = true, // Local compaction recall; LIGHT and stop-auto still win.
     val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
     val enableRecentChatsReference: Boolean = false,
+    // Independent optional areas: disabled means no catalogue, state reads or background work.
+    val orbisPetEnabled: Boolean = false,
+    val orbisStudyEnabled: Boolean = false,
+    val orbisModelContinuityEnabled: Boolean = true,
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),
     val quickMessageIds: Set<Uuid> = emptySet(),

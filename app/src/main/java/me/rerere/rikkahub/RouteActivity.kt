@@ -178,6 +178,7 @@ class RouteActivity : ComponentActivity() {
     private val orbisHomeNavigation = OrbisHomeNavigationState()
     private var showColdStart = false
     private var pendingWorkshopOwner by mutableStateOf<String?>(null)
+    private var foregroundChatReturnRequest by mutableStateOf<me.rerere.rikkahub.ui.pages.chat.OrbisChatReturnRequest?>(null)
 
     // Volume key listener registry — last registered handler wins
     internal val volumeKeyListeners = mutableListOf<(isVolumeUp: Boolean) -> Boolean>()
@@ -289,14 +290,19 @@ class RouteActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         removeRetiredOrbisTasks()
         intent.getStringExtra("orbis_image_workshop_owner")?.let { pendingWorkshopOwner = it }
         if (intent.action == Intent.ACTION_MAIN || intent.hasExtra("conversationId")) {
             orbisHomeNavigation.returnToChat()
         }
-        // Navigate to the chat screen if a conversation ID is provided
-        intent.getStringExtra("conversationId")?.let { text ->
-            navStack?.add(Screen.Chat(text))
+        // A return request may target the chat already under a drawer or Home.
+        // Reuse it rather than stacking an equal NavKey, and reject malformed IDs.
+        me.rerere.rikkahub.ui.pages.chat.foregroundChatNavigation(
+            intent.getStringExtra("conversationId"), (navStack?.lastOrNull() as? Screen.Chat)?.id,
+        )?.let { target ->
+            if (target.appendRoute) navStack?.add(Screen.Chat(target.conversationId))
+            foregroundChatReturnRequest = me.rerere.rikkahub.ui.pages.chat.OrbisChatReturnRequest(target.conversationId)
         }
     }
 
@@ -412,6 +418,7 @@ class RouteActivity : ComponentActivity() {
                 LocalNavController provides Navigator(backStack),
                 LocalOpenOrbisHome provides orbisHomeNavigation::openHome,
                 LocalReturnToOrbisChat provides returnToOrbisChat,
+                me.rerere.rikkahub.ui.pages.chat.LocalOrbisChatReturnRequest provides foregroundChatReturnRequest,
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
                 LocalToaster provides toastState,

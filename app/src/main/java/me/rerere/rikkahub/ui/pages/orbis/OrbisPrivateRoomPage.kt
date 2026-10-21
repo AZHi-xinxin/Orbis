@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,8 +13,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -77,6 +74,17 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
     var selectedRequest by remember { mutableStateOf<String?>(null) }
     var recoveryCode by remember { mutableStateOf("") }
     var enteredCode by remember { mutableStateOf("") }
+    var creationMethod by remember { mutableStateOf(PrivateRoomRecoveryMethod.PASSWORD) }
+    var recoveryMethod by remember { mutableStateOf(PrivateRoomRecoveryMethod.PASSWORD) }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var enteredPassword by remember { mutableStateOf("") }
+    var newPasswordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var enteredPasswordVisible by remember { mutableStateOf(false) }
+    var enteredCodeVisible by remember { mutableStateOf(false) }
+    var passwordConfirmationPending by remember { mutableStateOf(false) }
+    var showPasswordSettings by remember { mutableStateOf(false) }
     var purpose by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
     var importedUri by rememberSaveable(owner.id) { mutableStateOf<String?>(null) }
@@ -88,8 +96,12 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
     fun clearVisibleSecrets() {
         record = null; granted = emptyList(); selectedRequest = null; pageOffset = 0
         recoveryCode = ""; enteredCode = ""; purpose = ""
+        newPassword = ""; confirmPassword = ""; enteredPassword = ""
+        newPasswordVisible = false; confirmPasswordVisible = false
+        enteredPasswordVisible = false; enteredCodeVisible = false
+        passwordConfirmationPending = false
     }
-    suspend fun refresh(): Boolean {
+    suspend fun refresh(preserveNotice: Boolean = false): Boolean {
         val previousRequests = requests
         return privateRoomRefreshLatest(refreshGate, read = {
             withContext(Dispatchers.IO) {
@@ -98,16 +110,16 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
             }
         }, publish = { pair ->
             status = pair.first; requests = pair.second.requests; requestsKnown = pair.second.known
-            if (pair.first.availability == PrivateVaultAvailability.READY && !pair.second.known)
+            if (!preserveNotice && pair.first.availability == PrivateVaultAvailability.READY && !pair.second.known)
                 notice = "暂时无法核对已有申请，原申请没有被删除。请刷新申请状态后再提交新申请。"
         }, failed = {
             clearVisibleSecrets()
             status = null; requests = emptyList(); requestsKnown = false
-            notice = "暂时无法核对空间状态，原密文保留。未确认不存在前不能创建，请重新核对。"
+            if (!preserveNotice) notice = "暂时无法核对空间状态，原密文保留。未确认不存在前不能创建，请重新核对。"
         })
     }
     fun go(destination: PrivateRoomScreen) {
-        if (!busy) { clearVisibleSecrets(); notice = ""; navigate(destination) }
+        if (!busy) { clearVisibleSecrets(); showPasswordSettings = false; notice = ""; navigate(destination) }
     }
     fun close() { refreshGate.invalidate(false); job?.cancel(); clearVisibleSecrets(); onClose() }
     fun act(block: suspend () -> Unit) {
@@ -123,10 +135,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                 clearVisibleSecrets()
                 // A preceding request commit may have succeeded even if its receipt/refresh failed.
                 requestsKnown = false
-                val failure = privateRoomFailureNotice(error)
-                val refreshed = refresh()
-                if (foreground) notice = failure + if (refreshed) "已只读核对当前空间状态。"
-                    else "暂时无法核对空间状态，请先刷新；不能据此重新创建。"
+                privateRoomReportFailure(error, { foreground }, { notice = it }) { refresh(preserveNotice = true) }
             }
             finally { busy = false }
         }
@@ -148,6 +157,11 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
     }
     LaunchedEffect(owner.id) {
         refresh()
+    }
+    LaunchedEffect(status?.hasRecoveryPassword, status?.hasRecoveryCode, importedUri) {
+        // Use envelope metadata, never the entered secret, to select the initial recovery mode.
+        if (importedUri == null && status?.hasRecoveryPassword == false && status?.hasRecoveryCode == true)
+            recoveryMethod = PrivateRoomRecoveryMethod.RANDOM_CODE
     }
     LaunchedEffect(selectedRequest, status?.enabled) {
         val requestId = selectedRequest ?: return@LaunchedEffect
@@ -173,7 +187,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                     reopen = { context.contentResolver.openInputStream(uri) ?: error("private_export_verification_unavailable") },
                     checkCancelled = { coroutine.ensureActive() })
             }
-            notice = "密文备份已保存并读回校验。它不含恢复码；请将恢复码另行离线保管。"
+            notice = "密文备份已保存并读回校验。它不含明文恢复密码或随机码；请将恢复凭据另行离线保管。"
         } else if (uri != null) notice = "保存来源已失效，不能确认导出成功；请重新导出。"
     }
     fun exportCiphertext() {
@@ -230,7 +244,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                     when (status?.availability) {
                                         PrivateVaultAvailability.READY -> PrivateRoomStatusPanel(status!!.enabled, status!!.recoveryConfirmed)
                                         PrivateVaultAvailability.ABSENT -> Text("这位助手尚未创建隐私室。")
-                                        PrivateVaultAvailability.RECOVERY_REQUIRED -> Text("房间需要恢复码重新绑定；请先进入房间设置保留原密文。")
+                                        PrivateVaultAvailability.RECOVERY_REQUIRED -> Text("房间需要恢复密码或随机码重新绑定；请先进入房间设置保留原密文。")
                                         PrivateVaultAvailability.UNREADABLE -> Text("房间暂不可读；请先保留原文件，勿卸载或清数据。")
                                         null -> Text("正在检查加密空间…")
                                     }
@@ -256,13 +270,48 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                 }
                                 when (status?.availability) {
                                     PrivateVaultAvailability.ABSENT -> item {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            FilterChip(modifier = Modifier.weight(1f), selected = creationMethod == PrivateRoomRecoveryMethod.PASSWORD,
+                                                enabled = !busy, onClick = {
+                                                    clearVisibleSecrets(); notice = ""
+                                                    creationMethod = PrivateRoomRecoveryMethod.PASSWORD
+                                                }, label = { Text("自设恢复密码") })
+                                            FilterChip(modifier = Modifier.weight(1f), selected = creationMethod == PrivateRoomRecoveryMethod.RANDOM_CODE,
+                                                enabled = !busy, onClick = {
+                                                    clearVisibleSecrets(); notice = ""
+                                                    creationMethod = PrivateRoomRecoveryMethod.RANDOM_CODE
+                                                }, label = { Text("随机恢复码") })
+                                        }
+                                        if (creationMethod == PrivateRoomRecoveryMethod.PASSWORD) {
+                                            Text("设置一个自己能记住的恢复密码，8–128 个字符，可使用中文。空格和大小写原样保留，不要求字母、数字、符号组合。")
+                                            PrivateRoomSecretField(newPassword, { newPassword = it }, "恢复密码",
+                                                newPasswordVisible, { newPasswordVisible = !newPasswordVisible },
+                                                !busy, "private-room-password")
+                                            PrivateRoomSecretField(confirmPassword, { confirmPassword = it }, "再次输入恢复密码",
+                                                confirmPasswordVisible, { confirmPasswordVisible = !confirmPasswordVisible },
+                                                !busy, "private-room-password-confirm")
+                                        }
                                         Button(enabled = !busy && foreground, modifier = Modifier.fillMaxWidth(), onClick = { act {
-                                            recoveryCode = withContext(Dispatchers.IO) { repo.create().recoveryCode }
-                                            notice = "空间已创建，仍未启用。请离线保存恢复码。"
+                                            if (creationMethod == PrivateRoomRecoveryMethod.PASSWORD) {
+                                                val invalid = privateRoomPasswordValidation(newPassword, confirmPassword)
+                                                if (invalid != null) { notice = invalid; return@act }
+                                                val password = newPassword.toCharArray()
+                                                clearVisibleSecrets()
+                                                privateRoomUsePassword(password) { secret ->
+                                                    withContext(Dispatchers.IO) { repo.createWithRecoveryPassword(secret) }
+                                                }
+                                                passwordConfirmationPending = true
+                                                notice = "空间已创建，仍未启用。请妥善保管恢复密码。"
+                                            } else {
+                                                recoveryCode = withContext(Dispatchers.IO) { repo.create().recoveryCode }
+                                                notice = "空间已创建，仍未启用。请离线保存恢复码。"
+                                            }
                                             // Unlike go(), this forward step retains the code only in memory.
                                             navigate(PrivateRoomScreen.RECOVERY_CODE)
                                         } }) { Text("创建加密隐私室") }
-                                        Text("下一步会单独显示恢复码。没有确认离线保管前，不能开启。")
+                                        Text(if (creationMethod == PrivateRoomRecoveryMethod.PASSWORD)
+                                            "创建后请确认已妥善保管密码，再单独开启。忘记密码且本机无法解密时，不能重置解密。"
+                                        else "下一步会单独显示恢复码。没有确认离线保管前，不能开启。")
                                     }
                                     PrivateVaultAvailability.READY -> item {
                                         PrivateRoomStatusPanel(status!!.enabled, status!!.recoveryConfirmed)
@@ -280,13 +329,29 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                 }
                             }
                             PrivateRoomScreen.RECOVERY_CODE -> {
-                                item {
+                                if (creationMethod == PrivateRoomRecoveryMethod.PASSWORD) item {
+                                    Text("第 2 步 · 保管恢复密码", style = MaterialTheme.typography.titleMedium)
+                                    Text("恢复密码用于换机或重装后配合原密文恢复，不是日常阅读密码。请离线保管，不发给 AI。只有密码、没有原密文文件，无法找回内容。")
+                                    if (passwordConfirmationPending) {
+                                        Button(enabled = !busy && foreground, modifier = Modifier.fillMaxWidth(), onClick = { act {
+                                            withContext(Dispatchers.IO) { repo.confirmRecoverySaved() }
+                                            passwordConfirmationPending = false
+                                            notice = "已确认妥善保管恢复密码，空间仍暂停。请单独决定是否开启。"
+                                            navigate(PrivateRoomScreen.COMPLETE)
+                                        } }) { Text("我已妥善保管恢复密码") }
+                                    } else {
+                                        Text("密码输入已清空，未自动确认保存。本机仍能解密时，可在设置中确认保管或设置新密码。")
+                                        Button(enabled = !busy && foreground, onClick = { go(PrivateRoomScreen.SETTINGS) }) {
+                                            Text("返回房间设置")
+                                        }
+                                    }
+                                } else item {
                                     Text("第 2 步 · 离线保存恢复码", style = MaterialTheme.typography.titleMedium)
                                     Text("空间已创建但仍暂停。请抄写到应用外安全位置，不与密文备份一起存放，不发给 AI。")
                                     Text("恢复码用于换机或重装后配合原密文备份恢复，不是日常密码。只有恢复码、没有原密文文件，无法找回内容。")
                                     Text("关闭、返回或退到后台会隐藏此码；本机仍可解密时，可回房间设置明确重新签发。")
                                 }
-                                if (recoveryCode.isNotEmpty()) {
+                                if (creationMethod == PrivateRoomRecoveryMethod.RANDOM_CODE && recoveryCode.isNotEmpty()) {
                                     item { Text(recoveryCode, Modifier.testTag("private-room-recovery-code"), style = MaterialTheme.typography.bodyLarge) }
                                     item {
                                         Button(enabled = !busy && foreground, modifier = Modifier.fillMaxWidth(), onClick = { act {
@@ -296,7 +361,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                             navigate(PrivateRoomScreen.COMPLETE)
                                         } }) { Text("我已在应用外安全保管恢复码") }
                                     }
-                                } else item {
+                                } else if (creationMethod == PrivateRoomRecoveryMethod.RANDOM_CODE) item {
                                     Text("恢复码已收起，未自动确认你已保存。")
                                     Button(enabled = !busy && foreground, onClick = { go(PrivateRoomScreen.SETTINGS) }) { Text("返回设置核对 / 重新签发") }
                                 }
@@ -322,7 +387,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                 item {
                                     Text("房间设置", style = MaterialTheme.typography.titleMedium)
                                     PrivateRoomModelPanel(owner.name)
-                                    Text("这是应用内阅读权限与本机加密保护；所用模型服务仍处理助手读取的内容，不保证防拆包或服务商零留存。恢复码请离线保管，不要发给 AI 或放进聊天。",
+                                    Text("这是应用内阅读权限与本机加密保护；所用模型服务仍处理助手读取的内容，不保证防拆包或服务商零留存。恢复密码和随机码请离线保管，不要发给 AI 或放进聊天。",
                                         style = MaterialTheme.typography.bodySmall)
                                 }
                                 when (status?.availability) {
@@ -336,7 +401,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                         }) { Text("选择已有密文备份") }
                                     }
                                     PrivateVaultAvailability.RECOVERY_REQUIRED -> item {
-                                        Text("设备密钥不可用或刚完成救援恢复。原密文仍在；请用独立恢复码重新绑定本机。")
+                                        Text("设备密钥不可用或刚完成救援恢复。原密文仍在；请使用配套恢复密码或随机恢复码重新绑定本机。这里不能重置已经无法解密的房间。")
                                         OutlinedButton(enabled = !busy, onClick = ::exportCiphertext) { Text("先导出原密文备份") }
                                     }
                                     PrivateVaultAvailability.UNREADABLE -> item {
@@ -350,13 +415,44 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                                 clearVisibleSecrets()
                                                 withContext(Dispatchers.IO) { repo.setEnabled(!status!!.enabled) }
                                             } }) { Text(if (status!!.enabled) "暂停并撤销当前许可" else "开启隐私室") }
-                                        } else if (recoveryCode.isEmpty()) Text("第 2 步未完成。若未保管恢复码，可重新签发；不要清除空间。")
+                                        } else if (recoveryCode.isEmpty()) {
+                                            Text("第 2 步未完成。本机仍可解密，可设置新的恢复密码或重新签发恢复码；不要清除空间。")
+                                            if (status!!.hasRecoveryPassword) OutlinedButton(enabled = !busy, onClick = { act {
+                                                withContext(Dispatchers.IO) { repo.confirmRecoverySaved() }
+                                                notice = "已确认妥善保管恢复密码，请单独决定是否开启。"
+                                            } }) { Text("我已妥善保管恢复密码") }
+                                        }
+                                        Text(if (status!!.hasRecoveryPassword) "已设置恢复密码。" else "尚未设置恢复密码；本机仍可解密，无需旧恢复码即可设置。")
+                                        OutlinedButton(enabled = !busy, onClick = {
+                                            clearVisibleSecrets(); notice = ""; showPasswordSettings = !showPasswordSettings
+                                        }) { Text(if (showPasswordSettings) "收起密码设置" else "设置 / 修改恢复密码") }
+                                        if (showPasswordSettings) {
+                                            Text("8–128 个字符，可使用中文，不强制复杂组合。空格和大小写原样保留。修改后请重新导出备份；已导出的旧备份仍使用其原凭据。")
+                                            PrivateRoomSecretField(newPassword, { newPassword = it }, "新恢复密码",
+                                                newPasswordVisible, { newPasswordVisible = !newPasswordVisible },
+                                                !busy, "private-room-password")
+                                            PrivateRoomSecretField(confirmPassword, { confirmPassword = it }, "再次输入恢复密码",
+                                                confirmPasswordVisible, { confirmPasswordVisible = !confirmPasswordVisible },
+                                                !busy, "private-room-password-confirm")
+                                            Button(enabled = !busy && foreground, modifier = Modifier.testTag("private-room-password-submit"), onClick = { act {
+                                                val invalid = privateRoomPasswordValidation(newPassword, confirmPassword)
+                                                if (invalid != null) { notice = invalid; return@act }
+                                                val password = newPassword.toCharArray()
+                                                clearVisibleSecrets()
+                                                privateRoomUsePassword(password) { secret ->
+                                                    withContext(Dispatchers.IO) { repo.setRecoveryPassword(secret) }
+                                                }
+                                                showPasswordSettings = false
+                                                notice = "恢复密码已保存。本机原内容与阅读许可保持不变；请重新导出密文备份，新密码不会改变已经导出的旧备份。"
+                                            } }) { Text("保存恢复密码") }
+                                        }
                                         OutlinedButton(enabled = !busy, onClick = { act {
                                             clearVisibleSecrets()
                                             recoveryCode = withContext(Dispatchers.IO) { repo.issueRecoveryCode().recoveryCode }
+                                            creationMethod = PrivateRoomRecoveryMethod.RANDOM_CODE
                                             notice = "新恢复码需离线保存。旧备份配套的旧码仍可解密旧备份，无法远程撤销。"
                                             navigate(PrivateRoomScreen.RECOVERY_CODE)
-                                        } }) { Text("重新签发恢复码") }
+                                        } }) { Text(if (status!!.hasRecoveryPassword) "生成 / 重新签发备用恢复码" else "重新签发恢复码") }
                                         OutlinedButton(enabled = !busy, onClick = ::exportCiphertext) { Text("导出密文备份（不含恢复码）") }
                                         Text("适合少量文字；密文导出上限 64 MiB，超限不会删除原件。", style = MaterialTheme.typography.bodySmall)
                                     }
@@ -366,21 +462,53 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                     }
                                 }
                                 if (status?.availability == PrivateVaultAvailability.RECOVERY_REQUIRED || importedUri != null) item {
-                                    OutlinedTextField(value = enteredCode, onValueChange = { enteredCode = it.take(100) },
-                                        label = { Text("离线恢复码") }, visualTransformation = PasswordVisualTransformation(),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                                        modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = !busy)
-                                    Button(enabled = !busy && enteredCode.isNotBlank(), onClick = { act {
-                                        val code = enteredCode.trim(); val uri = importedUri
-                                        enteredCode = ""
-                                        withContext(Dispatchers.IO) {
-                                            if (uri == null) repo.recoverLocal(code)
-                                            else context.contentResolver.openInputStream(Uri.parse(uri))?.use { repo.importEncrypted(it, code) }
-                                                ?: error("private_import_unavailable")
-                                        }
-                                        importedUri = null
-                                        notice = "已恢复并绑定本机，旧许可已清除。保持暂停，请自行决定是否开启。"
-                                    } }) { Text("用恢复码恢复（紧急解密）") }
+                                    Text("请选择当时设置的恢复方式；不会根据输入内容自动切换。")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilterChip(modifier = Modifier.weight(1f), selected = recoveryMethod == PrivateRoomRecoveryMethod.PASSWORD,
+                                            enabled = !busy, onClick = {
+                                                clearVisibleSecrets(); notice = ""
+                                                recoveryMethod = PrivateRoomRecoveryMethod.PASSWORD
+                                            }, label = { Text("使用恢复密码") })
+                                        FilterChip(modifier = Modifier.weight(1f), selected = recoveryMethod == PrivateRoomRecoveryMethod.RANDOM_CODE,
+                                            enabled = !busy, onClick = {
+                                                clearVisibleSecrets(); notice = ""
+                                                recoveryMethod = PrivateRoomRecoveryMethod.RANDOM_CODE
+                                            }, label = { Text("使用随机恢复码") })
+                                    }
+                                    if (recoveryMethod == PrivateRoomRecoveryMethod.PASSWORD) {
+                                        PrivateRoomSecretField(enteredPassword, { enteredPassword = it }, "恢复密码",
+                                            enteredPasswordVisible, { enteredPasswordVisible = !enteredPasswordVisible },
+                                            !busy, "private-room-recovery-password")
+                                        Button(enabled = !busy && enteredPassword.isNotEmpty(), onClick = { act {
+                                            val password = enteredPassword.toCharArray(); val uri = importedUri
+                                            clearVisibleSecrets()
+                                            privateRoomUsePassword(password) { secret ->
+                                                withContext(Dispatchers.IO) {
+                                                    if (uri == null) repo.recoverLocalWithPassword(secret)
+                                                    else context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+                                                        repo.importEncryptedWithPassword(it, secret)
+                                                    } ?: error("private_import_unavailable")
+                                                }
+                                            }
+                                            importedUri = null
+                                            notice = "已恢复并绑定本机，旧许可已清除。保持暂停，请自行决定是否开启。"
+                                        } }) { Text("用密码恢复（紧急解密）") }
+                                    } else {
+                                        PrivateRoomSecretField(enteredCode, { enteredCode = it.take(100) }, "离线恢复码",
+                                            enteredCodeVisible, { enteredCodeVisible = !enteredCodeVisible },
+                                            !busy, "private-room-entered-code")
+                                        Button(enabled = !busy && enteredCode.isNotBlank(), onClick = { act {
+                                            val code = enteredCode.trim(); val uri = importedUri
+                                            clearVisibleSecrets()
+                                            withContext(Dispatchers.IO) {
+                                                if (uri == null) repo.recoverLocal(code)
+                                                else context.contentResolver.openInputStream(Uri.parse(uri))?.use { repo.importEncrypted(it, code) }
+                                                    ?: error("private_import_unavailable")
+                                            }
+                                            importedUri = null
+                                            notice = "已恢复并绑定本机，旧许可已清除。保持暂停，请自行决定是否开启。"
+                                        } }) { Text("用恢复码恢复（紧急解密）") }
+                                    }
                                 }
                             }
                             PrivateRoomScreen.REQUEST -> {
@@ -468,7 +596,7 @@ private fun PrivateRoomHomeCard(title: String, description: String, action: Stri
 @Composable
 internal fun PrivateRoomStatusPanel(enabled: Boolean, recoveryConfirmed: Boolean) {
     Text(if (enabled) "隐私室已开启 · 内容仍上锁" else "隐私室已暂停 · 助手不能访问房间")
-    if (!recoveryConfirmed) Text("尚未确认恢复码离线保管，不能开启。")
+    if (!recoveryConfirmed) Text("尚未确认恢复凭据已妥善保管，不能开启。")
     Text("获准阅读最长十分钟，应用重启需重新申请；新增或修改内容不自动加入旧许可。", style = MaterialTheme.typography.bodySmall)
 }
 

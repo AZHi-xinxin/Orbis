@@ -22,7 +22,8 @@ sealed class TTSProviderSetting {
         val apiKey: String = "",
         val baseUrl: String = "https://api.openai.com/v1",
         val model: String = "gpt-4o-mini-tts",
-        val voice: String = "alloy"
+        val voice: String = "alloy",
+        val strictEndpoint: Boolean = false,
     ) : TTSProviderSetting() {
         override fun copyProvider(
             id: Uuid,

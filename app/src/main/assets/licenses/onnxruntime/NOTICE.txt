@@ -1,0 +1,27 @@
+ONNX Runtime Android 1.20.0
+Dependency: com.microsoft.onnxruntime:onnxruntime-android:1.20.0
+Publisher: Microsoft Corporation
+Source: https://github.com/microsoft/onnxruntime/tree/v1.20.0
+
+LICENSE.txt and ThirdPartyNotices.txt are the unmodified text files retrieved
+from the upstream v1.20.0 source tag:
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.20.0/LICENSE
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.20.0/ThirdPartyNotices.txt
+
+UTF-8 SHA-256:
+LICENSE.txt: 2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c
+ThirdPartyNotices.txt: cf7342f7ba482ef715ae58f5f497a8d3564fa255164175aea324cd293c5701a0
+
+Pinned input AAR SHA-256:
+07a8f71ef890afed8c6087a56220e6d558a492804276ee2dd7cb7f6262242027
+
+Orbis uses the arm64-v8a and x86_64 native binaries through this dependency.
+The Android build strips symbols from packaged copies; it does not modify the
+cached upstream AAR. No byte-for-byte source rebuild is claimed.
+The runtime library has 16 KiB PT_LOAD alignment; the Java JNI wrapper in this
+version has 4 KiB PT_LOAD alignment. APK ZIP alignment is a separate property.
+This is not a claim of full 16 KiB page-size device compatibility.
+
+Upstream third-party notices cover optional upstream components as well; their
+inclusion here preserves the upstream text, not a claim that every listed
+component is linked into this Android build.

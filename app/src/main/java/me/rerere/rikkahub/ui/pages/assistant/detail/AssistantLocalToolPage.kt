@@ -133,6 +133,17 @@ private fun AssistantLocalToolContent(
     ) {
         AssistantMessageTimeCard(assistant = assistant, onUpdate = onUpdate)
         CardGroup {
+            item(headlineContent = { Text("宠物区") },
+                supportingContent = { Text("开启本地照料及伙伴工具。关闭不联网、不加载图片；已领养宠物仍按离开时长变化，可先送去寄养。") },
+                trailingContent = { Switch(assistant.orbisPetEnabled, { onUpdate(assistant.copy(orbisPetEnabled = it)) }) })
+            item(headlineContent = { Text("学习机") },
+                supportingContent = { Text("题库、答卷和进度按助手独立保存；关闭不注册学习工具，不影响聊天。") },
+                trailingContent = { Switch(assistant.orbisStudyEnabled, { onUpdate(assistant.copy(orbisStudyEnabled = it)) }) })
+            item(headlineContent = { Text("模型信息连续性") },
+                supportingContent = { Text("简短告知本轮选用模型及是否切换；不额外联网、不等待核对。不代表服务商底层权重鉴定。") },
+                trailingContent = { Switch(assistant.orbisModelContinuityEnabled, { onUpdate(assistant.copy(orbisModelContinuityEnabled = it)) }) })
+        }
+        CardGroup {
             item(
                 headlineContent = { Text("允许 AI 清理旧思考与工具记录") },
                 supportingContent = { Text("仅本对话已完成旧轮，先预览再经批准清理；原文可恢复，正文、附件和当前工具链不删除。下一轮请求生效，不依赖网关。清理回执只显示简短状态，不反复套娃。") },

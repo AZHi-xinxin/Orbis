@@ -113,11 +113,13 @@ import me.rerere.rikkahub.data.model.OrbisComposerAction
 import me.rerere.rikkahub.data.model.OrbisDictationDraft
 import me.rerere.rikkahub.data.model.toggleOrbisComposerPanel
 import me.rerere.rikkahub.data.model.orbisComposerPanelAfterCapability
+import me.rerere.rikkahub.data.model.orbisStickerSendUnavailableReason
 import me.rerere.rikkahub.service.OrbisVoiceCallPreflight
 import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
 import me.rerere.asr.ASRProviderSetting
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.service.MessageQueueState
+import me.rerere.rikkahub.service.blocksExplicitImmediateInput
 import me.rerere.rikkahub.service.QueuedMessage
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionContext
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
@@ -230,6 +232,13 @@ fun ChatInput(
 
     val asr = LocalASRState.current
     val asrState by asr.state.collectAsState()
+    val stickerUnavailableReason = orbisStickerSendUnavailableReason(
+        generating = loading,
+        editing = state.isEditing(),
+        voiceUnavailable = voiceState.phase != VoicePhase.Off,
+        recording = asrState.isRecording,
+        queued = messageQueue.blocksExplicitImmediateInput(),
+    )
     val voiceUnavailableReason = when {
         voiceState.phase != VoicePhase.Off -> "已有通话正在进行或收尾，请先结束当前通话。"
         loading -> "当前回复尚未结束，请完成或停止本轮后再发起通话。"
@@ -561,9 +570,8 @@ fun ChatInput(
                             OrbisComposerPanel.EMOTIONS -> OrbisStickerPanel(
                                 onSendImage = onOrbisSendSticker,
                                 onSendText = onOrbisSendTextEmotion,
-                                sendEnabled = !loading && !state.isEditing() && !voiceState.isActive &&
-                                    !asrState.isRecording && !messageQueue.paused &&
-                                    messageQueue.messages.none { it.recoveryHeldReason == null },
+                                sendEnabled = stickerUnavailableReason == null,
+                                sendUnavailableReason = stickerUnavailableReason,
                             )
                             OrbisComposerPanel.VOICE -> OrbisVoicePanel(
                                 canRecognize = asrState.isAvailable || asrState.isRecording,

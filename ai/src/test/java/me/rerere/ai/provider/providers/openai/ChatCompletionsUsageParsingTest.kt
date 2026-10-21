@@ -4,9 +4,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.merge
 import me.rerere.ai.util.KeyRoulette
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -30,6 +33,23 @@ class ChatCompletionsUsageParsingTest {
         )
         method.isAccessible = true
         return method.invoke(api, usage) as TokenUsage?
+    }
+
+    @Test
+    fun `explicit cache zero is distinct from omitted cache across dialects`() {
+        val previous = TokenUsage(promptTokens = 200, cachedTokens = 100)
+        listOf(
+            """{"prompt_tokens_details":{"cached_tokens":0},"cached_tokens":99}""",
+            """{"cached_tokens":0}""",
+            """{"prompt_cache_hit_tokens":0}""",
+        ).forEach { raw ->
+            val usage = requireNotNull(parseTokenUsage(Json.parseToJsonElement(raw).jsonObject))
+            assertTrue(usage.cachedTokensReported)
+            assertEquals(0, previous.merge(usage).cachedTokens)
+        }
+        val partial = requireNotNull(parseTokenUsage(Json.parseToJsonElement("""{"completion_tokens":12}""").jsonObject))
+        assertFalse(partial.cachedTokensReported)
+        assertEquals(100, previous.merge(partial).cachedTokens)
     }
 
     // #1576: cached tokens 按 provider 方言兜底解析

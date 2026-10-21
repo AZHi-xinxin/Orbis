@@ -84,7 +84,7 @@ internal fun OrbisAssistantMemoryPage(id: String) {
             } finally { exporting = false; if (finished) exportStarted = false }
         }
     }
-    fun update(mode: OrbisMemoryMode? = null, autoInject: Boolean? = null) {
+    fun update(mode: OrbisMemoryMode? = null, autoInject: Boolean? = null, semantic: Boolean? = null) {
         if (saving || assistant == null) return
         saving = true
         scope.launch {
@@ -96,6 +96,7 @@ internal fun OrbisAssistantMemoryPage(id: String) {
                             if (target.id.toString() == id) target.copy(
                                 orbisMemoryMode = mode ?: target.orbisMemoryMode,
                                 orbisMemoryAutoInject = autoInject ?: target.orbisMemoryAutoInject,
+                                orbisSemanticRecall = semantic ?: target.orbisSemanticRecall,
                             ) else target
                         })
                     }
@@ -122,6 +123,19 @@ internal fun OrbisAssistantMemoryPage(id: String) {
             OrbisAssistantMemorySettingsContent(assistant.orbisMemoryMode, assistant.orbisMemoryAutoInject,
                 stats, enabled = !saving, onMode = { update(mode = it) },
                 onAutoInject = { update(autoInject = it) })
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("按意思想起旧对话", style = MaterialTheme.typography.titleSmall)
+                    Text("标准档、独立档自动找回相关压缩摘要，不用 AI 查工具。完全在本机处理；" +
+                        "准备中或超时就正常回复，不等待。轻档和停止自动带入仍优先生效。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = assistant.orbisSemanticRecall, enabled = !saving,
+                    onCheckedChange = { update(semantic = it) }, modifier = Modifier.testTag("local_memory_semantic"))
+            }
+            Text("旧压缩记录会在后台逐步准备；每位助手先索引最近最多 8192 个短片段。" +
+                "原记录不删不改。明确改为仅存档、暂停或删除的记录不参与；不会把摘要当作当年的逐字原话。",
+                style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { showAtlas = true }, modifier = Modifier.testTag("local_memory_atlas")) { Text("记忆星图") }
                 OutlinedButton(onClick = {
@@ -160,8 +174,8 @@ internal fun OrbisAssistantMemorySettingsContent(
         }
         val explanation = when (option) {
             OrbisMemoryMode.LIGHT -> "已有 ST 等外置记忆：本机只保存和按需查询，零自动带入。"
-            OrbisMemoryMode.STANDARD -> "需要主动查记忆：常驻带入，条件命中最多 900 token。"
-            OrbisMemoryMode.INDEPENDENT -> "以本机为主：常驻与条件命中合计最多 2000 token。"
+            OrbisMemoryMode.STANDARD -> "常驻便签与相关旧摘要自动带入，条件与语义命中最多 900 token。"
+            OrbisMemoryMode.INDEPENDENT -> "以本机为主：常驻、条件与相关旧摘要合计最多 2000 token。"
         }
         Row(Modifier.fillMaxWidth().testTag("local_memory_mode_${option.name.lowercase()}")
             .clickable(enabled = enabled) { onMode(option) }.padding(vertical = 8.dp),

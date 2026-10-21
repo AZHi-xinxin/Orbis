@@ -22,8 +22,14 @@ import java.io.File
 
 val repositoryModule = module {
     single {
+        val observationSettings = get<me.rerere.rikkahub.data.datastore.SettingsStore>()
+        val observationContext = get<Context>()
         ConversationRepository(get(), get(), get(), get(), get(), get(),
-            me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository(get<Context>()))
+            me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository(get<Context>()),
+            onMessagesDeleted = { count ->
+                if (observationSettings.settingsFlow.value.aiGlobalObservation)
+                    me.rerere.rikkahub.data.orbis.observation.ObservationMeter(observationContext).delete(count)
+            })
     }
 
     single { OrbisCompactionRepository(get(), get()) }

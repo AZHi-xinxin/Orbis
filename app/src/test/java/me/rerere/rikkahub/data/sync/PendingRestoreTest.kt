@@ -21,6 +21,21 @@ class PendingRestoreTest {
 
     private fun database() = File(temporary.root, "databases/rikka_hub")
 
+    @Test fun explicitVersionRestorePreservesBeforeImageAndNeverReplaysIt() = runBlocking {
+        write(database(), "before")
+        val r = restore(); val staging = r.createStagingDirectory()
+        write(File(staging, "payload/database/rikka_hub"), "selected older version")
+        write(File(staging, "replace-local-tools"), "explicit-version-restore-v1")
+        write(File(staging, "original-settings.json"), "original settings")
+        r.publish(staging)
+        assertTrue(r.apply { })
+        val previous = File(temporary.root, "restore").listFiles()!!.single { it.name.startsWith("previous-") }
+        assertEquals("before", File(previous, "originals/database/rikka_hub").readText())
+        assertEquals("original settings", File(previous, "original-settings.json").readText())
+        assertFalse(r.apply { error("must not replay") })
+        assertTrue(previous.exists()); assertEquals("selected older version", database().readText())
+    }
+
     private fun write(file: File, contents: String): File {
         file.parentFile!!.mkdirs()
         file.writeText(contents)

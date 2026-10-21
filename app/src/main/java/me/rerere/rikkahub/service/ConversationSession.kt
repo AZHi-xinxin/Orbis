@@ -66,6 +66,11 @@ class ConversationSession(
     var submittingMessage: QueuedMessage? = null
         internal set
 
+    // Captured/cleared with synchronized(this). A continuation may retain the immutable
+    // value after the ordinary writer ends, including a commit with a lost callback.
+    @Volatile
+    internal var ordinaryInputSaveHandoff: HumanContinuationOrdinaryInputHandoff? = null
+
     // 原子引用计数
     private val refCount = AtomicInteger(0)
 

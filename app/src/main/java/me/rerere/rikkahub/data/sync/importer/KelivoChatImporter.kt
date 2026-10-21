@@ -34,7 +34,7 @@ class KelivoChatImporter internal constructor(private val context: Context, priv
         catch (_: java.nio.charset.CharacterCodingException) { throw ArchiveReadException(ArchiveFailure.INVALID_UTF8) }
         catch (_: java.util.zip.ZipException) { throw ArchiveReadException(ArchiveFailure.CHECKSUM) }
         catch (_: java.io.IOException) { throw ArchiveReadException(ArchiveFailure.READ_WRITE) }
-        catch (_: Exception) { throw IllegalArgumentException("Kelivo 备份不兼容、损坏或超限；目前支持聊天 SQLite v3 的 v2 ZIP，原聊天未更改") }
+        catch (_: Exception) { throw IllegalArgumentException("Kelivo 备份不兼容、损坏或超限；目前支持含聊天 SQLite v3 的 v2/v3 ZIP，原聊天未更改") }
     }
 
     suspend fun importSelected(file: File, assistantId: Uuid, selections: Set<String>, expectedFingerprint: String,

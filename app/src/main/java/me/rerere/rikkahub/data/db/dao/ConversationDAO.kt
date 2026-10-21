@@ -12,6 +12,17 @@ import me.rerere.rikkahub.data.repository.LightConversationEntity
 
 @Dao
 interface ConversationDAO {
+    @Query("SELECT title FROM conversationentity WHERE id=:id AND consultation_binding=''")
+    suspend fun getObservationTitle(id: String): String?
+
+    @Query("SELECT COUNT(*) FROM conversationentity WHERE assistant_id=:owner AND consultation_binding=''")
+    suspend fun observationWindowCount(owner: String): Long
+
+    @Query("SELECT MAX(update_at) FROM conversationentity WHERE assistant_id=:owner AND consultation_binding=''")
+    suspend fun observationLastActive(owner: String): Long?
+
+    @Query("SELECT id, substr(title,1,256) AS title FROM conversationentity WHERE assistant_id=:owner AND consultation_binding='' ORDER BY update_at DESC,id LIMIT :limit OFFSET :offset")
+    suspend fun observationWindows(owner: String, limit: Int, offset: Int): List<RescueWindowMetadata>
     /** Recovery catalogue cannot depend on decoding or loading full conversation headers. */
     @Query("SELECT id, substr(title, 1, 256) AS title FROM conversationentity " +
         "WHERE consultation_binding = '' AND instr(lower(title), lower(:query)) > 0 " +

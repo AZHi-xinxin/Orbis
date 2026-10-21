@@ -46,6 +46,7 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
     private var lastConfirmedExternal = false
     private var lastConfirmedDevice: VoiceCallAudioDevice? = null
     private var requestedLegacySpeaker: Boolean? = null
+    private var closeFailures: List<String> = emptyList()
 
     fun start(): Boolean {
         if (started || closed || backend.mode != VoiceCallAudioMode.NORMAL) return false
@@ -143,31 +144,46 @@ internal class VoiceCallAudioRouting(private val backend: VoiceCallAudioBackend)
         releaseDevice()
     }
 
-    private fun releaseDevice() {
+    private fun releaseDevice(): List<String> {
+        val cleanup = VoiceCallCleanup()
         if (ownsDevice) {
             // clearCommunicationDevice cancels this process's selection, not another app's.
-            runCatching { backend.clearDevice() }.onSuccess { ownsDevice = false }
+            if (cleanup.attempt("AUDIO_DEVICE_RELEASE") { backend.clearDevice() }) ownsDevice = false
         }
         val last = lastSpeaker
         val previous = previousSpeaker
         if (last != null && previous != null) {
-            runCatching {
+            cleanup.attempt("AUDIO_SPEAKER_RESTORE") {
                 if (backend.mode == VoiceCallAudioMode.COMMUNICATION && backend.speakerphoneOn == last) {
                     backend.speakerphoneOn = previous
+                    check(backend.speakerphoneOn == previous)
                 }
             }
             lastSpeaker = null
         }
+        return cleanup.failures
     }
 
-    fun close() {
-        if (closed) return
-        releaseDevice()
-        if (ownsMode) runCatching {
-            // A real phone call / another mode owner must never be overwritten on hang-up.
-            if (backend.mode == VoiceCallAudioMode.COMMUNICATION) backend.mode = VoiceCallAudioMode.NORMAL
-        }
+    fun close(): List<String> {
+        if (closed) return closeFailures
+        // Fence synchronous platform callbacks before any release can trigger them. An old
+        // lease never retries later and cannot reset the mode of a subsequent Orbis call.
         closed = true
+        val cleanup = VoiceCallCleanup()
+        cleanup.include(releaseDevice())
+        if (ownsMode) cleanup.attempt("AUDIO_MODE_RELEASE") {
+            // Only withdraw our communication-mode request. OTHER is never overwritten.
+            if (backend.mode == VoiceCallAudioMode.COMMUNICATION) {
+                backend.mode = VoiceCallAudioMode.NORMAL
+                // The global effective mode can also belong to another app. Record a
+                // non-confirmation, not proof of failure; do not keep forcing NORMAL.
+                if (backend.mode == VoiceCallAudioMode.COMMUNICATION) {
+                    cleanup.include(listOf("AUDIO_MODE_RELEASE_UNCONFIRMED"))
+                }
+            }
+        }
+        closeFailures = cleanup.failures
+        return closeFailures
     }
 }
 

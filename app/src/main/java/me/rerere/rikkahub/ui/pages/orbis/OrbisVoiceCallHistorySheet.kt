@@ -188,6 +188,7 @@ private fun VoiceCallHistoryDetail(
     val colors = OrbisTheme.colors
     var showActual by rememberSaveable(record.id) { mutableStateOf(false) }
     var confirmArchive by rememberSaveable(record.id) { mutableStateOf(false) }
+    var showAcoustics by rememberSaveable(record.id) { mutableStateOf(false) }
     val closed = record.status == OrbisVoiceCallStatus.ENDED || record.status == OrbisVoiceCallStatus.INTERRUPTED
     val transcriptView = remember(record) { voiceCallTranscriptView(record) }
     val actualTranscript = transcriptView.entries
@@ -230,6 +231,18 @@ private fun VoiceCallHistoryDetail(
             SelectionContainer {
                 Text(record.summary?.takeIf { it.isNotBlank() } ?: "摘要尚未完成，已保存的实际记录仍可查看。",
                     color = colors.ink, fontSize = 13.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+        }
+        if (record.acousticEvents.isNotEmpty()) item {
+            TextButton(onClick = { showAcoustics = !showAcoustics }) {
+                Text(if (showAcoustics) "收起声学记录" else "声学提示 · ${record.acousticEvents.size} 条")
+            }
+            if (showAcoustics) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("仅为当时有效收音的本机测量，不代表情绪或意图，不含原始录音。", color = colors.mutedInk, fontSize = 12.sp)
+                record.acousticEvents.forEach { event ->
+                    Text(event.text, color = colors.ink, fontSize = 13.sp)
+                    Text(if (event.receipt == null) "留在本机记录，未附入发言" else "已附入本次真实发言", color = colors.mutedInk, fontSize = 11.sp)
+                }
             }
         }
         item {

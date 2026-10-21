@@ -19,6 +19,8 @@ import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
 import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
 import me.rerere.rikkahub.data.orbis.character.CharacterBackup
+import me.rerere.rikkahub.data.orbis.voice.VoiceCallBackup
+import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -31,28 +33,24 @@ import java.util.zip.ZipOutputStream
 /** Shared archive format and restore lifecycle for local, WebDAV and S3 backups. */
 class BackupManager(
     private val context: Context,
-    private val database: AppDatabase,
-    private val settingsStore: SettingsStore,
+    private val database: AppDatabase?,
+    private val settingsStore: SettingsStore?,
     private val json: Json,
 ) {
     private val restoreMutex = Mutex()
 
-    suspend fun createBackup(includeDatabase: Boolean, includeFiles: Boolean): File = withContext(Dispatchers.IO) {
+    suspend fun createBackup(includeDatabase: Boolean, includeFiles: Boolean, includeConnectionSecrets: Boolean = true): File = withContext(Dispatchers.IO) {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         val archive = File.createTempFile("backup_${timestamp}_", ".zip", context.cacheDir)
         val staging = Files.createTempDirectory(context.cacheDir.toPath(), "backup-").toFile()
         try {
-            val settings = settingsStore.settingsFlowRaw.first()
+            val settings = requireNotNull(settingsStore).settingsFlowRaw.first()
             require(!settings.init) { "请先完成应用初始化，再导出可恢复的备份" }
-            val settingsJson = json.encodeToString(settings)
+            val settingsJson = if(includeConnectionSecrets) json.encodeToString(settings)
+                else BackupSettingsPrivacy.sanitize(json.encodeToString(settings))
             // Even a files-only export needs the same committed reference snapshot for exclusions.
             val snapshot = File(staging, SQLiteConfiguration.DATABASE_NAME)
-            val excludedUploads = if (includeDatabase || includeFiles) {
-                val live = context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME)
-                ArchiveCapacity.requireSpace(staging.usableSpace, 2 * (live.length() + File(live.path + "-wal").length()))
-                DatabaseBackup.createSnapshot(database.openHelper.writableDatabase, snapshot)
-                DatabaseBackup.excludeConsultations(context, snapshot, settingsJson)
-            } else emptySet()
+            var recovery = emptyList<Pair<String, File>>()
             var expanded = 0L
             var entries = 0
             val coroutine = currentCoroutineContext()
@@ -63,6 +61,25 @@ class BackupManager(
                 ArchiveCapacity.requireSize(expanded, ArchiveCapacity.MAX_EXPANDED_BYTES, allowEmpty = true)
                 require(++entries <= ArchiveCapacity.MAX_ENTRIES) { "备份文件数量超过安全上限" }
             }
+            val excludedUploads = if (includeDatabase || includeFiles) {
+                val live = context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME)
+                // Finish first-open creation/migrations before opening the read-only observer.
+                val sourceDatabase = requireNotNull(database).openHelper.writableDatabase
+                val capture = {
+                    ArchiveCapacity.requireSpace(staging.usableSpace, 2 * (live.length() + File(live.path + "-wal").length()))
+                    DatabaseBackup.createSnapshot(sourceDatabase, snapshot)
+                    val excluded = DatabaseBackup.excludeConsultations(context, snapshot, settingsJson)
+                    if (includeDatabase) {
+                        // Capture both bounded journals before releasing the consistency check.
+                        // A live commit may clear a journal; mixing that with an older DB is refused.
+                        recovery = ConversationRecoveryBackup.stageSnapshot(context.noBackupFilesDir,
+                            File(staging, "conversation-recovery-snapshot"), DatabaseBackup.conversationOwners(context, snapshot),
+                            checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    }
+                    excluded
+                }
+                if (includeDatabase) ConversationBackupConsistency.capture(context, live, capture) else capture()
+            } else emptySet()
             ZipOutputStream(NativeBackupBudget.Output(FileOutputStream(archive)) { archive.parentFile!!.usableSpace }).use { zip ->
                 val settingsBytes = settingsJson.toByteArray(Charsets.UTF_8)
                 reserve("settings.json", settingsBytes.size.toLong())
@@ -70,6 +87,12 @@ class BackupManager(
                 if (includeDatabase) {
                     reserve(DatabaseBackup.ARCHIVE_DATABASE, snapshot.length())
                     addFile(zip, snapshot, DatabaseBackup.ARCHIVE_DATABASE) { coroutine.ensureActive() }
+                    // The Room page can lag behind either recovery journal. Preserve both exact
+                    // committed copies with that database, including damaged bytes for diagnosis.
+                    for ((name, file) in recovery) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
                 }
                 if (includeFiles) {
                     for (folder in listOf(FileFolders.UPLOAD, FileFolders.SKILLS, FileFolders.FONTS)) {
@@ -86,6 +109,12 @@ class BackupManager(
                         }
                     }
                     // Semantic, locked snapshots only. Do not scan these directories or include credentials/sidecars.
+                    OrbisVoiceCallRepository(context).snapshotForBackup(DatabaseBackup.conversationOwners(context, snapshot)) { name, bytes ->
+                        coroutine.ensureActive()
+                        VoiceCallBackup.decode(name, bytes)
+                        reserve(name, bytes.size.toLong())
+                        zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry()
+                    }
                     val schedule = me.rerere.rikkahub.data.orbis.schedule.OrbisScheduleStore.open(context).load()
                     val kaomoji = me.rerere.rikkahub.data.orbis.OrbisKaomojis.open(context).snapshotForBackup()
                     for ((name, bytes) in listOf(
@@ -112,6 +141,13 @@ class BackupManager(
                         context.filesDir, File(staging, "companion-spaces-snapshot"),
                         checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
                     for ((name, file) in spaces) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
+                    val activities = me.rerere.rikkahub.data.orbis.activities.ActivitiesBackup.stageSnapshot(
+                        context.filesDir, File(staging, "activities-snapshot"),
+                        checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    for ((name, file) in activities) {
                         coroutine.ensureActive()
                         addFile(zip, file, name) { coroutine.ensureActive() }
                     }
@@ -144,9 +180,16 @@ class BackupManager(
         }
     }
 
-    suspend fun stageRestore(archive: File, includeDatabase: Boolean, includeFiles: Boolean) =
+    suspend fun stageRestore(archive: File, includeDatabase: Boolean, includeFiles: Boolean, replaceLocalTools: Boolean = false,
+        bootstrapSettings: Settings? = null, verifiedCloudSource: VerifiedCloudRestoreSource? = null) =
         withContext(Dispatchers.IO) {
             ArchiveCapacity.requireSize(archive.length(), ArchiveCapacity.MAX_ZIP_BYTES)
+            verifiedCloudSource?.let {
+                it.validate()
+                require(replaceLocalTools && includeDatabase && includeFiles && archive.length() == it.point.bytes) {
+                    "verified_restore_source_mismatch"
+                }
+            }
             restoreMutex.withLock {
                 val restore = pendingRestore(context, json)
                 val staging = restore.createStagingDirectory()
@@ -172,7 +215,10 @@ class BackupManager(
                                 DatabaseBackup.ARCHIVE_DATABASE -> if (includeDatabase) stagedDatabase else null
                                 DatabaseBackup.WAL -> if (includeDatabase) stagedWal else null
                                 DatabaseBackup.SHM -> null // Rebuilt by SQLite; never restore shared-memory state.
-                                else -> if (includeFiles && entry.name.startsWith("${CharacterBackup.DIRECTORY}/")) {
+                                else -> if (ConversationRecoveryBackup.inNamespace(entry.name)) {
+                                    require(ConversationRecoveryBackup.maxBytes(entry.name) != null) { ConversationRecoveryBackup.INVALID }
+                                    if (includeDatabase) ConversationRecoveryBackup.exactFile(File(payload, "no-backup"), entry.name) else null
+                                } else if (includeFiles && entry.name.startsWith("${CharacterBackup.DIRECTORY}/")) {
                                     CharacterBackup.exactFile(File(payload, "no-backup"), entry.name)
                                 } else if (includeFiles && (OrbisLocalToolBackup.maxBytes(entry.name) != null || isAttachment(entry.name))) {
                                     PendingRestore.resolveInside(File(payload, "files"), entry.name)
@@ -209,11 +255,17 @@ class BackupManager(
                         }
                         DatabaseBackup.removeSidecars(stagedDatabase)
                     }
-                    if (ContextPruningBackup.hasStagedPolicies(payload)) {
+                    if (ConversationRecoveryBackup.hasStaged(payload)) {
+                        require(stagedDatabase.isFile) { ConversationRecoveryBackup.INVALID }
+                        ConversationRecoveryBackup.validateStaged(payload, DatabaseBackup.conversationOwners(context, stagedDatabase))
+                        ConversationRecoveryBackup.requireNoConflicts(payload, context.noBackupFilesDir)
+                    }
+                    if (ContextPruningBackup.hasStagedPolicies(payload) || VoiceCallBackup.hasStaged(payload)) {
                         try {
                             val owners = if (stagedDatabase.exists()) DatabaseBackup.conversationOwners(context, stagedDatabase)
-                                else DatabaseBackup.conversationOwners(database.openHelper.readableDatabase)
+                                else DatabaseBackup.conversationOwners(requireNotNull(database).openHelper.readableDatabase)
                             ContextPruningBackup.validateOwnership(payload, owners)
+                            VoiceCallBackup.validateOwnership(payload, owners)
                         } catch (failure: Exception) {
                             throw IllegalArgumentException(OrbisLocalToolBackup.publicError(failure.message)
                                 ?: "上下文清理标记归属校验失败；原数据未更改")
@@ -225,14 +277,29 @@ class BackupManager(
                         val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
                         val text = java.io.InputStreamReader(settingsFile.inputStream(), decoder).use { it.readText() }
-                        val settings = json.decodeFromString<Settings>(SettingsJsonMigrator.migrate(text))
-                        require(!settings.init) { "Backup contains uninitialized settings" }
+                        val decoded = json.decodeFromString<Settings>(SettingsJsonMigrator.migrate(text))
+                        require(!decoded.init) { "Backup contains uninitialized settings" }
+                        val settings = BackupBootstrapConnection.preserve(decoded, bootstrapSettings)
                         // Persist the migrated value once, including generated IDs, for restart/retry consistency.
-                        val migrated = json.encodeToString(settings)
+                        val migrated = json.encodeToString(settings.copy(
+                            autoBackup = settings.autoBackup.copy(enabled = false, archiveDirectoryUri = null,
+                                controllerAssistant = null, controllerWorkspace = null, controllerDestination = null),
+                            connectionProposals = settings.connectionProposals.map { it.copy(alwaysAllow = false) }))
                         ArchiveCapacity.requireSize(migrated.toByteArray(Charsets.UTF_8).size.toLong(), NativeBackupBudget.MAX_SETTINGS_BYTES)
                         PendingRestore.writeDurably(settingsFile, migrated)
                     }
                     validateCharacters(payload, settingsFile, json)
+                    if (replaceLocalTools) {
+                        // Written only by the native, explicitly confirmed version restore; never
+                        // extracted from ZIP input. Automatic recovery continues to preserve conflicts.
+                        require(stagedDatabase.isFile && includeFiles && settingsFile.isFile)
+                        val before = requireNotNull(settingsStore).settingsFlowRaw.first()
+                        PendingRestore.writeDurably(File(staging, "original-settings.json"), json.encodeToString(before))
+                        PendingRestore.writeDurably(File(staging, "replace-local-tools"), "explicit-version-restore-v1")
+                    }
+                    // This source is supplied only by the verified native cloud downloader,
+                    // never extracted from an archive. All restores invalidate older epochs.
+                    CloudRestoreProof.stage(staging, verifiedCloudSource)
                     currentCoroutineContext().ensureActive()
                     restore.publish(staging)
                 } finally {
@@ -269,10 +336,17 @@ class BackupManager(
             noBackupFilesDir = context.noBackupFilesDir,
             validateBeforeJournal = { payload ->
                 validateCharacters(payload, File(payload.parentFile, "settings.json"), json)
-                if (ContextPruningBackup.hasStagedPolicies(payload)) {
+                if (ConversationRecoveryBackup.hasStaged(payload)) {
+                    val staged = File(payload, "database/${SQLiteConfiguration.DATABASE_NAME}")
+                    require(staged.isFile) { ConversationRecoveryBackup.INVALID }
+                    ConversationRecoveryBackup.validateStaged(payload, DatabaseBackup.conversationOwners(context, staged))
+                }
+                if (ContextPruningBackup.hasStagedPolicies(payload) || VoiceCallBackup.hasStaged(payload)) {
                     val staged = File(payload, "database/${SQLiteConfiguration.DATABASE_NAME}")
                     val selected = if (staged.exists()) staged else context.getDatabasePath(SQLiteConfiguration.DATABASE_NAME)
-                    ContextPruningBackup.validateOwnership(payload, DatabaseBackup.conversationOwners(context, selected))
+                    val owners = DatabaseBackup.conversationOwners(context, selected)
+                    ContextPruningBackup.validateOwnership(payload, owners)
+                    VoiceCallBackup.validateOwnership(payload, owners)
                 }
             },
         )

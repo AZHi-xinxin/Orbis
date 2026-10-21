@@ -50,6 +50,21 @@ class OrbisLocalToolBackupTest {
         assertFalse(source.toString(Charsets.UTF_8).contains("settings"))
     }
 
+    @Test fun `explicit historical replacement keeps local file protections while replacing progress`() {
+        val payload = File(temporary.root, "replacement-payload")
+        val local = FileProtectionState(overrides = mapOf("upload/local.png" to true))
+        val incoming = FileProtectionState(overrides = mapOf("upload/local.png" to false))
+        write(live(FileProtection.PATH), FileProtection.encode(local).toByteArray())
+        val restored = write(File(payload, "files/${FileProtection.PATH}"), FileProtection.encode(incoming).toByteArray())
+        write(live(OrbisLocalToolBackup.SCHEDULE), scheduleBytes(schedule("same", "newer")))
+        val old = scheduleBytes(schedule("same", "older"))
+        val oldFile = write(File(payload, "files/${OrbisLocalToolBackup.SCHEDULE}"), old)
+        OrbisLocalToolBackup.prepareReplacementBeforeJournal(payload, File(temporary.root, "files"))
+        assertTrue(FileProtection.decode(restored.readText()).isLocked("upload/local.png"))
+        assertArrayEquals(old, oldFile.readBytes())
+        assertArrayEquals(FileProtection.encode(local).toByteArray(), live(FileProtection.PATH).readBytes())
+    }
+
     @Test fun `schedule merge preserves local only entries skips identical and advances revision`() {
         val local = schedule("local")
         val shared = schedule("shared")

@@ -1,0 +1,22 @@
+Orbis offline semantic recall assets
+
+Model: BAAI/bge-small-zh-v1.5 (Beijing Academy of Artificial Intelligence)
+Model card and declared MIT license:
+https://huggingface.co/BAAI/bge-small-zh-v1.5
+Upstream implementation/license:
+https://github.com/FlagOpen/FlagEmbedding
+
+Quantized ONNX conversion: Xenova/bge-small-zh-v1.5
+https://huggingface.co/Xenova/bge-small-zh-v1.5
+Pinned revision: 75c43b069aac4d136ba6bc1122f995fedcfd2781
+Original asset: onnx/model_quantized.onnx
+Bundled name: model.onnx
+Bytes: 24010842
+SHA256: 15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc
+vocab.txt SHA256: 45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c
+
+Inference: CLS pooling, 512 dimensions, L2 normalization, CPU int8.
+Tokenizer: BertNormalizer clean_text=true, handle_chinese_chars=true,
+lowercase=false, strip_accents=null; BertPreTokenizer; WordPiece.
+The runtime does not download models, call an embedding service, or upload text.
+Vectors are disposable cache data and never replace the original records.

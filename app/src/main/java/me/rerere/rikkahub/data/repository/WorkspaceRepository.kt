@@ -61,6 +61,20 @@ class WorkspaceRepository(
 
     suspend fun getById(id: String): WorkspaceEntity? = dao.getById(id)
 
+    /** Native configuration workspace. The caller supplies a host-derived UUID, never a model path. */
+    internal suspend fun createNative(id: String, name: String): WorkspaceEntity = withContext(Dispatchers.IO) {
+        Uuid.parse(id)
+        check(dao.getById(id) == null) { "workspace_already_exists" }
+        manager.prepareNativeWorkspace(id)
+        val now = System.currentTimeMillis()
+        WorkspaceEntity(id = id, name = name, root = id, createdAt = now, updatedAt = now).also { dao.upsert(it) }
+    }
+
+    internal suspend fun prepareNative(id: String) = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("workspace_missing")
+        manager.prepareNativeWorkspace(workspace.root)
+    }
+
     suspend fun readNativeChunk(id: String, path: String, offset: Long, maxBytes: Int, revision: String?): WorkspaceFileChunk =
         withContext(Dispatchers.IO) {
             val workspace = dao.getById(id) ?: error("workspace_missing")
@@ -70,6 +84,11 @@ class WorkspaceRepository(
     suspend fun readNativeBytes(id: String, path: String): ByteArray = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("workspace_missing")
         manager.readNativeBytes(workspace.root, path)
+    }
+
+    suspend fun readNativeAudio(id: String, path: String): ByteArray = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("workspace_missing")
+        manager.readNativeAudio(workspace.root, path)
     }
 
     suspend fun writeNativeText(id: String, path: String, text: String, overwrite: Boolean): WorkspaceFileEntry = withContext(Dispatchers.IO) {

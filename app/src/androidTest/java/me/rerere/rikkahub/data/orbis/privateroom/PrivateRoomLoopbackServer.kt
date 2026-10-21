@@ -14,9 +14,11 @@ import kotlin.concurrent.thread
 /** Dependency-free, literal-loopback HTTP fixtures. Never connects to real models. */
 internal class PrivateRoomLoopbackResponse {
     var body: String = "{}"
+    var binaryBody: ByteArray? = null
     var code: Int = 200
     val headers = linkedMapOf<String, String>()
-    fun setBody(value: String) = apply { body = value }
+    fun setBody(value: String) = apply { body = value; binaryBody = null }
+    fun setBody(value: ByteArray) = apply { binaryBody = value.copyOf() }
     fun setResponseCode(value: Int) = apply { code = value }
     fun addHeader(name: String, value: String) = apply { headers[name] = value }
 }
@@ -68,9 +70,12 @@ internal class PrivateRoomLoopbackServer : Closeable {
                 requests.put(PrivateRoomLoopbackRequest(first[0], first[1], headers, body.toString(Charsets.UTF_8)))
                 count.incrementAndGet()
                 val response = responses.poll(5, TimeUnit.SECONDS) ?: error("fixture response missing")
-                val bytes = response.body.toByteArray(Charsets.UTF_8)
+                val bytes = response.binaryBody ?: response.body.toByteArray(Charsets.UTF_8)
                 val head = buildString {
-                    append("HTTP/1.1 ${response.code} Test\r\nContent-Type: application/json\r\n")
+                    append("HTTP/1.1 ${response.code} Test\r\n")
+                    if (response.headers.keys.none { it.equals("Content-Type", ignoreCase = true) }) {
+                        append("Content-Type: application/json\r\n")
+                    }
                     append("Content-Length: ${bytes.size}\r\nConnection: close\r\n")
                     response.headers.forEach { (k, v) -> append("$k: $v\r\n") }
                     append("\r\n")

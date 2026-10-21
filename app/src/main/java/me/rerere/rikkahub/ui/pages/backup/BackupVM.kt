@@ -26,6 +26,9 @@ import me.rerere.rikkahub.data.sync.webdav.WebDavBackupItem
 import me.rerere.rikkahub.data.sync.webdav.WebDavSync
 import me.rerere.rikkahub.data.sync.S3BackupItem
 import me.rerere.rikkahub.data.sync.S3Sync
+import me.rerere.rikkahub.data.sync.ContinuousBackup
+import me.rerere.rikkahub.data.sync.VerifiedBackupExport
+import me.rerere.rikkahub.data.sync.completed
 import me.rerere.rikkahub.utils.UiState
 import java.io.File
 import java.io.FileNotFoundException
@@ -161,8 +164,9 @@ class BackupVM(
     }
 
     suspend fun backup() {
-        webDavSync.backup(settings.value.webDavConfig)
-        recordBackupTime()
+        val selected = settings.value
+        webDavSync.backup(selected.webDavConfig)
+        recordBackupTime(ContinuousBackup.key("webdav", selected))
     }
 
     suspend fun restore(item: WebDavBackupItem) {
@@ -177,8 +181,21 @@ class BackupVM(
         val file = webDavSync.prepareBackupFile(
             settings.value.webDavConfig.copy(items = localBackupItems.value)
         )
-        recordBackupTime()
         return file
+    }
+
+    suspend fun exportToDocument(uri: Uri) = withContext(Dispatchers.IO) {
+        val file = exportToFile()
+        try {
+            val coroutine = currentCoroutineContext()
+            VerifiedBackupExport.copy(
+                source = { file.inputStream() },
+                destination = { requireNotNull(context.contentResolver.openOutputStream(uri, "wt")) },
+                readBack = { requireNotNull(context.contentResolver.openInputStream(uri)) },
+                checkCancelled = { coroutine.ensureActive() },
+            )
+            recordBackupTime("local-export")
+        } finally { file.delete() }
     }
 
     suspend fun restoreFromLocalFile(file: File) {
@@ -289,8 +306,9 @@ class BackupVM(
     }
 
     suspend fun backupToS3() {
-        s3Sync.backupToS3(settings.value.s3Config)
-        recordBackupTime()
+        val selected = settings.value
+        s3Sync.backupToS3(selected.s3Config)
+        recordBackupTime(ContinuousBackup.key("s3", selected))
     }
 
     suspend fun restoreFromS3(item: S3BackupItem) {
@@ -301,12 +319,10 @@ class BackupVM(
         s3Sync.deleteS3BackupFile(settings.value.s3Config, item)
     }
 
-    private suspend fun recordBackupTime() {
+    private suspend fun recordBackupTime(key: String) {
         settingsStore.update { settings ->
             settings.copy(
-                backupReminderConfig = settings.backupReminderConfig.copy(
-                    lastBackupTime = System.currentTimeMillis()
-                )
+                backupReminderConfig = settings.backupReminderConfig.completed(key, System.currentTimeMillis())
             )
         }
     }

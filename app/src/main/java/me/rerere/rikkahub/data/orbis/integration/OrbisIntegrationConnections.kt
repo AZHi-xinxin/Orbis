@@ -37,22 +37,28 @@ internal interface OrbisConnectionPersistence {
     suspend fun write(value: String?)
 }
 
+/** Only local input validation: never include the address or credential in an error. */
+internal class OrbisConnectionInputException(val code: String) : IllegalArgumentException(code)
+private fun connectionInput(valid: Boolean, code: String) {
+    if (!valid) throw OrbisConnectionInputException(code)
+}
+
 internal fun normalizeOrbisIntegrationUrl(value: String): String {
-    require(value.length <= 2048 && value.none { it.isISOControl() }) { "invalid_address" }
-    val url = value.trim().toHttpUrlOrNull() ?: error("invalid_address")
-    require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) { "invalid_address" }
+    connectionInput(value.length <= 2048 && value.none { it.isISOControl() }, "invalid_address")
+    val url = value.trim().toHttpUrlOrNull() ?: throw OrbisConnectionInputException("invalid_address")
+    connectionInput(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null, "invalid_address")
     val octets = url.host.split('.').map { it.toIntOrNull() }
     val privateIp = octets.size == 4 && octets.all { it != null && it in 0..255 } &&
         (octets[0] == 10 || octets[0] == 127 || (octets[0] == 192 && octets[1] == 168) ||
             (octets[0] == 172 && octets[1]!! in 16..31) || (octets[0] == 100 && octets[1]!! in 64..127))
-    require(url.isHttps || privateIp || url.host == "localhost" || url.host == "::1") { "https_required" }
+    connectionInput(url.isHttps || privateIp || url.host == "localhost" || url.host == "::1", "https_required")
     // No user-controlled path traversal/encoded separators at the prefix boundary.
-    require(url.encodedPath.none { it == '%' || it == '\\' }) { "invalid_address" }
+    connectionInput(url.encodedPath.none { it == '%' || it == '\\' }, "invalid_address")
     return url.toString().trimEnd('/')
 }
 
 internal fun validateOrbisIntegrationToken(token: String): String = token.trim().also {
-    require(it.length in 32..4096 && it.all { character -> character.code in 33..126 }) { "invalid_token" }
+    connectionInput(it.length in 32..4096 && it.all { character -> character.code in 33..126 }, "invalid_token")
 }
 
 class OrbisIntegrationConnections(context: Context, scope: CoroutineScope) {
@@ -88,8 +94,8 @@ class OrbisConnectionStore internal constructor(private val persistence: OrbisCo
             check(state.value.canEdit) { "配置尚未安全读取，请先重试或明确清除。" }
             val url = normalizeOrbisIntegrationUrl(baseUrl)
             val token = if (newToken.isNotBlank()) validateOrbisIntegrationToken(newToken) else {
-                check(credential?.baseUrl == url) { "更换地址时必须重新填写专用 Token。" }
-                credential?.token ?: error("请填写专用 Token。")
+                connectionInput(credential?.baseUrl == url, "token_required")
+                credential?.token ?: throw OrbisConnectionInputException("token_required")
             }
             val revision = state.value.revision + 1
             val json = buildJsonObject { put("baseUrl", url); put("token", token); put("enabled", enabled) }.toString()

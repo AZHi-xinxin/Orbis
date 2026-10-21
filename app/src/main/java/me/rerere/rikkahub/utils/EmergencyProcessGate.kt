@@ -94,6 +94,10 @@ class EmergencyProcessGate(directory: File) {
         return lease
     }
 
+    /** Current versioned-backup recovery, only when no business process is running.
+     * Does not write/read the abandoned emergency request flag or terminate anything. */
+    fun tryAcquireColdBackupRestoreLease(): Lease? = tryAcquire(shared = false)
+
     /** Explicit human exit only; close the lease before relaunching the normal app. */
     fun clearRecoveryRequest(lease: Lease): Boolean {
         require(lease.ownerDirectory == directory && !lease.shared && lease.isValid) {

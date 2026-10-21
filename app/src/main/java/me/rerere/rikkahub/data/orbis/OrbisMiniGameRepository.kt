@@ -20,6 +20,7 @@ data class OrbisMiniGameSession(
     val id: String, val gameId: String, val gameTitle: String, val gameSha256: String,
     val startedAt: Long, val finishedAt: Long? = null, val result: String? = null,
     val moveCount: Int? = null,
+    val score: Long? = null, val maxTile: Int? = null, val scoringVersion: String? = null,
 )
 
 @Serializable
@@ -75,6 +76,8 @@ class OrbisMiniGameRepository(
             require(validId(it.id) && value.games.any { game -> game.id == it.gameId }) { "invalid_game_session" }
             require(it.gameTitle.isNotBlank() && it.gameTitle.length <= 100 && it.gameSha256.matches(Regex("[a-f0-9]{64}"))) { "invalid_game_session" }
             require(it.startedAt >= 0) { "invalid_game_time" }
+            validateScore(it.score, it.maxTile, it.scoringVersion)
+            if (it.finishedAt == null) require(it.score == null && it.maxTile == null && it.scoringVersion == null)
             if (it.finishedAt == null) require(it.result == null && it.moveCount == null) { "unfinished_game_result" }
             else require(it.finishedAt >= it.startedAt && it.result in RESULTS && it.moveCount != null && it.moveCount in 0..1_000_000) { "invalid_game_result" }
         }
@@ -120,15 +123,17 @@ class OrbisMiniGameRepository(
     }
 
     /** Only the host-created frame's bound session reaches this API, never an arbitrary JS id. */
-    @Synchronized fun finish(sessionId: String, result: String, moveCount: Int): OrbisMiniGameSession {
+    @Synchronized fun finish(sessionId: String, result: String, moveCount: Int, score: Long? = null, maxTile: Int? = null, scoringVersion: String? = null): OrbisMiniGameSession {
         val before = readSnapshot()
         require(result in RESULTS && moveCount in 0..1_000_000) { "invalid_game_result" }
+        validateScore(score, maxTile, scoringVersion)
         val old = before.sessions.find { it.id == sessionId } ?: error("game_session_not_found")
         if (old.finishedAt != null) {
-            require(old.result == result && old.moveCount == moveCount) { "game_result_already_recorded" }
+            require(old.result == result && old.moveCount == moveCount && old.score == score && old.maxTile == maxTile && old.scoringVersion == scoringVersion) { "game_result_already_recorded" }
             return old
         }
-        val finished = old.copy(finishedAt = maxOf(now(), old.startedAt), result = result, moveCount = moveCount)
+        val finished = old.copy(finishedAt = maxOf(now(), old.startedAt), result = result, moveCount = moveCount,
+            score = score, maxTile = maxTile, scoringVersion = scoringVersion)
         commit(before.copy(sessions = before.sessions.map { if (it.id == old.id) finished else it }))
         return finished
     }
@@ -139,6 +144,11 @@ class OrbisMiniGameRepository(
     }
 
     companion object {
+        fun validateScore(score: Long?, maxTile: Int?, version: String?) {
+            require(score == null || score in 0..9_007_199_254_740_991L) { "invalid_game_score" }
+            require(maxTile == null || maxTile in 1..1_073_741_824) { "invalid_game_max_tile" }
+            require(version == null || version.matches(Regex("[A-Za-z0-9._-]{1,64}"))) { "invalid_scoring_version" }
+        }
         const val MAX_HTML_CHARS = 2 * 1024 * 1024
         private const val MAX_STORAGE_CHARS = 32 * 1024 * 1024
         private val RESULTS = setOf("win", "loss", "draw", "completed", "abandoned")

@@ -12,6 +12,26 @@ class UsageContextInvalidationTest {
     private fun old() = UIMessage.assistant("synthetic old").copy(usage = oldUsage, usageContextInvalidated = true)
     private val fresh = TokenUsage(promptTokens = 120, completionTokens = 15, cachedTokens = 0, totalTokens = 135)
 
+    @Test fun normalToolContinuationReplacesPreviousCacheWithZero() {
+        val ordinary = old().copy(usageContextInvalidated = false)
+        val message = StreamChunkHandler().handle(listOf(ordinary), StreamChunk.Usage(fresh)).last()
+        assertEquals(0, message.usage!!.cachedTokens)
+        assertEquals(120, message.usage!!.promptTokens)
+        val nonStream = listOf(ordinary).handleTextGenerationResult(
+            TextGenerationResult("synthetic", "model", UIMessage.assistant("next"), usage = fresh)
+        ).last()
+        assertEquals(0, nonStream.usage!!.cachedTokens)
+    }
+
+    @Test fun outputOnlyStreamDeltaKeepsCurrentCacheButExplicitZeroClearsIt() {
+        val handler = StreamChunkHandler()
+        val ordinary = old().copy(usageContextInvalidated = false)
+        val partial = handler.handle(listOf(ordinary), StreamChunk.Usage(TokenUsage(completionTokens = 500)))
+        assertEquals(850000, partial.last().usage!!.cachedTokens)
+        val zero = handler.handle(partial, StreamChunk.Usage(TokenUsage(cachedTokensReported = true)))
+        assertEquals(0, zero.last().usage!!.cachedTokens)
+    }
+
     @Test fun invalidationIsDurableAndMissingFieldInOldDataDefaultsFalse() {
         val codec = Json { encodeDefaults = true }
         val encoded = codec.encodeToString(UIMessage.serializer(), old())

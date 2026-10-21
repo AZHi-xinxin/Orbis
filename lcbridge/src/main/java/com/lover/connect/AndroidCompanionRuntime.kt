@@ -60,10 +60,10 @@ internal class AndroidCompanionRuntime(private val context: Context) : Companion
             return "exact_alarm_permission_required"
         if (name == "lock_screen" && !(context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager)
                 .isAdminActive(ComponentName(context, LockScreenReceiver::class.java))) return "device_admin_required"
-        if (name in setOf("lock_app", "focus_rikka", "redirect_to_rikka")) {
+        if (name in setOf("lock_app", "focus_orbis", "redirect_to_orbis")) {
             if (!DeviceCompatibility.activeAppInterventionsSupported()) return "device_control_unsupported"
-            val disabling = (name == "focus_rikka" && !arguments.optBoolean("enabled", false)) ||
-                (name == "redirect_to_rikka" && arguments.optJSONArray("package_names")?.length() == 0)
+            val disabling = (name == "focus_orbis" && !arguments.optBoolean("enabled", false)) ||
+                (name == "redirect_to_orbis" && arguments.optJSONArray("package_names")?.length() == 0)
             if (!disabling && LCAccessibilityService.instance == null) return "accessibility_permission_required"
         }
         if (name == "get_steps" && Build.VERSION.SDK_INT >= 29 && !granted(Manifest.permission.ACTIVITY_RECOGNITION))

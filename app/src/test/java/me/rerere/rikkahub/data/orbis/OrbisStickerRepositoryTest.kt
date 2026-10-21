@@ -41,6 +41,16 @@ class OrbisStickerRepositoryTest {
         override fun totalImageBytes() = totalOverride ?: images.values.sumOf { it.size.toLong() }
     }
     private fun repository(storage: MemoryStorage) = OrbisStickerRepository(storage, now = { 10L })
+    @Test fun `human removal preserves immutable bytes and never reuses the id`() {
+        val storage = MemoryStorage(); val repo = repository(storage)
+        val first = repo.importImage(png(), listOf("一"))
+        repo.removeFromLibrary(first.id); repo.removeFromLibrary(first.id)
+        assertTrue(repo.readSnapshot().stickers.isEmpty())
+        assertArrayEquals(png(), storage.readImage(first.id))
+        val restarted = repository(storage)
+        assertTrue(restarted.readSnapshot().stickers.isEmpty())
+        assertNotEquals(first.id, restarted.importImage(png(), listOf("二")).id)
+    }
     private fun png(width: Int = 1, height: Int = 1): ByteArray {
         val output = ByteArrayOutputStream()
         output.write(byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10))

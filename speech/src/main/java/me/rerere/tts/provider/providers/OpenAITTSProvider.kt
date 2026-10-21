@@ -24,6 +24,7 @@ class OpenAITTSProvider : TTSProvider<TTSProviderSetting.OpenAI> {
     private val httpClient = OkHttpClient.Builder()
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
+    private val strictHttpClient = httpClient.newBuilder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
 
     override fun generateSpeech(
         context: Context,
@@ -37,7 +38,6 @@ class OpenAITTSProvider : TTSProvider<TTSProviderSetting.OpenAI> {
             put("response_format", "mp3") // Default to MP3
         }
 
-        Log.i(TAG, "generateSpeech: $requestBody")
 
         val httpRequest = Request.Builder()
             .url("${providerSetting.baseUrl}/audio/speech")
@@ -46,7 +46,7 @@ class OpenAITTSProvider : TTSProvider<TTSProviderSetting.OpenAI> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
+        val response = (if(providerSetting.strictEndpoint) strictHttpClient else httpClient).newCall(httpRequest).execute()
 
         if (!response.isSuccessful) {
             val statusCode = response.code

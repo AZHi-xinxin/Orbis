@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.sync.s3
 
 import android.util.Log
+import me.rerere.rikkahub.data.sync.backupText
+import me.rerere.rikkahub.data.sync.copyBackup
 import android.util.Xml
 import io.ktor.client.HttpClient
 import io.ktor.client.request.headers
@@ -54,12 +56,13 @@ class S3Client(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "putObject failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw S3Exception("Failed to put object: ${response.status}", errorBody)
             }
 
-            Log.d(TAG, "putObject success: $key")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -91,12 +94,13 @@ class S3Client(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "putObject(file) failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw S3Exception("Failed to put object: ${response.status}", errorBody)
             }
 
-            Log.d(TAG, "putObject(file) success: $key (${file.length()} bytes)")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -118,8 +122,9 @@ class S3Client(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "getObject failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw S3Exception("Failed to get object: ${response.status}", errorBody)
             }
 
@@ -145,8 +150,9 @@ class S3Client(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "getObjectStream failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw S3Exception("Failed to get object stream: ${response.status}", errorBody)
             }
 
@@ -154,7 +160,7 @@ class S3Client(
         }
     }
 
-    suspend fun downloadObjectToFile(key: String, targetFile: File): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun downloadObjectToFile(key: String, targetFile: File, maxBytes: Long = me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.MAX_ZIP_BYTES): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val path = "/${key.trimStart('/')}"
             val signed = AwsSignatureV4.sign(
@@ -163,7 +169,7 @@ class S3Client(
                 path = path,
             )
 
-            Log.d(TAG, "GET (download to file): $key")
+            // Do not log storage URLs, object names or remote response bodies.
 
             httpClient.prepareRequest(signed.url) {
                 method = HttpMethod.Get
@@ -172,18 +178,13 @@ class S3Client(
                 }
             }.execute { response ->
                 if (!response.status.isSuccess()) {
-                    val errorBody = response.bodyAsText()
-                    Log.e(TAG, "downloadObjectToFile failed: ${response.status} - $errorBody")
+                    response.bodyAsChannel().cancel(null)
+                    val errorBody = "HTTP ${response.status.value}"
+                    // Do not log storage URLs, object names or remote response bodies.
                     throw S3Exception("Failed to download object: ${response.status}", errorBody)
                 }
 
-                response.bodyAsChannel().toInputStream().use { input ->
-                    me.rerere.rikkahub.data.sync.NativeBackupBudget.Output(targetFile.outputStream()) {
-                        targetFile.parentFile!!.usableSpace
-                    }.use { output ->
-                        input.copyTo(output)
-                    }
-                }
+                response.copyBackup(targetFile, maxBytes)
                 Log.d(TAG, "downloadObjectToFile success: downloaded ${targetFile.length()} bytes")
             }
             Unit
@@ -207,12 +208,13 @@ class S3Client(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "deleteObject failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw S3Exception("Failed to delete object: ${response.status}", errorBody)
             }
 
-            Log.d(TAG, "deleteObject success: $key")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -277,12 +279,13 @@ class S3Client(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "listObjects failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw S3Exception("Failed to list objects: ${response.status}", errorBody)
             }
 
-            val xmlBody = response.bodyAsText()
+            val xmlBody = response.backupText()
             parseListObjectsResponse(xmlBody)
         }
     }

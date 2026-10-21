@@ -116,15 +116,10 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         if (uri != null) scope.launch {
             localBusy = true
             try {
-                withContext(Dispatchers.IO) {
-                    val file = vm.exportToFile()
-                    try {
-                        requireNotNull(context.contentResolver.openOutputStream(uri)).use { output -> file.inputStream().use { it.copyTo(output) } }
-                    } finally { file.delete() }
-                }
-                result = "本地备份已保存。备份含模型连接配置，请私密保管，不要公开分享。"
+                vm.exportToDocument(uri)
+                result = "本地备份已保存并读回校验。备份含模型连接配置，请私密保管，不要公开分享。"
             } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { result = "导出未完成：${e.message ?: "文件无法写入"}" }
+            } catch (e: Exception) { result = "导出未确认完成：${ArchiveCapacity.publicError(e)}。请检查所选位置的读写权限；现有聊天未更改。" }
             finally { localBusy = false }
         }
     }
@@ -153,7 +148,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         item { BackupCard("Operit 聊天记录", "支持 Operit v2 JSON 导出。先预览再选择会话，只追加当前选中的回答，内部摘要会跳过并提示；不导入模型设置、人格、权限、工作区或附件实体。", !busy && !operitState.busy, "选择 Operit JSON") {
             openOperit.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }
-        item { BackupCard("Kelivo 聊天记录", "支持 Kelivo 安卓 v2 ZIP 备份。先预览再追加当前选中的回答，重复导入会跳过。只导聊天，附件保留引用说明；不导入配置、密钥、人格或技能。原备份可能包含密钥，请私密保管。", !busy && !kelivoState.busy, "选择 Kelivo 备份") {
+        item { BackupCard("Kelivo 聊天记录", "支持 Kelivo 安卓 v2/v3 ZIP 备份（需包含 SQLite v3 聊天数据库）。先预览再追加当前选中的回答，重复导入会跳过。只导聊天，附件保留引用说明；不导入配置、密钥、人格或技能。原备份可能包含密钥，请私密保管。", !busy && !kelivoState.busy, "选择 Kelivo 备份") {
             openKelivo.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         } }
         item { BackupCard("北极星聊天记录", "支持北极星导出 ZIP。先预览并选择窗口，再按原顺序追加聊天；思考过程单独保留。图片只显示历史引用说明，不导入附件或配置、密钥、人格与工具授权。重复导入自动跳过。", !busy && !polarisState.busy, "选择北极星备份") {

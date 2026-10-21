@@ -81,9 +81,18 @@ internal object KelivoChatArchive {
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
             val manifest = DeepSeekStrictJson.parse(decoder.decode(ByteBuffer.wrap(bytes.toByteArray())).toString(),
                 checkCancelled) as? JsonObject ?: error("kelivo_manifest_object")
-            require(manifest.text("format") == "kelivo-backup" && manifest.number("formatVersion") == 2L &&
-                manifest.number("minimumReadableFormatVersion") in 1L..2L && manifest.text("payloadKind") == "sqlite" &&
-                (manifest["includeChats"] as? JsonPrimitive)?.booleanOrNull == true) { "kelivo_format" }
+            // ZIP v3 adds scoped backups; it does not change the independently versioned SQLite rows.
+            // Accept only the container formats inspected here, not unknown future formats claiming compatibility.
+            val formatVersion = manifest.number("formatVersion")
+            require(manifest.text("format") == "kelivo-backup" && formatVersion in 2L..3L &&
+                manifest.number("minimumReadableFormatVersion") in 1L..formatVersion &&
+                manifest.text("payloadKind") == "sqlite" && manifest.flag("includeChats") == true) { "kelivo_format" }
+            if (formatVersion == 3L) {
+                val scope = manifest["scope"] as? JsonObject ?: error("kelivo_scope")
+                require(scope.flag("chats") == true && scope.values.all {
+                    it is JsonPrimitive && !it.isString && it.booleanOrNull != null
+                }) { "kelivo_scope" }
+            }
             val database = manifest["database"] as? JsonObject ?: error("kelivo_database_manifest")
             require(database.text("entry") == DATABASE_ENTRY && database.number("schemaVersion") == 3L &&
                 database.number("minimumReadableSchemaVersion") in 1L..3L) { "kelivo_schema_version" }
@@ -153,5 +162,6 @@ internal object KelivoChatArchive {
         ?: error("kelivo_manifest_string")
     private fun JsonObject.number(key: String) = (get(key) as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
         ?: error("kelivo_manifest_number")
+    private fun JsonObject.flag(key: String) = (get(key) as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }
 }

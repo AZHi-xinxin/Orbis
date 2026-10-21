@@ -147,6 +147,14 @@ class OrbisSentinels private constructor(private val context: Context) {
 
     /** Also applied to legacy ingress, and rechecked immediately before generation. */
     fun mayDeliver(event: OrbisInboxEvent): Boolean {
+        if (me.rerere.rikkahub.data.orbis.isPetEventSource(event.source)) return runCatching {
+            val settings = GlobalContext.get().get<me.rerere.rikkahub.data.datastore.SettingsStore>().settingsFlow.value
+            val owner = settings.assistants.firstOrNull { it.id.toString() == event.assistantId && it.orbisPetEnabled }
+            if(settings.init || owner == null || event.wake || event.source != "pet_room.${event.assistantId}") false
+            else me.rerere.rikkahub.data.orbis.activities.OrbisActivities.pet(context, event.assistantId).snapshot().let {
+                it.noticesEnabled && it.noticeConversationId == event.conversationId
+            }
+        }.getOrDefault(false)
         return sentinelMayDeliver(rules.refresh(), event)
     }
 

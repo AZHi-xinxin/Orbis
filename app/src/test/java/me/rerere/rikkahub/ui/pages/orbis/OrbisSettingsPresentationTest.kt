@@ -127,7 +127,7 @@ class OrbisSettingsPresentationTest {
         val workspace = orbisToolEntries.single { it.destination == OrbisToolDestination.WORKSPACE }
         assertEquals(OrbisToolGroup.WORK, workspace.group)
         listOf("文件", "终端", "技能").forEach { assertTrue(workspace.subtitle.contains(it)) }
-        assertEquals(4, orbisToolEntries.count { it.group == OrbisToolGroup.WORK })
+        assertEquals(5, orbisToolEntries.count { it.group == OrbisToolGroup.WORK })
     }
 
     @Test fun toolsDoNotAdvertiseConfigurationOrUnavailablePlaceholders() {
@@ -135,7 +135,7 @@ class OrbisSettingsPresentationTest {
         listOf("MCP", "TTS", "快捷消息", "天气", "未接入").forEach {
             assertFalse("Unexpected duplicated or unavailable tool: $it", labels.contains(it))
         }
-        assertEquals(10, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
+        assertEquals(11, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
         assertEquals(1, orbisToolEntries.count { it.destination == OrbisToolDestination.BLUETOOTH_TOY })
     }
 
@@ -148,6 +148,6 @@ class OrbisSettingsPresentationTest {
             OrbisToolDestination.PRIVATE_ROOM), rows[1])
         assertEquals(listOf(OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
             OrbisToolDestination.PHOTO_WALL), rows[2])
-        assertEquals(listOf(OrbisToolDestination.CHARACTER), rows[3])
+        assertEquals(listOf(OrbisToolDestination.CHARACTER, OrbisToolDestination.PET), rows[3])
     }
 }

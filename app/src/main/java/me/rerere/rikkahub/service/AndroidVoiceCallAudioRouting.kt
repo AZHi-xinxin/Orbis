@@ -26,6 +26,7 @@ internal class AndroidVoiceCallAudioRouting(
     private val routing = VoiceCallAudioRouting(AndroidVoiceCallAudioBackend(audio))
     private var registered = false
     private var closed = false
+    private var closeFailures: List<String> = emptyList()
     private var waiting = false
     private var preservingMutedOutput = false
     private var refreshPending = false
@@ -127,21 +128,25 @@ internal class AndroidVoiceCallAudioRouting(
         routing.suspendRouting()
     }
 
-    fun close() {
-        if (closed) return
+    fun close(): List<String> {
+        if (closed) return closeFailures
         closed = true
+        val cleanup = VoiceCallCleanup()
         preservingMutedOutput = false
+        refreshPending = false
         requestEpoch++
         confirmation.changed()
-        routeJob?.cancel()
+        cleanup.attempt("AUDIO_ROUTE_JOB_CANCEL") { routeJob?.cancel() }
         routeJob = null
-        if (registered) runCatching { audio.unregisterAudioDeviceCallback(callback) }
+        if (registered) cleanup.attempt("AUDIO_DEVICE_LISTENER_REMOVE") { audio.unregisterAudioDeviceCallback(callback) }
         registered = false
-        removeCommunicationListener?.let { runCatching(it) }
+        removeCommunicationListener?.let { cleanup.attempt("AUDIO_ROUTE_LISTENER_REMOVE", it) }
         removeCommunicationListener = null
-        removeModeListener?.let { runCatching(it) }
+        removeModeListener?.let { cleanup.attempt("AUDIO_MODE_LISTENER_REMOVE", it) }
         removeModeListener = null
-        routing.close()
+        cleanup.attempt("AUDIO_ROUTING_CLOSE") { cleanup.include(routing.close()) }
+        closeFailures = cleanup.failures
+        return closeFailures
     }
 }
 

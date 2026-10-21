@@ -50,8 +50,13 @@ internal class PendingRestore(
             try {
                 // Only explicitly supported sidecars/libraries, before any live move. Old backups
                 // without these entries leave them alone; the conversation DB stays unmodified.
-                OrbisLocalToolBackup.prepareBeforeJournal(File(pending, "payload"), filesDir)
+                if (replacingLocalTools()) OrbisLocalToolBackup.prepareReplacementBeforeJournal(File(pending, "payload"), filesDir)
+                else OrbisLocalToolBackup.prepareBeforeJournal(File(pending, "payload"), filesDir)
                 validateBeforeJournal(File(pending, "payload"))
+                if (ConversationRecoveryBackup.hasStaged(File(pending, "payload"))) {
+                    ConversationRecoveryBackup.requireNoConflicts(File(pending, "payload"),
+                        requireNotNull(noBackupFilesDir) { ConversationRecoveryBackup.INVALID })
+                }
                 buildEntries().also { writeDurably(journal, Json.encodeToString(it)) }
             } catch (e: Exception) {
                 // No live files have been changed yet, so this restore can be safely rejected.
@@ -88,10 +93,16 @@ internal class PendingRestore(
 
         // Commit by removing the pending name atomically before any live connection can be opened.
         // If this move fails, startup aborts and the next launch retries the same installation.
-        val completed = File(root, "completed-${UUID.randomUUID()}")
+        val preserveOriginals = replacingLocalTools()
+        val completed = File(root, "${if (preserveOriginals) "previous" else "completed"}-${UUID.randomUUID()}")
         move(pending, completed)
-        completed.deleteRecursively()
+        if (!preserveOriginals) completed.deleteRecursively()
         return true
+    }
+
+    private fun replacingLocalTools(): Boolean {
+        val flag = File(pending, "replace-local-tools")
+        return flag.isFile && flag.length() == 27L && flag.readText() == "explicit-version-restore-v1"
     }
 
     private fun buildEntries(): List<RestoreEntry> {
@@ -145,6 +156,9 @@ internal class PendingRestore(
             path.startsWith("no-backup/${CharacterBackup.DIRECTORY}/") ->
                 CharacterBackup.exactFile(requireNotNull(noBackupFilesDir) { "character_backup_path" },
                     path.removePrefix("no-backup/"))
+            path.startsWith("no-backup/") && ConversationRecoveryBackup.inNamespace(path.removePrefix("no-backup/")) ->
+                ConversationRecoveryBackup.exactFile(requireNotNull(noBackupFilesDir) { ConversationRecoveryBackup.INVALID },
+                    path.removePrefix("no-backup/"))
             else -> error("Invalid restore path: $path")
         }
     }
@@ -184,5 +198,6 @@ internal class PendingRestore(
 
 /** Only thrown when original files are intact and the failed import has been isolated. */
 internal class RestoreFailedException(cause: Exception) : Exception(
-    OrbisLocalToolBackup.publicError(cause.message) ?: "Backup restore failed; original files restored", cause,
+    ConversationRecoveryBackup.publicError(cause.message) ?: OrbisLocalToolBackup.publicError(cause.message)
+        ?: "Backup restore failed; original files restored", cause,
 )

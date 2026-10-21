@@ -31,6 +31,8 @@ import me.rerere.asr.ASRState
 import me.rerere.asr.ASRStatus
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.MessageQueuePausedException
+import me.rerere.rikkahub.service.VoiceCallCleanup
+import me.rerere.rikkahub.service.voiceCallCleanupError
 
 enum class VoicePhase { Off, Connecting, Listening, Transcribing, Speaking, Error }
 
@@ -80,6 +82,12 @@ class VoiceSessionController(
     private var muteOutput: ((Boolean) -> Unit)? = null
     private var interruptCurrentAudio: (() -> Unit)? = null
     private var controls: Channel<Event>? = null
+    private var stopRequested = false
+    private var stopCleanup = VoiceCallCleanup()
+    private var playbackReleaseConfirmed = AtomicBoolean(true)
+    /** Completed coroutines or an attempted stop do not prove native audio was released. */
+    internal val isStopped: Boolean get() = job?.isCompleted != false && activeAsr == null &&
+        playbackReleaseConfirmed.get()
     private val microphoneRevision = AtomicLong()
     private val focusRevision = AtomicLong()
     private val replyRevision = AtomicLong()
@@ -141,12 +149,19 @@ class VoiceSessionController(
         /** Caller accepts fresh human turns independently of old queue/tool persistence. */
         freshHumanReplies: Boolean = false,
     ) {
-        if (job?.isCompleted == false) return
+        if (!isStopped) return
+        stopRequested = false
+        val cleanup = VoiceCallCleanup()
+        stopCleanup = cleanup
         val events = Channel<Event>(Channel.UNLIMITED)
         controls = events
-        val playbackStopped = AtomicBoolean(false)
+        val playbackStopAttempted = AtomicBoolean(false)
+        val playbackReleased = AtomicBoolean(false)
+        playbackReleaseConfirmed = playbackReleased
         val stopPlayback = {
-            if (playbackStopped.compareAndSet(false, true)) runCatching { stopSpeaking() }
+            if (playbackStopAttempted.compareAndSet(false, true)) {
+                playbackReleased.set(cleanup.attempt("VOICE_PLAYBACK_STOP") { stopSpeaking() })
+            }
             Unit
         }
         stopCurrentPlayback = stopPlayback
@@ -181,7 +196,7 @@ class VoiceSessionController(
                     controls = null
                 }
                 events.close()
-                onEnded(terminalError)
+                onEnded(voiceCallCleanupError(terminalError, cleanup.failures))
             }
         }
     }
@@ -472,6 +487,7 @@ class VoiceSessionController(
                 if (audioAllowed() && !awaitingRetry && capture == null && !tailWaiting && mutableState.value.microphoneEnabled &&
                     (playing == null || (playing?.id != captureDeferredForPlayback &&
                         runCatching(isHeadsetConnected).getOrDefault(false)))) {
+                    check(activeAsr == null) { "Previous microphone release unconfirmed" }
                     val recorder = try { createAsr() } catch (error: Exception) {
                         val failure = VoiceRecoveryPolicy.failure(VoiceFailureStage.ASR_START, error)
                         if (!connected) throw failure
@@ -639,7 +655,9 @@ class VoiceSessionController(
                         acousticMonitor = null
                         event.error?.let {
                             val failure = VoiceRecoveryPolicy.failure(VoiceFailureStage.TTS, it)
-                            if (!failure.network) throw failure
+                            // A failed utterance (provider rejection, decoder, route or optional
+                            // mixer) does not own the call. Never replay it or its model/tools.
+                            // Drain this playback and accept the next human turn normally.
                             runCatching { stopSpeaking() }
                             mutableState.update { state -> state.copy(recoveryNotice = failure.message) }
                         }
@@ -749,7 +767,13 @@ class VoiceSessionController(
             throw VoiceRecoveryPolicy.failure(stage, error, hadSpeech = stage == VoiceFailureStage.ASR_FINAL ||
                 state.transcript.isNotBlank() || state.voiceTurn.itemId != null)
         } finally {
-            try { asr.dispose() } finally { if (activeAsr === asr) activeAsr = null }
+            if (stopCleanup.attempt("VOICE_CAPTURE_DISPOSE") { asr.dispose() }) {
+                if (activeAsr === asr) activeAsr = null
+            } else {
+                // Preserve the owned reference: a cancelled/completed coroutine cannot
+                // prove release when native dispose threw. Never start another recorder.
+                error("Microphone release unconfirmed [VOICE_CAPTURE_DISPOSE]")
+            }
         }
     }
 
@@ -837,20 +861,33 @@ class VoiceSessionController(
         return accepted.await()
     }
 
-    fun stop() {
+    fun stop(): List<String> {
+        if (stopRequested) return stopCleanup.failures
+        stopRequested = true
+        val cleanup = stopCleanup
         val recorder = activeAsr
+        val stopPlayback = stopCurrentPlayback
         microphoneRevision.incrementAndGet()
+        focusRevision.incrementAndGet()
         replyRevision.incrementAndGet()
         // Fence/cancel observers before native stop can synchronously emit old ASR/TTS callbacks.
-        job?.cancel()
-        runCatching { recorder?.pauseCapture() }
-        stopCurrentPlayback?.invoke()
-        mutableState.value = VoiceSessionState()
+        controls = null
+        cleanup.attempt("VOICE_JOB_CANCEL") { job?.cancel() }
+        cleanup.attempt("VOICE_CAPTURE_PAUSE") { recorder?.pauseCapture() }
+        // Capture the owned closure before cancellation: its finally may already have
+        // cleared the controller field. The closure itself releases playback only once.
+        cleanup.attempt("VOICE_PLAYBACK_STOP") { stopPlayback?.invoke() }
+        mutableState.value = VoiceSessionState(error = voiceCallCleanupError(null, cleanup.failures))
+        return cleanup.failures
     }
 
-    suspend fun stopAndJoin() {
+    suspend fun stopAndJoin(): List<String> {
         val stoppedJob = job
         stop()
         stoppedJob?.join()
+        if (stopCleanup.failures.isNotEmpty()) {
+            mutableState.value = VoiceSessionState(error = voiceCallCleanupError(null, stopCleanup.failures))
+        }
+        return stopCleanup.failures
     }
 }

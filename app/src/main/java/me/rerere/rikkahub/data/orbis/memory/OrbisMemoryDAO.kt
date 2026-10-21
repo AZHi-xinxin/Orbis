@@ -28,6 +28,9 @@ interface OrbisMemoryDAO {
     @Query("SELECT * FROM orbis_memory_revision WHERE assistant_id=:assistantId AND id=:id ORDER BY revision DESC LIMIT :limit OFFSET :offset")
     suspend fun history(assistantId: String, id: String, limit: Int, offset: Int): List<OrbisMemoryRevisionEntity>
 
+    @Query("SELECT revision,state,deleted FROM orbis_memory_revision WHERE assistant_id=:assistantId AND id=:id ORDER BY revision DESC LIMIT 101")
+    suspend fun semanticLineage(assistantId: String, id: String): List<SemanticRevisionGate>
+
     @Query("SELECT id,state,tags,created_at,updated_at,revision,deleted FROM orbis_memory_note WHERE assistant_id=:assistantId AND (:includeDeleted OR deleted=0) ORDER BY updated_at DESC,id LIMIT :limit OFFSET :offset")
     suspend fun metadata(assistantId: String, includeDeleted: Boolean, limit: Int, offset: Int): List<OrbisMemoryMetadataRow>
 

@@ -240,6 +240,7 @@ private fun TokenUsage?.sum(other: TokenUsage?): TokenUsage? {
         completionTokens = completionTokens + other.completionTokens,
         cachedTokens = cachedTokens + other.cachedTokens,
         totalTokens = totalTokens + other.totalTokens,
+        cachedTokensReported = cachedTokensReported || other.cachedTokensReported,
     )
 }
 
@@ -900,6 +901,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             completionTokens = completionTokens,
             totalTokens = promptTokens + completionTokens,
             cachedTokens = cachedInputTokens,
+            cachedTokensReported = usageJson["cache_read_input_tokens"]?.jsonPrimitiveOrNull?.intOrNull != null,
         )
     }
 }

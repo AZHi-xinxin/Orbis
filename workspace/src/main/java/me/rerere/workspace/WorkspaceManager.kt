@@ -30,6 +30,14 @@ class WorkspaceManager(
         return dir
     }
 
+    /** AI configuration needs a native files directory, not a downloaded Linux environment. */
+    fun prepareNativeWorkspace(root: String) {
+        val anchor = requireNotNull(baseDir.parentFile).absoluteFile.toPath().normalize()
+        val directory = filesDir(root).absoluteFile.toPath().normalize()
+        require(directory.startsWith(anchor) && directory != anchor) { "workspace_path_denied" }
+        nativeFiles.ensureDirectory(anchor.relativize(directory).map { it.toString() })
+    }
+
     fun workspaceDir(root: String): File {
         requireValidRoot(root)
         return File(baseDir, root)
@@ -153,6 +161,12 @@ class WorkspaceManager(
         nativeFiles.readChunk(nativePath(root, path), offset, maxBytes, revision)
 
     fun readNativeBytes(root: String, path: String): ByteArray = nativeFiles.readBytes(nativePath(root, path))
+
+    /** Only a bound workspace artifact, never an arbitrary app-private file or upload alias. */
+    fun readNativeAudio(root: String, path: String): ByteArray {
+        require(path.startsWith("/workspace/")) { "workspace_path_denied" }
+        return nativeFiles.readBytes(nativePath(root, path), 32 * 1024 * 1024)
+    }
 
     fun writeNativeText(root: String, path: String, text: String, overwrite: Boolean): WorkspaceFileEntry {
         val stat = nativeFiles.writeText(nativePath(root, path, write = true), text, overwrite)

@@ -81,6 +81,8 @@ internal fun OrbisChatPreferencesPage(vm: SettingVM) {
             onVolumeRatio = { value -> update { it.copy(volumeKeyScrollRatio = value.coerceIn(.25f, 1f)) } },
             suggestionsEnabled = settings.enableSuggestion,
             onSuggestionsChange = { checked -> updateSettings { it.copy(enableSuggestion = checked) } },
+            observationEnabled = settings.aiGlobalObservation,
+            onObservationChange = { checked -> updateSettings { it.copy(aiGlobalObservation = checked) } },
             modifier = Modifier.fillMaxSize().padding(padding),
         )
     }
@@ -99,6 +101,8 @@ internal fun OrbisChatPreferencesGrid(
     suggestionsEnabled: Boolean,
     onSuggestionsChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    observationEnabled: Boolean = false,
+    onObservationChange: (Boolean) -> Unit = {},
 ) {
     val colors = OrbisTheme.colors
     BoxWithConstraints(modifier) {
@@ -124,6 +128,10 @@ internal fun OrbisChatPreferencesGrid(
                 OrbisPreferenceTile("AI 建议回复", "聊天底部的预制回复。关闭后立即隐藏，并停止后续生成；X 只收起当前一组。",
                     suggestionsEnabled, enabled, onSuggestionsChange,
                     Modifier.testTag("chat-preference-suggestions"))
+            }
+            item("ai-observation") {
+                OrbisPreferenceTile("开启 AI 全局观测", "每轮告知窗口、助手、模型与使用情况。开启期间记录重刷、删除数量和窗口使用时长。",
+                    observationEnabled, enabled, onObservationChange, Modifier.testTag("chat-preference-observation"))
             }
             items(OrbisChatPreference.entries.filter {
                 it != OrbisChatPreference.JUMPER_LEFT || display.showMessageJumper

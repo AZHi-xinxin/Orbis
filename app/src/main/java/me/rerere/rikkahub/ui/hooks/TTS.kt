@@ -143,8 +143,10 @@ private class CustomTtsStateImpl(
     }
 
     override fun speak(text: String, flushCalled: Boolean) {
+        val settings = settingsStore.settingsFlow.value
+        controller.setProvider(settings.getSelectedTTSProvider())
         val processed = text.stripMarkdown()
-        controller.speak(processed, flushCalled)
+        controller.speak(processed, flushCalled, mixerConfig = settings.voiceMixer)
     }
 
     override fun stop() {

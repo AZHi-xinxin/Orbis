@@ -97,7 +97,8 @@ class PrivateRoomNavigationTest {
 
     @Test fun onlyAllowlistedReasonsAppearAndNoExceptionMessageOrCauseIsExposed() {
         listOf("device_key_unavailable", "storage_failed", "unsafe_path", "already_exists",
-            "recovery_required", "recovery_not_confirmed", "authentication_failed", "invalid_format", "size_limit")
+            "recovery_required", "recovery_not_confirmed", "authentication_failed", "invalid_format", "size_limit",
+            "password_invalid_length", "password_not_configured")
             .forEach { code ->
                 val notice = privateRoomFailureNotice(PrivateVaultException(code))
                 assertTrue(notice.contains("（$code）"))

@@ -96,6 +96,27 @@ class KelivoChatModelTest {
         assertTrue(result.currentMessages[1].toText().contains("historical-call"))
         assertTrue(result.currentMessages[1].toText().contains("reason"))
     }
+    @Test fun v3PartsRetainSelectedBranchAndArrivalOrderWithoutActivatingRoundOrAuthMetadata() {
+        val c = chat(selections = "{\"g\":1}")
+        val source = Source(listOf(c), listOf(message("old", "g", order = 0),
+            message("later", order = 1, role = "user"), message("chosen", "g", version = 1, order = 2)),
+            mapOf("old" to listOf(KelivoPart("text", "UNSELECTED_ANSWER")), "chosen" to listOf(
+                KelivoPart("text", "first segment"), KelivoPart("reasoning", "thinking segment"),
+                KelivoPart("tool_call", "{\"name\":\"synthetic_tool\",\"result\":\"historical result\"}"),
+                KelivoPart("assistant_round_end", "[{\"opaque\":\"PRIVATE_PROVIDER_METADATA\"}]"),
+                KelivoPart("text", "last segment"),
+                KelivoPart("provider_auth_error", "{\"providerId\":\"PRIVATE_PROVIDER_ID\"}"))))
+        val result = convertKelivoChat(source, c, assistant).conversation
+        val text = result.currentMessages.first().toText()
+        assertEquals(2, result.currentMessages.size)
+        assertEquals(kelivoImportId("message", c.id, "chosen"), result.currentMessages.first().id)
+        assertTrue(text.indexOf("first segment") < text.indexOf("thinking segment"))
+        assertTrue(text.indexOf("thinking segment") < text.indexOf("historical result"))
+        assertTrue(text.indexOf("historical result") < text.indexOf("last segment"))
+        assertFalse(text.contains("UNSELECTED_ANSWER")); assertFalse(text.contains("PRIVATE_PROVIDER"))
+        assertFalse(text.contains("暂不支持")); assertTrue(text.contains("历史模型授权失败"))
+        assertTrue(result.currentMessages.all { it.getTools().isEmpty() && it.finishedAt == it.createdAt })
+    }
     @Test fun mediaEntitiesAreNeverLoadedAndPathsAreNotRendered() {
         val source = Source(listOf(chat()), listOf(message(refs = 2)), mapOf("m" to listOf(
             KelivoPart("image", "file:///secret.jpg"), KelivoPart("file", "https://example.invalid/secret"),

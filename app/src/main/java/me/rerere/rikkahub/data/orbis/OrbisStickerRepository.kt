@@ -220,6 +220,13 @@ class OrbisStickerRepository(private val storage: OrbisStickerStorage, private v
         stickerCheck(state.value.stickers.any { it.id == id }, "sticker_not_found")
         commit(state.value.copy(stickers = state.value.stickers.map { if (it.id == id) it.copy(tags = normalized) else it }))
     }
+    /** Human management only. Remove the catalogue entry, never a historical image or attachment. */
+    @Synchronized fun removeFromLibrary(id: String) = safe {
+        ensureAvailable()
+        stickerCheck(validId(id), "sticker_invalid_id")
+        if (state.value.stickers.any { it.id == id })
+            commit(state.value.copy(stickers = state.value.stickers.filterNot { it.id == id }))
+    }
     @Synchronized fun imageForSend(id: String): OrbisStickerImage = safe {
         ensureAvailable()
         stickerCheck(validId(id), "sticker_invalid_id")

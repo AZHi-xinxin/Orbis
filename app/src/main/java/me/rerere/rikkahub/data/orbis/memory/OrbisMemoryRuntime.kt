@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.orbis.memory
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -24,6 +25,7 @@ class OrbisMemoryRuntime(
     private val database: AppDatabase,
     private val repository: OrbisMemoryRepository,
     private val settingsStore: SettingsStore,
+    private val semanticRecall: SemanticRecall? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -32,6 +34,15 @@ class OrbisMemoryRuntime(
         val human = latestMemoryHuman(messages) ?: return null
         val owner = assistant.id.toString()
         val key = orbisCompactionSummaryHash("$conversationId:${human.id}:${human.toText()}")
+        // Native inference is never inside a Room transaction or the chat/tool execution queue.
+        // A persisted human turn (including an empty selection) must not be re-scored on retry.
+        val semantic = try {
+            if (semanticRecall != null && SemanticMemoryRecall.enabled(assistant) &&
+                withTimeoutOrNull(40) { database.orbisMemoryTurnDao().get(owner, key) == null } == true) {
+                semanticRecall.recall(owner, messages)
+            } else emptyList()
+        } catch (cancel: CancellationException) { throw cancel
+        } catch (_: Exception) { emptyList() }
         val frozen = try {
             database.withTransaction {
                 val dao = database.orbisMemoryTurnDao()
@@ -64,8 +75,14 @@ class OrbisMemoryRuntime(
                         offset += page.size
                     }
                 }
-                val selection = if (!eligible) OrbisMemorySelection() else selectOrbisMemory(
+                val lexical = if (!eligible) OrbisMemorySelection() else selectOrbisMemory(
                     assistant.orbisMemoryMode, human.toText(), notes, ordinal)
+                val previous = dao.lastSurfaced(owner, semantic.map { it.id }).associate { it.noteId to it.lastOrdinal }
+                val semanticHits = semantic.filter { entry -> previous[entry.id]?.let {
+                    ordinal - it >= entry.minIntervalTurns.coerceAtLeast(1)
+                } ?: true }
+                val selection = limitFrozenMemory(OrbisMemorySelection(lexical.entries + semanticHits),
+                    assistant.orbisMemoryMode)
                 if (!readOnly) {
                     dao.insert(OrbisMemoryTurnEntity(owner, key, ordinal, json.encodeToString(selection), System.currentTimeMillis()))
                     if (selection.entries.isNotEmpty()) dao.recordSurfacing(selection.entries.map {
@@ -86,12 +103,20 @@ class OrbisMemoryRuntime(
             if (current == null || !current.orbisMemoryAutoInject || current.orbisMemoryMode == OrbisMemoryMode.LIGHT) {
                 projectOrbisMemory(request, OrbisMemorySelection())
             } else {
-                val ids = try { repository.eligibleInjectionIds(owner, selected.entries.map { it.id })
+                val ordinary = selected.entries.filter { it.kind != "compaction_excerpt" }
+                val ids = try { repository.eligibleInjectionIds(owner, ordinary.map { it.id })
                 } catch (cancel: CancellationException) { throw cancel
                 } catch (_: Exception) { emptySet() }
+                val recalled = try {
+                    if (semanticRecall != null && current.orbisSemanticRecall)
+                        withTimeoutOrNull(80) { semanticRecall.validate(owner,
+                            selected.entries.filter { it.kind == "compaction_excerpt" }) }.orEmpty()
+                    else emptyList()
+                } catch (cancel: CancellationException) { throw cancel
+                } catch (_: Exception) { emptyList() }
                 // Pausing, soft deletion and static downgrade take effect without replaying this turn.
                 projectOrbisMemory(request, limitFrozenMemory(
-                    selected.copy(entries = selected.entries.filter { it.id in ids }), current.orbisMemoryMode))
+                    selected.copy(entries = ordinary.filter { it.id in ids } + recalled), current.orbisMemoryMode))
             }
         }
     }

@@ -4,12 +4,31 @@ import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.data.ai.compaction.COMPACTION_SUMMARY_MARKER
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisCallTimelineTest {
     private fun turn(text: String, id: String = "call-1") = UIMessage.user(text)
         .copy(orbisVoiceCallId = id, orbisVoiceCallKind = "turn").toMessageNode()
+
+    @Test fun mislabeledCompactionSummaryStaysVisibleAndDoesNotAnchorTheCallAtTheTop() {
+        val summary = UIMessage.assistant("").copy(orbisVoiceCallId = "call-1", orbisVoiceCallKind = "turn",
+            parts = listOf(UIMessagePart.Text("synthetic summary", buildJsonObject {
+                put(COMPACTION_SUMMARY_MARKER, true)
+            }))).toMessageNode()
+        val ordinary = UIMessage.user("independent retained message").toMessageNode()
+        val nodes = listOf(summary, ordinary, turn("first"), turn("second"))
+        val shown = orbisCallTimeline(nodes)
+        assertEquals(3, shown.size)
+        assertSame(summary, shown[0].nodes.single())
+        assertNull(shown[0].callId)
+        assertEquals(listOf(2, 3), shown[2].sourceIndices)
+        assertEquals("call-1", shown[2].callId)
+        assertEquals("call-1", summary.currentMessage.orbisVoiceCallId) // display-only, no source write
+    }
 
     @Test fun continuousCallBecomesOneDisplayEntryWithoutChangingSource() {
         val first = UIMessage.user("before").toMessageNode()

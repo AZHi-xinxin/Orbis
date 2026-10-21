@@ -19,7 +19,9 @@ data class PlaybackState(
     val speed: Float = 1.0f,
     val currentChunkIndex: Int = 0, // 1-based，与 currentChunk StateFlow 对齐
     val totalChunks: Int = 0,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** Pending base speed for the next utterance; never an assertion about current audio. */
+    val nextSpeed: Float = 1.0f,
 )
 
 

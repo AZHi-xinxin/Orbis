@@ -114,6 +114,22 @@ class OrbisLauncherActivity : Activity() {
                 if (BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED) EmergencyLauncherState.CHECK_FAILED
                 else EmergencyLauncherState.LEGACY_RESTORE_BLOCKED
             }
+            if(state == EmergencyLauncherState.READY && BuildConfig.ORBIS_ENABLED &&
+                runCatching { me.rerere.rikkahub.data.sync.LocalCheckpointRecovery.needed(this) }.getOrDefault(false)) {
+                runOnUiThread { if(!isDestroyed && !isFinishing) {
+                    ensureRecoveryForm(); status.text = "找到本机完整存档，正在校验并恢复缺失的聊天库……不需要安全码。"
+                    retry.isEnabled = false; rescue.isEnabled = false
+                } }
+                try {
+                    kotlinx.coroutines.runBlocking { me.rerere.rikkahub.data.sync.LocalCheckpointRecovery.recover(this@OrbisLauncherActivity) }
+                } catch(_: Exception) {
+                    runOnUiThread { if(!isDestroyed && !isFinishing) {
+                        checking = false; ensureRecoveryForm(); retry.isEnabled = true; rescue.isEnabled = false
+                        status.text = "本机存档未通过恢复检查，原文件和存档都已保留，没有覆盖。请勿清除数据；可重新检查或联系维护者。"
+                    } }
+                    return@execute
+                }
+            }
             runOnUiThread {
                 if (isDestroyed || isFinishing) return@runOnUiThread
                 checking = false

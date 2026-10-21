@@ -23,6 +23,7 @@ class OrbisCompactionRepository(
     private val messageFtsManager: MessageFtsManager,
 ) {
     private val dao get() = database.orbisCompactionDao()
+    private val historyCache = me.rerere.rikkahub.data.orbis.history.ConversationHistoryCache(database)
 
     /** One confirmed whole-node edit. Durable state and FTS commit before the caller publishes RAM.
      * Archive keeps an independent complete source plus the existing reversible context slot;
@@ -54,6 +55,13 @@ class OrbisCompactionRepository(
                 }
                 val updated = baseline.copy(messageNodes = preview.replacementNodes,
                     compactionEpoch = nextEpoch, chatSuggestions = emptyList(), updateAt = Instant.now())
+                val remaining = updated.messageNodes.flatMap { it.messages }.map { it.id }.toSet()
+                historyCache.recordInTransaction(stored.id, stored.assistantId, stored.compactionEpoch, nextEpoch,
+                    baseline.messageNodes.map { it.id.toString() }, baseline.messageNodes.flatMap { node ->
+                        node.messages.filterNot { it.id in remaining }.map {
+                            me.rerere.rikkahub.data.orbis.history.RemovedHistoryMessage(node.id.toString(), it)
+                        }
+                    })
                 replacePage(updated)
                 OrbisMessageBatchCommit(updated, OrbisMessageBatchResult(preview.operation, preview.affectedCount))
             }
@@ -161,6 +169,7 @@ class OrbisCompactionRepository(
                 }
             }
         }
+        historyCache.compactInTransaction(expected, updated)
         replacePage(updated)
         OrbisCompactionCommit(updated, event.toModel(rollbackAvailable = true), branch?.id)
     }
@@ -186,6 +195,8 @@ class OrbisCompactionRepository(
         val updated = decodeConversationEntity(stored, restored).copy(
             compactionEpoch = Math.addExact(stored.compactionEpoch, 1L), chatSuggestions = emptyList(), updateAt = Instant.now(),
         )
+        // Rollback restores visible originals only; discarded deleted caches never resurrect.
+        historyCache.clearInTransaction(stored.id)
         replacePage(updated)
         dao.markRolledBack(event.id)
         dao.deleteRollback(stored.id) // Consumed. Older slots do not reappear.

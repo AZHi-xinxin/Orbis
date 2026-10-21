@@ -8,6 +8,7 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.CharBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -43,12 +44,16 @@ class PrivateVaultRepository(
         // A first read does not create an empty owner directory/lock in an emergency backup.
         // A concurrent creation can make this one response stale, but cannot disclose content.
         if (!storage.exists()) PrivateVaultStatus(PrivateVaultAvailability.ABSENT) else guarded {
-            when {
-                !storage.exists() -> PrivateVaultStatus(PrivateVaultAvailability.ABSENT)
-                storage.recoveryRequired() -> PrivateVaultStatus(PrivateVaultAvailability.RECOVERY_REQUIRED)
-                else -> opened { current -> PrivateVaultStatus(PrivateVaultAvailability.READY,
+            val envelope = storage.load().envelope
+            val recoveryStatus = PrivateVaultStatus(PrivateVaultAvailability.RECOVERY_REQUIRED,
+                hasRecoveryPassword = envelope.passwordRecovery != null, hasRecoveryCode = envelope.recoveryKey.isNotEmpty())
+            if (storage.recoveryRequired()) recoveryStatus else try {
+                opened { current -> PrivateVaultStatus(PrivateVaultAvailability.READY,
                     current.state.enabled, current.state.recoveryConfirmed, current.state.records.size,
-                    current.state.requests.count { effective(it) == PrivateVaultRequestStatus.PENDING }) }
+                    current.state.requests.count { effective(it) == PrivateVaultRequestStatus.PENDING },
+                    hasRecoveryPassword = envelope.passwordRecovery != null, hasRecoveryCode = envelope.recoveryKey.isNotEmpty()) }
+            } catch (error: PrivateVaultException) {
+                if (error.reasonCode in setOf("device_key_unavailable", "recovery_required")) recoveryStatus else throw error
             }
         }
     } catch (error: PrivateVaultException) {
@@ -66,6 +71,34 @@ class PrivateVaultRepository(
                 deviceKey = "", recoveryKey = "", encryptedState = "")
             createWithId(session, envelope, creation.recovery)
         }
+    }
+
+    /** Password stays at the human API boundary; it is neither retained nor sent to an AI tool. */
+    fun createWithRecoveryPassword(password: CharArray): Unit = withPassword(password, creating = true) { guarded {
+        if (storage.exists()) fail("already_exists")
+        val roomId = vaultId()
+        PrivateVaultCrypto.createSession(roomId).use { session ->
+            val envelope = VaultEnvelope(version = 2, vaultId = roomId, ownerDigest = storage.owner,
+                deviceKey = vaultBase64(session.wrapDeviceKey(protector)), recoveryKey = "", encryptedState = "",
+                passwordRecovery = session.createPasswordRecovery(password))
+            commitNewGeneration(session, envelope, audited(VaultState(epoch = vaultId()), "created"), emptyMap())
+        }
+    } }
+
+    /** Rewrap only: keep content, owner, enabled state, existing code and current grants unchanged. */
+    fun setRecoveryPassword(password: CharArray): Unit = withPassword(password, creating = true) { guarded { opened { current ->
+        val envelope = current.snapshot.envelope.copy(version = 2,
+            passwordRecovery = current.session.createPasswordRecovery(password))
+        commit(current, audited(current.state, "recovery_password_set"), envelope)
+    } } }
+
+    private fun withPassword(password: CharArray, creating: Boolean = false, action: () -> Unit) {
+        try {
+            if (creating && (password.size !in 8..128 || !Charsets.UTF_8.newEncoder().canEncode(CharBuffer.wrap(password)))) {
+                fail("password_invalid_length")
+            }
+            action()
+        } finally { password.fill('\u0000') }
     }
 
     private fun createWithId(session: PrivateVaultCrypto.Session, envelope: VaultEnvelope,
@@ -147,8 +180,15 @@ class PrivateVaultRepository(
         PrivateVaultAiSession(this, current.state.epoch, digest)
     } }
 
-    /** New random data key and recovery code, staged together. Old backups remain decryptable. */
-    fun issueRecoveryCode(): PrivateVaultCrypto.RecoveryMaterial = guarded { opened { current ->
+    /** Legacy rooms rotate the data key; password rooms preserve their independent password wrapper. */
+    fun issueRecoveryCode(): PrivateVaultCrypto.RecoveryMaterial = guarded { opened issue@ { current ->
+        if (current.snapshot.envelope.passwordRecovery != null) {
+            val recovery = current.session.createRecoveryMaterial()
+            val state = audited(current.state.copy(enabled = false, recoveryConfirmed = false, epoch = vaultId(),
+                requests = revokeAll(current.state.requests)), "recovery_rotated")
+            commit(current, state, current.snapshot.envelope.copy(recoveryKey = vaultBase64(recovery.wrappedKey)))
+            return@issue recovery
+        }
         val newVaultId = vaultId()
         val created = PrivateVaultCrypto.create(newVaultId)
         created.session.use { newSession ->
@@ -211,6 +251,18 @@ class PrivateVaultRepository(
     fun importEncrypted(input: InputStream, recoveryCode: String) = guarded {
         // First release has no destructive replace option. Existing rooms use recoverLocal instead.
         if (storage.exists()) fail("already_exists")
+        val imported = readBackup(input)
+        recover(imported.envelope, imported.stateId, recoveryCode) { version -> imported.records[version] ?: fail("missing_record") }
+    }
+
+    fun importEncryptedWithPassword(input: InputStream, password: CharArray): Unit = withPassword(password) { guarded {
+        if (storage.exists()) fail("already_exists")
+        val imported = readBackup(input)
+        recoverPassword(imported.envelope, imported.stateId, password) { version -> imported.records[version] ?: fail("missing_record") }
+    } }
+
+    private class ImportedVault(val envelope: VaultEnvelope, val stateId: String, val records: Map<String, ByteArray>)
+    private fun readBackup(input: InputStream): ImportedVault {
         val bytes = boundedVaultRead(input, MAX_BACKUP_BYTES)
         val imported = DataInputStream(ByteArrayInputStream(bytes))
         val magic = ByteArray(BACKUP_MAGIC.size).also(imported::readFully)
@@ -228,7 +280,7 @@ class PrivateVaultRepository(
             records[version] = readSized(imported, MAX_CIPHER_BYTES)
         }
         if (imported.read() != -1) fail("invalid_format")
-        recover(envelope, stateId, recoveryCode) { version -> records[version] ?: fail("missing_record") }
+        return ImportedVault(envelope, stateId, records)
     }
 
     fun recoverLocal(recoveryCode: String) = guarded {
@@ -236,23 +288,39 @@ class PrivateVaultRepository(
         recover(snapshot.envelope, snapshot.stateId, recoveryCode) { storage.record(snapshot.generation, it) }
     }
 
+    fun recoverLocalWithPassword(password: CharArray): Unit = withPassword(password) { guarded {
+        val snapshot = storage.load()
+        recoverPassword(snapshot.envelope, snapshot.stateId, password) { storage.record(snapshot.generation, it) }
+    } }
+
+    private fun recoverPassword(envelope: VaultEnvelope, stateId: String, password: CharArray, record: (String) -> ByteArray) {
+        val recovery = envelope.passwordRecovery ?: fail("password_not_configured")
+        PrivateVaultCrypto.recoverWithPassword(envelope.vaultId, password, recovery).use { session ->
+            recoverSession(session, envelope, stateId, record)
+        }
+    }
+
     private fun recover(envelope: VaultEnvelope, stateId: String, code: String, record: (String) -> ByteArray) {
         PrivateVaultCrypto.recover(envelope.vaultId, code, vaultUnbase64(envelope.recoveryKey, 66)).use { session ->
-            val state = decodeState(session, stateId, envelope)
-            val records = LinkedHashMap<String, ByteArray>()
-            // Validate every still-current record before changing CURRENT. Historical grants are
-            // revoked, so their obsolete versions need not be imported into the new generation.
-            state.records.forEach { ref ->
-                val ciphertext = record(ref.version)
-                decodeRecord(session, ref, ciphertext)
-                records[ref.version] = ciphertext
-            }
-            val reset = audited(state.copy(enabled = false, epoch = vaultId(), recoveryConfirmed = true,
-                requests = revokeAll(state.requests)), "offline_recovered")
-            val rebound = envelope.copy(deviceKey = vaultBase64(session.wrapDeviceKey(protector)))
-            commitNewGeneration(session, rebound, reset, records)
-            storage.clearRecoveryMarker()
+            recoverSession(session, envelope, stateId, record)
         }
+    }
+
+    private fun recoverSession(session: PrivateVaultCrypto.Session, envelope: VaultEnvelope, stateId: String,
+                               record: (String) -> ByteArray) {
+        val state = decodeState(session, stateId, envelope)
+        val records = LinkedHashMap<String, ByteArray>()
+        // Authenticate every current record before the sole CURRENT commit point.
+        state.records.forEach { ref ->
+            val ciphertext = record(ref.version)
+            decodeRecord(session, ref, ciphertext)
+            records[ref.version] = ciphertext
+        }
+        val reset = audited(state.copy(enabled = false, epoch = vaultId(), recoveryConfirmed = true,
+            requests = revokeAll(state.requests)), "offline_recovered")
+        val rebound = envelope.copy(deviceKey = vaultBase64(session.wrapDeviceKey(protector)))
+        commitNewGeneration(session, rebound, reset, records)
+        storage.clearRecoveryMarker()
     }
 
     internal fun aiList(token: PrivateVaultAiSession): List<PrivateVaultRecordInfo> = withAi(token) { current ->

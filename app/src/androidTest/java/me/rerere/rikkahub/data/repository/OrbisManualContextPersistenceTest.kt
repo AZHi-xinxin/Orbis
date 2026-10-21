@@ -2,10 +2,16 @@ package me.rerere.rikkahub.data.repository
 
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -14,6 +20,12 @@ import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.model.*
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointStore
+import me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal
+import me.rerere.rikkahub.service.HumanContinuationContextStore
+import me.rerere.rikkahub.service.HumanContinuationLane
+import me.rerere.rikkahub.service.commitManualContinuation
+import me.rerere.rikkahub.service.sameDurableGenerationSnapshot
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +63,51 @@ class OrbisManualContextPersistenceTest {
         return f.repository.commitManual(c, p.replacementNodes, p.metadata, p.expectedFingerprint)
     }
     private fun assertSameStored(a: Conversation, b: Conversation) = assertEquals(manualContextFingerprint(a), manualContextFingerprint(b))
+
+    @Test fun manualContinuationCommitsDisplayedTailAndBothAnchorsWithRealRoom() = runBlocking {
+        Fixture().use { f ->
+            f.save(original(), true)
+            val id = Uuid.parse(f.db.conversationDao().getAllIds().single())
+            val baseline = f.load(id)
+            val displayed = baseline.copy(messageNodes = baseline.messageNodes + UIMessage.assistant("synthetic unsaved continuation").toMessageNode())
+            val bytes = mutableMapOf<Uuid, ByteArray>()
+            val raw = object : GenerationCheckpointStore {
+                override fun read(conversationId: Uuid) = bytes[conversationId]?.copyOf()
+                override fun writeAtomic(conversationId: Uuid, value: ByteArray) { bytes[conversationId] = value.copyOf() }
+                override fun delete(conversationId: Uuid) { bytes.remove(conversationId) }
+            }
+            val journal = HumanContinuationJournal(raw)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                lateinit var lane: HumanContinuationLane
+                val storage = HumanContinuationContextStore(baseline, baseline, Uuid.random(), Mutex(), journal,
+                    read = { f.load(id) }, proveBaseline = { _, _ -> false },
+                    commit = { expected, next -> f.db.withTransaction {
+                        if (sameDurableGenerationSnapshot(expected, f.load(id))) {
+                            f.save(next.copy(updateAt = next.updateAt.plusSeconds(1))); f.load(id)
+                        } else null
+                    } }, canWrite = { true }, project = { lane.projectContext(it) }, latest = { lane.state.value },
+                    onStored = {}, onRebased = { a, b -> lane.acceptCompaction(a, b) }, retireOldJournal = {})
+                // Disable asynchronous observers: exercise the production transactional operation
+                // deterministically, then explicitly persist/checkpoint/recreate the journal below.
+                lane = HumanContinuationLane(baseline, scope, { false }, { throw it }, initial = displayed, contextStore = storage)
+                val preview = prepareOrbisManualContext(displayed, 3)
+                val archive = commitManualContinuation(lane, preview, {}) { durable ->
+                    val result = f.repository.commitManual(durable, preview.replacementNodes, preview.metadata, manualContextFingerprint(durable))
+                    result.commit.conversation to result.archiveId
+                }
+                val persisted = f.load(id)
+                assertEquals(1L, persisted.compactionEpoch)
+                assertEquals(persisted.messageNodes, lane.state.value.messageNodes)
+                assertEquals(displayed.currentMessages.map { it.parts }, f.load(archive).currentMessages.map { it.parts })
+                storage.checkpoint(lane.state.value)
+                assertNull(HumanContinuationJournal(raw).recover(persisted))
+                val next = lane.state.value.copy(messageNodes = lane.state.value.messageNodes + UIMessage.user("synthetic next turn").toMessageNode())
+                assertTrue(storage.save(next))
+                assertEquals("synthetic next turn", f.load(id).currentMessages.last().toText())
+            } finally { scope.cancel() }
+        }
+    }
 
     @Test fun archiveAndCompactedWindowCommitTogetherWithIndependentIdentities() = runBlocking {
         Fixture().use { f ->

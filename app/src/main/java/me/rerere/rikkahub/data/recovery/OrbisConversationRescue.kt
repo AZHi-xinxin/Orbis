@@ -20,6 +20,7 @@ import me.rerere.rikkahub.data.db.entity.ConversationEntity
 import me.rerere.rikkahub.data.db.entity.MessageNodeEntity
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.sync.ConversationRecoveryBackup
 import me.rerere.rikkahub.utils.JsonInstant
 import java.io.File
 import java.io.FileOutputStream
@@ -53,7 +54,7 @@ class OrbisConversationRescue(
     private val directory = File(context.noBackupFilesDir, "orbis-conversation-rescue-v1")
     private val store = AndroidGenerationCheckpointStore.create(context.noBackupFilesDir)
     private val journal = GenerationCheckpointJournal(store)
-    private val checkpointDirectory = File(context.noBackupFilesDir, "orbis-generation-journal-v1")
+    private val recoveryRoot = context.noBackupFilesDir
 
     suspend fun windows(query: String = "", offset: Int = 0, limit: Int = 50): List<RescueWindow> = withContext(Dispatchers.IO) {
         require(query.length <= 200 && offset >= 0 && limit in 1..100)
@@ -68,8 +69,8 @@ class OrbisConversationRescue(
         // COUNT/byte lengths do not decode JSON or put the raw cells into a CursorWindow.
         val headerBytes = checkNotNull(db.conversationDao().getRescueHeaderBytes(id.toString()))
         val raw = db.messageNodeDao().getRescueRawSize(id.toString())
-        val checkpointBytes = listOf(File(checkpointDirectory, "$id.json"), File(checkpointDirectory, "$id.json.bak"))
-            .maxOf { it.length() }
+        val checkpointBytes = ConversationRecoveryBackup.committedSize(recoveryRoot, ConversationRecoveryBackup.GENERATION, id.toString()) +
+            ConversationRecoveryBackup.committedSize(recoveryRoot, ConversationRecoveryBackup.CONTINUATION, id.toString())
         RescueAdmission.requireSafe(raw.nodeCount, raw.totalBytes, raw.largestRowBytes,
             headerBytes, checkpointBytes, heapHeadroom())
         val header = checkNotNull(db.conversationDao().getConversationById(id.toString()))
@@ -90,7 +91,9 @@ class OrbisConversationRescue(
     suspend fun inspect(id: Uuid): RescueInspection = withContext(Dispatchers.IO) {
         db.withTransaction {
             val current = snapshot(id)
-            val bytes = try { store.read(id) } catch (_: Exception) { null }
+            // Preserve bounded raw copies, even malformed JSON. A read failure must not silently
+            // produce a diagnostic ZIP that omits the only newer human conversation tail.
+            val bytes = ConversationRecoveryBackup.readCommitted(recoveryRoot, ConversationRecoveryBackup.GENERATION, id.toString())
             // Copy the ORIGINAL raw cells first, even if JSON decoding subsequently fails.
             val copy = preserve(current, bytes, "before")
             diagnose(current, bytes, copy)
@@ -189,6 +192,11 @@ class OrbisConversationRescue(
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
     private fun preserve(snapshot: Snapshot, checkpoint: ByteArray?, stage: String): File {
+        val continuation = ConversationRecoveryBackup.readCommitted(recoveryRoot,
+            ConversationRecoveryBackup.CONTINUATION, snapshot.header.id)
+        // A tail may have grown after metadata admission. Refuse without truncating either copy.
+        if ((checkpoint?.size?.toLong() ?: 0) + (continuation?.size?.toLong() ?: 0) > RescueAdmission.MAX_CHECKPOINT_BYTES)
+            throw RescueCapacityException("恢复副本超过本机自助检查范围，未执行修复；请先保存完整本地备份，原记录仍保留。")
         check(directory.isDirectory || directory.mkdirs())
         syncDirectory(checkNotNull(directory.parentFile))
         val file = File(directory, "${System.currentTimeMillis()}-${Uuid.random()}-$stage.zip")
@@ -204,8 +212,10 @@ class OrbisConversationRescue(
                 snapshot.rows.forEach { zip.write(exactRescueJsonBytes(rowJson(it).toString())); zip.write(10) }
                 zip.closeEntry()
                 checkpoint?.let { entry("generation-checkpoint.json", it) }
+                continuation?.let { entry("human-continuation-checkpoint.json", it) }
                 entry("README.txt", ("Orbis 私密诊断副本 / $stage\n包含此窗口的聊天、思考和工具记录，可能包含敏感信息。" +
-                    "不是一键整库恢复包，不要公开上传。原始字段按原样保存。\nSHA256: ${fingerprint(snapshot)}\n").toByteArray())
+                    "不是一键整库恢复包，不要公开上传。原始字段和存在的两类恢复副本按原样保存；存在不代表已安全合并。" +
+                    "\nSHA256: ${fingerprint(snapshot)}\n").toByteArray())
                 zip.finish(); zip.flush(); output.fd.sync()
             }
             // CRC verification catches incomplete/private-storage writes before any repair.

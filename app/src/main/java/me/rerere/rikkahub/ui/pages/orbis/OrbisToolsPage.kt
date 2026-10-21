@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AiBrain01
@@ -46,7 +47,12 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
     val selected = ownerScope?.assistant
     var showGames by rememberSaveable { mutableStateOf(false) }
     var showStickers by rememberSaveable { mutableStateOf(false) }
+    var showPet by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showStudy by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    val activityScope = rememberCoroutineScope()
+    val activitySettings = org.koin.compose.koinInject<me.rerere.rikkahub.data.datastore.SettingsStore>()
     var showCalls by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showConnections by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showGallery by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showPrivateRoom by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var companionSpace by rememberSaveable(selected?.id?.toString()) { mutableStateOf<CompanionSpaceSection?>(null) }
@@ -109,10 +115,13 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                                                 val enabled = item.destination !in setOf(OrbisToolDestination.LOCAL_CAPABILITIES,
                                                     OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM,
                                                     OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
-                                                    OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.CHARACTER, OrbisToolDestination.IMAGE_WORKSHOP) || selected != null
+                                                    OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.CHARACTER, OrbisToolDestination.IMAGE_WORKSHOP,
+                                                    OrbisToolDestination.PET, OrbisToolDestination.STUDY) || selected != null
                                                 val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
                                                 ToolsTile(tile, enabled, Modifier.weight(1f)) {
                                                     when (item.destination) {
+                                                        OrbisToolDestination.PET -> showPet = true
+                                                        OrbisToolDestination.STUDY -> showStudy = true
                                                         OrbisToolDestination.WORKSPACE -> navigator.navigate(Screen.Workspaces)
                                                         OrbisToolDestination.ATTACHMENTS -> navigator.navigate(Screen.SettingFiles)
                                                         OrbisToolDestination.LOCAL_CAPABILITIES -> selected?.id?.toString()?.let {
@@ -143,6 +152,10 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                     }
                 }
                 item("permissions") {
+                    OutlinedButton(onClick = { showConnections = true }, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
+                        val pending = settings.connectionProposals.count { it.owner == selected?.id?.toString() && it.status == "pending" }
+                        Text(if(pending > 0) "AI 连接建议 · $pending 条待查看" else "AI 连接建议 · 原生配置与以后允许")
+                    }
                     OutlinedButton(onClick = { showCalls = true }, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
                         Text("通话记录 · 摘要与完整文字记录")
                     }
@@ -155,6 +168,15 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
         }
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
         if (selected != null) key(selected.id) {
+            if (showConnections) OrbisConnectionProposals(selected.id.toString(), onClose = { showConnections = false })
+            if (showPet) OrbisPetPage(selected.id.toString(), selected.name, selected.orbisPetEnabled,
+                onToggle = { value -> activityScope.launch { activitySettings.update { current ->
+                    current.copy(assistants = current.assistants.map { if(it.id == selected.id) it.copy(orbisPetEnabled = value) else it })
+                } } }, onClose = { showPet = false }, conversationId = conversationId)
+            if (showStudy) OrbisStudyPage(selected.id.toString(), selected.name, selected.orbisStudyEnabled,
+                onToggle = { value -> activityScope.launch { activitySettings.update { current ->
+                    current.copy(assistants = current.assistants.map { if(it.id == selected.id) it.copy(orbisStudyEnabled = value) else it })
+                } } }, onClose = { showStudy = false })
             if (companionSpace != null) OrbisCompanionSpacesPage(selected.id.toString(), selected.name,
                 companionSpace!!, onClose = { companionSpace = null })
             if (showPrivateRoom) OrbisPrivateRoomPage(selected.id.toString(), selected.name,

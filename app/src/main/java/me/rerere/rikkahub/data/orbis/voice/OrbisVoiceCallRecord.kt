@@ -49,6 +49,7 @@ data class OrbisVoiceCallRecord(
     /** A model's written account, never substituted for the captured source below. */
     val modelTranscript: String? = null,
     val transcript: List<OrbisVoiceTranscriptEntry> = emptyList(),
+    val acousticEvents: List<CallAcousticEvent> = emptyList(),
     val sourceMessageIds: List<String> = emptyList(),
     /** Exact serialized message nodes, including tools and alternatives, owned by ChatService. */
     val sourceNodesJson: String? = null,

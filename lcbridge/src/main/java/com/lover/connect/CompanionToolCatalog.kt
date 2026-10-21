@@ -3,7 +3,15 @@ package com.lover.connect
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Single unchanged tool schema source for the legacy MCP and native host. No runtime access. */
+/** Persisted history may carry these names, but new tool catalogs use Orbis names only. */
+fun canonicalCompanionToolName(name: String): String = when (name) {
+    "get_l_service_status" -> "get_runtime_status"
+    "focus_rikka" -> "focus_orbis"
+    "redirect_to_rikka" -> "redirect_to_orbis"
+    else -> name
+}
+
+/** Single schema source for the legacy MCP and native host. No runtime access. */
 object CompanionToolCatalog {
     fun json(): JSONArray = JSONArray().apply {
         put(JSONObject().apply {
@@ -157,8 +165,8 @@ object CompanionToolCatalog {
             })
         })
         put(JSONObject().apply {
-            put("name", "focus_rikka")
-            put("description", "Redirect only explicitly listed entertainment apps to the current Orbis host. Legacy tool name retained for compatibility. Vivo reports unsupported and writes nothing. Requires manual approval.")
+            put("name", "focus_orbis")
+            put("description", "配置指定娱乐应用的持续返回 Orbis 规则；成功仅表示规则已保存，不表示当前画面已经切换。切换依赖后续无障碍窗口事件。要立即返回当前聊天请用 orbis_return_to_chat。Vivo被动兼容模式不支持，不写入。")
             put("inputSchema", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {
@@ -169,8 +177,8 @@ object CompanionToolCatalog {
             })
         })
         put(JSONObject().apply {
-            put("name", "redirect_to_rikka")
-            put("description", "Redirect selected safe apps to the current Orbis host during an HH:mm-HH:mm window. Legacy tool name retained. Vivo reports unsupported and writes nothing. Empty list disables it. Requires manual approval.")
+            put("name", "redirect_to_orbis")
+            put("description", "配置指定应用在 HH:mm-HH:mm 时间段返回 Orbis 的规则；成功仅表示规则已保存，不表示当前画面已切换。空列表关闭。要立即返回当前聊天请用 orbis_return_to_chat。Vivo被动兼容模式不支持，不写入。")
             put("inputSchema", JSONObject().apply {
                 put("type", "object")
                 put("properties", JSONObject().apply {

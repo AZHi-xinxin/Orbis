@@ -75,9 +75,10 @@ class CompanionNativeTools internal constructor(
 
     fun authorizationRevision(name: String): String = runtime.authorizationRevision(name)
 
-    suspend fun execute(name: String, argumentsJson: String, expectedAuthorizationRevision: String? = null): CompanionToolResult {
-        // A read-only compatibility alias is executable but is never advertised to new model turns.
-        val descriptor = catalog().firstOrNull { it.name == (if (name == "get_l_service_status") "get_runtime_status" else name) }
+    suspend fun execute(requestedName: String, argumentsJson: String, expectedAuthorizationRevision: String? = null): CompanionToolResult {
+        // Legacy call names remain executable, never advertised on new turns.
+        val name = canonicalCompanionToolName(requestedName)
+        val descriptor = catalog().firstOrNull { it.name == name }
             ?: return failure("unknown_tool")
         val args = try {
             require(argumentsJson.toByteArray(Charsets.UTF_8).size <= 256 * 1024)
@@ -117,7 +118,7 @@ class CompanionNativeTools internal constructor(
 
     companion object {
         private val writes = setOf("send_notification", "save_memory", "set_alarm", "cancel_alarm", "lock_screen",
-            "play_music", "take_screenshot", "lock_app", "unlock_app", "focus_rikka", "redirect_to_rikka",
+            "play_music", "take_screenshot", "lock_app", "unlock_app", "focus_orbis", "redirect_to_orbis",
             "configure_sentinel", "test_sentinel")
         fun descriptors(): List<CompanionToolDescriptor> {
             val array = CompanionToolCatalog.json()

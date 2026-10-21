@@ -113,12 +113,15 @@ internal class HumanContinuationLane(
     private var workshopReservation: WorkshopReturnReservation? = null
     private var sentinelReservation: SentinelReservation? = null
     private val contextRebases = mutableListOf<ContinuationContextRebase>()
+    private val manualMetadataRefreshes = mutableListOf<ContinuationMetadataRefresh>()
+    private var manualContextInProgress = false
     private val streamEnrichments = mutableListOf<me.rerere.rikkahub.data.ai.checkpoint.ContinuationStreamEnrichment>()
     private val selectedBranches = mutableMapOf<kotlin.uuid.Uuid, kotlin.uuid.Uuid>()
 
     /** Selecting an existing alternative is not a tool retry or a history-body edit. */
     @Synchronized fun selectBranch(nodeId: kotlin.uuid.Uuid, index: Int) {
         check(!retired)
+        check(!manualContextInProgress) { "正在整理上下文，请完成后再切换回复；新消息仍可发送。" }
         val node = state.value.messageNodes.firstOrNull { it.id == nodeId } ?: error("回复已不存在。")
         require(index in node.messages.indices)
         selectedBranches[nodeId] = node.messages[index].id
@@ -146,6 +149,7 @@ internal class HumanContinuationLane(
             if (projected.compactionEpoch == rebase.fromEpoch)
                 projected = rebase.project(projected) ?: return null
         }
+        for (refresh in manualMetadataRefreshes) projected = refresh.project(projected)
         return projected.takeIf { it.compactionEpoch == state.value.compactionEpoch }?.let(::applyBranchSelection)
     }
 
@@ -173,6 +177,43 @@ internal class HumanContinuationLane(
             "活动消息已变化，本次未整理；请基于最新上下文重试。"
         }
         return snapshot
+    }
+
+    @Synchronized fun captureManualContext(preview: me.rerere.rikkahub.data.model.OrbisManualContextPreview): Conversation {
+        check(!retired && !manualContextInProgress && job.value == null && activeJobs.none { !it.isCompleted } &&
+            workshopReservation == null && sentinelReservation == null && workshopReturns.isEmpty()) {
+            "请等当前回复或工具结束，再重新预览手动整理。"
+        }
+        val snapshot = state.value
+        check(snapshot.id == preview.conversationId && snapshot.compactionEpoch == preview.compactionEpoch &&
+            me.rerere.rikkahub.data.model.manualContextFingerprint(snapshot) == preview.expectedFingerprint) {
+            "活动消息已变化，本次未整理，请重新预览。"
+        }
+        // Keep same-node edits outside the transaction: append-only fresh input can be
+        // rebased, but a newly generated alternative inside the captured prefix cannot.
+        manualContextInProgress = true
+        return snapshot
+    }
+
+    @Synchronized fun releaseManualContext() {
+        manualContextInProgress = false
+        notifyIdleSaved()
+    }
+
+    /** The durable page was verified by the context store. Refresh headers only after
+     * rejecting its stale preview; never replace messages appended in the meantime.
+     */
+    @Synchronized fun refreshManualContextMetadata(source: Conversation, durable: Conversation) {
+        check(manualContextInProgress)
+        if (!sameDurableGenerationSnapshot(source, durable)) return
+        val refresh = ContinuationMetadataRefresh(source, durable)
+        val current = state.value
+        val updated = refresh.project(current)
+        if (updated === current) return
+        manualMetadataRefreshes += refresh
+        state.value = updated
+        revision++
+        requestSave()
     }
 
     /** A committed result is adopted even if a new human turn arrived while Room was writing.
@@ -329,7 +370,7 @@ internal class HumanContinuationLane(
     /** The caller separately verifies disk history, no journal and no old session job while
      * holding the history edit mutex. This is a CAS handoff, never a queue resume or replay.
      */
-    private fun idleAndSaved(allowPendingApprovals: Boolean = false): Boolean = !retired && savedRevision == revision && persistenceJob == null && checkpointJob == null &&
+    private fun idleAndSaved(allowPendingApprovals: Boolean = false): Boolean = !retired && !manualContextInProgress && savedRevision == revision && persistenceJob == null && checkpointJob == null &&
         activeJobs.none { !it.isCompleted } && job.value == null && workshopReservation == null &&
         sentinelReservation == null && workshopReturns.isEmpty() &&
         state.value.currentMessages.none { it.getTools().any { tool ->
@@ -401,7 +442,9 @@ internal class HumanContinuationLane(
     /** A button-local refusal changes neither the owner nor the queue; new sends remain independent. */
     @Synchronized fun regenerate(message: UIMessage,
         generate: suspend (Conversation, Long, (Conversation) -> Unit) -> Unit,
-    ): String? = when (val plan = prepareHumanContinuationRegeneration(state.value, message)) {
+    ): String? = if (manualContextInProgress) {
+        "正在整理上下文，请完成后再重新生成；新消息仍可发送。"
+    } else when (val plan = prepareHumanContinuationRegeneration(state.value, message)) {
         is HumanContinuationRegeneration.Blocked -> plan.notice
         is HumanContinuationRegeneration.Ready -> {
             plan.original.messageNodes.drop(plan.request.messageNodes.size).forEach { selectedBranches.remove(it.id) }

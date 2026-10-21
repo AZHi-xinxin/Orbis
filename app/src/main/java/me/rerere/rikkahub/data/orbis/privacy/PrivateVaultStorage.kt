@@ -92,13 +92,30 @@ internal fun readVaultFile(file: File, maximum: Int): ByteArray {
 }
 
 internal fun validateVaultEnvelope(envelope: VaultEnvelope, owner: String) {
-    if (envelope.version != 1 || !validVaultId(envelope.vaultId) || envelope.ownerDigest != owner ||
+    if (envelope.version !in 1..2 || !validVaultId(envelope.vaultId) || envelope.ownerDigest != owner ||
         !owner.matches(Regex("[0-9a-f]{64}"))) throw PrivateVaultException("invalid_format")
+    if ((envelope.version == 1 && envelope.passwordRecovery != null) ||
+        (envelope.version == 2 && envelope.passwordRecovery == null) ||
+        (envelope.version == 1 && envelope.recoveryKey.isEmpty())) throw PrivateVaultException("invalid_format")
     if (envelope.deviceKey.isNotEmpty()) vaultUnbase64(envelope.deviceKey, 4096)
-    val recovery = vaultUnbase64(envelope.recoveryKey, 66)
-    if (recovery.size != 66 || !vaultCipherHeader(recovery, 1)) throw PrivateVaultException("invalid_format")
+    if (envelope.recoveryKey.isNotEmpty()) {
+        val recovery = vaultUnbase64(envelope.recoveryKey, 66)
+        if (recovery.size != 66 || !vaultCipherHeader(recovery, 1)) throw PrivateVaultException("invalid_format")
+    }
+    envelope.passwordRecovery?.let(::validatePasswordRecovery)
     val state = vaultUnbase64(envelope.encryptedState, MAX_STATE_BYTES + 34)
     if (!vaultCipherHeader(state, 2)) throw PrivateVaultException("invalid_format")
+}
+
+/** Reject attacker-controlled KDF work factors and allocation sizes before invoking the KDF. */
+internal fun validatePasswordRecovery(recovery: VaultPasswordRecovery) {
+    if (recovery.version != 1 || recovery.kdf != "PBKDF2-HMAC-SHA256" || recovery.iterations != 600_000) {
+        throw PrivateVaultException("invalid_format")
+    }
+    val salt = vaultUnbase64(recovery.salt, 32)
+    if (salt.size !in 16..32) throw PrivateVaultException("invalid_format")
+    val wrapped = vaultUnbase64(recovery.wrappedKey, 66)
+    if (wrapped.size != 66 || !vaultCipherHeader(wrapped, 3)) throw PrivateVaultException("invalid_format")
 }
 
 internal fun vaultCipherHeader(bytes: ByteArray, kind: Int) = bytes.size >= 34 &&

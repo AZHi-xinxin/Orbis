@@ -47,7 +47,18 @@ class ConversationRepository(
     private val filesManager: FilesManager,
     private val messageFtsManager: MessageFtsManager,
     private val voiceCalls: me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository? = null,
+    private val onMessagesDeleted: (Long) -> Unit = {},
 ) {
+    private val historyCache = me.rerere.rikkahub.data.orbis.history.ConversationHistoryCache(database)
+
+    internal suspend fun listRemovedHistory(current: Conversation, limit: Int, offset: Int) =
+        historyCache.listRemoved(current, limit, offset)
+
+    internal suspend fun readRemovedHistory(current: Conversation, messageId: String) =
+        historyCache.readRemoved(current, messageId)
+
+    internal suspend fun verifyCurrentHistoryScope(current: Conversation) = historyCache.verifyCurrent(current)
+
     companion object {
         private const val PAGE_SIZE = 20
         private const val INITIAL_LOAD_SIZE = 40
@@ -56,6 +67,9 @@ class ConversationRepository(
     suspend fun hasFileReference(fileUrl: String): Boolean =
         messageNodeDAO.hasFileReference(JsonInstant.encodeToString(fileUrl)) ||
             database.orbisCompactionDao().hasFileReference(JsonInstant.encodeToString(fileUrl)) || hasVoiceFileReference(fileUrl)
+
+    suspend fun observationWindows(owner: String, limit: Int, offset: Int) =
+        conversationDAO.observationWindows(owner, limit.coerceIn(1, 101), offset.coerceAtLeast(0))
 
     suspend fun hasCompactionFileReference(fileUrl: String): Boolean =
         database.orbisCompactionDao().hasFileReference(JsonInstant.encodeToString(fileUrl)) || hasVoiceFileReference(fileUrl)
@@ -400,7 +414,8 @@ class ConversationRepository(
                 }
             )
             // Preserve byte-identical historical rows instead of deleting and rebinding them.
-            saveMessageNodes(conversation.id.toString(), nodes)
+            saveMessageNodes(conversation.id.toString(), nodes,
+                cacheRemovals = stored?.assistantId == conversation.assistantId.toString())
             // The search index shares the page transaction: a delayed pre-compaction index update
             // must never re-expose the old page after the compacted page has committed.
             messageFtsManager.indexConversationInTransaction(conversation.copy(messageNodes = nodes))
@@ -441,7 +456,7 @@ class ConversationRepository(
         val next = current.copy(messageNodes = nodes, compactionEpoch = current.compactionEpoch + 1,
             chatSuggestions = emptyList(), updateAt = Instant.now())
         conversationDAO.update(conversationToConversationEntity(next))
-        saveMessageNodes(stored.id, nodes)
+        saveMessageNodes(stored.id, nodes, cacheRemovals = false)
         messageFtsManager.indexConversationInTransaction(next)
         next
     }
@@ -532,14 +547,33 @@ class ConversationRepository(
             }
             archiveOffset += page.size
         }
-        database.withTransaction {
+        val deletedMessageCount = database.withTransaction {
+            val stored = conversationDAO.getConversationById(conversation.id.toString())
+            // Count the exact stored alternatives under the same transaction as
+            // DELETE. A stale UI snapshot may still contain an already-deleted
+            // message, or omit a newer one; it is only useful for file cleanup.
+            var count = 0L
+            if (stored != null && !decodeConversationEntity(stored, emptyList()).isConsultation) {
+                var offset = 0
+                while (true) {
+                    val page = messageNodeDAO.getNodesOfConversationPaged(stored.id, 64, offset)
+                    if (page.isEmpty()) break
+                    page.forEach { node ->
+                        count += me.rerere.rikkahub.data.orbis.observation.observedMessageCount(
+                            JsonInstant.decodeFromString<List<UIMessage>>(node.messages))
+                    }
+                    offset += page.size
+                }
+            }
             database.openHelper.writableDatabase.execSQL("DELETE FROM message_fts WHERE conversation_id = ?",
                 arrayOf(conversation.id.toString()))
             // message_node 会通过 CASCADE 自动删除
             conversationDAO.delete(
                 conversationToConversationEntity(conversation)
             )
+            count
         }
+        if (deletedMessageCount > 0L) runCatching { onMessagesDeleted(deletedMessageCount) }
         val candidates = (fullConversation.files.map { it.toString() } + archivedFiles).distinct()
         filesManager.deleteChatFiles(candidates.filterNot { hasFileReference(it) }.map { android.net.Uri.parse(it) })
     }
@@ -716,10 +750,31 @@ class ConversationRepository(
         throw IllegalStateException("对话加载失败，原记录未改动。请返回，到「数据与本地备份 → 会话自助恢复」检查；不要清除数据或卸载。")
     }
 
-    private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>) {
+    private suspend fun saveMessageNodes(conversationId: String, nodes: List<MessageNode>, cacheRemovals: Boolean = true) {
         val ids = nodes.map { it.id.toString() }.toSet()
         check(ids.size == nodes.size) { "duplicate_message_node" }
         val previous = messageNodeDAO.getNodeStorageMetadataOfConversation(conversationId).associateBy { it.id }
+        val owner = conversationDAO.getConversationById(conversationId)
+        val cacheEnabled = cacheRemovals && owner != null && owner.consultationBinding.isBlank()
+        if (owner != null) historyCache.alignInTransaction(conversationId, owner.assistantId,
+            owner.compactionEpoch, owner.consultationBinding.isNotBlank())
+        val removed = mutableListOf<me.rerere.rikkahub.data.orbis.history.RemovedHistoryMessage>()
+        suspend fun rememberRemoved(nodeId: String, remaining: Set<Uuid>) {
+            if (!cacheEnabled) return
+            val metadata = previous[nodeId] ?: return
+            val json = if (metadata.messagesBytes <= MessageNodeBudget.MAX_NODE_BYTES) {
+                boundedNodeForEdit(conversationId, nodeId)?.messages ?: return
+            } else readLegacyHistoryNode(conversationId, nodeId, metadata.messagesBytes)
+            val decoded = try {
+                JsonInstant.decodeFromString<List<UIMessage>>(json)
+            } catch (_: Exception) {
+                // A malformed historical payload can be echoed in a decoder exception.
+                // Keep the page unchanged and surface a fixed code without its private cause.
+                error("history_cache_source_decode_failed")
+            }
+            decoded.filterNot { it.id in remaining }
+                .forEach { removed += me.rerere.rikkahub.data.orbis.history.RemovedHistoryMessage(nodeId, it) }
+        }
         // Encode and persist one bounded cell at a time, not an additional copy of the full page.
         nodes.forEachIndexed { index, node ->
             val old = previous[node.id.toString()]
@@ -735,6 +790,7 @@ class ConversationRepository(
             }
             if (old != null && old.messagesBytes > MessageNodeBudget.MAX_NODE_BYTES)
                 throw MessageNodeCapacityException("legacy_message_node_changed")
+            if (old != null) rememberRemoved(old.id, node.messages.map { it.id }.toSet())
             messageNodeDAO.insert(MessageNodeEntity(
                 id = node.id.toString(),
                 conversationId = conversationId,
@@ -743,7 +799,36 @@ class ConversationRepository(
                 selectIndex = node.selectIndex
             ))
         }
-        previous.keys.filterNot { it in ids }.forEach { messageNodeDAO.deleteById(it) }
+        previous.keys.filterNot { it in ids }.forEach {
+            rememberRemoved(it, emptySet())
+            messageNodeDAO.deleteById(it)
+        }
+        if (owner != null && removed.isNotEmpty()) historyCache.recordInTransaction(
+            conversationId, owner.assistantId, owner.compactionEpoch, owner.compactionEpoch,
+            previous.values.sortedBy { it.nodeIndex }.map { it.id }, removed)
+    }
+
+    /** Deleting a legacy node must not require loading its oversized cell into CursorWindow. */
+    private fun readLegacyHistoryNode(conversationId: String, nodeId: String, size: Long): String {
+        check(database.inTransaction())
+        if (size !in 1..MAX_LEGACY_NODE_COMPARISON_BYTES.toLong())
+            throw MessageNodeCapacityException("legacy_history_cache_limit")
+        val bytes = ByteArray(size.toInt())
+        var offset = 0
+        while (offset < bytes.size) {
+            val count = minOf(64 * 1024, bytes.size - offset)
+            database.openHelper.readableDatabase.query(
+                "SELECT substr(CAST(messages AS BLOB), ?, ?) FROM message_node WHERE conversation_id=? AND id=?",
+                arrayOf<Any>(offset + 1, count, conversationId, nodeId),
+            ).use { cursor ->
+                check(cursor.moveToFirst()) { "history_cache_source_missing" }
+                val chunk = cursor.getBlob(0)
+                check(chunk.size == count && !cursor.moveToNext()) { "history_cache_source_changed" }
+                chunk.copyInto(bytes, offset)
+            }
+            offset += count
+        }
+        return bytes.toString(Charsets.UTF_8)
     }
 
     private suspend fun boundedNodeForEdit(conversationId: String, nodeId: String): MessageNodeEntity? {

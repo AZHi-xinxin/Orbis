@@ -131,16 +131,18 @@ class OrbisAtlasBootstrapStore internal constructor(private val persistence: Orb
         atlas.clear()
     }
 
-    private suspend fun operation(action: suspend () -> Unit) = mutex.withLock {
+    private suspend fun operation(action: suspend () -> Unit): Boolean = mutex.withLock {
         if (!state.value.loaded) loadLocked()
-        if (state.value.phase == OrbisAtlasBootstrapPhase.UNREADABLE) return@withLock
+        if (state.value.phase == OrbisAtlasBootstrapPhase.UNREADABLE) return@withLock false
         mutableState.value = state.value.copy(busy = true, error = null)
-        try { action(); publish() }
+        try { action(); publish(); true }
         catch (cancelled: CancellationException) {
             publish(AtlasBootstrapException("unknown").message)
             throw cancelled
-        } catch (error: AtlasBootstrapException) { publish(error.message)
-        } catch (_: Exception) { publish(AtlasBootstrapException("storage").message) }
+        } catch (error: OrbisConnectionInputException) {
+            publish(AtlasBootstrapException(error.code).message); false
+        } catch (error: AtlasBootstrapException) { publish(error.message); false
+        } catch (_: Exception) { publish(AtlasBootstrapException("storage").message); false }
     }
 
     private fun source(id: String, providers: () -> List<ProviderSetting>): AtlasBootstrapSource =

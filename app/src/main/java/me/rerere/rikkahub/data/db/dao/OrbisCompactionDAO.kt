@@ -9,6 +9,11 @@ import me.rerere.rikkahub.data.db.entity.OrbisCompactionRollbackEntity
 
 @Dao
 interface OrbisCompactionDAO {
+    @Query("SELECT COUNT(*) FROM orbis_compaction_event WHERE assistant_id=:owner AND conversation_id=:window AND status='committed'")
+    suspend fun observationCount(owner: String, window: String): Long
+    @Query("SELECT e.* FROM orbis_compaction_event e JOIN conversationentity c ON c.id=e.conversation_id AND c.assistant_id=:owner WHERE e.assistant_id=:owner AND e.status='committed' ORDER BY e.created_at DESC,e.id DESC LIMIT :limit OFFSET :offset")
+    suspend fun semanticEvents(owner: String, limit: Int, offset: Int): List<OrbisCompactionEventEntity>
+
     @Insert suspend fun insertOriginalArchive(archive: me.rerere.rikkahub.data.db.entity.OrbisOriginalArchiveEntity)
     @Insert suspend fun insertOriginalChunks(chunks: List<me.rerere.rikkahub.data.db.entity.OrbisOriginalChunkEntity>)
 

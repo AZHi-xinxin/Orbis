@@ -3,11 +3,14 @@ package me.rerere.rikkahub.data.orbis.privacy
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.DataOutputStream
+import java.nio.CharBuffer
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.util.Base64
 import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -18,9 +21,9 @@ import javax.crypto.spec.SecretKeySpec
  * Android key custody, private model transport and atomic encrypted storage are caller responsibilities.
  * This class neither writes files nor opens a room automatically.
  *
- * Recovery codes are randomly generated 256-bit secrets, not human passwords. A person holding
- * a code AND its matching recovery envelope can recover the data key independently of the UI.
- * Replacing the recovery envelope does not revoke older exported envelopes or their codes.
+ * Legacy recovery codes are random 256-bit secrets. User-set passwords use a separately versioned
+ * PBKDF2 wrapper. Either credential plus its matching envelope can recover the data key offline.
+ * Replacing a wrapper does not revoke older exported envelopes or their credentials.
  */
 object PrivateVaultCrypto {
     const val MAX_RECORD_BYTES = 16 * 1024 * 1024
@@ -30,6 +33,8 @@ object PrivateVaultCrypto {
     private const val MAX_IDENTIFIER_BYTES = 256
     private const val WRAPPED_KEY_KIND: Byte = 1
     private const val RECORD_KIND: Byte = 2
+    private const val PASSWORD_KEY_KIND: Byte = 3
+    private const val PASSWORD_BINDING = "password-recovery-v1"
     private const val CODE_PREFIX = "ORPV1-"
     private val PREFIX = byteArrayOf(0x4f, 0x52, 0x50, 0x56, 1) // ORPV, format version 1
     private val random = SecureRandom()
@@ -83,6 +88,16 @@ object PrivateVaultCrypto {
             recovery(secret, vaultId)
         }
 
+        internal fun createPasswordRecovery(password: CharArray): VaultPasswordRecovery = synchronized(lock) {
+            requireOpen()
+            val salt = ByteArray(16).also(random::nextBytes)
+            val derived = derivePasswordKey(password, salt)
+            try {
+                VaultPasswordRecovery(salt = vaultBase64(salt), wrappedKey = vaultBase64(
+                    encrypt(derived, PASSWORD_KEY_KIND, vaultId, PASSWORD_BINDING, secret)))
+            } finally { derived.fill(0) }
+        }
+
         internal fun wrapDeviceKey(protector: PrivateVaultKeyProtector): ByteArray = synchronized(lock) {
             requireOpen()
             val copy = secret.copyOf()
@@ -114,6 +129,47 @@ object PrivateVaultCrypto {
         } finally {
             key.fill(0)
         }
+    }
+
+    /** Password-only creation avoids manufacturing an unused immutable recovery-code String. */
+    internal fun createSession(vaultId: String): Session {
+        requireIdentifier(vaultId)
+        val key = ByteArray(KEY_BYTES).also(random::nextBytes)
+        return try { Session(vaultId, key) } finally { key.fill(0) }
+    }
+
+    internal fun recoverWithPassword(vaultId: String, password: CharArray, recovery: VaultPasswordRecovery): Session {
+        requireIdentifier(vaultId)
+        validatePasswordRecovery(recovery)
+        val derived = derivePasswordKey(password, vaultUnbase64(recovery.salt, 32))
+        try {
+            val key = decrypt(derived, PASSWORD_KEY_KIND, vaultId, PASSWORD_BINDING,
+                vaultUnbase64(recovery.wrappedKey, 66), KEY_BYTES)
+            try { return Session(vaultId, key) } finally { key.fill(0) }
+        } finally { derived.fill(0) }
+    }
+
+    private fun derivePasswordKey(password: CharArray, salt: ByteArray): ByteArray {
+        if (password.size !in 8..128 || !Charsets.UTF_8.newEncoder().canEncode(CharBuffer.wrap(password))) {
+            throw AccessException()
+        }
+        val spec = PBEKeySpec(password, salt, 600_000, KEY_BYTES * 8)
+        try {
+            val key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec)
+            try {
+                val encoded = key.encoded
+                if (encoded == null || encoded.size != KEY_BYTES) {
+                    encoded?.fill(0)
+                    throw AccessException()
+                }
+                return encoded
+            } finally {
+                // Providers may not support destroying their private internal copy.
+                try { key.destroy() } catch (_: Exception) { /* best effort */ }
+            }
+        } catch (_: GeneralSecurityException) {
+            throw AccessException()
+        } finally { spec.clearPassword() }
     }
 
     /** Explicit offline recovery only. This method does not implement an AI approval policy. */

@@ -56,15 +56,28 @@ internal fun privateRoomFailureNotice(error: Throwable): String {
         "storage_failed" -> "本机加密存储操作失败。"
         "unsafe_path" -> "存储路径未通过安全检查。"
         "already_exists" -> "这位主人已有空间，没有重复创建或覆盖。"
-        "recovery_required" -> "原空间需要恢复码重新绑定本机。"
-        "recovery_not_confirmed" -> "尚未确认离线保管恢复码，不能开启。"
-        "authentication_failed" -> "解密校验未通过。"
+        "recovery_required" -> "原空间需要配套恢复密码或随机码重新绑定本机。"
+        "recovery_not_confirmed" -> "尚未确认恢复凭据已妥善保管，不能开启。"
+        "authentication_failed" -> "解密校验未通过，请核对恢复方式、密码或随机码，以及是否为配套备份。"
+        "password_invalid_length" -> "恢复密码需要 8–128 个字符，空格和大小写会原样保留。"
+        "password_not_configured" -> "这份隐私室尚未设置恢复密码，请使用与原密文配套的随机恢复码。"
         "invalid_format" -> "加密文件格式未通过检查。"
         "size_limit" -> "本次内容超过本机空间的大小限制。"
         else -> null
     }
     val safeCode = if (explanation == null) "operation_unconfirmed" else code
     return "操作未完成（$safeCode）。${explanation ?: "尚不能确认结果。"}未自动重试，原件保留。"
+}
+
+/** Publish the actionable failure before any potentially slow local status read. */
+internal suspend fun privateRoomReportFailure(error: Throwable, foreground: () -> Boolean,
+                                             publish: (String) -> Unit, refresh: suspend () -> Boolean) {
+    val failure = privateRoomFailureNotice(error)
+    if (!foreground()) return
+    publish(failure + "正在只读核对当前空间状态。")
+    val refreshed = refresh()
+    if (foreground()) publish(failure + if (refreshed) "已只读核对当前空间状态。"
+        else "暂时无法核对空间状态，请先刷新；不能据此重新创建。")
 }
 
 /** Local navigation only: never write Settings.assistantId or transfer a vault owner. */

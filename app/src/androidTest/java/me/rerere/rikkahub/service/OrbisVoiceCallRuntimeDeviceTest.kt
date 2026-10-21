@@ -217,6 +217,26 @@ class OrbisVoiceCallRuntimeDeviceTest {
         assertEquals(stops, fixture.stopSpeakingCount.get())
     }
 
+    @Test fun rejectedUtteranceDoesNotEndForegroundCallOrReplayPreviousTurn() {
+        val fixture = startFixture(withPlayback = true)
+        val first = awaitRecorder(fixture)
+        onMain { first.finish("synthetic first utterance") }
+        assertTrue(fixture.playbackEntered.await(10, TimeUnit.SECONDS))
+        fixture.allowPlayback.completeExceptionally(IllegalStateException("synthetic decoder failure"))
+        awaitCondition("TTS failure did not become a recoverable notice") {
+            runtime.voiceSession.state.value.recoveryNotice.orEmpty().contains("TTS_")
+        }
+        assertTrue(runtime.callState.value.isActive)
+        assertEquals(0, fixture.endCount.get())
+        assertEquals(1, fixture.spoken.size)
+        val next = awaitRecorder(fixture, first)
+        onMain { next.finish("synthetic second utterance") }
+        awaitCondition("Next human turn was not accepted after failed speech") { fixture.spoken.size == 2 }
+        assertEquals(listOf("synthetic first utterance", "synthetic second utterance"), fixture.submitted.toList())
+        assertTrue(runtime.callState.value.isActive)
+        assertEquals(0, fixture.endCount.get())
+    }
+
     private fun startFixture(blockBegin: Boolean = false, withPlayback: Boolean = false,
         withOpening: Boolean = false): Fixture {
         check(owned == null)

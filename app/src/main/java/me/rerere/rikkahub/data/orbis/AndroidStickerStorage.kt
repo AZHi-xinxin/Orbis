@@ -134,6 +134,7 @@ class AndroidStickerRepository internal constructor(context: Context) {
         core.importImage(bytes, tags)
     }
     suspend fun updateTags(id: String, tags: List<String>) = io { core.updateTags(id, tags) }
+    suspend fun removeFromLibrary(id: String) = io { core.removeFromLibrary(id) }
     suspend fun reloadFromStorage() = io { core.reloadFromStorage() }
     suspend fun readSnapshot(): OrbisStickerState = io { core.readSnapshot() }
     suspend fun imageForSend(id: String): OrbisStickerImage = io { core.imageForSend(id) }

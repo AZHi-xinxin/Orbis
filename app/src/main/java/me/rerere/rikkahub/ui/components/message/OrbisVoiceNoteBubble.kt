@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.components.message
 
 import android.content.Context
-import android.media.MediaPlayer
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -26,6 +25,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.UIMessage
@@ -37,24 +39,31 @@ import me.rerere.rikkahub.data.model.voiceNoteTranscript
 import me.rerere.rikkahub.data.model.voiceNotePlaybackKey
 import me.rerere.rikkahub.data.model.voiceNotePlayed
 import me.rerere.rikkahub.utils.JsonInstantPretty
+import me.rerere.tts.controller.AudioPlayer
 import java.io.File
 import java.security.MessageDigest
 
 /** One playback at a time, no auto-play, and no remote URL fetching during rendering. */
 private object VoiceNotePlayback {
     val active = MutableStateFlow<String?>(null)
-    private var player: MediaPlayer? = null
+    private var player: AudioPlayer? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+    private var playbackJob: kotlinx.coroutines.Job? = null
     fun stop(key: String? = null) {
         if (key != null && active.value != key) return
-        player?.let { runCatching { it.stop() }; runCatching { it.release() } }
+        val ownedJob = playbackJob
+        val ownedPlayer = player
+        playbackJob = null
         player = null
         active.value = null
         val manager = audioManager
         val focus = focusRequest
         audioManager = null
         focusRequest = null
+        ownedJob?.cancel()
+        ownedPlayer?.let { runCatching { it.stop() }; runCatching { it.release() } }
         if (manager != null && focus != null) runCatching { manager.abandonAudioFocusRequest(focus) }
     }
     fun play(context: Context, key: String, url: String, started: () -> Unit, failed: () -> Unit) {
@@ -65,7 +74,7 @@ private object VoiceNotePlayback {
             val file = File(uri.path ?: "").canonicalFile
             val root = File(context.filesDir, "upload").canonicalFile
             if (!file.toPath().startsWith(root.toPath()) || !file.isFile) { failed(); return }
-            val next = MediaPlayer()
+            val next = AudioPlayer(context)
             player = next
             active.value = key
             val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
@@ -78,16 +87,21 @@ private object VoiceNotePlayback {
             audioManager = manager
             focusRequest = focus
             check(manager.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
-            next.setAudioAttributes(attributes)
-            next.setDataSource(file.absolutePath)
-            next.setOnPreparedListener {
-                if (player === it) {
-                    runCatching { it.start(); started() }.onFailure { stop(key); failed() }
+            if (player !== next) return
+            val nextJob = scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    next.playFile(file) { if (player === next) started() }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    if (player === next) failed()
+                } finally {
+                    // A late completion from an earlier note cannot stop a newer one.
+                    if (player === next) stop(key)
                 }
             }
-            next.setOnCompletionListener { if (player === it) stop(key) }
-            next.setOnErrorListener { _, _, _ -> if (player === next) { stop(key); failed() }; true }
-            next.prepareAsync()
+            playbackJob = nextJob
+            nextJob.start()
         } catch (_: Exception) { stop(key); failed() }
     }
 }

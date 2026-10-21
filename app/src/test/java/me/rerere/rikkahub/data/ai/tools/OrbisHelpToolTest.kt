@@ -148,7 +148,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/23", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/24", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)
@@ -284,7 +284,8 @@ class OrbisHelpToolTest {
         val usage = category(help, "javascript").getValue("use").jsonPrimitive.content
         assertTrue(usage.contains("没有 DOM"))
         assertTrue(usage.contains("不等于小游戏入库"))
-        assertEquals("not_available", content(help, "permissions").getValue("native_settings_write_tool").jsonPrimitive.content)
+        assertEquals("orbis_configure_and_orbis_propose_connection",
+            content(help, "permissions").getValue("native_settings_write_tool").jsonPrimitive.content)
     }
 
     @Test fun `unknown fields return fixed error without echoing private data`() {
@@ -378,7 +379,8 @@ class OrbisHelpToolTest {
         }
         assertEquals("available_when_explicitly_bound_and_server_cutover_verified", limits.getValue("sentinel").jsonPrimitive.content)
         assertEquals("not_checked", limits.getValue("external_st_connection").jsonPrimitive.content)
-        assertEquals("not_available", manual.getValue("permissions").jsonObject.getValue("native_settings_write_tool").jsonPrimitive.content)
+        assertEquals("orbis_configure_and_orbis_propose_connection",
+            manual.getValue("permissions").jsonObject.getValue("native_settings_write_tool").jsonPrimitive.content)
         // Human-only full reference adds call/interruption, independent audio controls,
         // private notification speech, local ringtones, and Web/import boundaries in v15;
         // v16 adds local-gain mute, scoped hangup, free opening and isolated archive safety.
@@ -471,7 +473,7 @@ class OrbisHelpToolTest {
         }
         val imports = limits.getValue("chat_import_sources").jsonPrimitive.content
         listOf("密码保护", "DeepSeek官方ZIP≤8GiB", "RikkaHub含聊天数据库ZIP≤8GiB",
-            "Codex原始rollout JSONL≤64MiB", "Operit聊天JSON v2≤1GiB", "Kelivo安卓v2 ZIP≤8GiB",
+            "Codex原始rollout JSONL≤64MiB", "Operit聊天JSON v2≤1GiB", "Kelivo安卓v2/v3 ZIP≤8GiB",
             "北极星Polaris ZIP≤8GiB", "ZIP展开总量≤16GiB", "流式聊天JSON≤1GiB",
             "单条/单窗口容量", "不是无限容量", "预览→人工确认", "不覆盖现有窗口",
             "历史工具不执行", "取消保留已完成会话", "不扩大模型上下文上限").forEach { assertTrue(it, imports.contains(it)) }

@@ -140,7 +140,7 @@ private fun OrbisAtlasBootstrapSettingsDialog(onDismiss: () -> Unit) {
                     Button(onClick = { confirm = true }, enabled = idle && selectedSource != null && connection.canEdit) {
                         Text("连接星图")
                     }
-                    TextButton(onClick = { advanced = !advanced }, enabled = idle) { Text("高级：手动填写专用只读连接") }
+                    TextButton(onClick = { advanced = !advanced }, enabled = !managed.busy) { Text("高级：手动填写专用只读连接") }
                     if (advanced) {
                         Text("此处不是聊天密钥。只填写星图只读服务根地址与独立 Token；保存不测试连接。")
                         OutlinedTextField(address, { address = it }, label = { Text("只读服务基础地址") }, singleLine = true, enabled = idle)
@@ -150,7 +150,7 @@ private fun OrbisAtlasBootstrapSettingsDialog(onDismiss: () -> Unit) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("启用手填连接"); Switch(enabled, { enabled = it }, enabled = idle)
                         }
-                        TextButton(onClick = { launch { bootstrap.saveManual(address, token, enabled); token = "" } },
+                        TextButton(onClick = { launch { if (bootstrap.saveManual(address, token, enabled)) token = "" } },
                             enabled = idle && connection.canEdit) { Text("保存手填连接") }
                         if (connection.configured || connection.error != null)
                             TextButton(onClick = { clearConfirm = true }, enabled = idle) { Text("清除本机手填连接") }

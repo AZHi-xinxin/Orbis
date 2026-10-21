@@ -58,8 +58,11 @@ import me.rerere.rikkahub.utils.JsonInstant
         OrbisMemoryOperationEntity::class,
         OrbisMemoryTurnEntity::class,
         OrbisMemorySurfacingEntity::class,
+        me.rerere.rikkahub.data.db.entity.OrbisHistoryScopeEntity::class,
+        me.rerere.rikkahub.data.db.entity.OrbisHistorySlotEntity::class,
+        me.rerere.rikkahub.data.db.entity.OrbisHistoryRemovedEntity::class,
     ],
-    version = 29,
+    version = 30,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -84,10 +87,13 @@ import me.rerere.rikkahub.utils.JsonInstant
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
         AutoMigration(from = 28, to = 29),
+        AutoMigration(from = 29, to = 30),
     ]
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun orbisHistoryCacheDao(): me.rerere.rikkahub.data.db.dao.OrbisHistoryCacheDAO
+
     abstract fun conversationDao(): ConversationDAO
 
     abstract fun memoryDao(): MemoryDAO

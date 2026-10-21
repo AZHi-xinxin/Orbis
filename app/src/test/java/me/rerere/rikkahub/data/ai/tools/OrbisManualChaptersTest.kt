@@ -118,7 +118,7 @@ class OrbisManualChaptersTest {
 
     @Test fun `voice and expression guides distinguish synthesis from playback and human click from AI storage`() {
         val voice = guide("voice")
-        listOf("orbis_voice_note", "不自动播放", "1–4000", "原始转写", "让人类确认", "不自动重试计费请求").forEach { assertTrue(it, voice.contains(it)) }
+        listOf("orbis_voice_note", "不自动播放", "1–2000", "orbis_send_audio", "32MiB", "原始转写", "让人类确认", "不自动重试计费请求").forEach { assertTrue(it, voice.contains(it)) }
         val expressions = guide("expressions")
         listOf("保存不发送", "人类点选时立即独立发送", "原草稿不变", "管理入口不发送", "删除由人类", "expected_revision").forEach { assertTrue(it, expressions.contains(it)) }
     }
@@ -133,7 +133,7 @@ class OrbisManualChaptersTest {
     @Test fun `import guide documents current disk and stream limits without promising unlimited migration`() {
         val text = guide("imports")
         val zipLimit = "ZIP≤${ArchiveCapacity.MAX_ZIP_BYTES / ArchiveCapacity.GIB}GiB"
-        listOf("DeepSeek 官方 $zipLimit", "RikkaHub $zipLimit", "Kelivo 安卓 v2 $zipLimit",
+        listOf("DeepSeek 官方 $zipLimit", "RikkaHub $zipLimit", "Kelivo 安卓 v2/v3 $zipLimit",
             "北极星 Polaris 备份 $zipLimit",
             "JSON v2≤${ArchiveCapacity.MAX_STREAM_JSON_BYTES / ArchiveCapacity.GIB}GiB",
             "展开总量上限为${ArchiveCapacity.MAX_EXPANDED_BYTES / ArchiveCapacity.GIB}GiB",

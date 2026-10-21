@@ -76,6 +76,10 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
     private val mutableCallState = MutableStateFlow(OrbisVoiceCallState())
     val callState = mutableCallState.asStateFlow()
     private var current: Session? = null
+    private var acoustics: me.rerere.rikkahub.data.orbis.voice.LiveCallAcoustics? = null
+    fun acousticNote(callId: String, messageId: String): String? =
+        acoustics?.takeIf { it.callId == callId && mutableCallState.value.isActive }?.claim(messageId)
+    fun resetAcousticWindow() { acoustics?.routeChanged() }
     private var displayedToken: String? = null
 
     /** Presentation only. Never cancel archiving or reopen the microphone from the return screen. */
@@ -145,6 +149,14 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
         current = session
         displayedToken = session.token
         mutableCallState.value = OrbisVoiceCallState(callId, conversationId, title)
+        acoustics = runCatching { me.rerere.rikkahub.data.orbis.voice.LiveCallAcoustics(context, callId,
+            config = { org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.datastore.SettingsStore>().settingsFlow.value.callAcoustics },
+            usable = {
+                val call = mutableCallState.value; val voice = voiceSession.state.value
+                call.callId == callId && call.isActive && call.connectedAtMillis != null && call.audioInterruption == null &&
+                    voice.phase == me.rerere.rikkahub.ui.pages.chat.VoicePhase.Listening && voice.microphoneEnabled &&
+                    !voice.audioFocusSuspended && !voice.reconnecting && !voice.replyBlocked && voice.pendingReplies == 0 && voice.playbackToken == null
+            }) }.getOrNull()
         if (initialMicrophoneEnabled && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             finish(session, OrbisVoiceCallEndReason.STARTUP_FAILED, "需要麦克风权限才能开始通话")
             return true
@@ -173,6 +185,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                     mayUpdate = { current === session && !session.ending && session.focusState == VoiceAudioFocusState.AVAILABLE },
                     microphoneMuted = { !voiceSession.state.value.microphoneEnabled },
                     onWaiting = {
+                        acoustics?.routeChanged()
                         if (current === session && !session.ending) {
                             voiceSession.setAudioFocusSuspended(true)
                             mutableCallState.value = mutableCallState.value.copy(
@@ -195,7 +208,7 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
                 check(session.focusState == VoiceAudioFocusState.AVAILABLE) { "Audio focus lost during startup" }
                 voiceSession.start(
                     freshHumanReplies = true,
-                    createAsr = createAsr,
+                    createAsr = { val recorder = createAsr(); runCatching { acoustics?.bind(recorder) }; recorder },
                     speak = speak,
                     stopSpeaking = stopSpeaking,
                     initialMicrophoneEnabled = initialMicrophoneEnabled,
@@ -423,39 +436,68 @@ class OrbisVoiceCallRuntime private constructor(private val context: Context) {
         session.ending = true
         val endedAt = System.currentTimeMillis()
         val duration = session.connectedElapsedMillis?.let { (SystemClock.elapsedRealtime() - it).coerceAtLeast(0) }
-        val ended = OrbisVoiceCallEnd(session.callId, reason, session.connectedAtMillis, endedAt, duration, error, endReasonText)
-        // This is deliberately synchronous: summary/archive work never keeps the microphone open.
-        voiceSession.stop()
-        OrbisVideoCallRuntime.get(context).end(session.callId)
-        session.audioResumeJob?.cancel()
+        val cleanup = VoiceCallCleanup()
+        // These are synchronous, finite release attempts, independent of archive work.
+        // A native stop can still block; catching an exception is not proof of mic release.
+        // The owner is fenced first, so callbacks/late route confirmation cannot revive it.
+        cleanup.attempt("VOICE_STARTUP_CANCEL") { session.startupJob?.cancel() }
+        cleanup.attempt("VOICE_SESSION_STOP") { cleanup.include(voiceSession.stop()) }
+        val ownedAcoustics = acoustics
+        acoustics = null
+        cleanup.attempt("VOICE_ACOUSTICS_CLOSE") { ownedAcoustics?.close() }
+        cleanup.attempt("VOICE_VIDEO_END") { OrbisVideoCallRuntime.get(context).end(session.callId) }
+        val resumeJob = session.audioResumeJob
         session.audioResumeJob = null
-        val audio = context.getSystemService(AudioManager::class.java)
-        session.audioRouting?.close()
-        session.focus?.let { runCatching { audio.abandonAudioFocusRequest(it) } }
-        session.focus = null; session.audioRouting = null
-        session.service?.stopForCall(session.token)
+        cleanup.attempt("VOICE_RESUME_CANCEL") { resumeJob?.cancel() }
+        val routing = session.audioRouting
+        session.audioRouting = null
+        cleanup.attempt("AUDIO_ROUTING_CLOSE") { routing?.let { cleanup.include(it.close()) } }
+        val focus = session.focus
+        session.focus = null
+        cleanup.attempt("AUDIO_FOCUS_RELEASE") {
+            if (focus != null) {
+                val audio = context.getSystemService(AudioManager::class.java)
+                check(audio.abandonAudioFocusRequest(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+            }
+        }
+        val service = session.service
         session.service = null
-        // Publish the return-screen state only after capture and playback have stopped.
+        cleanup.attempt("VOICE_FOREGROUND_STOP") { service?.let { cleanup.include(it.stopForCall(session.token)) } }
+        val cleanupError = voiceCallCleanupError(error, cleanup.failures)
+        if (cleanup.failures.isNotEmpty()) {
+            android.util.Log.w("OrbisVoiceCall", "Cleanup unconfirmed: ${cleanup.failures.joinToString(",")}")
+        }
+        // Logical call completion must not be skipped by a failed release. Its diagnostic
+        // remains visible; ending below describes archive work, not an active audio session.
         mutableCallState.value = mutableCallState.value.copy(
-            endedAtMillis = endedAt, durationMillis = duration, ending = true, error = error,
+            endedAtMillis = endedAt, durationMillis = duration, ending = true, error = cleanupError,
             audioInterruption = null, canResumeAudio = false,
         )
         scope.launch {
-            session.startupJob?.cancelAndJoin()
-            voiceSession.stopAndJoin()
-            if (current === session) current = null
-            try {
-                session.onEnded(ended)
-            } catch (e: Exception) {
-                // The archive owner keeps its recovery state; failure must never look like success.
-                if (displayedToken == session.token && current == null) {
-                    mutableCallState.value = mutableCallState.value.copy(error = "通话已挂断，记录待恢复。[CALL_END_PERSIST_FAILED]")
-                }
-            } finally {
-                if (displayedToken == session.token && current == null) {
-                    mutableCallState.value = mutableCallState.value.copy(ending = false)
-                }
-            }
+            completeVoiceCallShutdown(
+                cleanup = cleanup,
+                joinStartup = { session.startupJob?.cancelAndJoin() },
+                joinVoice = { cleanup.include(voiceSession.stopAndJoin()) },
+                releaseConfirmed = { session.startupJob?.isCompleted != false && voiceSession.isStopped },
+                releaseOwner = { if (current === session) current = null },
+                persistEnd = { failures ->
+                    session.onEnded(OrbisVoiceCallEnd(session.callId, reason, session.connectedAtMillis,
+                        endedAt, duration, voiceCallCleanupError(error, failures), endReasonText))
+                },
+                finished = { failures ->
+                    // A release failure leaves the old owner fenced, not logically active.
+                    // Archive completion must not overwrite a newer call's state.
+                    if (displayedToken == session.token && (current == null || current === session)) {
+                        val releaseError = voiceCallCleanupError(error, failures.filterNot { it == "CALL_END_PERSIST_FAILED" })
+                        mutableCallState.value = mutableCallState.value.copy(ending = false, error = listOfNotNull(
+                            releaseError,
+                            "通话已挂断，记录待恢复。[CALL_END_PERSIST_FAILED]".takeIf { "CALL_END_PERSIST_FAILED" in failures },
+                        ).takeIf { it.isNotEmpty() }?.joinToString("\n"))
+                    }
+                    if (failures.isNotEmpty()) android.util.Log.w("OrbisVoiceCall",
+                        "Final cleanup unconfirmed: ${failures.joinToString(",")}")
+                },
+            )
         }
     }
 

@@ -562,9 +562,10 @@ class McpService : Service(), SensorEventListener {
         return executeCompanionTool(toolName, args)
     }
 
-    private fun executeCompanionTool(toolName: String, args: JSONObject): String {
+    private fun executeCompanionTool(requestedName: String, args: JSONObject): String {
+        val toolName = canonicalCompanionToolName(requestedName)
         val descriptor = CompanionNativeTools.descriptors().firstOrNull {
-            it.name == (if (toolName == "get_l_service_status") "get_runtime_status" else toolName)
+            it.name == toolName
         }
             ?: return "未知工具：$toolName"
         try { validateCompanionArguments(descriptor, args) } catch (_: Exception) { return "Invalid arguments" }
@@ -588,8 +589,8 @@ class McpService : Service(), SensorEventListener {
             "lock_app" -> toolLockApp(args)
             "unlock_app" -> toolUnlockApp(args)
             "list_locked_apps" -> toolListLockedApps()
-            "focus_rikka" -> toolFocusRikka(args)
-            "redirect_to_rikka" -> toolRedirectToRikka(args)
+            "focus_orbis" -> toolFocusRikka(args)
+            "redirect_to_orbis" -> toolRedirectToRikka(args)
             "configure_sentinel" -> toolConfigureSentinel(args)
             "test_sentinel" -> toolTestSentinel()
             "get_location_safety_status" -> toolGetLocationSafetyStatus()
@@ -1028,7 +1029,7 @@ class McpService : Service(), SensorEventListener {
         val enabled = args.optBoolean("enabled", false)
         val packages = jsonStringSet(args.optJSONArray("package_names"))
         return AppLockManager.configureFocus(this, enabled, packages).fold(
-            onSuccess = { "Orbis focus ${if (enabled) "enabled" else "disabled"} for ${packages.size} package(s)" },
+            onSuccess = { "Orbis focus rule ${if (enabled) "saved" else "disabled"}; foreground_switch_confirmed=false. 仅保存规则；没有执行或确认本次立即切换。立即返回当前聊天使用 orbis_return_to_chat。" },
             onFailure = { "Focus configuration refused: ${it.message}" },
         )
     }
@@ -1041,7 +1042,7 @@ class McpService : Service(), SensorEventListener {
         val packages = jsonStringSet(args.optJSONArray("package_names"))
         val window = args.optString("time_window", "")
         return AppLockManager.configureRedirect(this, packages, window).fold(
-            onSuccess = { "Orbis redirect configured for ${packages.size} package(s), window: $window" },
+            onSuccess = { "Orbis redirect rule saved; foreground_switch_confirmed=false. 仅保存定时规则；没有执行或确认本次立即切换。立即返回当前聊天使用 orbis_return_to_chat。" },
             onFailure = { "Redirect configuration refused: ${it.message}" },
         )
     }

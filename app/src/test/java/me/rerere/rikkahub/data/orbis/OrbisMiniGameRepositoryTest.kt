@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisMiniGameRepositoryTest {
+    @Test fun `optional scores preserve unknown values and cannot overwrite a completed result`() {
+        val f = Fixture(); val game = f.install()
+        val first = f.repo.start(game.id); val oldStyle = f.repo.finish(first.id, "completed", 3)
+        assertNull(oldStyle.score); assertNull(oldStyle.maxTile)
+        val second = f.repo.start(game.id)
+        val scored = f.repo.finish(second.id, "completed", 5, 1500, 256, "2048-v1")
+        assertEquals(scored, f.repo.finish(second.id, "completed", 5, 1500, 256, "2048-v1"))
+        assertThrows(IllegalArgumentException::class.java) { f.repo.finish(second.id, "completed", 5, 1600, 256, "2048-v1") }
+        assertEquals(scored, OrbisMiniGameRepository(f.storage).readSnapshot().sessions.last())
+        assertThrows(IllegalArgumentException::class.java) { OrbisMiniGameRepository.validateScore(-1, null, "v1") }
+        assertThrows(IllegalArgumentException::class.java) { OrbisMiniGameRepository.validateScore(1, null, "../v1") }
+    }
     private class Storage : OrbisGameStorage {
         var raw: String? = null
         var fail = false

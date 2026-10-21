@@ -41,6 +41,10 @@ data class MessageQueueState(
 internal fun MessageQueueState.blocksImmediateInput(): Boolean =
     paused || messages.any { it.recoveryHeldReason == null }
 
+/** Read-only preview for a NEW explicit tap, not permission to dispatch or resume old work. */
+internal fun MessageQueueState.blocksExplicitImmediateInput(): Boolean =
+    messages.any { it.recoveryHeldReason == null || it.isEditing }
+
 private fun QueuedMessage.isHumanEditableInput(): Boolean =
     orbisEventId == null && ((voiceCallId == null && voiceCallKind == null) ||
         (voiceCallId != null && voiceCallKind == "turn"))
@@ -121,6 +125,22 @@ class MessageQueue(
     /** Downgrade never replays old human text either. Original parts/order/id remain visible. */
     @Synchronized
     internal fun holdAllInputsForFreshRecovery(): Int = holdInputsForRecovery(state.value.messages.map { it.id }.toSet())
+
+    /** Shared by ordinary fresh human input and an explicit sticker tap. Never releases old items. */
+    @Synchronized
+    internal fun prepareExplicitFreshInput() {
+        holdAllInputsForFreshRecovery()
+        resume()
+        check(!state.value.paused) { "队列状态未能可靠保存，原输入仍保留。" }
+    }
+
+    /** The session owner must also validate generation/tool/recovery state before calling. */
+    @Synchronized
+    internal fun prepareExplicitImmediateInput(freshRecovery: Boolean): Boolean {
+        if (state.value.blocksExplicitImmediateInput()) return false
+        if (state.value.paused || freshRecovery) prepareExplicitFreshInput()
+        return true
+    }
 
     @Synchronized
     internal fun holdInputsForRecovery(ids: Set<Uuid>): Int {

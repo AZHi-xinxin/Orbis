@@ -68,6 +68,8 @@ import me.rerere.rikkahub.utils.onLoading
 import me.rerere.rikkahub.utils.onSuccess
 import me.rerere.rikkahub.utils.toLocalDateTime
 import java.time.Instant
+import me.rerere.rikkahub.data.sync.ContinuousBackup
+import me.rerere.rikkahub.data.sync.completedAt
 
 @Composable
 fun S3Tab(
@@ -88,12 +90,13 @@ fun S3Tab(
         vm.updateSettings(settings.copy(s3Config = newConfig))
     }
 
-    val lastBackupText = if (settings.backupReminderConfig.lastBackupTime == 0L) {
+    val lastBackupTime = settings.backupReminderConfig.completedAt(ContinuousBackup.key("s3", settings))
+    val lastBackupText = if (lastBackupTime == 0L) {
         stringResource(R.string.backup_page_reminder_no_record)
     } else {
         stringResource(
             R.string.backup_page_reminder_last_time,
-            Instant.ofEpochMilli(settings.backupReminderConfig.lastBackupTime).toLocalDateTime()
+            Instant.ofEpochMilli(lastBackupTime).toLocalDateTime()
         )
     }
     val backupFileSummary = when (val state = backupItemsState) {

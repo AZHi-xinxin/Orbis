@@ -99,6 +99,7 @@ internal class McpSessionRegistry(
     private val httpClient: HttpClient,
     private val oauthCoordinator: McpOAuthCoordinator,
     private val statusStore: McpStatusStore,
+    private val strictHttpClient: HttpClient = httpClient,
 ) {
     private val sessions = ConcurrentHashMap<Uuid, McpSession>()
 
@@ -233,7 +234,7 @@ internal class McpSessionRegistry(
             oldClient?.let { closeClient(it, config.commonOptions.name) }
 
             val sdkClient = createSdkClient(config)
-            val transport = createMcpTransport(config, httpClient)
+            val transport = createMcpTransport(config, if(config.commonOptions.strictEndpoint) strictHttpClient else httpClient)
             installTransportCallbacks(config, sdkClient, transport)
 
             try {
@@ -448,6 +449,7 @@ internal data class McpConnectionKey(
     val serverUrl: String,
     val clientName: String,
     val headers: List<Pair<String, String>>,
+    val strictEndpoint: Boolean = false,
 )
 
 internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKey(
@@ -458,6 +460,7 @@ internal fun McpServerConfig.connectionKey(): McpConnectionKey = McpConnectionKe
     serverUrl = serverUrl,
     clientName = commonOptions.name,
     headers = resolvedHeaders(),
+    strictEndpoint = commonOptions.strictEndpoint,
 )
 
 private fun hasSameConnectionParameters(

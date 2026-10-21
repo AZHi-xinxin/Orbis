@@ -47,6 +47,7 @@ internal fun OrbisStickerPanel(
     onSendText: ((String) -> Boolean)? = null,
     sendEnabled: Boolean = true,
     onSendTextAsync: (suspend (String) -> Boolean)? = null,
+    sendUnavailableReason: String? = null,
 ) {
     val context = LocalContext.current.applicationContext
     var repository by remember(context) { mutableStateOf<AndroidStickerRepository?>(null) }
@@ -62,7 +63,7 @@ internal fun OrbisStickerPanel(
             loadFailed = true
         }
     }
-    repository?.let { StickerLibrary(it, onSendImage, onSendText, sendEnabled, onSendTextAsync) } ?: Column(
+    repository?.let { StickerLibrary(it, onSendImage, onSendText, sendEnabled, onSendTextAsync, sendUnavailableReason) } ?: Column(
         Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -74,7 +75,7 @@ internal fun OrbisStickerPanel(
 @Composable
 private fun StickerLibrary(repository: AndroidStickerRepository,
     onSendImage: (suspend (String) -> Boolean)?, onSendText: ((String) -> Boolean)?, sendEnabled: Boolean,
-    onSendTextAsync: (suspend (String) -> Boolean)?) {
+    onSendTextAsync: (suspend (String) -> Boolean)?, sendUnavailableReason: String?) {
     val snapshot by repository.state.collectAsStateWithLifecycle()
     val writeBlocked by repository.writeBlocked.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -84,6 +85,7 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var selectedId by remember { mutableStateOf<String?>(null) }
     var editingId by remember { mutableStateOf<String?>(null) }
+    var removingId by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var operationError by remember { mutableStateOf<String?>(null) }
@@ -130,9 +132,9 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
             OrbisComposerTab("颜文字", selected = textMode) { textMode = true }
         }
         if (textMode) {
-            OrbisKaomojiPanel(enabled = sendEnabled && !busy, onSendText = onSendTextAsync ?: onSendText?.let { callback ->
-                { text -> callback(text) }
-            })
+            OrbisKaomojiPanel(enabled = sendEnabled && !busy,
+                sendUnavailableReason = sendUnavailableReason ?: if (busy) "上一张表情正在处理，请稍后再点选。" else null,
+                onSendText = onSendTextAsync ?: onSendText?.let { callback -> { text -> callback(text) } })
         } else {
     // One bounded lazy scroll surface: 1000 local stickers do not compose 1000 thumbnails at once.
     LazyVerticalGrid(
@@ -149,7 +151,7 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
                 Column {
                     StickerNote(if (onSendImage != null) "点图片立即发送真实图片，草稿保留。模型需支持图片；管理不上传。"
                         else "本机表情管理。导入与编辑不上传；回聊天点选图片才会发送。")
-                    if (onSendImage != null && !sendEnabled) StickerNote("当前不能发送；不会排队或自动补发。")
+                    if (onSendImage != null && !sendEnabled) StickerNote(sendUnavailableReason ?: "当前不能发送；不会排队或自动补发。")
                 }
             }
             item(key = "search", span = { GridItemSpan(maxLineSpan) }) {
@@ -165,7 +167,7 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
                         modifier = Modifier.weight(1f), fontSize = 10.sp, lineHeight = 15.sp,
                         color = OrbisTheme.colors.mutedInk)
                     TextButton(onClick = { managing = !managing }, enabled = !busy && !writeBlocked) {
-                        Text(if (managing) "完成管理" else "管理标签", fontSize = 11.sp)
+                        Text(if (managing) "完成管理" else "管理表情", fontSize = 11.sp)
                     }
                 }
             }
@@ -296,8 +298,20 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
             TextButton(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = {
                 pendingUri = null; editingId = null; operationError = null
             }) { Text("取消") }
+            if (existing != null) TextButton(enabled = !busy && !writeBlocked,
+                onClick = { removingId = existing.id }) { Text("从表情库移除这张") }
         }
     }
+    removingId?.let { id -> AlertDialog(onDismissRequest = { if(!busy) removingId = null },
+        title = { Text("移除这张表情？") }, text = { Text("只从可选表情库移除，不删除已发送的聊天图片，也不清理可能被历史引用的原图。") },
+        confirmButton = { TextButton(enabled = !busy, onClick = {
+            busy = true; scope.launch {
+                try { repository.removeFromLibrary(id); removingId = null; editingId = null; selectedId = null; notice = "已从表情库移除，聊天中的图片保留。" }
+                catch(e: CancellationException) { throw e }
+                catch(_: Exception) { operationError = "本次未能移除，原图保留。" }
+                finally { busy = false }
+            }
+        }) { Text("确认移除") } }, dismissButton = { TextButton(enabled = !busy, onClick = { removingId = null }) { Text("取消") } }) }
 }
 
 @Composable

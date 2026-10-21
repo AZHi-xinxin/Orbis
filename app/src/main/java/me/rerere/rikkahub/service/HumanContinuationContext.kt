@@ -83,12 +83,17 @@ internal class HumanContinuationContextStore(
     }
 
     private suspend fun saveLocked(snapshot: Conversation): Conversation? {
-        val direct = commitHumanContinuationSnapshot(lastSaved, snapshot, read, proveBaseline, commit)
+        val proof: suspend (Conversation, Conversation) -> Unit = { disk, candidate ->
+            journal.prepareRoomCommit(runId, checkpointBaseline, disk, candidate)
+        }
+        fun proved(disk: Conversation, expected: Conversation): Boolean =
+            journal.provesRoomWrite(runId, disk, snapshot) || proveBaseline(disk, expected)
+        val direct = commitHumanContinuationSnapshot(lastSaved, snapshot, read, ::proved, commit, proof)
         val stored = direct ?: run {
             val disk = read() ?: return null
             val enrichment = reconcileStream(disk, lastSaved) ?: return null
             val enriched = enrichment.project(snapshot) ?: return null
-            val saved = commitHumanContinuationSnapshot(enrichment.provenBaseline, enriched, read, proveBaseline, commit)
+            val saved = commitHumanContinuationSnapshot(enrichment.provenBaseline, enriched, read, proveBaseline, commit, proof)
                 ?: return null
             onEnriched(enrichment) // All late publishers retain the added durable suffix too.
             saved

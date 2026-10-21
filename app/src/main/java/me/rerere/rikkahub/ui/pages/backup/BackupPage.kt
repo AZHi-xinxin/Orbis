@@ -6,6 +6,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
+import me.rerere.rikkahub.ui.pages.backup.tabs.AutomaticBackupTab
+import me.rerere.rikkahub.ui.pages.backup.tabs.WebDavTab
+import me.rerere.rikkahub.ui.pages.backup.tabs.S3Tab
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,13 +28,24 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun BackupPage(vm: BackupVM = koinViewModel()) {
     var restart by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(0) }
     OrbisPageSurface {
         Scaffold(containerColor = Color.Transparent, topBar = {
-            OrbisPageHeader(title = "数据与本地备份", subtitle = "文件由你保管，不自动上传云端",
+            OrbisPageHeader(title = "数据与存档", subtitle = "本地先保存，服务器由你绑定",
                 avatar = { Text("↥") }, navigationIcon = { BackButton() }, modifier = Modifier.statusBarsPadding())
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
-                ImportExportTab(vm = vm, onShowRestartDialog = { restart = true })
+                ScrollableTabRow(selectedTabIndex = tab) {
+                    listOf("自动存档", "文件导入导出", "WebDAV 连接", "S3 连接").forEachIndexed { index, label ->
+                        Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
+                    }
+                }
+                when(tab) {
+                    0 -> AutomaticBackupTab(onRestart = { restart = true }, onConnection = { tab = if(it == "webdav") 2 else 3 })
+                    1 -> ImportExportTab(vm = vm, onShowRestartDialog = { restart = true })
+                    2 -> WebDavTab(vm = vm, onShowRestartDialog = { restart = true })
+                    3 -> S3Tab(vm = vm, onShowRestartDialog = { restart = true })
+                }
             }
         }
     }

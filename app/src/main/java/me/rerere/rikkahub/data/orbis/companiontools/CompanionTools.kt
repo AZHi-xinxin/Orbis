@@ -6,6 +6,7 @@ import com.lover.connect.CompanionNativeTools
 import com.lover.connect.CompanionToolDescriptor
 import com.lover.connect.CompanionToolImage
 import com.lover.connect.CompanionToolResult
+import com.lover.connect.canonicalCompanionToolName
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.HostToolApproval
@@ -50,8 +51,8 @@ internal fun buildCompanionTools(
     readNotification: (suspend (String) -> OrbisNotificationSpeechReceipt)? = null,
     imagePart: suspend (CompanionToolImage) -> UIMessagePart.Image = { error("Image attachment writer is unavailable") },
     execute: suspend (String, String, String?) -> CompanionToolResult,
-): List<Tool> = catalog.filter { enabledNames == null || it.name in enabledNames ||
-    (it.name == "get_runtime_status" && "get_l_service_status" in enabledNames) }.map { descriptor ->
+): List<Tool> = catalog.filter { enabledNames == null ||
+    it.name in enabledNames.map(::canonicalCompanionToolName) }.map { descriptor ->
     val schema = Json.parseToJsonElement(descriptor.inputSchemaJson).jsonObject
     val nativeName = "companion_${descriptor.name}"
     val authorization = authorizationRevision(descriptor.name)

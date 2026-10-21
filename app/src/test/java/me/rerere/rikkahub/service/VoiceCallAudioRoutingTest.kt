@@ -16,11 +16,16 @@ class VoiceCallAudioRoutingTest {
 
     private inner class Backend(override val modernRouting: Boolean = true) : VoiceCallAudioBackend {
         var refuseMode = false
+        var throwOnModeWrite = false
         var modeWrites = 0
         private var effectiveMode = VoiceCallAudioMode.NORMAL
         override var mode: VoiceCallAudioMode
             get() = effectiveMode
-            set(value) { modeWrites++; if (!refuseMode) effectiveMode = value }
+            set(value) {
+                modeWrites++
+                if (throwOnModeWrite) error("synthetic mode release failure")
+                if (!refuseMode) effectiveMode = value
+            }
         override var currentDevice: VoiceCallAudioDevice? = earpiece
         override var availableDevices = listOf(earpiece, speaker)
         override var legacyHeadsetConnected = false
@@ -29,6 +34,7 @@ class VoiceCallAudioRoutingTest {
         var acceptSelection = true
         var completeSelectionImmediately = true
         var throwOnClear = false
+        var onClear: () -> Unit = {}
         val selections = mutableListOf<Int>()
         var clears = 0
         override fun selectDevice(id: Int): Boolean {
@@ -38,6 +44,7 @@ class VoiceCallAudioRoutingTest {
         }
         override fun clearDevice() {
             clears++
+            onClear()
             if (throwOnClear) error("synthetic route release failure")
             currentDevice = earpiece
         }
@@ -347,7 +354,66 @@ class VoiceCallAudioRoutingTest {
         val backend = Backend().apply { throwOnClear = true }
         val lease = VoiceCallAudioRouting(backend)
         assertTrue(lease.start())
-        lease.close()
+        assertEquals(listOf("AUDIO_DEVICE_RELEASE"), lease.close())
+        assertEquals(VoiceCallAudioMode.NORMAL, backend.mode)
+    }
+
+    @Test fun failedReleaseIsObservableBoundedAndCannotRetryOverTheNextCall() {
+        val backend = Backend()
+        val old = VoiceCallAudioRouting(backend)
+        assertTrue(old.start())
+        backend.throwOnClear = true
+        backend.throwOnModeWrite = true
+        val failures = old.close()
+        assertEquals(listOf("AUDIO_DEVICE_RELEASE", "AUDIO_MODE_RELEASE"), failures)
+        val attempts = backend.modeWrites
+        assertEquals(failures, old.close())
+        assertFalse(old.resume())
+        assertFalse(old.refresh())
+        assertEquals(attempts, backend.modeWrites)
+        assertEquals(1, backend.clears)
+
+        backend.throwOnClear = false
+        backend.throwOnModeWrite = false
+        backend.mode = VoiceCallAudioMode.NORMAL
+        backend.currentDevice = earpiece
+        val replacement = VoiceCallAudioRouting(backend)
+        assertTrue(replacement.start())
+        val replacementWrites = backend.modeWrites
+        val replacementSelections = backend.selections.size
+        old.close() // A delayed old callback must not release the replacement's route.
+        assertFalse(old.resume())
+        assertEquals(replacementWrites, backend.modeWrites)
+        assertEquals(replacementSelections, backend.selections.size)
+        assertEquals(VoiceCallAudioMode.COMMUNICATION, backend.mode)
+        assertTrue(replacement.close().isEmpty())
+    }
+
+    @Test fun silentModeReleaseRefusalIsReportedWithoutRepeatedGlobalReset() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        backend.refuseMode = true
+        assertEquals(listOf("AUDIO_MODE_RELEASE_UNCONFIRMED"), lease.close())
+        assertEquals(VoiceCallAudioMode.COMMUNICATION, backend.mode)
+        assertEquals(1, backend.clears)
+        val attempts = backend.modeWrites
+        repeat(5) { lease.close(); assertFalse(lease.resume()) }
+        assertEquals(attempts, backend.modeWrites)
+        assertEquals(1, backend.clears)
+    }
+
+    @Test fun synchronousDeviceReleaseCallbackCannotReacquireTheClosingLease() {
+        val backend = Backend()
+        val lease = VoiceCallAudioRouting(backend)
+        assertTrue(lease.start())
+        backend.onClear = {
+            assertFalse(lease.resume())
+            assertFalse(lease.refresh())
+            assertFalse(lease.isConfirmed())
+        }
+        assertTrue(lease.close().isEmpty())
+        assertEquals(listOf(speaker.id), backend.selections)
         assertEquals(VoiceCallAudioMode.NORMAL, backend.mode)
     }
 

@@ -8,6 +8,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.finishInterruptedHostTools
+import me.rerere.rikkahub.data.ai.compaction.isCompactionSummary
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import java.io.ByteArrayOutputStream
@@ -26,7 +27,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
 
     @Serializable
     private data class Record(
-        val version: Int = 1,
+        val version: Int = 2,
         val runId: Uuid,
         val conversationId: Uuid,
         val assistantId: Uuid,
@@ -36,11 +37,76 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         val baseTail: List<MessageNode>,
         val tail: List<MessageNode>,
         val savedAtMillis: Long = 0,
+        // Write-ahead proof of this lane's last CAS attempt, not permission to replay tools.
+        // Omit the default so version-1 records retain their exact historical checksum.
+        @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+        val roomSnapshotHashes: List<String> = emptyList(),
     )
     @Serializable private data class Envelope(val record: Record, val sha256: String)
 
     data class Recovery(val runId: Uuid, val baseline: Conversation, val snapshot: Conversation,
         val durableBaseline: Conversation? = null)
+
+    class CompactionVoiceMetadataRepair internal constructor(
+        val before: Conversation,
+        val corrected: Conversation,
+        internal val recordHash: String,
+        internal val runId: Uuid,
+    ) {
+        val needsMetadataCorrection: Boolean get() = before.messageNodes != corrected.messageNodes
+    }
+
+    /** No writes. Only the known first-summary call mislabel is normalized, and only when that
+     * single two-field correction reproduces the ORIGINAL protected-prefix hash exactly.
+     * The newer Room tail/branches/suffix remain authoritative: nothing is copied from this file.
+     */
+    @Synchronized
+    fun planCompactionVoiceMetadataRepair(persisted: Conversation): CompactionVoiceMetadataRepair? = guarded {
+        val record = read(persisted.id) ?: return@guarded null
+        planCompactionVoiceMetadataRepair(record, persisted)
+    }
+
+    private fun planCompactionVoiceMetadataRepair(record: Record,
+        persisted: Conversation): CompactionVoiceMetadataRepair? {
+        if (record.version != 2 || record.conversationId != persisted.id || record.assistantId != persisted.assistantId ||
+            record.epoch != persisted.compactionEpoch || persisted.consultation != null || record.prefixCount < 1 ||
+            record.baseTail.size != 1 || record.tail.size != 1 ||
+            persisted.messageNodes.size <= record.prefixCount) return null
+        validateNodes(persisted.messageNodes)
+        val first = persisted.messageNodes.first()
+        val summary = first.currentMessage
+        if (!summary.isCompactionSummary()) return null
+        val anchor = record.tail.single().currentMessage
+        if (!hasCompactionVoiceReceipt(anchor, summary)) return null
+        // Null/null also permits retry after the CAS succeeded but journal retirement was interrupted.
+        if (!(summary.orbisVoiceCallId == null && summary.orbisVoiceCallKind == null) &&
+            !(summary.orbisVoiceCallId == anchor.orbisVoiceCallId && summary.orbisVoiceCallKind == "turn")) return null
+        val normalized = if (summary.orbisVoiceCallId == null) persisted else persisted.copy(messageNodes =
+            listOf(first.copy(messages = first.messages.map { message ->
+                if (message.id == summary.id) message.copy(orbisVoiceCallId = null, orbisVoiceCallKind = null) else message
+            })) + persisted.messageNodes.drop(1))
+        if (hashNodes(normalized.messageNodes.take(record.prefixCount)) != record.prefixHash) return null
+        if (!retainsCompactionVoiceTail(record.baseTail.single(), record.tail.single(), summary, persisted) ||
+            !retainsCompactionVoiceTail(record.tail.single(), persisted.messageNodes[record.prefixCount], summary, persisted)) return null
+        return CompactionVoiceMetadataRepair(persisted, normalized, hashRecord(record), record.runId)
+    }
+
+    /** Caller has committed the exact proposed metadata correction and independently reread Room.
+     * A new journal run/tail or changed Room row cannot be acknowledged by a stale plan.
+     */
+    @Synchronized
+    fun finishCompactionVoiceMetadataRepair(plan: CompactionVoiceMetadataRepair, persisted: Conversation): Boolean = guarded {
+        if (persisted.id != plan.corrected.id || persisted.assistantId != plan.corrected.assistantId ||
+            persisted.compactionEpoch != plan.corrected.compactionEpoch || persisted.consultation != plan.corrected.consultation ||
+            hashNodes(persisted.messageNodes) != hashNodes(plan.corrected.messageNodes)) return@guarded false
+        val record = read(persisted.id) ?: return@guarded true
+        if (record.runId != plan.runId || hashRecord(record) != plan.recordHash) return@guarded false
+        val proof = planCompactionVoiceMetadataRepair(record, persisted) ?: return@guarded false
+        if (proof.needsMetadataCorrection) return@guarded false
+        store.delete(persisted.id)
+        check(store.read(persisted.id) == null)
+        true
+    }
 
     @Synchronized
     fun checkpoint(runId: Uuid, baseline: Conversation, snapshot: Conversation) = guarded {
@@ -83,10 +149,51 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         record.baseTail.zip(tail).forEach { (base, next) ->
             check(base.id == next.id && base.messages.all { old -> next.messages.any { it.id == old.id } })
         }
-        val updated = record.copy(tail = tail, savedAtMillis = System.currentTimeMillis())
-        val bytes = BoundedOutput().also { json.encodeToStream(Envelope(updated, hashRecord(updated)), it) }.toByteArray()
-        store.writeAtomic(snapshot.id, bytes)
-        check(store.read(snapshot.id)?.contentEquals(bytes) == true)
+        val updated = record.copy(version = 2, tail = tail, savedAtMillis = System.currentTimeMillis())
+        write(updated)
+    }
+
+    /** Called only AFTER the current Room baseline was proved, immediately before its CAS.
+     * A streaming checkpoint keeps these two bounded hashes, so a crash between Room and
+     * the next checkpoint can identify the earlier version without guessing from text.
+     * Recording a failed attempt grants nothing: recovery also requires exact identities,
+     * branches, protected history and a strictly limited prose-only forward transition.
+     */
+    @Synchronized
+    internal fun prepareRoomCommit(runId: Uuid, baseline: Conversation,
+        persisted: Conversation, candidate: Conversation) = guarded {
+        check(baseline.id == persisted.id && baseline.assistantId == persisted.assistantId &&
+            baseline.compactionEpoch == persisted.compactionEpoch &&
+            candidate.id == persisted.id && candidate.assistantId == persisted.assistantId &&
+            candidate.compactionEpoch == persisted.compactionEpoch && candidate.consultation == persisted.consultation)
+        val record = read(persisted.id) ?: run {
+            checkpoint(runId, baseline, candidate)
+            checkNotNull(read(persisted.id))
+        }
+        check(record.runId == runId)
+        requirePrefix(record, persisted)
+        // Never replace the latest streaming tail with the possibly older saving snapshot.
+        write(record.copy(version = 2, roomSnapshotHashes = listOf(
+            hashNodes(persisted.messageNodes), hashNodes(candidate.messageNodes)).distinct()))
+    }
+
+    /** A Room transaction may commit just before its caller loses the completion receipt.
+     * Only this run's exact write-ahead candidate can advance the CAS anchor. Concurrent
+     * edits, changed branches/tools, shorter snapshots and unknown rows remain conflicts.
+     */
+    @Synchronized
+    internal fun provesRoomWrite(runId: Uuid, persisted: Conversation, candidate: Conversation): Boolean = guarded {
+        val record = read(persisted.id) ?: return@guarded false
+        if (record.runId != runId || persisted.id != candidate.id || persisted.assistantId != candidate.assistantId ||
+            persisted.compactionEpoch != candidate.compactionEpoch || persisted.consultation != candidate.consultation)
+            return@guarded false
+        requirePrefix(record, persisted)
+        if (record.roomSnapshotHashes.isEmpty() || hashNodes(persisted.messageNodes) !in record.roomSnapshotHashes ||
+            candidate.messageNodes.size < persisted.messageNodes.size) return@guarded false
+        validateNodes(candidate.messageNodes)
+        persisted.messageNodes.zip(candidate.messageNodes).all { (stored, next) ->
+            sameNode(stored, next) || isProvenContinuationTextAdvance(stored, next)
+        }
     }
 
     /** Load before the old generation journal. Never overwrite a later durable edit or append.
@@ -104,6 +211,8 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             return@guarded null
         }
         val current = persisted.messageNodes.drop(record.prefixCount)
+        val knownRoomWrite = record.roomSnapshotHashes.isNotEmpty() &&
+            hashNodes(persisted.messageNodes) in record.roomSnapshotHashes
         // A later append, deletion, branch change or unrelated replacement needs explicit
         // reconciliation, not silent truncation. Keep the recovery file on every refusal.
         check(current.size <= record.tail.size)
@@ -114,7 +223,8 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             check(stored.selectIndex == saved.selectIndex || stored.selectIndex == base?.selectIndex)
             // Only the old in-flight baseline may differ in content. Newly appended turns
             // already on disk must match a saved prefix, not be replaced by older text.
-            if (base == null) check(sameNode(stored, saved) || sameNode(stored, tail[index]))
+            if (base == null) check(sameNode(stored, saved) || sameNode(stored, tail[index]) ||
+                knownRoomWrite && isProvenContinuationTextAdvance(stored, saved))
         }
         val prefix = persisted.messageNodes.take(record.prefixCount)
         val favorites = persisted.messageNodes.associate { it.id to it.isFavorite }
@@ -189,10 +299,17 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         val envelope = json.decodeFromString<Envelope>(bytes.toString(Charsets.UTF_8))
         val record = envelope.record
         check(envelope.sha256 == hashRecord(record))
-        check(record.version == 1 && record.conversationId == id && record.epoch >= 0 && record.prefixCount >= 0)
+        check(record.version in 1..2 && record.conversationId == id && record.epoch >= 0 && record.prefixCount >= 0)
+        check(record.roomSnapshotHashes.size <= 2 && record.roomSnapshotHashes.all { it.matches(Regex("[0-9a-f]{64}")) })
         validateNodes(record.baseTail)
         validateNodes(record.tail)
         return record
+    }
+
+    private fun write(record: Record) {
+        val bytes = BoundedOutput().also { json.encodeToStream(Envelope(record, hashRecord(record)), it) }.toByteArray()
+        store.writeAtomic(record.conversationId, bytes)
+        check(store.read(record.conversationId)?.contentEquals(bytes) == true)
     }
 
     private fun validateNodes(nodes: List<MessageNode>) {

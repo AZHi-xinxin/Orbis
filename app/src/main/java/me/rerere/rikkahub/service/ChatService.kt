@@ -371,9 +371,7 @@ class ChatService(
     }
 
     private fun prepareExplicitFreshInput(session: ConversationSession) {
-        session.messageQueue.holdAllInputsForFreshRecovery()
-        session.messageQueue.resume()
-        check(!session.messageQueue.state.value.paused) { "队列状态未能可靠保存，原输入仍保留。" }
+        session.messageQueue.prepareExplicitFreshInput()
     }
     private val generationJournal by lazy {
         GenerationCheckpointJournal(AndroidGenerationCheckpointStore.create(context.noBackupFilesDir))
@@ -1438,6 +1436,8 @@ class ChatService(
 
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
+    /** A background snapshot may defer itself, but never acquires a conversation's queue/lock. */
+    fun hasActiveGeneration(): Boolean = sessions.values.any { it.isGenerating || it.getJob() != null }
     // Lock order: folder mutation, then session prompt edit. A manual archive inherits its
     // source folder, so folder deletion/moves cannot interleave with archive publication.
     private val folderMutationMutex = Mutex()
@@ -1688,7 +1688,21 @@ class ChatService(
                 if (selectAssistant) settingsStore.updateAssistant(session.state.value.assistantId)
                 return@withLock
             }
-            val conversation = conversationRepo.getConversationById(conversationId)
+            val conversation = conversationRepo.getConversationById(conversationId)?.let { stored ->
+                try {
+                    withContext(Dispatchers.IO) {
+                        repairCompactionVoiceMetadata(stored, humanContinuationJournal,
+                            read = { conversationRepo.getConversationById(conversationId) },
+                            commit = conversationRepo::commitHumanContinuation)
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    addError(failure, conversationId)
+                    // A CAS may have committed before its acknowledgement/cleanup failed.
+                    // Always reload Room; never publish the pre-repair or old journal tail.
+                    conversationRepo.getConversationById(conversationId)
+                }
+            }
             if (conversation != null) {
                 val continuation = try {
                     withContext(Dispatchers.IO) {
@@ -1807,7 +1821,8 @@ class ChatService(
             session.generationRecoveryBlocked = true
             holdAutomaticWakes(session, "recovery_conflict")
             addError(IllegalStateException("上次回复恢复记录与当前聊天暂不能安全合并，已保留两份记录并暂停生成，请勿清除数据。"), persisted.id)
-            Log.w(TAG, "Generation recovery refused (${failure.javaClass.simpleName}); private data withheld")
+            Log.w(TAG, "Generation recovery refused (${failure.javaClass.simpleName}; " +
+                "code=${me.rerere.rikkahub.data.ai.checkpoint.checkpointDiagnostic(failure)}); private data withheld")
             persisted
         }
     }
@@ -2946,16 +2961,23 @@ class ChatService(
 
     private fun humanContinuationFor(session: ConversationSession,
         recovered: me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal.Recovery? = null,
-    ): HumanContinuationLane =
+    ): HumanContinuationLane = synchronized(session) {
         session.humanContinuation.value ?: run {
             val baseline = recovered?.baseline ?: session.state.value
+            val ordinaryInput = if (recovered == null) session.ordinaryInputSaveHandoff?.takeIf {
+                it.initialFor(baseline) != null
+            } else null
+            val initial = recovered?.snapshot ?: ordinaryInput?.initialFor(baseline) ?: baseline
             val checkpointId = recovered?.runId ?: Uuid.random()
             lateinit var created: HumanContinuationLane
             val storage = HumanContinuationContextStore(
                 baseline = baseline, durableBaseline = recovered?.durableBaseline ?: baseline,
                 runId = checkpointId, writeMutex = session.orbisPromptEditMutex, journal = humanContinuationJournal,
                 read = { conversationRepo.getConversationById(session.id) },
-                proveBaseline = generationJournal::provesInFlightBaseline,
+                proveBaseline = { disk, expected ->
+                    ordinaryInput?.provesCommittedInput(disk, expected) == true ||
+                        generationJournal.provesInFlightBaseline(disk, expected)
+                },
                 commit = conversationRepo::commitHumanContinuation,
                 canWrite = { !queueControls.isResetting(session.id) && session.submittingMessage == null &&
                     !session.manualContextWriteInProgress },
@@ -2996,7 +3018,7 @@ class ChatService(
                         }
                     }
                 }
-            }, initial = recovered?.snapshot ?: baseline, checkpointId = checkpointId, checkpoint = { snapshot ->
+            }, initial = initial, checkpointId = checkpointId, checkpoint = { snapshot ->
                 // No old-job join, history mutex or Room operation may precede this write.
                 withContext(Dispatchers.IO) {
                     storage.checkpoint(snapshot)
@@ -3009,6 +3031,7 @@ class ChatService(
             session.cancelJobs().forEach { old -> old.invokeOnCompletion { created.requestSave() } }
             created
         }
+    }
 
     /** Human interruption is normal conversation control, not a queue recovery operation.
      * Fence the displayed producer immediately. Its cleanup and old tools remain separate;
@@ -3182,7 +3205,8 @@ class ChatService(
                     // previous request is finishing. File-backed history rewrites remain separate.
                     inputTransformers = continuationInputs,
                     outputTransformers = outputTransformers,
-                    allowLocalMemory = false, durableCheckpoints = false, stopOnUnknownToolOutcome = true,
+                    allowLocalMemory = false, allowObservation = !snapshot.isConsultation,
+                    durableCheckpoints = false, stopOnUnknownToolOutcome = true,
                     maxAutomaticContinuations = 0,
                     emitTerminalEvidence = true,
                     outputFrozenPrefixCount = frozenOutputPrefixCount(snapshot.currentMessages),
@@ -3197,8 +3221,7 @@ class ChatService(
                         is GenerationChunk.Messages -> {
                             val baselineIds = snapshot.currentMessages.map { it.id }.toSet()
                             current = current.updateCurrentMessages(chunk.messages.map { message ->
-                                if (voiceRecord != null && message.id !in baselineIds)
-                                    message.copy(orbisVoiceCallId = voiceRecord.id, orbisVoiceCallKind = "turn") else message
+                                generationVoiceOwnership(message, baselineIds, voiceRecord?.id, "turn")
                             })
                             publish(current)
                         }
@@ -3297,24 +3320,50 @@ class ChatService(
         if (content.isEmptyInputMessage()) return false
         val session = getOrCreateSession(conversationId)
         synchronized(session) {
-            if (!session.isInitialized || session.generationRecoveryBlocked || session.manualContextWriteInProgress ||
-                gatewaySubmissionBlocked(conversationId)) return false
+            if (!session.isInitialized) throw me.rerere.rikkahub.data.model.OrbisStickerSendNotice(
+                "对话尚未完整加载，请加载完成后重新点选表情。")
+            if (session.generationRecoveryBlocked || session.manualContextWriteInProgress ||
+                session.humanContinuation.value != null ||
+                gatewaySubmissionBlocked(conversationId) && !freshHumanReady(session))
+                throw me.rerere.rikkahub.data.model.OrbisStickerSendNotice(
+                    "当前回复保存或恢复状态仍在核对，未发送表情，也未继续旧工具操作。")
             val queue = session.messageQueue.state.value
-            if (!me.rerere.rikkahub.data.model.canSendOrbisStickerNow(
+            val voice = OrbisVoiceCallRuntime.get(context)
+            me.rerere.rikkahub.data.model.orbisStickerSendUnavailableReason(
                     generating = session.hasUnfinishedJobs(),
                     submitting = session.submittingMessage != null,
-                    queued = queue.blocksImmediateInput(),
+                    queued = queue.blocksExplicitImmediateInput(),
+                    voiceUnavailable = voice.callState.value.isActive || voice.callState.value.ending ||
+                        voice.voiceSession.state.value.phase != me.rerere.rikkahub.ui.pages.chat.VoicePhase.Off,
                     pendingTool = session.state.value.currentMessages.any { message ->
-                        message.parts.any { it is UIMessagePart.Tool && it.isPending }
+                        message.getTools().any { !it.isExecuted }
                     },
-                )) return false
-            // Recovery owns unpausing. Held call records alone do not prevent a new explicit tap.
-            val message = QueuedMessage(parts = content.toList(), orbisUserMessageTime = captureHumanMessageTime(session))
+                )?.let { throw me.rerere.rikkahub.data.model.OrbisStickerSendNotice(it) }
+            val messageId = Uuid.random()
+            val freshPermit = issueFreshHumanPermit(session, messageId)
+            // This tap acknowledges only this new input. Persist the pause transition with the
+            // same preparation as ordinary text, retaining every old record as held evidence.
+            try {
+                if (!session.messageQueue.prepareExplicitImmediateInput(freshPermit != null)) {
+                    freshPermit?.completed = true
+                    throw me.rerere.rikkahub.data.model.OrbisStickerSendNotice(
+                        "队列状态已变化，请先处理待发消息；本次没有发送表情。")
+                }
+            } catch (error: Throwable) {
+                freshPermit?.completed = true
+                if (error is IllegalStateException) throw me.rerere.rikkahub.data.model.OrbisStickerSendNotice(
+                    "暂停状态未能保存，本次没有发送表情；请检查本机存储后重试。")
+                throw error
+            }
+            val message = QueuedMessage(id = messageId, parts = content.toList(),
+                orbisUserMessageTime = captureHumanMessageTime(session), freshHumanInputPermit = freshPermit,
+                acknowledgeSafetyHold = freshPermit == null)
             session.submittingMessage = message
             try {
                 sendQueuedMessage(session, message, requireImageInput = content.any { it is UIMessagePart.Image })
                     .invokeOnCompletion { cleanupQueuedAttachments(message) }
             } catch (error: Throwable) {
+                freshPermit?.completed = true
                 if (session.submittingMessage?.id == message.id) session.submittingMessage = null
                 throw error
             }
@@ -3415,6 +3464,7 @@ class ChatService(
         var eventInputCommitted = false
         var inputSaveAttempted = false
         var attemptedInputConversation: Conversation? = null
+        var ordinaryInputHandoff: HumanContinuationOrdinaryInputHandoff? = null
         var generationAttempted = false
         val answer = queued.answer
         val bodyEntered = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -3563,6 +3613,11 @@ class ChatService(
                 )
                 inputSaveAttempted = true
                 attemptedInputConversation = newConversation
+                if (event == null && queued.voiceCallId == null && queued.voiceCallKind == null &&
+                    !currentConversation.isConsultation) synchronized(session) {
+                    ordinaryInputHandoff = HumanContinuationOrdinaryInputHandoff(currentConversation, newConversation, queued.id)
+                    session.ordinaryInputSaveHandoff = ordinaryInputHandoff
+                }
                 saveConversation(conversationId, newConversation)
                 eventInputCommitted = true
                 onInputCommitted?.invoke()
@@ -3719,6 +3774,10 @@ class ChatService(
                 // A malformed archive / page commit must not pause otherwise healthy text conversations.
                 if (queued.voiceCallKind !in setOf("archive", "restore", "visual")) session.messageQueue.pause()
                 addError(e, conversationId, title = context.getString(R.string.error_title_send_message))
+            } finally {
+                ordinaryInputHandoff?.let { captured -> synchronized(session) {
+                    if (session.ordinaryInputSaveHandoff === captured) session.ordinaryInputSaveHandoff = null
+                } }
             }
         }
         job.invokeOnCompletion { cause ->
@@ -3850,6 +3909,7 @@ class ChatService(
             val rejection = if (plan is HumanContinuationRegeneration.Blocked) plan.notice else {
                 val lane = humanContinuationFor(session)
                 lane.regenerate(message) { snapshot, owner, publish ->
+                    recordObservedRegeneration(current, message)
                     val completed = generateHumanContinuation(session, lane, snapshot, owner, publish,
                         // An old producer may not have published its tool yet. A retry button
                         // never silently authorizes a newly proposed side effect either.
@@ -3878,6 +3938,9 @@ class ChatService(
                 settlePreviousGeneration(session)
                 val conversation = session.state.value
 
+                if (message.role == MessageRole.USER || regenerateAssistantMsg) {
+                    recordObservedRegeneration(conversation, message)
+                }
                 val completed = if (message.role == MessageRole.USER) {
                     // 如果是用户消息，则截止到当前消息
                     val node = conversation.getMessageNodeByMessage(message)
@@ -3911,6 +3974,13 @@ class ChatService(
         }
 
         session.setJob(job)
+    }
+
+    private fun recordObservedRegeneration(conversation: Conversation, message: UIMessage) {
+        if (!settingsStore.settingsFlow.value.aiGlobalObservation || conversation.isConsultation) return
+        val human = me.rerere.rikkahub.data.orbis.observation.observedRegenerationHuman(conversation, message.id) ?: return
+        runCatching { me.rerere.rikkahub.data.orbis.observation.ObservationMeter(context)
+            .regenerate(conversation.id.toString(), human.id.toString()) }
     }
 
     // ---- 处理工具调用审批 ----
@@ -4234,9 +4304,7 @@ class ChatService(
             val editable = if (handle.suffixCount == 0) current else
                 current.copy(messageNodes = current.messageNodes.dropLast(handle.suffixCount))
             val projectedEditable = editable.updateCurrentMessages(messages.map { message ->
-                if (voiceCallId != null && !message.isCompactionSummary() && message.id !in initialMessageIds)
-                    message.copy(orbisVoiceCallId = voiceCallId, orbisVoiceCallKind = voiceCallKind)
-                else message
+                generationVoiceOwnership(message, initialMessageIds, voiceCallId, voiceCallKind)
             })
             val projected = if (handle.suffixCount == 0) projectedEditable else
                 projectedEditable.copy(messageNodes = projectedEditable.messageNodes + protectedSuffix)
@@ -5099,6 +5167,12 @@ class ChatService(
                             val committed = withContext(Dispatchers.IO) {
                                 compactionRepository.commitMessageBatch(current, preview)
                             }
+                            if (settingsStore.settingsFlow.value.aiGlobalObservation) runCatching {
+                                // One committed whole-node delete can contain several
+                                // assistant branches; affectedCount is only the node count.
+                                me.rerere.rikkahub.data.orbis.observation.ObservationMeter(context).delete(
+                                    me.rerere.rikkahub.data.orbis.observation.observedBatchDeletedCount(current, preview))
+                            }
                             // Room and FTS are durable before publishing. No generic save path:
                             // it could resume a paused queue, or make stale history visible first.
                             session.state.value = committed.conversation
@@ -5125,11 +5199,12 @@ class ChatService(
             initializeConversation(conversationId, selectAssistant = false)
             session.orbisPromptEditMutex.withLock {
                 synchronized(session) {
-                    check(session.getJob() == null && session.submittingMessage == null) {
+                    check(!session.hasUnfinishedJobs() && session.submittingMessage == null &&
+                        !session.manualContextWriteInProgress && session.humanContinuation.value?.job?.value == null) {
                         "请等当前回复结束或停止生成，再预览手动整理。"
                     }
                 }
-                val snapshot = session.state.value
+                val snapshot = session.displayedSnapshot()
                 withContext(Dispatchers.Default) {
                     me.rerere.rikkahub.data.model.prepareOrbisManualContext(snapshot, archiveThroughCount, summary)
                 }
@@ -5145,26 +5220,27 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         session.withRefSuspend {
             initializeConversation(conversationId, selectAssistant = false)
-            session.orbisPromptEditMutex.withLock {
-                val current = synchronized(session) {
-                    check(session.getJob() == null && session.submittingMessage == null) {
-                        "正在生成或提交消息，本次未整理；请等结束后重新预览。"
-                    }
-                    requireCompactionEpoch(preview.compactionEpoch, session.state.value.compactionEpoch)
-                    session.manualContextWriteInProgress = true
-                    session.state.value
+            fun requireReady() = synchronized(session) {
+                check(!session.hasUnfinishedJobs() && session.submittingMessage == null &&
+                    !session.manualContextWriteInProgress && !queueControls.isResetting(session.id)) {
+                    "正在生成或提交消息，本次未整理；请等结束后重新预览。"
                 }
-                // One transaction preserves a separate original archive AND shrinks this page.
-                // No saveConversation: that generic path would dispatch the paused old queue.
-                try { withContext(kotlinx.coroutines.NonCancellable) {
-                    val result = withContext(Dispatchers.IO) {
-                        compactionRepository.commitManual(current, preview.replacementNodes, preview.metadata,
-                            preview.expectedFingerprint)
-                    }
-                    session.state.value = result.commit.conversation
-                    session.isInitialized = true
-                    result.archiveId
-                } } finally { synchronized(session) { session.manualContextWriteInProgress = false } }
+            }
+            val lane = synchronized(session) {
+                requireReady()
+                humanContinuationFor(session)
+            }
+            // compact owns the edit/checkpoint mutexes. Do not hold the edit mutex outside it,
+            // or create a separate old-epoch lane while the manual transaction is in flight.
+            withContext(Dispatchers.IO) {
+                commitManualContinuation(lane, preview, requireReady = {
+                    requireReady()
+                    check(session.humanContinuation.value === lane) { "当前续聊已变化，请重新预览。" }
+                }) { durable ->
+                    val result = compactionRepository.commitManual(durable, preview.replacementNodes, preview.metadata,
+                        me.rerere.rikkahub.data.model.manualContextFingerprint(durable))
+                    result.commit.conversation to result.archiveId
+                }
             }
         }
     } }
@@ -5600,18 +5676,23 @@ class ChatService(
         val eventOwner = conversation.currentMessages.lastOrNull { it.role == MessageRole.USER }?.orbisEvent?.recordId
             ?.let { orbisEvents.inbox.get(it) }?.takeIf { it.conversationId == conversationId.toString() }
             ?.let { Uuid.parse(it.assistantId) }
-        // Preserve the existing message-update timing; only the prompt's commit ordering
-        // is changed by this feature. Initial forks/DB loads may seed their committed field.
+        // Publish a whole-state save only after Room commits. A failed ordinary input must
+        // leave the session's durable anchor intact for the independent continuation lane.
+        // Initial forks/DB loads may seed their committed prompt field.
         if (eventOwner != null) {
             // Atomic existing-owner check: queued events must never resurrect deleted chats.
             conversationRepo.updateConversation(updatedConversation, requireExistingOwner = eventOwner)
             updateConversation(conversationId, updatedConversation, restoreCommittedPrompt = !session.isInitialized)
         } else if (!exists) {
-            updateConversation(conversationId, updatedConversation, restoreCommittedPrompt = !session.isInitialized)
-            conversationRepo.insertConversation(updatedConversation)
+            commitConversationBeforePublish(
+                commit = { conversationRepo.insertConversation(updatedConversation) },
+                publish = { updateConversation(conversationId, updatedConversation, restoreCommittedPrompt = !session.isInitialized) },
+            )
         } else {
-            updateConversation(conversationId, updatedConversation, restoreCommittedPrompt = !session.isInitialized)
-            conversationRepo.updateConversation(updatedConversation)
+            commitConversationBeforePublish(
+                commit = { conversationRepo.updateConversation(updatedConversation) },
+                publish = { updateConversation(conversationId, updatedConversation, restoreCommittedPrompt = !session.isInitialized) },
+            )
         }
         session.isInitialized = true
     }
@@ -5792,16 +5873,12 @@ class ChatService(
         conversationId: Uuid,
         messageId: Uuid
     ): Conversation {
-        val currentConversation = getConversationFlow(conversationId).value
-        val targetNodeIndex = currentConversation.messageNodes.indexOfFirst { node ->
-            node.messages.any { it.id == messageId }
-        }
-        if (targetNodeIndex == -1) {
-            throw NotFoundException("Message not found")
+        val session = getOrCreateSession(conversationId)
+        val (currentConversation, prefix) = synchronized(session) {
+            forkDisplayedPrefix(session.state.value, session.humanContinuation.value?.state?.value, messageId)
         }
 
-        val copiedNodes = currentConversation.messageNodes
-            .subList(0, targetNodeIndex + 1)
+        val copiedNodes = prefix
             .map { node ->
                 node.copy(
                     id = Uuid.random(),
@@ -5868,6 +5945,10 @@ class ChatService(
                 return@withWritableHistory false
             }
             saveConversationLocked(session, updatedConversation)
+            if (settingsStore.settingsFlow.value.aiGlobalObservation && !currentConversation.isConsultation &&
+                currentConversation.messageNodes.flatMap { it.messages }.any {
+                    it.id == messageId && it.role in setOf(MessageRole.USER, MessageRole.ASSISTANT)
+                }) runCatching { me.rerere.rikkahub.data.orbis.observation.ObservationMeter(context).delete(1) }
             true
         }
         if (changed) dispatchNextQueuedMessage(conversationId)

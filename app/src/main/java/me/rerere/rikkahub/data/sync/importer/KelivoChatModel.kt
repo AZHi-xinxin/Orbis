@@ -46,6 +46,7 @@ internal object KelivoChatLimits {
 }
 
 internal fun kelivoImportId(kind: String, vararg identities: String): Uuid = Uuid.parse(UUID.nameUUIDFromBytes(
+    // Keep the original namespace across ZIP v2/v3 so the same source chat is never imported twice.
     ("orbis-kelivo-sqlite-v2/$kind/" + identities.joinToString("") { "${it.length}:$it" }).toByteArray(Charsets.UTF_8)).toString())
 
 internal fun kelivoTimestamp(micros: Long): Instant {
@@ -130,6 +131,9 @@ internal fun convertKelivoChat(source: KelivoChatSource, chat: KelivoChat, assis
                     "reasoning", "thinking" -> text += "[Kelivo 历史思考，仅作记录]\n${inertKelivoText(part.payload)}"
                     "tool_call", "tool_result", "toolCall", "toolResult" ->
                         text += "[Kelivo 历史工具记录；不会执行或恢复授权]\n${inertKelivoText(part.payload)}"
+                    // A response boundary and provider metadata, not another answer or executable work.
+                    "assistant_round_end" -> Unit
+                    "provider_auth_error" -> text += "[Kelivo 历史模型授权失败记录；未导入授权或重试]"
                     "image", "file", "attachment", "audio", "video" -> media++
                     else -> text += "[Kelivo 暂不支持的历史内容类型；请在原应用中查看，未执行]"
                 }

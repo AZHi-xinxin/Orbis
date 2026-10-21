@@ -32,4 +32,31 @@ class OrbisStickerSendTest {
                     mask and 8 != 0))
         }
     }
+
+    @Test fun `each active editor recorder call or service blocker has a visible reason`() {
+        for (mask in 0 until 128) {
+            val reason = orbisStickerSendUnavailableReason(
+                generating = mask and 1 != 0,
+                submitting = mask and 2 != 0,
+                queued = mask and 4 != 0,
+                pendingTool = mask and 8 != 0,
+                editing = mask and 16 != 0,
+                voiceUnavailable = mask and 32 != 0,
+                recording = mask and 64 != 0,
+            )
+            if (mask == 0) assertNull(reason)
+            else assertFalse("missing reason for blocker mask $mask", reason.isNullOrBlank())
+        }
+    }
+
+    @Test fun `unknown or unexecuted tool still blocks new sticker despite an otherwise idle input`() {
+        assertNotNull(orbisStickerSendUnavailableReason(pendingTool = true))
+        assertFalse(canSendOrbisStickerNow(false, false, false, true))
+    }
+
+    @Test fun `call ending never becomes automatic resend permission`() {
+        val reason = orbisStickerSendUnavailableReason(voiceUnavailable = true)
+        assertTrue(reason!!.contains("不会自动补发"))
+        assertNull(orbisStickerSendUnavailableReason())
+    }
 }

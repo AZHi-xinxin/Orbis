@@ -8,6 +8,10 @@ data class TokenUsage(
     val completionTokens: Int = 0,
     val cachedTokens: Int = 0,
     val totalTokens: Int = 0,
+    // A streaming delta may omit cache usage; an explicitly reported zero is not omission.
+    // Recovery journals checksum serialized messages; legacy default bytes must not change.
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val cachedTokensReported: Boolean = cachedTokens > 0,
 )
 
 fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
@@ -22,7 +26,10 @@ fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
         this?.completionTokens ?: 0
     }
     val totalTokens = promptTokens + completionTokens
-    val cachedTokens = if (other.cachedTokens > 0) {
+    // A new input snapshot must never inherit a cache hit from the preceding request.
+    // Output-only deltas (notably Claude message_delta) still retain their input snapshot.
+    val replacesCache = other.cachedTokensReported || other.cachedTokens > 0 || other.promptTokens > 0
+    val cachedTokens = if (replacesCache) {
         other.cachedTokens
     } else {
         this?.cachedTokens ?: 0
@@ -31,6 +38,7 @@ fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
         promptTokens = promptTokens,
         completionTokens = completionTokens,
         totalTokens = totalTokens,
-        cachedTokens = cachedTokens
+        cachedTokens = cachedTokens,
+        cachedTokensReported = if (replacesCache) other.cachedTokensReported else this?.cachedTokensReported ?: false,
     )
 }

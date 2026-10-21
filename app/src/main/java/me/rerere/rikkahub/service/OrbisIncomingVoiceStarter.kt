@@ -90,9 +90,12 @@ internal suspend fun startIncomingVoice(context: Context, lifecycle: Lifecycle, 
             cancelPendingReply = { chat.cancelVoiceCallReply(conversationId, call.id, it) },
             checkReplyResume = { chat.canResumeVoiceCallReplies(conversationId, call.id) },
             speak = { text ->
+                val voiceSettings = koin.get<SettingsStore>().settingsFlow.value
                 val spoken = text.stripMarkdown()
                 if (spoken.isNotBlank()) {
-                    ownedPlayer.speak(spoken)
+                    ownedPlayer.setProvider(voiceSettings.getSelectedTTSProvider())
+                    ownedPlayer.setSpeed(voiceSettings.defaultTTSPlaybackSpeed)
+                    ownedPlayer.speak(spoken, mixerConfig = voiceSettings.voiceMixer)
                     combine(ownedPlayer.isSpeaking, ownedPlayer.error) { speaking, error ->
                         check(error == null) { "通话朗读失败" }; !speaking
                     }.first { it }

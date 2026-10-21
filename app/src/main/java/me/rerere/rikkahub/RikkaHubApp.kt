@@ -143,9 +143,47 @@ class RikkaHubApp : Application() {
         }
 
         // Increment launch count
+        if (BuildConfig.ORBIS_ENABLED) get<AppScope>().launch {
+            var applied: me.rerere.tts.controller.VoiceMixerConfig? = null
+            get<SettingsStore>().settingsFlow.collect { settings ->
+                if (!settings.init && settings.voiceMixer != applied) runCatching {
+                    me.rerere.tts.controller.VoiceMixer.apply(settings.voiceMixer)
+                    applied = settings.voiceMixer
+                }
+                    .onFailure { Log.w(TAG, "Voice mixer configuration unavailable; original audio retained") }
+            }
+        }
         incrementLaunchCount()
+        if (BuildConfig.ORBIS_ENABLED) get<AppScope>().launch(Dispatchers.IO) {
+            get<me.rerere.rikkahub.data.orbis.memory.SemanticMemoryRecall>().start()
+        }
+
+        if (BuildConfig.ORBIS_ENABLED) get<AppScope>().launch(Dispatchers.IO) {
+            runCatching {
+                val initial = get<SettingsStore>().settingsFlow.first { !it.init }
+                me.rerere.rikkahub.data.sync.AutoBackupRuntime.schedule(this@RikkaHubApp, initial.autoBackup)
+                me.rerere.rikkahub.data.sync.ContinuousBackup.start(
+                    this@RikkaHubApp, get<me.rerere.rikkahub.data.db.AppDatabase>(), get<SettingsStore>(), get<AppScope>())
+            }.onFailure { Log.w(TAG, "Background backup unavailable; local chat remains available") }
+        }
 
         // Composer.setDiagnosticStackTraceMode(ComposeStackTraceMode.Auto)
+        if (BuildConfig.ORBIS_ENABLED) get<AppScope>().launch(kotlinx.coroutines.Dispatchers.IO) {
+            var previous = emptyMap<String, Boolean>()
+            get<SettingsStore>().settingsFlow.collect { settings ->
+                if(!settings.init) {
+                    val owners = settings.assistants.associate { it.id.toString() to it.orbisPetEnabled }
+                    (previous.keys + owners.keys).forEach { owner ->
+                        if(owner !in previous || previous[owner] != owners[owner]) runCatching {
+                            val enabled = owners[owner] == true &&
+                                me.rerere.rikkahub.data.orbis.activities.OrbisActivities.pet(this@RikkaHubApp, owner).snapshot().aiConsent
+                            me.rerere.rikkahub.data.orbis.activities.PetAiRuntime.schedule(this@RikkaHubApp, owner, enabled)
+                        }
+                    }
+                    previous = owners
+                }
+            }
+        }
     }
 
     private fun incrementLaunchCount() {

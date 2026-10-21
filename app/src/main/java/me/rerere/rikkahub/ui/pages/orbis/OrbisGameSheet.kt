@@ -299,7 +299,7 @@ internal fun GameContent(
                 }
             } else OrbisMiniGameWebView(opened.session.id, opened.source.html,
                 onFinish = { result ->
-                    try { miniRepository.finish(opened.session.id, result.result, result.moveCount) }
+                    try { miniRepository.finish(opened.session.id, result.result, result.moveCount, result.score, result.maxTile, result.scoringVersion) }
                     catch (error: Exception) { scope.launch { saveFailed = true }; throw error }
                 }, onRendererFailure = { htmlCrashed = true },
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("orbis-html-game"))
@@ -449,7 +449,9 @@ internal fun GameContent(
                         Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                             Text("${session.gameTitle} · ${session.result?.let(::resultLabel) ?: "未结算"}", fontSize = 12.sp, color = colors.ink)
                             Text(if (session.finishedAt == null) "未上报结果；离开页面不会自动判负。"
-                                else "${session.moveCount ?: 0} 步 · ${(session.finishedAt - session.startedAt) / 1000} 秒 · ${if (session.result == "abandoned") "主动结束" else "游戏上报 / 宿主计时"}",
+                                else "${session.moveCount ?: 0} 步 · ${(session.finishedAt - session.startedAt) / 1000} 秒" +
+                                    (session.score?.let { " · $it 分" } ?: "") + (session.maxTile?.let { " · 最大方块 $it" } ?: "") +
+                                    " · ${if (session.result == "abandoned") "主动结束" else "游戏上报 / 宿主计时"}",
                                 fontSize = 10.sp, color = colors.mutedInk)
                             if (session.finishedAt == null) TextButton(onClick = { perform({ miniRepository.abandon(session.id) }) }, enabled = !busy) { Text("结束这局") }
                         }

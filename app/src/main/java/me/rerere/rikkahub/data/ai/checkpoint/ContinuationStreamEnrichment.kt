@@ -4,6 +4,39 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.core.MessageRole
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.MessageNode
+
+/** An exact journal-issued Room hash is a prerequisite at the caller. This additionally
+ * limits recovery to unfinished, selected assistant prose moving forward. It is NOT a
+ * general prefix merge: other branches, human edits, tool receipts and ownership stay exact.
+ */
+internal fun isProvenContinuationTextAdvance(before: MessageNode, after: MessageNode): Boolean {
+    if (before.id != after.id || before.selectIndex != after.selectIndex ||
+        before.messages.size != after.messages.size) return false
+    return before.messages.zip(after.messages).all { (a, b) ->
+        if (a == b) true else {
+            if (a.id != before.currentMessage.id || a.role != MessageRole.ASSISTANT || a.finishedAt != null ||
+                a.isSynthetic || a.orbisEvent != null || a.deletedToolRecords.isNotEmpty() ||
+                a.parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Reasoning } ||
+                b.parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Reasoning } ||
+                b.parts.size < a.parts.size || b.finishedAt?.let { it < a.createdAt } == true ||
+                a.copy(parts = b.parts, finishedAt = b.finishedAt, usage = b.usage) != b) return false
+            a.parts.zip(b.parts).all { (old, next) ->
+                old == next || when {
+                    old is UIMessagePart.Text && next is UIMessagePart.Text ->
+                        next.text.startsWith(old.text) && old.copy(text = next.text) == next
+                    old is UIMessagePart.Reasoning && next is UIMessagePart.Reasoning ->
+                        old.finishedAt == null && next.reasoning.startsWith(old.reasoning) &&
+                            next.finishedAt?.let { it < old.createdAt } != true &&
+                            old.copy(reasoning = next.reasoning, finishedAt = next.finishedAt) == next
+                    else -> false
+                }
+            } && b.parts.drop(a.parts.size).all { part ->
+                part !is UIMessagePart.Reasoning || part.finishedAt?.let { it >= part.createdAt } != false
+            }
+        }
+    }
+}
 
 /** The disk checkpoint may finish one chunk after a human captures the visible baseline.
  * This only adds that exact, already durable text suffix. It cannot merge divergent edits,

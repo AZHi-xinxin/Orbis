@@ -16,10 +16,14 @@ class WorkspaceNativeFilesTest {
         var failBeforeCommit = false
         var changeAfterRead = false
         var opened = 0
+        val createdDirectories = mutableListOf<String>()
         fun put(name: String, bytes: ByteArray) { files[name] = bytes; revisions[name] = (revisions[name] ?: 0) + 1 }
         fun stat(name: String) = WorkspaceNativeStat(files.getValue(name).size.toLong(), 1, revisions.getValue(name).toString())
         fun directory(prefix: String = ""): WorkspaceNativeDirectory = object : WorkspaceNativeDirectory {
-            override fun directory(name: String, create: Boolean) = directory("$prefix$name/")
+            override fun directory(name: String, create: Boolean): WorkspaceNativeDirectory {
+                if (create) createdDirectories += "$prefix$name/"
+                return directory("$prefix$name/")
+            }
             override fun read(name: String): WorkspaceNativeRead {
                 val key = prefix + name
                 require(files.containsKey(key))
@@ -56,6 +60,17 @@ class WorkspaceNativeFilesTest {
         assertEquals(65536L, chunk.nextOffsetBytes)
         assertFalse(chunk.eof)
         assertTrue(disk.maxRead <= 65539)
+    }
+
+    @Test fun nativeDirectoryPreparationCreatesOnlyValidatedComponentsAndNoFiles() {
+        val disk = MemoryDisk()
+        val native = disk.engine()
+        native.ensureDirectory(listOf("workspaces", "owner", "files"))
+        assertEquals(listOf("workspaces/", "workspaces/owner/", "workspaces/owner/files/"), disk.createdDirectories)
+        assertTrue(disk.files.isEmpty())
+        assertThrows(IllegalArgumentException::class.java) { native.ensureDirectory(listOf("..")) }
+        assertThrows(IllegalArgumentException::class.java) { native.ensureDirectory(emptyList()) }
+        assertEquals(1, disk.opened)
     }
 
     @Test fun utf8ChunksReassembleWithoutLoss() {

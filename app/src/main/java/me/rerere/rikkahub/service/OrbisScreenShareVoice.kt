@@ -75,7 +75,7 @@ internal suspend fun startScreenShareVoice(context: Context) {
                         } else {
                             ownedPlayer.setProvider(provider)
                             ownedPlayer.setSpeed(liveSettings.defaultTTSPlaybackSpeed)
-                            if (!ownedPlayer.speakScreenShareText(spoken)) output.reportFailure(shareSession)
+                            if (!ownedPlayer.speakScreenShareText(spoken, liveSettings.voiceMixer)) output.reportFailure(shareSession)
                         }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { runCatching { ownedPlayer.stop() }; output.reportFailure(shareSession) }

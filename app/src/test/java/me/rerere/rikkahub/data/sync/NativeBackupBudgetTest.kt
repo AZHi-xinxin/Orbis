@@ -24,6 +24,19 @@ class NativeBackupBudgetTest {
         }
     }
 
+    @Test fun bothConversationRecoveryNamespacesUseTheNativeJournalLimit() {
+        val id = "00000000-0000-0000-0000-000000000001"
+        listOf(ConversationRecoveryBackup.GENERATION, ConversationRecoveryBackup.CONTINUATION).forEach { namespace ->
+            val name = "$namespace/$id.json"
+            val limit = ConversationRecoveryBackup.MAX_BYTES.toLong()
+            assertEquals(limit, NativeBackupBudget.entryLimit(name))
+            assertEquals(limit, NativeBackupBudget.inspect(1, sequenceOf(entry(name, limit))).expandedBytes)
+            assertEquals(ArchiveFailure.SIZE_LIMIT, failure {
+                NativeBackupBudget.inspect(1, sequenceOf(entry(name, limit + 1)))
+            }.reason)
+        }
+    }
+
     @Test fun expansionPathAndEntryCountRemainBounded() {
         assertEquals(ArchiveFailure.SIZE_LIMIT, failure {
             NativeBackupBudget.inspect(1, (1..3).asSequence().map { entry("upload/$it", 8L * ArchiveCapacity.GIB) })

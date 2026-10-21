@@ -174,6 +174,9 @@ fun ChatPage(
         return
     }
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
+    ReportForegroundChat(conversation.id.toString(), BuildConfig.ORBIS_ENABLED && !setting.init)
+    ObserveChatPresence(BuildConfig.ORBIS_ENABLED && !setting.init && setting.aiGlobalObservation,
+        conversation.id.toString())
     val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
     val composerScope = conversationComposerScope(setting, conversation.assistantId)
     val currentChatModel = composerScope?.model
@@ -201,6 +204,11 @@ fun ChatPage(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    HandleForegroundChatReturn(conversation.id.toString(), drawerState) {
+        manualContextOpen = false
+        focusManager.clearFocus(force = true)
+        softwareKeyboardController?.hide()
+    }
 
     // Handle back press when drawer is open
     BackHandler(enabled = drawerState.isOpen) {
@@ -405,6 +413,9 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    // The same activity-provided ASR controller used by ChatInput, not a second recorder.
+    // Read state.value at each send/recheck so image IO cannot capture a stale recording flag.
+    val composerAsr = me.rerere.rikkahub.ui.context.LocalASRState.current
     val screenShareContext = LocalContext.current
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
@@ -594,12 +605,12 @@ private fun ChatPageContent(
                     onOrbisPromptClick = { showOrbisPrompt = true },
                     orbisPromptActive = conversation.orbisPrompt.isActive(),
                     onOrbisSendSticker = { id ->
-                        vm.sendOrbisSticker(id).also { accepted ->
+                        vm.sendOrbisSticker(id, isRecording = { composerAsr.state.value.isRecording }).also { accepted ->
                             if (accepted) bottomFollowState.followForSend(chatListState.isScrollInProgress)
                         }
                     },
                     onOrbisSendTextEmotion = { text ->
-                        vm.sendOrbisTextEmotion(text).also { accepted ->
+                        vm.sendOrbisTextEmotion(text, isRecording = { composerAsr.state.value.isRecording }).also { accepted ->
                             if (accepted) bottomFollowState.followForSend(chatListState.isScrollInProgress)
                         }
                     },

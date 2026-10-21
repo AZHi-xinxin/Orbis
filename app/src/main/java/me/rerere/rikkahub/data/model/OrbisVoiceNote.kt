@@ -45,7 +45,7 @@ fun orbisVoiceNoteMetadata(transcript: String, original: String = transcript, du
 
 /** Only a completed, audio-only native result is presentation-safe. Never conceal errors/mixed output. */
 fun UIMessagePart.Tool.successfulOrbisVoiceNotes(): List<UIMessagePart.Audio> {
-    if (toolName != "orbis_voice_note" || !isExecuted || hostToolFailure() != null ||
+    if (toolName !in setOf("orbis_voice_note", "orbis_send_audio") || !isExecuted || hostToolFailure() != null ||
         approvalState is ToolApprovalState.Denied || approvalState is ToolApprovalState.Pending) return emptyList()
     if (output.any { it !is UIMessagePart.Audio || !it.isOrbisVoiceNote() }) return emptyList()
     return output.filterIsInstance<UIMessagePart.Audio>()

@@ -1,6 +1,9 @@
 package me.rerere.rikkahub.data.sync.webdav
 
 import android.util.Log
+import me.rerere.rikkahub.data.sync.backupText
+import me.rerere.rikkahub.data.sync.copyBackup
+import me.rerere.rikkahub.data.sync.OverwriteBackupNames
 import android.util.Xml
 import io.ktor.client.HttpClient
 import io.ktor.client.request.basicAuth
@@ -28,6 +31,7 @@ import java.io.StringReader
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 private const val TAG = "WebDavClient"
 
@@ -55,7 +59,7 @@ class WebDavClient(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "PUT: $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod.Put
@@ -68,12 +72,13 @@ class WebDavClient(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "put failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to put: ${response.status}", response.status.value, errorBody)
             }
 
-            Log.d(TAG, "put success: $path")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -85,7 +90,7 @@ class WebDavClient(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "PUT (stream file): $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod.Put
@@ -99,12 +104,13 @@ class WebDavClient(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "put(file) failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to put file: ${response.status}", response.status.value, errorBody)
             }
 
-            Log.d(TAG, "put(file) success: $path (${file.length()} bytes)")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -112,7 +118,7 @@ class WebDavClient(
     suspend fun get(path: String): Result<ByteArray> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "GET: $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod.Get
@@ -120,8 +126,9 @@ class WebDavClient(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "get failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to get: ${response.status}", response.status.value, errorBody)
             }
 
@@ -133,7 +140,7 @@ class WebDavClient(
     suspend fun getStream(path: String): Result<InputStream> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "GET (stream): $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod.Get
@@ -141,8 +148,9 @@ class WebDavClient(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "getStream failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to get stream: ${response.status}", response.status.value, errorBody)
             }
 
@@ -150,43 +158,107 @@ class WebDavClient(
         }
     }
 
-    suspend fun downloadToFile(path: String, targetFile: File): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun downloadToFile(path: String, targetFile: File, maxBytes: Long = me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.MAX_ZIP_BYTES,
+        envelope: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "GET (download to file): $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             httpClient.prepareRequest(url) {
                 method = HttpMethod.Get
                 basicAuth(config.username, config.password)
             }.execute { response ->
                 if (!response.status.isSuccess()) {
-                    val errorBody = response.bodyAsText()
-                    Log.e(TAG, "downloadToFile failed: ${response.status} - $errorBody")
+                    response.bodyAsChannel().cancel(null)
+                    val errorBody = "HTTP ${response.status.value}"
+                    // Do not log storage URLs, object names or remote response bodies.
                     throw WebDavException("Failed to download: ${response.status}", response.status.value, errorBody)
                 }
 
-                val channel = response.bodyAsChannel()
-                me.rerere.rikkahub.data.sync.NativeBackupBudget.Output(targetFile.outputStream()) {
-                    targetFile.parentFile!!.usableSpace
-                }.use { outputStream ->
-                    val buffer = ByteArray(8192)
-                    while (!channel.isClosedForRead) {
-                        val bytesRead = channel.readAvailable(buffer)
-                        if (bytesRead > 0) {
-                            outputStream.write(buffer, 0, bytesRead)
-                        }
-                    }
-                }
+                require(!envelope || path == OverwriteBackupNames.LATEST || OverwriteBackupNames.isTemporary(path))
+                response.copyBackup(targetFile, maxBytes, envelope)
                 Log.d(TAG, "downloadToFile success: downloaded ${targetFile.length()} bytes")
             }
             Unit
         }
     }
 
+    /** Read metadata without buffering the whole archive when a server ignores Range. */
+    suspend fun readPrefix(path: String, maxBytes: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(path == OverwriteBackupNames.LATEST && maxBytes in 1..OverwriteBackupNames.MAX_HEADER_BYTES)
+            httpClient.prepareRequest(config.buildUrl(path)) {
+                method = HttpMethod.Get
+                basicAuth(config.username, config.password)
+                headers { append("Range", "bytes=0-${maxBytes - 1}") }
+            }.execute { response ->
+                require(response.status.value == 200 || response.status.value == 206) { "backup_prefix_http_${response.status.value}" }
+                if (response.status.value == 206) require(response.headers["Content-Range"]?.startsWith("bytes 0-") == true) {
+                    "backup_prefix_range"
+                }
+                val channel = response.bodyAsChannel()
+                try {
+                    val bytes = ByteArray(maxBytes)
+                    var count = 0
+                    while (count < maxBytes) {
+                        val size = channel.readAvailable(bytes, count, maxBytes - count)
+                        if (size < 0) break
+                        count += size
+                    }
+                    bytes.copyOf(count)
+                } finally { channel.cancel(null) }
+            }
+        }
+    }
+
+    /** Generic DAV MOVE may delete the old file first: require the explicit server contract. */
+    suspend fun supportsAtomicBackupReplace(): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            httpClient.prepareRequest(config.buildUrl().trimEnd('/') + "/") {
+                method = HttpMethod.Options
+                basicAuth(config.username, config.password)
+            }.execute { response ->
+                try {
+                    if (response.status.value == 405 || response.status.value == 501) return@execute false
+                    check(response.status.isSuccess()) { "backup_capability_http_${response.status.value}" }
+                    response.headers["X-Orbis-Atomic-Replace"] == "bundle-v2"
+                } finally { response.bodyAsChannel().cancel(null) }
+            }
+        }
+    }
+
+    suspend fun replaceBackup(temporaryName: String, expectedGeneration: String?, requireEmpty: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(OverwriteBackupNames.isTemporary(temporaryName))
+            require(expectedGeneration == null || OverwriteBackupNames.isGeneration(expectedGeneration))
+            require(!requireEmpty || expectedGeneration == null)
+            check(supportsAtomicBackupReplace().getOrThrow()) { "backup_atomic_replace_unsupported" }
+            val source = config.buildUrl(temporaryName).toHttpUrl()
+            val destination = config.buildUrl(OverwriteBackupNames.LATEST).toHttpUrl()
+            check(source.scheme == destination.scheme && source.host == destination.host && source.port == destination.port &&
+                source.encodedPath.substringBeforeLast('/') == destination.encodedPath.substringBeforeLast('/'))
+            httpClient.prepareRequest(source.toString()) {
+                method = HttpMethod("MOVE")
+                basicAuth(config.username, config.password)
+                headers {
+                    append("Destination", destination.toString())
+                    append("Overwrite", "T")
+                    append("X-Orbis-Expected-Generation", expectedGeneration ?: "absent")
+                    append("X-Orbis-Require-Empty", if (requireEmpty) "1" else "0")
+                }
+            }.execute { response ->
+                try {
+                    check(response.status.value == 201 || response.status.value == 204) { "backup_replace_http_${response.status.value}" }
+                    check(response.headers["X-Orbis-Atomic-Replace"] == "bundle-v2") { "backup_replace_unconfirmed" }
+                } finally { response.bodyAsChannel().cancel(null) }
+            }
+        }
+    }
+
     suspend fun delete(path: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "DELETE: $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod.Delete
@@ -194,12 +266,13 @@ class WebDavClient(
             }
 
             if (!response.status.isSuccess()) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "delete failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to delete: ${response.status}", response.status.value, errorBody)
             }
 
-            Log.d(TAG, "delete success: $path")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -207,7 +280,7 @@ class WebDavClient(
     suspend fun head(path: String): Result<WebDavResourceInfo> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "HEAD: $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod.Head
@@ -232,7 +305,7 @@ class WebDavClient(
     suspend fun mkcol(path: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "MKCOL: $url")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val response: HttpResponse = httpClient.request(url) {
                 method = HttpMethod("MKCOL")
@@ -241,12 +314,13 @@ class WebDavClient(
 
             // 201 Created or 405 Method Not Allowed (already exists) are acceptable
             if (!response.status.isSuccess() && response.status != HttpStatusCode.MethodNotAllowed) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "mkcol failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to create collection: ${response.status}", response.status.value, errorBody)
             }
 
-            Log.d(TAG, "mkcol success: $path")
+            // Do not log storage URLs, object names or remote response bodies.
             Unit
         }
     }
@@ -257,7 +331,7 @@ class WebDavClient(
     ): Result<List<WebDavResourceInfo>> = withContext(Dispatchers.IO) {
         runCatching {
             val url = config.buildUrl(path)
-            Log.d(TAG, "PROPFIND: $url, depth: $depth")
+            // Do not log storage URLs, object names or remote response bodies.
 
             val propfindBody = """<?xml version="1.0" encoding="UTF-8"?>
                 |<D:propfind xmlns:D="DAV:">
@@ -282,12 +356,13 @@ class WebDavClient(
             }
 
             if (!response.status.isSuccess() && response.status.value != 207) {
-                val errorBody = response.bodyAsText()
-                Log.e(TAG, "propfind failed: ${response.status} - $errorBody")
+                response.bodyAsChannel().cancel(null)
+                val errorBody = "HTTP ${response.status.value}"
+                // Do not log storage URLs, object names or remote response bodies.
                 throw WebDavException("Failed to propfind: ${response.status}", response.status.value, errorBody)
             }
 
-            val xmlBody = response.bodyAsText()
+            val xmlBody = response.backupText()
             parsePropfindResponse(xmlBody, url)
         }
     }
@@ -299,12 +374,12 @@ class WebDavClient(
     suspend fun ensureCollectionExists(path: String = ""): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val targetUrl = config.buildUrl(path)
-            Log.d(TAG, "Ensuring collection exists: $targetUrl")
+            // Do not log storage URLs, object names or remote response bodies.
 
             // Try propfind first to check if it exists
             val propfindResult = propfind(path, depth = 0)
             if (propfindResult.isSuccess) {
-                Log.d(TAG, "Collection already exists: $targetUrl")
+                // Do not log storage URLs, object names or remote response bodies.
                 return@runCatching
             }
 

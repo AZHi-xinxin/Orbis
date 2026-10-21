@@ -66,6 +66,12 @@ class McpManager(
     }
 
     private val statusStore = McpStatusStore()
+    private val strictHttpClient = HttpClient(OkHttp) {
+        followRedirects = false
+        engine { preconfigured = okHttpClient.newBuilder().followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build() }
+        install(ContentNegotiation) { json(Json { isLenient = true }) }
+        install(SSE)
+    }
     private val oauthCallbackServer = OAuthLoopbackCallbackServer(
         port = MCP_OAUTH_CALLBACK_PORT,
         callbackPath = MCP_OAUTH_CALLBACK_PATH,
@@ -85,6 +91,7 @@ class McpManager(
         httpClient = httpClient,
         oauthCoordinator = oauthCoordinator,
         statusStore = statusStore,
+        strictHttpClient = strictHttpClient,
     )
 
     init {

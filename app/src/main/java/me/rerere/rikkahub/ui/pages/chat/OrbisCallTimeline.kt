@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.ai.compaction.isCompactionSummary
 import me.rerere.rikkahub.data.model.MessageNode
 
 /** Display projection only. Never use this list for persistence, model input, export or deletion. */
@@ -23,7 +24,7 @@ internal fun orbisCallTimeline(nodes: List<MessageNode>, enabled: Boolean = true
         // Ownership metadata is written by the host. Plain text resembling CALL_MODE is not ownership.
         // An approval/question must remain actionable; folding must not silently approve/hide it.
         val callId = message.orbisVoiceCallId?.takeIf {
-            enabled && it.isNotBlank() && message.orbisVoiceCallKind != null &&
+            enabled && it.isNotBlank() && message.orbisVoiceCallKind != null && !message.isCompactionSummary() &&
                 message.parts.none { part -> part is UIMessagePart.Tool && part.isPending }
         }
         val existing = callId?.let(calls::get)

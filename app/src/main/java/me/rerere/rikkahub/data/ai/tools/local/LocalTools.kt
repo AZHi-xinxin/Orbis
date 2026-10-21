@@ -60,6 +60,9 @@ class LocalTools(
             tools.addAll(createCompanionTools(context,
                 selectedCompanionToolNames(options, CompanionNativeTools.descriptors().map { it.name }), speechScope))
         }
+        if (LocalToolOption.CompanionDevice in options && speechScope != null) {
+            tools.add(me.rerere.rikkahub.data.ai.tools.createOrbisForegroundTool(context, speechScope.conversationId))
+        }
         if (LocalToolOption.BluetoothToy in options) {
             tools.addAll(buildOrbisToyTools(context))
         }

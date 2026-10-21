@@ -13,7 +13,8 @@ internal object NativeBackupBudget {
     const val MAX_SETTINGS_BYTES = 8L * ArchiveCapacity.MIB
     data class Inspection(val expandedBytes: Long, val databaseBytes: Long, val entries: Int)
 
-    fun entryLimit(name: String): Long = CharacterBackup.maxBytes(name)?.toLong()
+    fun entryLimit(name: String): Long = ConversationRecoveryBackup.maxBytes(name)?.toLong()
+        ?: CharacterBackup.maxBytes(name)?.toLong()
         ?: OrbisLocalToolBackup.maxBytes(name)?.toLong()
         ?: if (name == "settings.json") MAX_SETTINGS_BYTES else ArchiveCapacity.MAX_DISK_ENTRY_BYTES
 
@@ -36,7 +37,9 @@ internal object NativeBackupBudget {
     }
 
     /** Includes compressed bytes and ZIP directory/footer, and checks real free space before every write. */
-    class Output(output: OutputStream, private val freeBytes: () -> Long) : FilterOutputStream(output) {
+    class Output(output: OutputStream, private val maxBytes: Long = ArchiveCapacity.MAX_ZIP_BYTES,
+        private val freeBytes: () -> Long) : FilterOutputStream(output) {
+        init { require(maxBytes in 1..OverwriteBackupNames.MAX_BUNDLE_BYTES) }
         private var total = 0L
         override fun write(value: Int) { account(1); out.write(value) }
         override fun write(bytes: ByteArray, offset: Int, length: Int) {
@@ -44,7 +47,7 @@ internal object NativeBackupBudget {
         }
         private fun account(count: Int) {
             total += count
-            ArchiveCapacity.requireSize(total, ArchiveCapacity.MAX_ZIP_BYTES, allowEmpty = true)
+            ArchiveCapacity.requireSize(total, maxBytes, allowEmpty = true)
             ArchiveCapacity.requireSpace(freeBytes(), count.toLong())
         }
     }

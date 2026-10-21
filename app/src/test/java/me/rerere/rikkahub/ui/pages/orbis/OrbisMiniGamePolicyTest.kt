@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisMiniGamePolicyTest {
+    @Test fun scoresAreOptionalTypedAndNotInvented() {
+        assertNull(parseOrbisMiniGameResult("""{"result":"completed","move_count":0}""").score)
+        val score = parseOrbisMiniGameResult("""{"result":"completed","move_count":12,"score":1500,"max_tile":256,"scoring_version":"2048-v1"}""")
+        assertEquals(1500L, score.score); assertEquals(256, score.maxTile)
+        listOf("""{"result":"completed","move_count":0,"score":"12"}""", """{"result":"completed","move_count":0,"score":-1}""",
+            """{"result":"completed","move_count":0,"max_tile":4294967296}""").forEach { value ->
+            assertThrows(IllegalArgumentException::class.java) { parseOrbisMiniGameResult(value) }
+        }
+    }
     @Test fun documentMustBeTheExactOwnedMainFrame() {
         val policy = OrbisMiniGamePolicy("fixture")
         assertTrue(policy.isDocument(policy.pageUrl, true, "GET"))

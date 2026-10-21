@@ -83,7 +83,7 @@ internal fun createOrbisGameLibraryTools(
                     put("finished_sessions", snapshot.sessions.count { it.gameId == game.id && it.finishedAt != null })
                     if (includeHtml) put("html", game.html)
                 }) } })
-                put("result_bridge", "window.OrbisGame.finish(JSON.stringify({result:'win',move_count:5})); 返回JSON字符串，ok=true才已保存。只能为当前宿主打开的局记一次结果，重复相同结果幂等。")
+                put("result_bridge", "window.OrbisGame.finish(JSON.stringify({result:'win',move_count:5,score:1500,max_tile:256,scoring_version:'2048-v1'})); score/max_tile/scoring_version均可省略，未提供不是0；score为0到JS安全整数上限，max_tile为1到1073741824。返回JSON字符串，ok=true才已保存。同局同结果幂等，不覆盖不同结果；同游戏同计分版本比较纪录，缺少版本则按源码版本分别比较。旧HTML不必改动。")
                 put("sandbox", "self-contained HTML/JS only; no network/file/native capabilities; data/blob assets allowed")
                 if (includeTemplate) put("starter_template", buildJsonObject {
                     put("id", OrbisMiniGameTemplates.ID)

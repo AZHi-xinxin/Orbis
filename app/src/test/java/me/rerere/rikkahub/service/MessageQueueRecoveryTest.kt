@@ -24,7 +24,7 @@ class MessageQueueRecoveryTest {
         assertEquals(1, queue.state.value.messages.size)
     }
 
-    @Test fun `paused queue blocks a new sticker even when it only contains held records`() {
+    @Test fun `legacy nonexplicit admission remains blocked by a paused queue with held records`() {
         val queue = MessageQueue()
         enqueueTurn(queue)
         queue.holdCallInputsForRecovery()
@@ -51,6 +51,103 @@ class MessageQueueRecoveryTest {
         val queue = MessageQueue(initiallyPaused = true)
         assertTrue(queue.state.value.blocksImmediateInput())
         assertTrue(queue.state.value.paused)
+    }
+
+    @Test fun `explicit tap preview permits an empty pause without mutating or persisting it`() {
+        var writes = 0
+        val queue = MessageQueue(initiallyPaused = true, onPauseChanged = { writes++; true })
+        assertFalse(queue.state.value.blocksExplicitImmediateInput())
+        assertTrue(queue.state.value.paused)
+        assertEquals(0, writes)
+        assertTrue(queue.prepareExplicitImmediateInput(freshRecovery = false))
+        assertFalse(queue.state.value.paused)
+        assertEquals(1, writes)
+        assertNull(queue.takeNext())
+    }
+
+    @Test fun `explicit tap retains paused old call payloads and dispatches only newly accepted input`() {
+        var resumeWrites = 0
+        lateinit var queue: MessageQueue
+        queue = MessageQueue(onPauseChanged = { paused ->
+            if (!paused) {
+                resumeWrites++
+                assertTrue(queue.state.value.paused)
+                assertTrue(queue.state.value.messages.all { it.recoveryHeldReason != null })
+            }
+            true
+        })
+        enqueueTurn(queue)
+        queue.enqueue(text("old opening"), voiceCallId = call, voiceCallKind = "opening")
+        queue.holdCallInputsForRecovery()
+        queue.pause()
+        val originals = queue.state.value.messages
+        assertFalse(queue.state.value.blocksExplicitImmediateInput())
+        assertTrue(queue.prepareExplicitImmediateInput(freshRecovery = false))
+        assertEquals(1, resumeWrites)
+        assertEquals(originals.map { it.id }, queue.state.value.messages.map { it.id })
+        assertEquals(originals.map { it.parts }, queue.state.value.messages.map { it.parts })
+        assertTrue(queue.state.value.messages.all { !it.acknowledgeSafetyHold })
+        queue.enqueue(text("(^_^)") )
+        assertEquals(text("(^_^)"), queue.takeNext()!!.parts)
+        assertNull(queue.takeNext())
+        assertEquals(originals.size, queue.state.value.messages.size)
+    }
+
+    @Test fun `explicit tap cannot resume or overtake a real pending input`() {
+        var writes = 0
+        val queue = MessageQueue(initiallyPaused = true, onPauseChanged = { writes++; true })
+        queue.enqueue(text("old pending human input"))
+        val before = queue.state.value
+        assertTrue(queue.state.value.blocksExplicitImmediateInput())
+        assertFalse(queue.prepareExplicitImmediateInput(freshRecovery = true))
+        assertEquals(before, queue.state.value)
+        assertEquals(0, writes)
+    }
+
+    @Test fun `editing even a held call input blocks an explicit sticker until edit finishes`() {
+        val queue = MessageQueue(initiallyPaused = true)
+        enqueueTurn(queue)
+        queue.holdCallInputsForRecovery()
+        val id = queue.state.value.messages.single().id
+        assertNotNull(queue.beginEdit(id))
+        val before = queue.state.value
+        assertTrue(queue.state.value.blocksExplicitImmediateInput())
+        assertFalse(queue.prepareExplicitImmediateInput(freshRecovery = false))
+        assertEquals(before, queue.state.value)
+        queue.finishEdit(id)
+        assertFalse(queue.state.value.blocksExplicitImmediateInput())
+        assertTrue(queue.prepareExplicitImmediateInput(freshRecovery = false))
+        assertNull(queue.takeNext())
+    }
+
+    @Test fun `failed durable resume refuses fresh sticker while keeping every old input held`() {
+        val queue = MessageQueue(initiallyPaused = true, onPauseChanged = { paused -> paused })
+        enqueueTurn(queue)
+        queue.holdCallInputsForRecovery()
+        val original = queue.state.value.messages.single()
+        assertThrows(IllegalStateException::class.java) {
+            queue.prepareExplicitImmediateInput(freshRecovery = false)
+        }
+        assertTrue(queue.state.value.paused)
+        assertEquals(original.id, queue.state.value.messages.single().id)
+        assertEquals(original.parts, queue.state.value.messages.single().parts)
+        assertNotNull(queue.state.value.messages.single().recoveryHeldReason)
+        assertNull(queue.takeNext())
+    }
+
+    @Test fun `idle explicit admission needs no redundant pause write but fresh recovery does`() {
+        var writes = 0
+        val queue = MessageQueue(onPauseChanged = { writes++; true })
+        enqueueTurn(queue)
+        queue.holdCallInputsForRecovery()
+        val retained = queue.state.value
+        assertTrue(queue.prepareExplicitImmediateInput(freshRecovery = false))
+        assertEquals(retained, queue.state.value)
+        assertEquals(0, writes)
+        assertTrue(queue.prepareExplicitImmediateInput(freshRecovery = true))
+        assertEquals(1, writes)
+        assertNull(queue.takeNext())
+        assertEquals(retained.messages.map { it.parts }, queue.state.value.messages.map { it.parts })
     }
 
     @Test fun `recovery retains every call input and dispatches only ordinary pending messages`() {

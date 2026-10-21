@@ -86,6 +86,8 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
     var editingTTSProvider by remember { mutableStateOf<TTSProviderSetting?>(null) }
     var editingASRProvider by remember { mutableStateOf<ASRProviderSetting?>(null) }
     var selectedPage by remember { mutableIntStateOf(0) }
+    var mixer by remember { mutableStateOf(false) }
+    if (mixer) me.rerere.rikkahub.ui.pages.orbis.OrbisVoiceMixer(onClose = { mixer = false })
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -98,6 +100,7 @@ fun SettingSpeechPage(vm: SettingVM = koinViewModel()) {
                     BackButton()
                 },
                 actions = {
+                    TextButton(onClick = { mixer = true }) { Text("语音台") }
                     if (selectedPage == 0) {
                         AddTTSProviderButton {
                             vm.updateSettings(

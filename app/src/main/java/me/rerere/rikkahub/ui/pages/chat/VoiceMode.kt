@@ -32,6 +32,7 @@ import me.rerere.asr.providers.BatchVoiceASRController
 import me.rerere.asr.providers.VolcengineASRController
 import me.rerere.asr.providers.OpenAIRealtimeASRController
 import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.getSelectedASRProvider
 import me.rerere.rikkahub.data.datastore.getSelectedTTSProvider
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
@@ -66,6 +67,7 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings, video: Boolean = fa
     val chatService = koinInject<ChatService>()
     val appScope = koinInject<AppScope>()
     val ttsManager = koinInject<TTSManager>()
+    val settingsStore = koinInject<SettingsStore>()
     val provider = settings.getSelectedASRProvider()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     // Service/runtime, not composition or the chat ViewModel, owns the call.
@@ -145,12 +147,15 @@ fun rememberVoiceModeStarter(vm: ChatVM, settings: Settings, video: Boolean = fa
                             cancelPendingReply = { chatService.cancelVoiceCallReply(conversation.id, call.id, it) },
                             checkReplyResume = { chatService.canResumeVoiceCallReplies(conversation.id, call.id) },
                             speak = { reply ->
+                                val voiceSettings = settingsStore.settingsFlow.value
                                 var spoken = reply
-                                if (settings.displaySetting.ttsOnlyReadQuoted) spoken = spoken.extractQuotedContentAsText() ?: spoken
-                                if (settings.displaySetting.ttsOnlyReadOutsideBrackets) spoken = spoken.removeBracketedContent() ?: spoken
+                                if (voiceSettings.displaySetting.ttsOnlyReadQuoted) spoken = spoken.extractQuotedContentAsText() ?: spoken
+                                if (voiceSettings.displaySetting.ttsOnlyReadOutsideBrackets) spoken = spoken.removeBracketedContent() ?: spoken
                                 spoken = spoken.stripMarkdown()
                                 if (spoken.isNotBlank()) {
-                                    callPlayer.speak(spoken)
+                                    callPlayer.setProvider(voiceSettings.getSelectedTTSProvider())
+                                    callPlayer.setSpeed(voiceSettings.defaultTTSPlaybackSpeed)
+                                    callPlayer.speak(spoken, mixerConfig = voiceSettings.voiceMixer)
                                     combine(callPlayer.isSpeaking, callPlayer.error) { speaking, error ->
                                         check(error == null) { error.orEmpty() }
                                         !speaking

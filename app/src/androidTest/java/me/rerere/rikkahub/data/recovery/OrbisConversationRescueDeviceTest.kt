@@ -161,6 +161,49 @@ class OrbisConversationRescueDeviceTest {
         }
     }
 
+    @Test fun diagnosticCopyIncludesTheIndependentHumanTailWithoutChangingEitherJournalOrRoom() = runBlocking {
+        Fixture().use { fixture ->
+            val scenario = fixture.seed(pendingTool = true)
+            val original = scenario.conversation
+            val continued = original.copy(messageNodes = original.messageNodes + listOf(
+                UIMessage.user("synthetic input after stalled save").toMessageNode(),
+                UIMessage.assistant("synthetic independent reply").toMessageNode()))
+            val humanStore = AndroidGenerationCheckpointStore.createHumanContinuation(fixture.context.noBackupFilesDir)
+            HumanContinuationJournal(humanStore).checkpoint(Uuid.random(), original, continued)
+            val human = humanStore.read(original.id)!!
+            val generation = fixture.store.read(original.id)!!
+            val before = fixture.db.messageNodeDao().getNodesOfConversation(original.id.toString())
+            val result = fixture.rescue.inspect(original.id)
+            assertFalse(result.repairAvailable) // The unknown generation tool still cannot be replayed.
+            ZipFile(result.copy).use { zip ->
+                assertArrayEquals(human, zip.getInputStream(zip.getEntry("human-continuation-checkpoint.json")).use { it.readBytes() })
+                assertArrayEquals(generation, zip.getInputStream(zip.getEntry("generation-checkpoint.json")).use { it.readBytes() })
+                assertNotNull(zip.getEntry("raw-nodes.jsonl"))
+            }
+            assertEquals(before, fixture.db.messageNodeDao().getNodesOfConversation(original.id.toString()))
+            assertArrayEquals(human, humanStore.read(original.id))
+            assertArrayEquals(generation, fixture.store.read(original.id))
+        }
+    }
+
+    @Test fun malformedHumanRecoveryCopyIsPreservedAsOriginalBytesInTheDiagnosticArchive() = runBlocking {
+        Fixture().use { fixture ->
+            val scenario = fixture.seed(pendingTool = true)
+            val id = scenario.conversation.id
+            val damaged = byteArrayOf('{'.code.toByte(), 0xc3.toByte(), 0x28)
+            val humanStore = AndroidGenerationCheckpointStore.createHumanContinuation(fixture.context.noBackupFilesDir)
+            humanStore.writeAtomic(id, damaged)
+            val before = fixture.db.messageNodeDao().getNodesOfConversation(id.toString())
+            val result = fixture.rescue.inspect(id)
+            ZipFile(result.copy).use { zip ->
+                assertArrayEquals(damaged, zip.getInputStream(zip.getEntry("human-continuation-checkpoint.json")).use { it.readBytes() })
+            }
+            assertFalse(result.repairAvailable)
+            assertEquals(before, fixture.db.messageNodeDao().getNodesOfConversation(id.toString()))
+            assertArrayEquals(damaged, humanStore.read(id))
+        }
+    }
+
     @Test fun twoDamagedRowsOnlyOfferDiagnosticCopyAndNeverChangeEither() = runBlocking {
         Fixture().use { fixture ->
             val scenario = fixture.seed()

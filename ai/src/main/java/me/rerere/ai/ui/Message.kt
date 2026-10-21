@@ -23,6 +23,7 @@ data class UIMessage(
         .toLocalDateTime(TimeZone.currentSystemDefault()),
     val finishedAt: LocalDateTime? = null,
     val modelId: Uuid? = null,
+    val configuredModelReceipt: ConfiguredModelReceipt? = null,
     val usage: TokenUsage? = null,
     /** Historical usage remains visible after a manual history edit, but is not a current budget anchor. */
     val usageContextInvalidated: Boolean = false,

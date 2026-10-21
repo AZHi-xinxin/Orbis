@@ -15,7 +15,9 @@ fun isNativeSentinelSource(source: String): Boolean = source.startsWith("native_
     Regex("[A-Za-z0-9][A-Za-z0-9_-]{0,127}").matches(source.removePrefix("native_sentinel."))
 fun isImageWorkshopSource(source: String): Boolean = source.startsWith("image_workshop.") &&
     Regex("[a-f0-9-]{36}").matches(source.removePrefix("image_workshop."))
-private fun validEventSource(source: String) = source in ORBIS_EVENT_SOURCES || isNativeSentinelSource(source) || isImageWorkshopSource(source)
+fun isPetEventSource(source: String) = source.startsWith("pet_room.") &&
+    Regex("[a-f0-9-]{36}").matches(source.removePrefix("pet_room."))
+private fun validEventSource(source: String) = source in ORBIS_EVENT_SOURCES || isNativeSentinelSource(source) || isImageWorkshopSource(source) || isPetEventSource(source)
 
 @Serializable
 data class OrbisEventBinding(val assistantId: String, val conversationId: String, val enabled: Boolean = true)

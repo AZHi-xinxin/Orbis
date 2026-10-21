@@ -41,6 +41,16 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
 
     suspend fun get(id: String): OrbisVoiceCallRecord? = locked { read(id) }
 
+    /** Release the archive lock before ZIP IO, so a new call never waits for whole-backup compression. */
+    internal suspend fun snapshotForBackup(owners: Map<String, String>, write: (String, ByteArray) -> Unit) {
+        locked { storage.ids() }.forEach { id ->
+            val record = locked { checkNotNull(read(id)) { "voice_call_record_disappeared" } }
+            if (owners[record.conversationId] == record.assistantId) {
+                write("orbis-voice-calls/$id.json", json.encodeToString(record).toByteArray(Charsets.UTF_8))
+            }
+        }
+    }
+
     /** Durable intent before network dispatch. Only an exact predecessor may be superseded. */
     internal suspend fun claimArchiveAttempt(
         id: String, assistantId: String, sourceDigest: String, attemptId: String,
@@ -304,7 +314,11 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
         validate(after)
     }
 
-    private fun validate(record: OrbisVoiceCallRecord) {
+    companion object {
+    internal fun validate(record: OrbisVoiceCallRecord) {
+        require(record.acousticEvents.size <= 200 && record.acousticEvents.map { it.id }.distinct().size == record.acousticEvents.size)
+        require(record.acousticEvents.all { it.callId == record.id && it.kind in setOf("silence", "low_volume", "high_pitch") &&
+            it.startMs >= 0 && it.endMs >= it.startMs && it.id.length <= 160 && (it.receipt?.length ?: 0) <= 128 })
         validateVoiceCallId(record.id)
         require(!record.chatCommitted || record.archiveStatus == OrbisVoiceArchiveStatus.READY) {
             "voice_call_chat_requires_complete_archive"
@@ -360,10 +374,9 @@ class OrbisVoiceCallRepository internal constructor(private val storage: OrbisVo
         }
     }
 
-    private companion object {
-        const val MAX_CHARS = 16 * 1024 * 1024
-        val locks = ConcurrentHashMap<String, Mutex>()
-        val revisions = ConcurrentHashMap<String, MutableStateFlow<Long>>()
+        private const val MAX_CHARS = 16 * 1024 * 1024
+        private val locks = ConcurrentHashMap<String, Mutex>()
+        private val revisions = ConcurrentHashMap<String, MutableStateFlow<Long>>()
     }
 }
 

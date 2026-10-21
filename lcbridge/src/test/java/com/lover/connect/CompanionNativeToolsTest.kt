@@ -53,7 +53,21 @@ class CompanionNativeToolsTest {
     @Test fun effectsMarkAllWritesIncludingScreenshotAndSentinel() {
         val writes = CompanionNativeTools.descriptors().filter { it.effect == "write" }.map { it.name }.toSet()
         assertEquals(setOf("send_notification", "save_memory", "set_alarm", "cancel_alarm", "lock_screen", "play_music",
-            "take_screenshot", "lock_app", "unlock_app", "focus_rikka", "redirect_to_rikka", "configure_sentinel", "test_sentinel"), writes)
+            "take_screenshot", "lock_app", "unlock_app", "focus_orbis", "redirect_to_orbis", "configure_sentinel", "test_sentinel"), writes)
+    }
+
+    @Test fun oldRedirectNamesExecuteCanonicalToolsButAreNeverAdvertised() = runTest {
+        val runtime=FakeRuntime()
+        val received=mutableListOf<String>()
+        runtime.action={received.add(it); "rule saved; foreground_switch_confirmed=false"}
+        val bridge=CompanionNativeTools(runtime,CompanionMemoryStore(temporary.root),StandardTestDispatcher(testScheduler))
+        assertTrue(bridge.execute("focus_rikka","""{"enabled":false,"package_names":[]}""").ok)
+        assertTrue(bridge.execute("redirect_to_rikka","""{"package_names":[],"time_window":""}""").ok)
+        assertEquals(listOf("focus_orbis","redirect_to_orbis"),received)
+        assertFalse(bridge.catalog().any { "rikka" in it.name })
+        listOf("focus_orbis","redirect_to_orbis").forEach { name ->
+            assertTrue(bridge.catalog().single { it.name==name }.description.contains("仅表示规则已保存"))
+        }
     }
 
     @Test fun directRuntimeExecutesOnceWithoutTransport() = runTest {

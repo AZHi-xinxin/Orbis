@@ -146,6 +146,7 @@ class GenerationLoop(
     private val providerManager: ProviderManager,
     private val json: Json,
     private val localMemory: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime? = null,
+    private val observation: me.rerere.rikkahub.data.orbis.observation.AiObservationRuntime? = null,
 ) {
     fun generateText(
         settings: Settings,
@@ -175,6 +176,8 @@ class GenerationLoop(
         emitTerminalEvidence: Boolean = false,
         // Group and AI-to-AI invocations must neither inject private notes nor advance human turns.
         allowLocalMemory: Boolean = true,
+        // Human-requested continuations can report metadata without recapturing memory.
+        allowObservation: Boolean = allowLocalMemory,
         // A proactive preflight may read the same context without advancing human memory turns.
         readOnlyLocalMemory: Boolean = false,
         admitOutput: suspend (List<UIMessage>) -> Boolean = { false },
@@ -186,7 +189,24 @@ class GenerationLoop(
 
         // One snapshot per collected generation, not per conversation. A new human wake (or the
         // existing approval-resume path) reevaluates current settings, memory and input transforms.
-        val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime)
+        val modelReceipt = if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && (assistant.orbisModelContinuityEnabled || settings.aiGlobalObservation) &&
+            conversationId != null && allowObservation && !readOnlyLocalMemory) {
+            ModelContinuity.safeModelId(model.modelId)?.let { nativeId ->
+                me.rerere.ai.ui.ConfiguredModelReceipt(assistant.id.toString(), conversationId.toString(),
+                    provider.id.toString(), nativeId, when(provider) {
+                        is me.rerere.ai.provider.ProviderSetting.OpenAI -> "OpenAI compatible"
+                        else -> provider::class.simpleName.orEmpty().take(40)
+                    })
+            }
+        } else null
+        val previousModel = modelReceipt?.let { ModelContinuity.previous(messages, it) }
+        val observationReport = if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && allowObservation && !readOnlyLocalMemory)
+            observation?.report(settings, assistant, conversationId, messages, model.modelId,
+                previousModel?.let { it.modelId != model.modelId || it.providerId != provider.id.toString() })
+            else null
+        val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime,
+            modelNotice = if (settings.aiGlobalObservation) null else ModelContinuity.notice(modelReceipt, previousModel),
+            observation = observationReport)
         val screenShareTurn = if (allowLocalMemory && !readOnlyLocalMemory) me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn.bind(
             me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()?.state?.value,
             assistant.id.toString(), conversationId?.toString()) else null
@@ -348,6 +368,8 @@ class GenerationLoop(
                         .toLocalDateTime(TimeZone.currentSystemDefault())
                 )
                 messages = privatePresentation.classify(messages, completed = true)
+                messages = ModelContinuity.attachSuccess(messages, modelReceipt,
+                    responseForContinuation != null && !generationResponseHasToolParts(responseForContinuation))
                 preparedUsage?.let { (tokens, preparedAt) ->
                     messages = attachPreparedContextUsage(messages, tokens, preparedAt, contextEpoch,
                         assistant.id, model.id, usageConfiguration)

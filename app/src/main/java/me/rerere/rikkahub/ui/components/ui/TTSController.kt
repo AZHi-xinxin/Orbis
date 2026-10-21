@@ -197,7 +197,7 @@ private fun SpeedButton(
 ) {
     TextButton(
         onClick = {
-            when (playbackState.speed) {
+            when (playbackState.nextSpeed) {
                 0.8f -> {
                     ttsState.setSpeed(1.0f)
                 }
@@ -220,6 +220,6 @@ private fun SpeedButton(
             }
         }
     ) {
-        Text(text = "x${"%.1f".format(playbackState.speed)}")
+        Text(text = "下次 ×${"%.1f".format(playbackState.nextSpeed)}")
     }
 }

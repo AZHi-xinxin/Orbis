@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.sync.importer
 
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.*
 import org.junit.Rule
@@ -15,10 +17,13 @@ class KelivoChatArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
     private val db = "SQLite format 3\u0000synthetic-not-a-real-database".toByteArray()
     private fun manifest(checksum: String = MessageDigest.getInstance("SHA-256").digest(db)
-        .joinToString("") { "%02x".format(it.toInt() and 255) }, version: Int = 2, schema: Int = 3): String =
+        .joinToString("") { "%02x".format(it.toInt() and 255) }, version: Int = 2, schema: Int = 3,
+        minimumVersion: Int = version, scope: JsonElement? = if (version == 3)
+            buildJsonObject { put("chats", true); put("files", false); put("settings", false) } else null): String =
         buildJsonObject {
-            put("format", "kelivo-backup"); put("formatVersion", version); put("minimumReadableFormatVersion", 2)
+            put("format", "kelivo-backup"); put("formatVersion", version); put("minimumReadableFormatVersion", minimumVersion)
             put("payloadKind", "sqlite"); put("includeChats", true); put("secretsIncluded", true)
+            scope?.let { put("scope", it) }
             put("database", buildJsonObject { put("entry", "database/kelivo.db"); put("schemaVersion", schema)
                 put("minimumReadableSchemaVersion", 2); put("conversationCount", 1); put("messageCount", 2) })
             put("entries", buildJsonObject { put("database/kelivo.db", buildJsonObject {
@@ -44,9 +49,52 @@ class KelivoChatArchiveTest {
         assertEquals(before, KelivoChatArchive.fingerprint(file))
     }
     @Test fun rejectsUnsupportedManifestAndSchemaVersions() {
-        listOf(manifest(version = 3), manifest(schema = 4), manifest().replace("kelivo-backup", "orbis-backup")).forEach {
+        listOf(manifest(version = 1), manifest(version = 4), manifest(version = 4, minimumVersion = 3),
+            manifest(minimumVersion = 3), manifest(version = 3, minimumVersion = 4), manifest(minimumVersion = 0),
+            manifest(schema = 4), manifest(version = 3, schema = 4),
+            manifest().replace("kelivo-backup", "orbis-backup")).forEach {
             assertThrows(IllegalArgumentException::class.java) { KelivoChatArchive.extract(zip(text = it), temporary.newFolder()) }
         }
+    }
+    @Test fun acceptsV3ScopedChatArchiveWithoutReadingOtherCategoriesOrChangingSource() {
+        val file = zip(text = manifest(version = 3), extra = listOf(
+            "settings.json" to "INVALID_SETTINGS must not parse".toByteArray(),
+            "skills/example/SKILL.md" to "must not execute".toByteArray()))
+        val before = KelivoChatArchive.fingerprint(file)
+        val destination = temporary.newFolder()
+        val snapshot = KelivoChatArchive.extract(file, destination)
+        assertEquals(1, snapshot.conversationCount)
+        assertEquals(2, snapshot.messageCount)
+        assertArrayEquals(db, snapshot.file.readBytes())
+        assertEquals(listOf("kelivo-chat-snapshot.db"), destination.listFiles()!!.map { it.name })
+        assertEquals(before, KelivoChatArchive.fingerprint(file))
+    }
+    @Test fun v2AndV3ContainerCompatibilityIsIndependentOfSqliteSchemaVersion() {
+        for (version in 2..3) {
+            for (minimum in 1..version) {
+                val snapshot = KelivoChatArchive.extract(zip(text = manifest(version = version,
+                    schema = 3, minimumVersion = minimum)), temporary.newFolder())
+                assertArrayEquals(db, snapshot.file.readBytes())
+            }
+        }
+    }
+    @Test fun rejectsMissingDisabledOrMalformedV3ChatScopeBeforeCreatingOutput() {
+        val scopes = listOf(null, JsonPrimitive(true), buildJsonObject { put("files", true) },
+            buildJsonObject { put("chats", false) }, buildJsonObject { put("chats", "true") },
+            buildJsonObject { put("chats", true); put("settings", "false") })
+        for (scope in scopes) {
+            val destination = temporary.newFolder()
+            assertThrows(Exception::class.java) {
+                KelivoChatArchive.extract(zip(text = manifest(version = 3, scope = scope)), destination)
+            }
+            assertTrue(destination.listFiles()!!.isEmpty())
+        }
+        val destination = temporary.newFolder()
+        assertThrows(IllegalArgumentException::class.java) {
+            KelivoChatArchive.extract(zip(text = manifest(version = 3).replace("\"includeChats\":true",
+                "\"includeChats\":\"true\"")), destination)
+        }
+        assertTrue(destination.listFiles()!!.isEmpty())
     }
     @Test fun rejectsDatabaseChecksumMismatchAndDeletesOnlyNewOutput() {
         val destination = temporary.newFolder()

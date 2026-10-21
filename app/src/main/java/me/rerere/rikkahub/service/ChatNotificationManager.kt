@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -60,8 +61,12 @@ class ChatNotificationManager(
         appScope.launch(Dispatchers.Default) {
             eventBus.events.collect { event ->
                 when (event) {
-                    is AppEvent.ChatGenerationUpdate -> handleGenerationUpdate(event)
-                    is AppEvent.ChatGenerationEnded -> handleGenerationEnded(event)
+                    is AppEvent.ChatGenerationUpdate -> deliverChatNotificationEvent(
+                        ChatNotificationDeliveryKind.UPDATE, ::recordDeliveryFailure,
+                    ) { handleGenerationUpdate(event) }
+                    is AppEvent.ChatGenerationEnded -> deliverChatNotificationEvent(
+                        ChatNotificationDeliveryKind.COMPLETED, ::recordDeliveryFailure,
+                    ) { handleGenerationEnded(event) }
                     else -> {}
                 }
             }
@@ -83,12 +88,20 @@ class ChatNotificationManager(
     }
 
     private fun handleGenerationEnded(event: AppEvent.ChatGenerationEnded) {
-        cancelLiveUpdateNotification(event.conversationId)
+        // A broken progress-notification cancellation must not discard this completed reply.
+        deliverChatNotificationEvent(ChatNotificationDeliveryKind.CLEANUP, ::recordDeliveryFailure) {
+            cancelLiveUpdateNotification(event.conversationId)
+        }
 
         val contentPreview = event.contentPreview ?: return
         if (isForeground.value) return
         if (!settingsStore.settingsFlow.value.displaySetting.enableNotificationOnMessageGeneration) return
         sendGenerationDoneNotification(event.conversationId, event.senderName, contentPreview)
+    }
+
+    private fun recordDeliveryFailure(kind: ChatNotificationDeliveryKind) {
+        // No message preview, conversation/assistant identifiers, or exception message in logs.
+        Log.w("OrbisChatNotifications", kind.failureCode)
     }
 
     private fun sendGenerationDoneNotification(

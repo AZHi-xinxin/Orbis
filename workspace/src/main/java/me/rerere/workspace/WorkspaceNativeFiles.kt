@@ -49,6 +49,17 @@ class WorkspaceNativeFiles(
     private val anchor: File,
     private val open: (File) -> WorkspaceNativeDirectory = AndroidWorkspaceDirectory::openRoot,
 ) {
+    /** Create only directories, through the same pinned/no-follow backend as native writes. */
+    @Synchronized
+    fun ensureDirectory(path: List<String>) {
+        require(path.isNotEmpty() && path.all(::validWorkspaceComponent)) { "workspace_path_denied" }
+        val handles = mutableListOf<WorkspaceNativeDirectory>()
+        try {
+            var directory = open(anchor).also(handles::add)
+            path.forEach { directory = directory.directory(it, true).also(handles::add) }
+        } finally { handles.asReversed().forEach { runCatching { it.close() } } }
+    }
+
     @Synchronized
     fun readChunk(path: List<String>, offset: Long = 0, maxBytes: Int = DEFAULT_CHUNK_BYTES,
                   expectedRevision: String? = null): WorkspaceFileChunk {

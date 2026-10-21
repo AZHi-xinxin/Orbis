@@ -1,6 +1,8 @@
 package me.rerere.rikkahub.data.orbis.privacy
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 
 /** Fixed reason codes only; never propagate paths, model output, plaintext or key material. */
 class PrivateVaultException(val reasonCode: String) : IllegalStateException("private_vault:$reasonCode")
@@ -12,6 +14,8 @@ data class PrivateVaultStatus(
     val recoveryConfirmed: Boolean = false,
     val recordCount: Int = 0,
     val pendingRequestCount: Int = 0,
+    val hasRecoveryPassword: Boolean = false,
+    val hasRecoveryCode: Boolean = false,
 )
 
 @Serializable
@@ -70,8 +74,22 @@ internal data class VaultState(
 }
 
 /** Everything sensitive, including titles, scopes, requests and audit, lives in encryptedState. */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class VaultEnvelope(val version: Int = 1, val vaultId: String, val ownerDigest: String,
-                                  val deviceKey: String, val recoveryKey: String, val encryptedState: String) {
+                                  val deviceKey: String, val recoveryKey: String, val encryptedState: String,
+                                  @EncodeDefault(EncodeDefault.Mode.NEVER)
+                                  val passwordRecovery: VaultPasswordRecovery? = null) {
     override fun toString() = "VaultEnvelope(redacted)"
+}
+
+@Serializable
+internal data class VaultPasswordRecovery(
+    val version: Int = 1,
+    val kdf: String = "PBKDF2-HMAC-SHA256",
+    val iterations: Int = 600_000,
+    val salt: String,
+    val wrappedKey: String,
+) {
+    override fun toString() = "VaultPasswordRecovery(redacted)"
 }

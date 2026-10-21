@@ -189,7 +189,12 @@ fun CharacterStage(owner: String, assistantName: String, onClose: () -> Unit) {
         val index = lineIndices.getOrDefault(region.id, 0)
         line = lines[index % lines.size]; lineIndices[region.id] = (index + 1) % lines.size
         if (speaking) {
-            if (context.getSystemService(AudioManager::class.java).mode == AudioManager.MODE_NORMAL) voice.speak(line)
+            if (context.getSystemService(AudioManager::class.java).mode == AudioManager.MODE_NORMAL) {
+                val voiceSettings = settings.settingsFlow.value
+                voice.setProvider(voiceSettings.getSelectedTTSProvider())
+                voice.setSpeed(voiceSettings.defaultTTSPlaybackSpeed)
+                voice.speak(line, mixerConfig = voiceSettings.voiceMixer)
+            }
             else { voice.stop(); speaking = false; notice = "设备正在通话，已保持静音。" }
         }
     }

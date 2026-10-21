@@ -193,7 +193,7 @@ class OrbisScreenShareSpeechOutput private constructor(private val context: Cont
                         owned = it
                         player = it; it.setProvider(settings.getSelectedTTSProvider()); it.setSpeed(settings.defaultTTSPlaybackSpeed)
                     }
-                    if (!currentPlayer.speakScreenShareText(text)) reportFailure(session)
+                    if (!currentPlayer.speakScreenShareText(text, settings.voiceMixer)) reportFailure(session)
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { reportFailure(session) }
                 finally {
@@ -216,9 +216,12 @@ class OrbisScreenShareSpeechOutput private constructor(private val context: Cont
 }
 
 /** Provider failures are speech-local, never MODEL_FAILED or a reason to close screen sharing. */
-internal suspend fun TtsController.speakScreenShareText(text: String): Boolean = withContext(Dispatchers.Main.immediate) {
+internal suspend fun TtsController.speakScreenShareText(
+    text: String,
+    mixerConfig: me.rerere.tts.controller.VoiceMixerConfig = me.rerere.tts.controller.VoiceMixer.config.value,
+): Boolean = withContext(Dispatchers.Main.immediate) {
     runScreenShareSpeechAttempt(stop = ::stop) {
-        speak(text)
+        speak(text, mixerConfig = mixerConfig)
         combine(isSpeaking, error) { speaking, failure -> !speaking || failure != null }.first { it }
         error.value == null
     }

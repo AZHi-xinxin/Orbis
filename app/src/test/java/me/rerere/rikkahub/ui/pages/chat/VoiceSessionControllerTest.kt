@@ -164,6 +164,8 @@ class VoiceSessionControllerTest {
         var paused = false
         var emitEndedOnPause = false
         var emitErrorOnPause = false
+        var throwOnPause = false
+        var throwOnDispose = false
         override fun start(onTranscriptChange: (String) -> Unit) {
             state.value = ASRState(status = ASRStatus.Listening,
                 echoCancellationAvailable = echoActive, echoCancellationActive = echoActive)
@@ -173,9 +175,14 @@ class VoiceSessionControllerTest {
             if (releaseEchoOnPause) state.value = state.value.copy(echoCancellationActive = false)
             if (emitEndedOnPause) state.value = state.value.copy(voiceTurn = ASRVoiceTurn("closing-recorder", true))
             if (emitErrorOnPause) state.value = state.value.copy(errorMessage = "intentional capture close")
+            if (throwOnPause) error("synthetic native pause failure")
         }
         override fun stop() {}
-        override fun dispose() { disposed = true; if (releaseEchoOnPause) pauseCapture() }
+        override fun dispose() {
+            if (throwOnDispose) error("synthetic private native disposal failure")
+            disposed = true
+            if (releaseEchoOnPause) pauseCapture()
+        }
         fun begin() {
             state.value = state.value.copy(voiceTurn = ASRVoiceTurn("a"))
         }
@@ -493,8 +500,8 @@ class VoiceSessionControllerTest {
         } finally { rig.close() }
     }
 
-    @Test fun `ASR and generation errors pause independently while fatal playback ends voice`() = runBlocking<Unit> {
-        for (failure in listOf("asr", "generation", "playback")) {
+    @Test fun `ASR and generation errors pause independently`() = runBlocking<Unit> {
+        for (failure in listOf("asr", "generation")) {
             val rig = Rig()
             try {
                 rig.start()
@@ -504,11 +511,7 @@ class VoiceSessionControllerTest {
                 } else {
                     asr.end("hello")
                     rig.recorder(asr)
-                    if (failure == "generation") rig.replies[0].completeExceptionally(IllegalStateException("failed"))
-                    else {
-                        rig.failPlayback = true
-                        rig.replies[0].complete("reply")
-                    }
+                    rig.replies[0].completeExceptionally(IllegalStateException("failed"))
                 }
                 awaitCondition { rig.asrs.all { it.disposed } &&
                     when (failure) {
@@ -516,10 +519,45 @@ class VoiceSessionControllerTest {
                         "asr" -> !rig.voice.state.value.microphoneEnabled
                         else -> rig.voice.state.value.phase == VoicePhase.Error
                     } }
-                if (failure != "playback") assertTrue(rig.voice.state.value.isActive)
+                assertTrue(rig.voice.state.value.isActive)
                 if (failure == "asr") assertTrue(rig.voice.state.value.recoveryNotice.orEmpty().contains("ASR_LISTEN_FAILED"))
                 assertTrue(rig.asrs.all { it.disposed })
             } finally { rig.close() }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `all utterance failures preserve call and next turn without retrying old speech`() = runTest {
+        for (failure in listOf(IllegalStateException("decoder rejected"), SocketTimeoutException(),
+            HttpException("provider rejected", httpStatus = 400))) {
+            val recorders = mutableListOf<FakeAsr>()
+            val spoken = mutableListOf<String>()
+            val inputs = mutableListOf<String>()
+            var ended = 0
+            val voice = VoiceSessionController(backgroundScope, { it.toString() }) {
+                inputs += it
+                CompletableDeferred<String?>().apply { complete("next reply") }
+            }
+            try {
+                voice.start(createAsr = { FakeAsr().also { recorders += it } },
+                    speak = { text -> spoken += text; if (spoken.size == 1) throw failure },
+                    stopSpeaking = {}, onEnded = { ended++ })
+                advanceTimeBy(201); runCurrent()
+                voice.acceptSupplementaryReply(CompletableDeferred<String?>().apply { complete("failed reply") })
+                runCurrent(); advanceTimeBy(1_000); runCurrent()
+                assertTrue(voice.state.value.isActive)
+                assertFalse(voice.state.value.replyBlocked)
+                assertEquals("failed reply", voice.state.value.lastReplyText)
+                assertTrue(voice.state.value.recoveryNotice.orEmpty().contains("TTS_"))
+                assertEquals(listOf("failed reply"), spoken)
+                assertEquals(0, ended)
+                recorders.last().end("new human turn")
+                runCurrent(); advanceTimeBy(1_000); runCurrent()
+                assertEquals(listOf("new human turn"), inputs)
+                assertEquals(listOf("failed reply", "next reply"), spoken)
+                assertTrue(voice.state.value.isActive)
+                assertEquals(0, ended)
+            } finally { voice.stopAndJoin() }
         }
     }
 
@@ -609,6 +647,117 @@ class VoiceSessionControllerTest {
             assertEquals(2, rig.stopCount)
             assertEquals(VoicePhase.Off, rig.voice.state.value.phase)
         } finally { rig.close() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `failed capture and playback release still fence callbacks and publish Off`() = runTest {
+        val recorder = FakeAsr()
+        var stopCount = 0
+        var inputs = 0
+        var endCount = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) {
+            inputs++; CompletableDeferred<String?>()
+        }
+        try {
+            voice.start(createAsr = { recorder }, speak = {}, stopSpeaking = {
+                stopCount++
+                if (stopCount > 1) error("synthetic private playback detail")
+            }, onEnded = { endCount++ })
+            advanceTimeBy(201); runCurrent()
+            assertEquals(VoicePhase.Listening, voice.state.value.phase)
+            recorder.throwOnPause = true
+            recorder.emitEndedOnPause = true
+            val failures = voice.stop()
+            assertEquals(listOf("VOICE_CAPTURE_PAUSE", "VOICE_PLAYBACK_STOP"), failures)
+            assertEquals(VoicePhase.Off, voice.state.value.phase)
+            assertFalse(voice.state.value.isActive)
+            assertTrue(voice.state.value.error!!.contains("VOICE_CAPTURE_PAUSE"))
+            assertFalse(voice.state.value.error!!.contains("private"))
+            assertEquals(2, stopCount)
+            assertFalse(voice.acceptSupplementaryReply(CompletableDeferred("late")))
+            recorder.end("late native event")
+            runCurrent()
+            voice.stopAndJoin()
+            assertEquals(failures, voice.stop())
+            assertEquals(2, stopCount)
+            assertEquals(1, endCount)
+            assertEquals(0, inputs)
+            assertTrue(recorder.disposed)
+            assertEquals(VoicePhase.Off, voice.state.value.phase)
+        } finally { voice.stopAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `failed native disposal cannot be mistaken for completed shutdown or allow replacement capture`() = runTest {
+        val recorder = FakeAsr()
+        var created = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) { error("No input expected") }
+        voice.start(createAsr = { created++; recorder }, speak = null, stopSpeaking = {})
+        advanceTimeBy(201); runCurrent()
+        assertEquals(VoicePhase.Listening, voice.state.value.phase)
+        recorder.throwOnDispose = true
+        voice.stop()
+        runCurrent()
+        val failures = voice.stopAndJoin()
+        assertTrue("VOICE_CAPTURE_DISPOSE" in failures)
+        assertFalse(voice.isStopped)
+        assertFalse(recorder.disposed)
+        assertEquals(VoicePhase.Off, voice.state.value.phase)
+        assertTrue(voice.state.value.error!!.contains("VOICE_CAPTURE_DISPOSE"))
+        assertFalse(voice.state.value.error!!.contains("private"))
+        voice.start(createAsr = { created++; FakeAsr() }, speak = null, stopSpeaking = {})
+        advanceTimeBy(201); runCurrent()
+        assertEquals(1, created)
+        assertEquals(VoicePhase.Off, voice.state.value.phase)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `failed output shutdown stays fenced instead of transferring unconfirmed playback to a new call`() = runTest {
+        var firstStops = 0
+        var secondStops = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) { error("muted test") }
+        try {
+            voice.start(createAsr = { error("muted test") }, speak = null, initialMicrophoneEnabled = false,
+                stopSpeaking = { firstStops++; if (firstStops > 1) error("first session only") })
+            advanceTimeBy(201); runCurrent()
+            assertEquals(listOf("VOICE_PLAYBACK_STOP"), voice.stop())
+            runCurrent(); voice.stopAndJoin()
+            assertFalse(voice.isStopped)
+            voice.start(createAsr = { error("muted test") }, speak = null, initialMicrophoneEnabled = false,
+                stopSpeaking = { secondStops++ })
+            advanceTimeBy(201); runCurrent()
+            assertEquals(VoicePhase.Off, voice.state.value.phase)
+            assertTrue(voice.state.value.error!!.contains("VOICE_PLAYBACK_STOP"))
+            assertEquals(listOf("VOICE_PLAYBACK_STOP"), voice.stop())
+            runCurrent(); voice.stopAndJoin()
+            assertEquals(2, firstStops)
+            assertEquals(0, secondStops)
+            assertEquals(VoicePhase.Off, voice.state.value.phase)
+        } finally { voice.stopAndJoin() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `initial output reset failure does not block a new call when final release is confirmed`() = runTest {
+        var firstStops = 0
+        var secondStops = 0
+        val voice = VoiceSessionController(backgroundScope, { it.toString() }) { error("muted test") }
+        try {
+            voice.start(createAsr = { error("muted test") }, speak = null, initialMicrophoneEnabled = false,
+                stopSpeaking = { firstStops++; if (firstStops == 1) error("initial reset only") })
+            runCurrent()
+            assertEquals(2, firstStops)
+            assertTrue(voice.isStopped)
+            assertTrue(voice.stopAndJoin().isEmpty())
+            voice.start(createAsr = { error("muted test") }, speak = null, initialMicrophoneEnabled = false,
+                stopSpeaking = { secondStops++ })
+            advanceTimeBy(201); runCurrent()
+            assertEquals(VoicePhase.Listening, voice.state.value.phase)
+            assertNull(voice.state.value.error)
+            assertTrue(voice.stop().isEmpty())
+            runCurrent(); voice.stopAndJoin()
+            assertEquals(2, secondStops)
+            assertTrue(voice.isStopped)
+        } finally { voice.stopAndJoin() }
     }
 
     @Test fun `connection persistence failure remains terminal after microphone cleanup`() = runBlocking<Unit> {

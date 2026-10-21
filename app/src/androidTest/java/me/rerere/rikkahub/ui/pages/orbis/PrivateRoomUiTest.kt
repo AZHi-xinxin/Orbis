@@ -207,6 +207,13 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("填写进入申请").performClick()
     }
 
+    private fun chooseRandomCodeCreation() {
+        // New rooms default to a human-chosen password; these existing tests deliberately
+        // keep exercising the separate legacy random-code confirmation flow.
+        scrollToText("随机恢复码")
+        compose.onNodeWithText("随机恢复码").performClick()
+    }
+
     @Test fun homeHasThreeActionsAndNoConnectionOrRecoveryControls() {
         show()
         listOf("选择隐私室主人", "进入申请", "新建隐私室").forEach(::scrollToText)
@@ -242,6 +249,7 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("新房间合成助手").performClick()
         val fresh = repositories.getValue(newOwner)
         assertEquals(PrivateVaultAvailability.ABSENT, fresh.status().availability)
+        chooseRandomCodeCreation()
         scrollToText("创建加密隐私室")
         compose.onNodeWithText("隐私室专用模型（手机端独立处理）").assertDoesNotExist()
         compose.onNodeWithText("创建加密隐私室").performClick()
@@ -268,6 +276,7 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("选择助手新建").performTouchInput { click(center) }
         scrollToText("新房间合成助手")
         compose.onNodeWithText("新房间合成助手").performTouchInput { click(center) }
+        chooseRandomCodeCreation()
         scrollToText("创建加密隐私室")
         compose.onNodeWithText("隐私室专用模型（手机端独立处理）").assertDoesNotExist()
         compose.onNodeWithText("创建加密隐私室").performTouchInput { click(center) }
@@ -295,6 +304,7 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("选择助手新建").performClick()
         scrollToText("新房间合成助手")
         compose.onNodeWithText("新房间合成助手").performClick()
+        chooseRandomCodeCreation()
         scrollToText("创建加密隐私室")
         compose.onNodeWithText("创建加密隐私室").performTouchInput { click(center) }
         compose.waitUntil(10_000) {
@@ -330,6 +340,7 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("选择助手新建").performClick()
         scrollToText("新房间合成助手")
         compose.onNodeWithText("新房间合成助手").performClick()
+        chooseRandomCodeCreation()
         scrollToText("创建加密隐私室")
         try {
             compose.onNodeWithText("创建加密隐私室").performTouchInput { click(center) }
@@ -355,6 +366,7 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("选择助手新建").performClick()
         scrollToText("新房间合成助手")
         compose.onNodeWithText("新房间合成助手").performClick()
+        chooseRandomCodeCreation()
         scrollToText("创建加密隐私室")
         compose.onNodeWithText("创建加密隐私室").performClick()
         val fresh = repositories.getValue(newOwner)
@@ -400,6 +412,7 @@ class PrivateRoomUiTest {
         compose.onNodeWithText("选择助手新建").performClick()
         scrollToText("新房间合成助手")
         compose.onNodeWithText("新房间合成助手").performClick()
+        chooseRandomCodeCreation()
         scrollToText("创建加密隐私室")
         compose.runOnUiThread { testLifecycle.currentState = Lifecycle.State.CREATED }
         // Simulate a synchronous commit completing after the prior UI lifetime was stopped.

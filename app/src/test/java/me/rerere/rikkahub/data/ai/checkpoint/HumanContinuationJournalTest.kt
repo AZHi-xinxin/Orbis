@@ -55,6 +55,107 @@ class HumanContinuationJournalTest {
     private fun Conversation.append() = copy(messageNodes = messageNodes + listOf(
         UIMessage.user("new input").toMessageNode(), UIMessage.assistant("new answer").toMessageNode()))
 
+    private fun Conversation.replyText(text: String) = copy(messageNodes = messageNodes.dropLast(1) +
+        messageNodes.last().let { it.copy(messages = listOf(it.currentMessage.copy(parts = listOf(UIMessagePart.Text(text))))) })
+
+    @Test fun `recorded Room partial reply recovers later same-node text after journal reopen`() {
+        val store = Store(); val base = base(); val early = base.append().replyText("A"); val latest = early.replyText("AB")
+        val id = Uuid.random(); val journal = HumanContinuationJournal(store)
+        journal.checkpoint(id, base, early)
+        journal.prepareRoomCommit(id, base, base, early)
+        // Room commits A; a later streaming checkpoint stores AB, retaining the write proof.
+        journal.checkpoint(id, base, latest)
+        val bytes = store.read(base.id)
+        val recovered = HumanContinuationJournal(store).recover(early)!!
+        assertEquals(latest.messageNodes, recovered.snapshot.messageNodes)
+        assertEquals(early.messageNodes, recovered.durableBaseline!!.messageNodes)
+        assertArrayEquals(bytes, store.read(base.id)) // Recovery itself does not replace either source.
+    }
+
+    @Test fun `known partial reasoning may append prose and finish without changing protected metadata`() {
+        val store = Store(); val base = base(); val id = Uuid.random()
+        val reasoning = UIMessagePart.Reasoning("A", createdAt = kotlin.time.Instant.parse("2026-01-01T00:00:00Z"), finishedAt = null)
+        val reply = UIMessage.assistant("").copy(parts = listOf(reasoning))
+        val early = base.copy(messageNodes = base.messageNodes + UIMessage.user("fresh").toMessageNode() + reply.toMessageNode())
+        val latest = early.copy(messageNodes = early.messageNodes.dropLast(1) + early.messageNodes.last().copy(messages = listOf(
+            reply.copy(parts = listOf(reasoning.copy(reasoning = "AB", finishedAt = reasoning.createdAt), UIMessagePart.Text("answer")),
+                finishedAt = reply.createdAt))))
+        val journal = HumanContinuationJournal(store); journal.checkpoint(id, base, early)
+        journal.prepareRoomCommit(id, base, base, early)
+        journal.checkpoint(id, base, latest)
+        assertEquals(latest.messageNodes, HumanContinuationJournal(store).recover(early)!!.snapshot.messageNodes)
+    }
+
+    @Test fun `a matching text prefix without an exact Room write receipt remains a conflict`() {
+        val store = Store(); val base = base(); val early = base.append().replyText("A"); val latest = early.replyText("AB")
+        val journal = HumanContinuationJournal(store); val id = Uuid.random()
+        journal.checkpoint(id, base, latest)
+        val original = store.read(base.id)
+        assertThrows(IllegalStateException::class.java) { journal.recover(early) }
+        assertArrayEquals(original, store.read(base.id))
+        journal.prepareRoomCommit(id, base, base, early)
+        // A third text prefix was never proposed by this lane's CAS; it is not inferred safe.
+        val different = early.replyText("")
+        val proof = store.read(base.id)
+        assertThrows(IllegalStateException::class.java) { journal.recover(different) }
+        assertArrayEquals(proof, store.read(base.id))
+    }
+
+    @Test fun `Room receipt cannot authorize edited user text divergent reply branch or tool transition`() {
+        val base = base(); val early = base.append().replyText("A")
+        val replyNode = early.messageNodes.last(); val reply = replyNode.currentMessage
+        val variants = listOf(
+            early.replyText("different"),
+            early.copy(messageNodes = early.messageNodes.dropLast(1) + replyNode.copy(messages = listOf(reply, UIMessage.assistant("new branch")), selectIndex = 1)),
+            early.copy(messageNodes = early.messageNodes.dropLast(1) + replyNode.copy(messages = listOf(reply.copy(modelId = Uuid.random(), parts = listOf(UIMessagePart.Text("AB")))))),
+            early.copy(messageNodes = early.messageNodes.dropLast(1) + replyNode.copy(messages = listOf(reply.copy(parts = listOf(UIMessagePart.Text("AB"), UIMessagePart.Tool("call", "write", "{}")))))),
+            early.copy(messageNodes = early.messageNodes.mapIndexed { index, node ->
+                if (index != base.messageNodes.size) node else node.copy(messages = listOf(node.currentMessage.copy(parts = listOf(UIMessagePart.Text("new input edited")))))
+            }),
+        )
+        variants.forEach { latest ->
+            val store = Store(); val id = Uuid.random(); val journal = HumanContinuationJournal(store)
+            journal.checkpoint(id, base, early); journal.prepareRoomCommit(id, base, base, early)
+            journal.checkpoint(id, base, latest)
+            val bytes = store.read(base.id)
+            assertThrows(IllegalStateException::class.java) { journal.recover(early) }
+            assertArrayEquals(bytes, store.read(base.id))
+        }
+    }
+
+    @Test fun `failed Room proof write keeps earlier complete journal and failed CAS does not discard tail`() {
+        val store = Store(); val base = base(); val early = base.append().replyText("A"); val latest = early.replyText("AB")
+        val id = Uuid.random(); val journal = HumanContinuationJournal(store)
+        journal.checkpoint(id, base, latest); val bytes = store.read(base.id)
+        store.fail = true
+        assertThrows(IllegalStateException::class.java) { journal.prepareRoomCommit(id, base, base, early) }
+        assertArrayEquals(bytes, store.read(base.id))
+        store.fail = false
+        journal.prepareRoomCommit(id, base, base, early)
+        // Crash or DB failure before the proposed A commit leaves Room at base. AB still restores.
+        assertEquals(latest.messageNodes, HumanContinuationJournal(store).recover(base)!!.snapshot.messageNodes)
+        assertEquals(latest.messageNodes, HumanContinuationJournal(store).recover(early)!!.snapshot.messageNodes)
+    }
+
+    @Test fun `version one checksum remains readable but has no invented Room proof`() {
+        val store = Store(); val base = base(); val early = base.append().replyText("A"); val latest = early.replyText("AB")
+        val journal = HumanContinuationJournal(store); journal.checkpoint(Uuid.random(), base, latest)
+        val json = kotlinx.serialization.json.Json
+        val envelope = json.parseToJsonElement(store.read(base.id)!!.toString(Charsets.UTF_8)) as kotlinx.serialization.json.JsonObject
+        val record = envelope.getValue("record") as kotlinx.serialization.json.JsonObject
+        val legacy = kotlinx.serialization.json.JsonObject(record.toMutableMap().apply {
+            put("version", kotlinx.serialization.json.JsonPrimitive(1)); remove("roomSnapshotHashes")
+        })
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(legacy.toString().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val legacyBytes = kotlinx.serialization.json.JsonObject(mapOf("record" to legacy,
+            "sha256" to kotlinx.serialization.json.JsonPrimitive(digest))).toString().toByteArray()
+        store.values[base.id] = legacyBytes
+        assertEquals(latest.messageNodes, HumanContinuationJournal(store).recover(base)!!.snapshot.messageNodes)
+        assertThrows(IllegalStateException::class.java) { HumanContinuationJournal(store).recover(early) }
+        assertArrayEquals(legacyBytes, store.read(base.id))
+    }
+
     @Test fun `new journal instance restores complete human tail without modifying old Room page`() {
         val store = Store(); val base = base(); val latest = base.append().append(); val id = Uuid.random()
         HumanContinuationJournal(store).checkpoint(id, base, latest)

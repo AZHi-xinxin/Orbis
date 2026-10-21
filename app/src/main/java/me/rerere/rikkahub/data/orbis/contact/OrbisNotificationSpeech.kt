@@ -29,6 +29,7 @@ import me.rerere.rikkahub.data.datastore.getSelectedTTSProvider
 import me.rerere.rikkahub.service.OrbisIncomingCallRuntime
 import me.rerere.rikkahub.service.OrbisVoiceCallRuntime
 import me.rerere.tts.controller.AudioPlayer
+import me.rerere.tts.controller.VoicePlaybackSnapshot
 import me.rerere.tts.model.AudioFormat
 import me.rerere.tts.model.PlaybackStatus
 import me.rerere.tts.model.TTSRequest
@@ -201,16 +202,14 @@ private class AndroidNotificationSpeechPort(
 
     override suspend fun acquire(scope: OrbisNotificationSpeechScope): OrbisNotificationSpeechLease? = withContext(Dispatchers.Main.immediate) {
         val snapshot = settings.settingsFlow.value
-        val provider = snapshot.getSelectedTTSProvider() ?: return@withContext null
+        val provider = snapshot.getSelectedTTSProvider()?.copyProvider() ?: return@withContext null
         val speed = snapshot.defaultTTSPlaybackSpeed.takeIf { it.isFinite() }?.coerceIn(0.5f, 2.0f) ?: 1.0f
+        val playback = VoicePlaybackSnapshot.capture(speed, snapshot.voiceMixer)
         val session = NotificationSpeechPlaybackSession(object : NotificationSpeechPlaybackPort<TTSResponse> {
             private var player: AudioPlayer? = null
             private var focus: AudioFocusRequest? = null
 
             override fun blockedReason(): String? {
-                val live = settings.settingsFlow.value
-                if (live.getSelectedTTSProvider() != provider || live.defaultTTSPlaybackSpeed != snapshot.defaultTTSPlaybackSpeed)
-                    return "voice_setting_changed"
                 // Keep the existing owned-player allowance: Android's public playback snapshot
                 // can lag a pause/end callback. Focus must independently permit every resume.
                 return blocked(scope, ownPlaying = player != null)
@@ -236,11 +235,11 @@ private class AndroidNotificationSpeechPort(
 
             override suspend fun play(audio: TTSResponse, onStarted: () -> Unit) = coroutineScope {
                 val audioPlayer = AudioPlayer(context, audioUsage = AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
-                    .also { player = it; it.setSpeed(speed) }
+                    .also { player = it }
                 val observe = launch {
                     audioPlayer.playbackState.collect { if (it.status == PlaybackStatus.Playing) onStarted() }
                 }
-                try { audioPlayer.play(audio) } finally { observe.cancelAndJoin() }
+                try { audioPlayer.play(audio, playback) } finally { observe.cancelAndJoin() }
             }
 
             override fun pause() { player?.pause() }

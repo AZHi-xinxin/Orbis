@@ -3,9 +3,11 @@ package me.rerere.rikkahub.data.sync
 import java.io.ByteArrayOutputStream
 import java.io.File
 import me.rerere.rikkahub.data.files.FileProtection
+import me.rerere.rikkahub.data.orbis.voice.VoiceCallBackup
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import me.rerere.rikkahub.data.orbis.gallery.GalleryBackup
+import me.rerere.rikkahub.data.orbis.activities.ActivitiesBackup
 import me.rerere.rikkahub.data.orbis.spaces.CompanionSpacesBackup
 import me.rerere.rikkahub.data.ai.contextpruning.ContextPruningBackup
 import kotlinx.serialization.encodeToString
@@ -29,7 +31,7 @@ internal object OrbisLocalToolBackup {
         SCHEDULE -> ORBIS_SCHEDULE_MAX_BYTES
         KAOMOJI -> OrbisKaomojiRepository.MAX_STORAGE_CHARS * 4
         FileProtection.PATH -> FileProtection.MAX_BYTES
-        else -> GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path) ?: CompanionSpacesBackup.maxBytes(path)
+        else -> VoiceCallBackup.maxBytes(path) ?: GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path) ?: CompanionSpacesBackup.maxBytes(path) ?: ActivitiesBackup.maxBytes(path)
     }
 
     fun encodeSchedule(value: OrbisScheduleSnapshot): ByteArray = json.encodeToString(value).toByteArray(Charsets.UTF_8).also { validate(SCHEDULE, it) }
@@ -41,6 +43,7 @@ internal object OrbisLocalToolBackup {
             KAOMOJI -> kaomoji(bytes)
             FileProtection.PATH -> FileProtection.decode(text(path, bytes, setOf("version", "automatic", "overrides")))
             else -> if (ContextPruningBackup.maxBytes(path) != null) ContextPruningBackup.validate(path, bytes)
+                else if (ActivitiesBackup.maxBytes(path) != null) ActivitiesBackup.validate(path, bytes)
                 else error("local_tool_backup_unknown_path")
         }
     }
@@ -116,6 +119,8 @@ internal object OrbisLocalToolBackup {
 
     /** Used on private staging before publication. Bad local-tool data cannot stage a partial restore. */
     fun validateStaged(payload: File) {
+        VoiceCallBackup.validateStaged(payload)
+        ActivitiesBackup.validateStaged(payload)
         GalleryBackup.validateStaged(payload)
         CompanionSpacesBackup.validateStaged(payload)
         ContextPruningBackup.validateStaged(payload)
@@ -127,10 +132,22 @@ internal object OrbisLocalToolBackup {
 
     /** Startup only, before any repository opens; prepare all merges before changing any payload file. */
     fun prepareBeforeJournal(payload: File, liveFiles: File) {
+        VoiceCallBackup.prepareBeforeJournal(payload, liveFiles)
+        ActivitiesBackup.prepareBeforeJournal(payload, liveFiles)
         GalleryBackup.prepareBeforeJournal(payload, liveFiles)
         CompanionSpacesBackup.prepareBeforeJournal(payload, liveFiles)
         ContextPruningBackup.prepareBeforeJournal(payload, liveFiles)
-        val prepared = paths.mapNotNull { path ->
+        preparePaths(payload, liveFiles, paths)
+    }
+
+    /** An explicit historical restore may replace progress, but must not unlock protected files. */
+    fun prepareReplacementBeforeJournal(payload: File, liveFiles: File) {
+        validateStaged(payload)
+        preparePaths(payload, liveFiles, listOf(FileProtection.PATH))
+    }
+
+    private fun preparePaths(payload: File, liveFiles: File, selectedPaths: List<String>) {
+        val prepared = selectedPaths.mapNotNull { path ->
             val source = exactFile(File(payload, "files"), path)
             if (!source.exists()) null else {
                 val target = exactFile(liveFiles, path)
@@ -148,7 +165,7 @@ internal object OrbisLocalToolBackup {
     /** Sidecars are journalled with originals, not blindly deleted or restored from an archive. */
     fun sidecarPaths(installedPaths: Set<String>): List<String> = paths.filter { "files/$it" in installedPaths }
         .flatMap { listOf("files/$it.bak", "files/$it.new") } + GalleryBackup.sidecarPaths(installedPaths) +
-        CompanionSpacesBackup.sidecarPaths(installedPaths)
+        CompanionSpacesBackup.sidecarPaths(installedPaths) + ActivitiesBackup.sidecarPaths(installedPaths) + VoiceCallBackup.sidecarPaths(installedPaths)
 
     private fun exactFile(root: File, path: String): File {
         val canonicalRoot = root.canonicalFile
@@ -181,6 +198,10 @@ internal object OrbisLocalToolBackup {
     private fun conflict(path: String) = if (path == SCHEDULE) "local_tool_backup_conflict_schedule" else "local_tool_backup_conflict_kaomoji"
 
     fun publicError(code: String?): String? = when (code) {
+        "voice_backup_owner", "voice_backup_path", "voice_backup_invalid" -> "通话档案内容或助手归属校验失败，未改动本机记录。"
+        "voice_backup_conflict" -> "通话档案与本机已有记录不同，未覆盖原记录；可在版本恢复中明确选择要恢复的历史版本。"
+        "activity_backup_conflict" -> "宠物或学习机档案与本机已有进度不同，未覆盖本机档案。请保留两份备份，迁移到无冲突的安装中恢复。"
+        "activity_backup_invalid", "activity_backup_path" -> "宠物或学习机备份内容未通过检查，未改动本机档案。"
         "character_backup_owner" -> "角色素材与备份中的助手身份不匹配，整次恢复已停止；不会把素材转给当前助手或按名称猜测归属。"
         "character_backup_path", "character_backup_invalid" -> "角色素材备份的路径、图片或完整性未通过校验，整次恢复已停止；本机角色和其他助手素材保留。"
         "file_protection_invalid", "file_protection_unsafe_path" -> "附件锁定清单校验失败，整次恢复已停止；本机文件与保护状态保留。"

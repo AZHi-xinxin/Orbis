@@ -62,7 +62,7 @@ class KelivoChatImporterDeviceTest {
         digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
     }
     private data class Fixture(val archive: File, val database: File)
-    private fun fixture(mutate: (SQLiteDatabase) -> Unit = {}): Fixture {
+    private fun fixture(formatVersion: Int = 2, mutate: (SQLiteDatabase) -> Unit = {}): Fixture {
         val database = File(directory, "source-${Uuid.random()}.db")
         SQLiteDatabase.openOrCreateDatabase(database, null).use { db ->
             db.rawQuery("PRAGMA journal_mode=DELETE", null).close()
@@ -90,8 +90,12 @@ class KelivoChatImporterDeviceTest {
             mutate(db)
         }
         val manifest = buildJsonObject {
-            put("format", "kelivo-backup"); put("formatVersion", 2); put("minimumReadableFormatVersion", 2)
+            put("format", "kelivo-backup"); put("formatVersion", formatVersion)
+            put("minimumReadableFormatVersion", formatVersion)
             put("payloadKind", "sqlite"); put("includeChats", true); put("includeFiles", true); put("secretsIncluded", true)
+            if (formatVersion == 3) put("scope", buildJsonObject {
+                put("chats", true); put("files", true); put("settings", false)
+            })
             put("database", buildJsonObject { put("entry", "database/kelivo.db"); put("schemaVersion", 3)
                 put("minimumReadableSchemaVersion", 2); put("conversationCount", 1); put("messageCount", 3) })
             put("entries", buildJsonObject { put("database/kelivo.db", buildJsonObject {
@@ -140,6 +144,45 @@ class KelivoChatImporterDeviceTest {
         try { importer.importSelected(second.archive, assistant, setOf("c"), preview.fingerprint); fail("changed archive") }
         catch (_: DeepSeekImportException) { assertEquals(0, sink.writes) }
     }
+    @Test fun v3ScopedDatabasePreservesBranchPartsOriginalDataAndV2Deduplication() = runBlocking {
+        val v3Fixture = fixture(formatVersion = 3) { db ->
+            db.execSQL("INSERT INTO message_part_rows VALUES ('c','a1',3,'assistant_round_end','null')")
+            db.execSQL("INSERT INTO message_part_rows VALUES ('c','a1',4,'reasoning','synthetic thinking')")
+            db.execSQL("INSERT INTO message_part_rows VALUES ('c','a1',5,'text','second round answer')")
+            db.execSQL("INSERT INTO message_part_rows VALUES ('c','a1',6,'provider_auth_error','{\"providerId\":\"PRIVATE_PROVIDER_ID\"}')")
+        }
+        val before = hash(v3Fixture.database)
+        val archiveHash = hash(v3Fixture.archive)
+        val existing = Conversation(id = Uuid.random(), assistantId = assistant, title = "existing chat", messageNodes = emptyList())
+        val sink = Sink().apply { saved[existing.id] = existing }
+        val importer = KelivoChatImporter(context, sink)
+        val preview = importer.inspect(v3Fixture.archive)
+        assertEquals(2, preview.conversations.single().messageCount)
+        assertEquals(1, preview.conversations.single().branchPointCount)
+        assertEquals(1, importer.importSelected(v3Fixture.archive, assistant, setOf("c"), preview.fingerprint).imported)
+        assertEquals(existing, sink.saved[existing.id])
+        val imported = sink.saved.getValue(kelivoImportId("conversation", "c"))
+        val text = imported.currentMessages.last().toText()
+        assertTrue(text.indexOf("selected answer") < text.indexOf("historical call only"))
+        assertTrue(text.indexOf("historical call only") < text.indexOf("synthetic thinking"))
+        assertTrue(text.indexOf("synthetic thinking") < text.indexOf("second round answer"))
+        assertFalse(text.contains("UNSELECTED_ANSWER")); assertFalse(text.contains("PRIVATE_PROVIDER_ID"))
+        assertFalse(text.contains("暂不支持")); assertFalse(text.contains("SYNTHETIC_SECRET"))
+        assertTrue(imported.currentMessages.all { it.getTools().isEmpty() && it.parts.all { p -> p is UIMessagePart.Text } })
+        val v2 = fixture()
+        val v2Preview = importer.inspect(v2.archive)
+        assertEquals(1, importer.importSelected(v2.archive, Uuid.random(), setOf("c"), v2Preview.fingerprint).skipped)
+        assertEquals(imported, sink.saved[kelivoImportId("conversation", "c")])
+        assertEquals(2, sink.saved.size); assertEquals(1, sink.writes)
+        assertEquals(before, hash(v3Fixture.database)); assertEquals(archiveHash, hash(v3Fixture.archive))
+        assertTrue(File(context.cacheDir, ChatImportStaging.ROOT).listFiles()!!.isEmpty())
+    }
+    @Test fun v3InvalidBranchAndFutureContainerLeaveExistingChatsUntouched() = runBlocking {
+        assertRejected(fixture(formatVersion = 3) {
+            it.execSQL("UPDATE conversation_rows SET version_selections_json='{\"g\":99}'")
+        })
+        assertRejected(fixture(formatVersion = 4))
+    }
     @Test fun sourceViewIsRejectedBeforeQueryingItsProjection() = runBlocking {
         val f = fixture { db ->
             db.execSQL("ALTER TABLE message_part_rows RENAME TO hidden_parts")
@@ -167,11 +210,14 @@ class KelivoChatImporterDeviceTest {
     }
     private suspend fun assertRejected(f: Fixture) {
         val before = hash(f.database); val sink = Sink()
+        val existing = Conversation(id = Uuid.random(), assistantId = assistant, title = "existing chat", messageNodes = emptyList())
+        sink.saved[existing.id] = existing
         val importer = KelivoChatImporter(context, sink)
         try { importer.inspect(f.archive); fail("unsafe archive must fail") } catch (_: IllegalArgumentException) { }
         try { importer.importSelected(f.archive, assistant, setOf("c"), hash(f.archive)); fail("must fail before write") }
         catch (_: DeepSeekImportException) { }
         assertEquals(0, sink.writes); assertEquals(before, hash(f.database))
+        assertEquals(mapOf(existing.id to existing), sink.saved)
         assertTrue(File(context.cacheDir, ChatImportStaging.ROOT).listFiles()!!.isEmpty())
     }
 }

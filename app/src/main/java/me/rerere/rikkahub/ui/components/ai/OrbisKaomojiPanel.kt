@@ -20,6 +20,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.rerere.rikkahub.data.model.OrbisStickerSendNotice
 import me.rerere.rikkahub.data.orbis.OrbisKaomoji
 import me.rerere.rikkahub.data.orbis.OrbisKaomojiRepository
 import me.rerere.rikkahub.data.orbis.OrbisKaomojis
@@ -27,7 +28,7 @@ import me.rerere.rikkahub.data.orbis.OrbisKaomojis
 /** Selection is explicit. The host chooses draft insertion or standalone sending; management never sends. */
 @Composable
 internal fun OrbisKaomojiPanel(onInsertText: ((String) -> Unit)? = null, enabled: Boolean = true,
-    onSendText: (suspend (String) -> Boolean)? = null) {
+    onSendText: (suspend (String) -> Boolean)? = null, sendUnavailableReason: String? = null) {
     val context = LocalContext.current.applicationContext
     var repository by remember(context) { mutableStateOf<OrbisKaomojiRepository?>(null) }
     var failed by remember { mutableStateOf(false) }
@@ -39,7 +40,7 @@ internal fun OrbisKaomojiPanel(onInsertText: ((String) -> Unit)? = null, enabled
         catch (_: Exception) { failed = true }
     }
     val loaded = repository
-    if (loaded != null) KaomojiLibrary(loaded, onInsertText, enabled, onSendText)
+    if (loaded != null) KaomojiLibrary(loaded, onInsertText, enabled, onSendText, sendUnavailableReason)
     else Column(Modifier.fillMaxWidth().padding(12.dp)) {
         Text(if (failed) "暂时无法读取颜文字库；未改动原文件。" else "正在读取本机颜文字库…")
         if (failed) TextButton(onClick = { attempt++ }) { Text("重新读取") }
@@ -48,7 +49,7 @@ internal fun OrbisKaomojiPanel(onInsertText: ((String) -> Unit)? = null, enabled
 
 @Composable
 private fun KaomojiLibrary(repository: OrbisKaomojiRepository, onInsertText: ((String) -> Unit)?, enabled: Boolean,
-    onSendText: (suspend (String) -> Boolean)?) {
+    onSendText: (suspend (String) -> Boolean)?, sendUnavailableReason: String?) {
     val snapshot by repository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
@@ -77,7 +78,8 @@ private fun KaomojiLibrary(repository: OrbisKaomojiRepository, onInsertText: ((S
                     onInsertText != null -> "点选加入输入框，确认后再发送。"
                     else -> "管理与你的 AI 共用的文字表情。"
                 }, style = MaterialTheme.typography.bodySmall)
-                if (!enabled && (onSendText != null || onInsertText != null)) Text("当前不能发送；不会排队或自动补发。", style = MaterialTheme.typography.bodySmall)
+                if (!enabled && (onSendText != null || onInsertText != null)) Text(
+                    sendUnavailableReason ?: "当前不能发送；不会排队或自动补发。", style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(enabled = !busy, onClick = { creating = true }) { Text("新增") }
                     TextButton(enabled = !busy, onClick = { managing = !managing }) { Text(if (managing) "完成管理" else "管理") }
@@ -112,6 +114,7 @@ private fun KaomojiLibrary(repository: OrbisKaomojiRepository, onInsertText: ((S
                                 try { notice = if (onSendText(item.text)) "颜文字已发送，原草稿保持不变。"
                                     else "未确认发送成功，请核对聊天记录；不会自动补发。" }
                                 catch (cancelled: CancellationException) { throw cancelled }
+                                catch (error: OrbisStickerSendNotice) { notice = error.userMessage }
                                 catch (_: Exception) { notice = "未确认发送成功，请核对聊天记录；不会自动重试。" }
                                 finally { busy = false }
                             }

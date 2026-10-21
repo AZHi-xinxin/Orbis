@@ -65,6 +65,11 @@ class ChatToolFactory(
 ) {
     private val stImageAttachments = StMemoryImageAttachmentRegistry()
 
+    private fun hostWorkspaceId(assistant: Assistant, consultation: Boolean): String? =
+        assistant.workspaceId?.toString() ?: if (BuildConfig.ORBIS_ENABLED && !consultation && settingsStore != null)
+            me.rerere.rikkahub.data.orbis.integration.AiWorkspacePreparation.defaultId(assistant.id.toString())
+        else null
+
     suspend fun createTools(
         settings: Settings,
         assistant: Assistant,
@@ -78,6 +83,46 @@ class ChatToolFactory(
         onWorkshopAccepted: ((me.rerere.rikkahub.data.orbis.workshop.WorkshopJob) -> Unit)? = null,
         readActiveConversation: (suspend () -> me.rerere.rikkahub.data.model.Conversation?)? = null,
     ): List<Tool> = buildList {
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null) {
+            if (settings.aiGlobalObservation) add(observationWindowsTool(
+                enabled = { settingsStore.settingsFlow.value.aiGlobalObservation &&
+                    settingsStore.settingsFlow.value.getAssistantById(assistant.id) != null },
+                read = { limit, offset -> conversationRepository.observationWindows(assistant.id.toString(), limit, offset) }))
+            add(connectionProposalTool(settingsStore, assistant.id.toString()))
+            add(orbisSelfConfigurationTool(settingsStore, assistant.id.toString(), context, mcpManager, workspaceRepository))
+            hostWorkspaceId(assistant, consultationReferenceOnly)?.let { workspaceId ->
+                val owner = assistant.id.toString()
+                fun currentBinding() = settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.workspaceId?.toString() == workspaceId
+                add(createOrbisBackupTool(workspaceId, ::currentBinding,
+                    readFile = { path ->
+                        check(currentBinding() && workspaceRepository.getById(workspaceId) != null)
+                        val chunk = workspaceRepository.readNativeChunk(workspaceId, path, 0,
+                            me.rerere.rikkahub.data.sync.BackupRecoveryConnection.MAX_BYTES, null)
+                        require(chunk.eof && chunk.totalBytes <= me.rerere.rikkahub.data.sync.BackupRecoveryConnection.MAX_BYTES)
+                        chunk.text.toByteArray(Charsets.UTF_8)
+                    },
+                    bind = { connection, automatic, secrets ->
+                        check(currentBinding() && workspaceRepository.getById(workspaceId) != null)
+                        check(settingsStore.update { me.rerere.rikkahub.data.sync.AiBackupBinding.bind(
+                            it, owner, workspaceId, connection, automatic, secrets) })
+                        if (automatic) me.rerere.rikkahub.data.sync.AutoBackupRuntime.now(context)
+                    },
+                    status = {
+                        check(currentBinding() && workspaceRepository.getById(workspaceId) != null)
+                        me.rerere.rikkahub.data.sync.AiBackupOperations.status(
+                            context, owner, workspaceId, settingsStore.settingsFlow.value)
+                    },
+                    request = { action ->
+                        val live = settingsStore.settingsFlow.value
+                        check(currentBinding() && workspaceRepository.getById(workspaceId) != null &&
+                            me.rerere.rikkahub.data.sync.AiBackupBinding.owns(live, owner, workspaceId))
+                        if (action == "save_now") {
+                            check(live.autoBackup.enabled) { "automatic_backup_disabled" }
+                            me.rerere.rikkahub.data.sync.AutoBackupRuntime.now(context)
+                        } else me.rerere.rikkahub.data.sync.AiBackupOperations.enqueue(context, action, owner, workspaceId, live)
+                    }))
+            }
+        }
         if (BuildConfig.ORBIS_ENABLED && orbisMemoryRepository != null) {
             add(buildOrbisMemoryTool(assistant.id.toString(),
                 assistantExists = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
@@ -107,7 +152,14 @@ class ChatToolFactory(
         if (assistant.enableRecentChatsReference) {
             addAll(createConversationTools(conversationRepository, assistant.id))
         }
-        addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd, consultationReferenceOnly))
+        if (assistant.workspaceId == null) {
+            hostWorkspaceId(assistant, consultationReferenceOnly)?.let { expectedId ->
+                addAll(createPreparedWorkspaceTools(expectedId, workspaceRepository,
+                    stillBound = { settingsStore?.settingsFlow?.value?.getAssistantById(assistant.id)?.workspaceId?.toString() == expectedId }))
+            }
+        } else {
+            addAll(createWorkspaceToolsIfReady(assistant.workspaceId.toString(), workspaceCwd, consultationReferenceOnly))
+        }
         if (assistant.enabledSkills.isNotEmpty()) {
             addAll(
                 createSkillTools(
@@ -141,6 +193,13 @@ class ChatToolFactory(
             (if (readActiveConversation != null) readActiveConversation()
             else imageConversationId?.let { conversationRepository.getConversationById(it) })
                 ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
+        }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && imageConversationId != null) {
+            add(createOrbisConversationHistoryTool(assistant.id, imageConversationId, readBoundConversation,
+                listRemoved = { current, limit, offset -> conversationRepository.listRemovedHistory(current, limit, offset) },
+                readRemoved = { current, message -> conversationRepository.readRemovedHistory(current, message) },
+                enabled = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
+                verifyCurrent = { current -> conversationRepository.verifyCurrentHistoryScope(current) }))
         }
         val imageScope = if (imageDestinations.isEmpty() || imageConversationId == null) null else
             readBoundConversation()
@@ -199,6 +258,17 @@ class ChatToolFactory(
                 }) else definition)
         }
         if (BuildConfig.ORBIS_ENABLED) {
+            if (!consultationReferenceOnly) {
+                fun liveOwner() = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                if (assistant.orbisPetEnabled) add(petTool({ liveOwner()?.orbisPetEnabled == true }, { action, text ->
+                    me.rerere.rikkahub.data.orbis.activities.PetAiRuntime.enqueue(context, assistant.id.toString(), action, text)
+                }) {
+                    me.rerere.rikkahub.data.orbis.activities.OrbisActivities.pet(context, assistant.id.toString())
+                })
+                if (assistant.orbisStudyEnabled) add(studyTool({ liveOwner()?.orbisStudyEnabled == true }) {
+                    me.rerere.rikkahub.data.orbis.activities.OrbisActivities.study(context, assistant.id.toString())
+                })
+            }
             if (!consultationReferenceOnly && conversationId != null && imageSourceMessageIds != null) {
                 val zipConversationId = kotlin.uuid.Uuid.parse(conversationId)
                 val zipLastUserId = readBoundConversation()
@@ -258,6 +328,14 @@ class ChatToolFactory(
                     org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.files.FilesManager>()),
                 settings = { settingsStore?.settingsFlow?.value ?: settings },
             ))
+            if (!consultationReferenceOnly) assistant.workspaceId?.toString()?.let { workspaceId ->
+                add(createOrbisSendAudioTool(
+                    me.rerere.rikkahub.data.orbis.voice.OrbisVoiceNotes(context,
+                        org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.files.FilesManager>()),
+                    workspaceId, workspaceRepository,
+                    stillBound = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)?.workspaceId == assistant.workspaceId },
+                ))
+            }
             addAll(me.rerere.rikkahub.data.orbis.consultation.createOrbisConsultationMainTools(
                 context, assistant.id, conversationId, conversationRepository,
             ))
@@ -338,7 +416,8 @@ class ChatToolFactory(
                     tool.name.startsWith("companion_") || tool.name.startsWith("toy_bluetooth_") ->
                         live.localTools == assistant.localTools
                     tool.name.startsWith("calendar_") -> LocalToolOption.Calendar in live.localTools
-                    tool.name.startsWith("workspace_") -> live.workspaceId == assistant.workspaceId
+                    tool.name.startsWith("workspace_") -> live.workspaceId?.toString() ==
+                        hostWorkspaceId(assistant, consultationReferenceOnly)
                     tool.name.startsWith("mcp__") || tool.name == ST_IMAGE_LIST_TOOL -> live.mcpServers == assistant.mcpServers
                     else -> live.localTools == assistant.localTools &&
                         live.enableMemory == assistant.enableMemory &&

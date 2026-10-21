@@ -10,7 +10,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lover.connect.LcExternalRecoveryGate
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -134,6 +142,66 @@ class HumanContinuationRoomTest {
         }
     }
 
+    @Test fun ordinaryInputRollbackDoesNotBecomeContinuationBaselineWithoutGenerationJournal() = runBlocking {
+        Fixture().use { f ->
+            f.repo.insertConversation(f.baseline)
+            var published = f.load()
+            val baseline = published
+            val attempted = baseline.copy(messageNodes = baseline.messageNodes + UIMessage.user("new input").toMessageNode())
+            assertFalse(f.oldJournal.hasCheckpoint(baseline.id))
+            f.db.openHelper.writableDatabase.execSQL("CREATE TEMP TRIGGER fail_input_index BEFORE INSERT ON message_fts BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END")
+
+            assertTrue(runCatching {
+                commitConversationBeforePublish(
+                    commit = { f.repo.updateConversation(attempted) },
+                    publish = { published = attempted },
+                )
+            }.isFailure)
+
+            assertEquals(baseline.messageNodes, published.messageNodes)
+            assertEquals(baseline.messageNodes, f.load().messageNodes)
+            f.db.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_input_index")
+            val continued = attempted.copy(messageNodes = attempted.messageNodes + UIMessage.assistant("continued answer").toMessageNode())
+            val journal = HumanContinuationJournal(f.humanStore); val runId = Uuid.random()
+            journal.checkpoint(runId, published, continued)
+            assertNotNull(commitHumanContinuationSnapshot(published, continued, f::load,
+                f.oldJournal::provesInFlightBaseline, f.repo::commitHumanContinuation,
+                beforeCommit = { disk, candidate -> journal.prepareRoomCommit(runId, published, disk, candidate) }))
+            assertEquals(continued.messageNodes, f.load().messageNodes)
+            assertNull(HumanContinuationJournal(f.humanStore).recover(f.load()))
+        }
+    }
+
+    @Test fun sameNodeStreamingAppendSurvivesAtomicFileReopenAndRoomCompareAndSet() = runBlocking {
+        Fixture().use { f ->
+            f.repo.insertConversation(f.baseline)
+            val baseline = f.load()
+            val early = baseline.copy(messageNodes = baseline.messageNodes +
+                UIMessage.user("new input").toMessageNode() + UIMessage.assistant("A").toMessageNode())
+            val replyNode = early.messageNodes.last()
+            val latest = early.copy(messageNodes = early.messageNodes.dropLast(1) + replyNode.copy(messages = listOf(
+                replyNode.currentMessage.copy(parts = listOf(UIMessagePart.Text("AB"))))))
+            val journal = HumanContinuationJournal(f.humanStore); val runId = Uuid.random()
+            journal.checkpoint(runId, baseline, early)
+            journal.prepareRoomCommit(runId, baseline, baseline, early)
+            assertNotNull(f.repo.commitHumanContinuation(baseline, early))
+            journal.checkpoint(runId, baseline, latest)
+            val bytes = f.humanStore.read(baseline.id)
+
+            val reopened = HumanContinuationJournal(f.humanStore)
+            val recovery = reopened.recover(f.load())!!
+
+            assertEquals(latest.messageNodes, recovery.snapshot.messageNodes)
+            assertEquals(early.messageNodes, recovery.durableBaseline!!.messageNodes)
+            assertArrayEquals(bytes, f.humanStore.read(baseline.id))
+            assertNotNull(commitHumanContinuationSnapshot(recovery.durableBaseline!!, recovery.snapshot, f::load,
+                f.oldJournal::provesInFlightBaseline, f.repo::commitHumanContinuation,
+                beforeCommit = { disk, candidate -> reopened.prepareRoomCommit(runId, recovery.baseline, disk, candidate) }))
+            assertEquals(latest.messageNodes, f.load().messageNodes)
+            assertNull(HumanContinuationJournal(f.humanStore).recover(f.load()))
+        }
+    }
+
     @Test fun concurrentHistoryEditWinsAndDuplicateCommitDoesNotDuplicateRows() = runBlocking {
         Fixture().use { f ->
             f.seed()
@@ -151,6 +219,66 @@ class HumanContinuationRoomTest {
             assertNotNull(f.save())
             assertNotNull(f.save())
             assertEquals(f.continued.messageNodes, f.load().messageNodes)
+        }
+    }
+
+    @Test fun ordinaryFirstInputCommittedBeforeCancellationIsRetainedBySecondLaneAndContinuesSaving() = runBlocking {
+        Fixture().use { f ->
+            f.repo.insertConversation(f.baseline)
+            val baseline = f.load()
+            var published = baseline
+            val first = UIMessage.user("first accepted input").toMessageNode()
+            val candidate = baseline.copy(messageNodes = baseline.messageNodes + first)
+            var pending: HumanContinuationOrdinaryInputHandoff? =
+                HumanContinuationOrdinaryInputHandoff(baseline, candidate, first.currentMessage.id)
+            val mutex = Mutex()
+            val entered = CompletableDeferred<Unit>(); val lostReceipt = CompletableDeferred<Unit>()
+            val ordinary = async {
+                try {
+                    mutex.withLock {
+                        commitConversationBeforePublish(commit = {
+                            f.repo.updateConversation(candidate)
+                            entered.complete(Unit); lostReceipt.await()
+                        }, publish = { published = candidate })
+                    }
+                } finally { pending = null }
+            }
+            entered.await()
+            val captured = checkNotNull(pending)
+            assertEquals(candidate.messageNodes, f.load().messageNodes)
+            assertEquals(baseline.messageNodes, published.messageNodes)
+            assertFalse(f.oldJournal.hasCheckpoint(baseline.id))
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                val journal = HumanContinuationJournal(f.humanStore)
+                lateinit var lane: HumanContinuationLane
+                val storage = HumanContinuationContextStore(baseline, baseline, Uuid.random(), mutex, journal,
+                    read = f::load, proveBaseline = captured::provesCommittedInput,
+                    commit = f.repo::commitHumanContinuation, canWrite = { true },
+                    project = { lane.projectContext(it) }, latest = { lane.state.value },
+                    onStored = {}, onRebased = { a, b -> lane.acceptCompaction(a, b) }, retireOldJournal = {})
+                // Explicitly drive both production storage operations below; no app singleton,
+                // real account, model call or device-level data is involved.
+                lane = HumanContinuationLane(baseline, scope, { false }, { throw it },
+                    initial = checkNotNull(captured.initialFor(published)), contextStore = storage)
+                lane.send(UIMessage.user("second accepted input"), answer = false) { _, _, _ -> error("no model") }.join()
+                ordinary.cancelAndJoin()
+                assertNull(pending)
+                assertEquals(baseline.messageNodes, published.messageNodes)
+                assertEquals(listOf("first accepted input", "second accepted input"), lane.state.value.currentMessages.takeLast(2).map { it.toText() })
+                storage.checkpoint(lane.state.value)
+                assertTrue(storage.save(lane.state.value))
+                assertEquals(lane.state.value.messageNodes, f.load().messageNodes)
+                lane.send(UIMessage.user("third accepted input"), answer = false) { _, _, _ -> error("no model") }.join()
+                assertTrue(storage.save(lane.state.value))
+                storage.checkpoint(lane.state.value)
+                assertEquals(listOf("first accepted input", "second accepted input", "third accepted input"), f.load().currentMessages.takeLast(3).map { it.toText() })
+                assertNull(HumanContinuationJournal(f.humanStore).recover(f.load()))
+                assertFalse(f.oldJournal.hasCheckpoint(baseline.id))
+            } finally {
+                ordinary.cancelAndJoin()
+                scope.cancel()
+            }
         }
     }
 }

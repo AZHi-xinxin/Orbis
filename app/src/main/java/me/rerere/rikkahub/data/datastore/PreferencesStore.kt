@@ -96,6 +96,7 @@ class SettingsStore(
         val FAST_MODEL_REASONING_LEVEL = stringPreferencesKey("fast_model_reasoning_level")
         val TRANSLATE_MODEL = stringPreferencesKey("translate_model")
         val ENABLE_SUGGESTION = booleanPreferencesKey("enable_suggestion")
+        val AI_GLOBAL_OBSERVATION = booleanPreferencesKey("orbis_ai_global_observation")
         val IMAGE_GENERATION_MODEL = stringPreferencesKey("image_generation_model")
         val TITLE_PROMPT = stringPreferencesKey("title_prompt")
         val TRANSLATION_PROMPT = stringPreferencesKey("translation_prompt")
@@ -134,6 +135,10 @@ class SettingsStore(
         val TTS_PROVIDERS = stringPreferencesKey("tts_providers")
         val SELECTED_TTS_PROVIDER = stringPreferencesKey("selected_tts_provider")
         val DEFAULT_TTS_PLAYBACK_SPEED = floatPreferencesKey("default_tts_playback_speed")
+        val VOICE_MIXER = stringPreferencesKey("orbis_voice_mixer")
+        val AUTO_BACKUP = stringPreferencesKey("orbis_auto_backup")
+        val CONNECTION_PROPOSALS = stringPreferencesKey("orbis_connection_proposals")
+        val CALL_ACOUSTICS = stringPreferencesKey("orbis_call_acoustics")
         val ORBIS_CONTACT = stringPreferencesKey("orbis_contact")
 
         // ASR
@@ -218,6 +223,7 @@ class SettingsStore(
                 preferences[FAST_MODEL_REASONING_LEVEL] = settings.fastModelReasoningLevel.name
                 preferences[TRANSLATE_MODEL] = settings.translateModeId.toString()
                 preferences[ENABLE_SUGGESTION] = settings.enableSuggestion
+                preferences[AI_GLOBAL_OBSERVATION] = settings.aiGlobalObservation
                 preferences[IMAGE_GENERATION_MODEL] = settings.imageGenerationModelId.toString()
                 preferences[TITLE_PROMPT] = settings.titlePrompt
                 preferences[TRANSLATION_PROMPT] = settings.translatePrompt
@@ -250,6 +256,23 @@ class SettingsStore(
                     preferences[SELECTED_TTS_PROVIDER] = it.toString()
                 } ?: preferences.remove(SELECTED_TTS_PROVIDER)
                 preferences[DEFAULT_TTS_PLAYBACK_SPEED] = settings.defaultTTSPlaybackSpeed.coerceIn(0.5f, 2.0f)
+                settings.voiceMixer.validate()
+                preferences[VOICE_MIXER] = JsonInstant.encodeToString(settings.voiceMixer)
+                settings.autoBackup.validate()
+                preferences[AUTO_BACKUP] = JsonInstant.encodeToString(settings.autoBackup)
+                preferences[CALL_ACOUSTICS] = JsonInstant.encodeToString(settings.callAcoustics)
+                me.rerere.rikkahub.data.orbis.integration.ConnectionProposalRules.validate(settings.connectionProposals)
+                preferences[CONNECTION_PROPOSALS]?.let { raw ->
+                    if (runCatching {
+                        JsonInstant.decodeFromString<List<me.rerere.rikkahub.data.orbis.integration.ConnectionProposal>>(raw)
+                            .also(me.rerere.rikkahub.data.orbis.integration.ConnectionProposalRules::validate)
+                    }.isFailure) {
+                        // An optional suggestion must not block normal chat/settings. Keep the
+                        // original locally for recovery, rather than silently discarding it.
+                        preferences[stringPreferencesKey("orbis_connection_proposals_unreadable")] = raw
+                    }
+                }
+                preferences[CONNECTION_PROPOSALS] = JsonInstant.encodeToString(settings.connectionProposals)
                 preferences[ORBIS_CONTACT] = JsonInstant.encodeToString(settings.orbisContact.normalized())
                 preferences[ASR_PROVIDERS] = JsonInstant.encodeToString(settings.asrProviders)
                 preferences[ASR_TERM_CORRECTIONS] = JsonInstant.encodeToString(settings.asrCorrections)
@@ -286,6 +309,7 @@ class SettingsStore(
                 translateModeId = preferences[TRANSLATE_MODEL]?.let { Uuid.parse(it) }
                     ?: DEFAULT_AUTO_MODEL_ID,
                 enableSuggestion = preferences[ENABLE_SUGGESTION] != false,
+                aiGlobalObservation = preferences[AI_GLOBAL_OBSERVATION] == true,
                 imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
                 translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
@@ -334,6 +358,19 @@ class SettingsStore(
                 selectedTTSProviderId = preferences[SELECTED_TTS_PROVIDER]?.let { Uuid.parse(it) }
                     ?: DEFAULT_SYSTEM_TTS_ID,
                 defaultTTSPlaybackSpeed = preferences[DEFAULT_TTS_PLAYBACK_SPEED]?.coerceIn(0.5f, 2.0f) ?: 1.0f,
+                connectionProposals = preferences[CONNECTION_PROPOSALS]?.let {
+                    runCatching { JsonInstant.decodeFromString<List<me.rerere.rikkahub.data.orbis.integration.ConnectionProposal>>(it)
+                        .also(me.rerere.rikkahub.data.orbis.integration.ConnectionProposalRules::validate) }.getOrNull()
+                } ?: emptyList(),
+                voiceMixer = preferences[VOICE_MIXER]?.let {
+                    runCatching { JsonInstant.decodeFromString<me.rerere.tts.controller.VoiceMixerConfig>(it).also { value -> value.validate() } }.getOrNull()
+                } ?: me.rerere.tts.controller.VoiceMixerConfig(),
+                autoBackup = preferences[AUTO_BACKUP]?.let {
+                    runCatching { JsonInstant.decodeFromString<me.rerere.rikkahub.data.sync.AutoBackupConfig>(it).also { value -> value.validate() } }.getOrNull()
+                } ?: me.rerere.rikkahub.data.sync.AutoBackupConfig(),
+                callAcoustics = preferences[CALL_ACOUSTICS]?.let {
+                    runCatching { JsonInstant.decodeFromString<me.rerere.rikkahub.data.orbis.voice.CallAcousticConfig>(it) }.getOrNull()
+                } ?: me.rerere.rikkahub.data.orbis.voice.CallAcousticConfig(),
                 orbisContact = JsonInstant.decodeFromString<OrbisContactPreferences>(preferences[ORBIS_CONTACT] ?: "{}").normalized(),
                 asrProviders = preferences[ASR_PROVIDERS]?.let {
                     JsonInstant.decodeFromString(it)
@@ -686,6 +723,7 @@ data class Settings(
     val translatePrompt: String = DEFAULT_TRANSLATION_PROMPT,
     val translateThinkingBudget: Int = 0,
     val enableSuggestion: Boolean = true,
+    val aiGlobalObservation: Boolean = false,
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,
     val ocrModelId: Uuid = Uuid.random(),
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
@@ -707,6 +745,10 @@ data class Settings(
     val ttsProviders: List<TTSProviderSetting> = DEFAULT_TTS_PROVIDERS,
     val selectedTTSProviderId: Uuid = DEFAULT_SYSTEM_TTS_ID,
     val defaultTTSPlaybackSpeed: Float = 1.0f,
+    val voiceMixer: me.rerere.tts.controller.VoiceMixerConfig = me.rerere.tts.controller.VoiceMixerConfig(),
+    val autoBackup: me.rerere.rikkahub.data.sync.AutoBackupConfig = me.rerere.rikkahub.data.sync.AutoBackupConfig(),
+    val callAcoustics: me.rerere.rikkahub.data.orbis.voice.CallAcousticConfig = me.rerere.rikkahub.data.orbis.voice.CallAcousticConfig(),
+    val connectionProposals: List<me.rerere.rikkahub.data.orbis.integration.ConnectionProposal> = emptyList(),
     val orbisContact: OrbisContactPreferences = OrbisContactPreferences(),
     val asrProviders: List<ASRProviderSetting> = emptyList(),
     val asrCorrections: me.rerere.asr.ASRTermCorrectionSettings = me.rerere.asr.ASRTermCorrectionSettings(),
@@ -819,6 +861,7 @@ data class BackupReminderConfig(
     val enabled: Boolean = false,
     val intervalDays: Int = 7,
     val lastBackupTime: Long = 0L,
+    val destinationTimes: Map<String, Long> = emptyMap(),
 )
 
 fun Settings.isNotConfigured() = providers.all { it.models.isEmpty() }

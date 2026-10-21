@@ -50,6 +50,7 @@ import me.rerere.rikkahub.data.orbis.OrbisStickers
 import me.rerere.rikkahub.data.model.orbisStickerImageParts
 import me.rerere.rikkahub.data.model.OrbisStickerSendNotice
 import me.rerere.rikkahub.data.model.isOrbisStickerTapDebounced
+import me.rerere.rikkahub.data.model.orbisStickerSendUnavailableReason
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Conversation
@@ -459,15 +460,24 @@ class ChatVM(
         return conversation.value.quoteMessage(node.id, node.currentMessage.id)
     }
 
-    /** Returns false when busy. The existing draft (including edits and attachments) is untouched. */
-    suspend fun sendOrbisSticker(id: String): Boolean {
+    private fun requireStickerInputIdle(isRecording: () -> Boolean) {
+        orbisStickerSendUnavailableReason(
+            generating = conversationJob.value != null,
+            editing = inputState.isEditing(),
+            voiceUnavailable = voiceSession.state.value.phase != VoicePhase.Off ||
+                voiceRuntime.callState.value.isActive || voiceRuntime.callState.value.ending,
+            recording = isRecording(),
+        )?.let { throw OrbisStickerSendNotice(it) }
+    }
+
+    /** Explicit tap only. The existing draft (including edits and attachments) is untouched. */
+    suspend fun sendOrbisSticker(id: String, isRecording: () -> Boolean = { false }): Boolean {
         if (isOrbisStickerTapDebounced(android.os.SystemClock.elapsedRealtime(), lastStickerAcceptedAt)) return false
         if (!stickerSendMutex.tryLock()) return false
         var attachment: android.net.Uri? = null
         var accepted = false
         try {
-            if (inputState.isEditing() || conversationJob.value != null || voiceSession.state.value.isActive)
-                return false
+            requireStickerInputIdle(isRecording)
             val model = stickerChatModel()
                 ?: throw OrbisStickerSendNotice("请先选择聊天模型，再点表情发送。")
             if (Modality.IMAGE !in model.inputModalities) throw OrbisStickerSendNotice(
@@ -483,8 +493,9 @@ class ChatVM(
             }
             currentCoroutineContext().ensureActive()
             // Recheck after IO; a voice turn, edit or model switch may have happened meanwhile.
-            if (inputState.isEditing() || voiceSession.state.value.isActive ||
-                stickerChatModel() != model) return false
+            requireStickerInputIdle(isRecording)
+            if (stickerChatModel() != model) throw OrbisStickerSendNotice(
+                "聊天模型已切换，本次没有发送图片；请确认模型后重新点选。")
             accepted = chatService.trySendOrbisSticker(_conversationId,
                 orbisStickerImageParts(attachment.toString()))
             if (accepted) lastStickerAcceptedAt = android.os.SystemClock.elapsedRealtime()
@@ -498,13 +509,16 @@ class ChatVM(
         }
     }
 
-    fun sendOrbisTextEmotion(text: String): Boolean {
-        if (inputState.isEditing() || voiceSession.state.value.isActive ||
-            stickerChatModel() == null || stickerSendMutex.isLocked ||
-            isOrbisStickerTapDebounced(android.os.SystemClock.elapsedRealtime(), lastStickerAcceptedAt)) return false
-        return chatService.trySendOrbisSticker(_conversationId, listOf(UIMessagePart.Text(text))).also {
-            if (it) lastStickerAcceptedAt = android.os.SystemClock.elapsedRealtime()
-        }
+    fun sendOrbisTextEmotion(text: String, isRecording: () -> Boolean = { false }): Boolean {
+        if (isOrbisStickerTapDebounced(android.os.SystemClock.elapsedRealtime(), lastStickerAcceptedAt)) return false
+        if (!stickerSendMutex.tryLock()) return false
+        try {
+            requireStickerInputIdle(isRecording)
+            if (stickerChatModel() == null) throw OrbisStickerSendNotice("请先选择聊天模型，再点表情发送。")
+            return chatService.trySendOrbisSticker(_conversationId, listOf(UIMessagePart.Text(text))).also {
+                if (it) lastStickerAcceptedAt = android.os.SystemClock.elapsedRealtime()
+            }
+        } finally { stickerSendMutex.unlock() }
     }
 
     private fun stickerChatModel(): Model? = settings.value.let { current ->

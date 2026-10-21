@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 274
-        versionName = "2.6.11"
+        versionCode = 275
+        versionName = "2.6.12"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
@@ -105,7 +105,12 @@ android {
             buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED",
                 (providers.gradleProperty("orbisInternalConsultation").orNull == "true").toString())
             applicationIdSuffix = ".dev"
-            versionNameSuffix = "-orbis-dev.100"
+            val candidateSuffix = providers.gradleProperty("orbisDebugCandidateSuffix")
+                .orElse("-orbis-dev.100").get()
+            require(candidateSuffix.matches(Regex("-orbis-dev\\.[a-z0-9.-]{1,40}"))) {
+                "Invalid Orbis debug candidate suffix"
+            }
+            versionNameSuffix = candidateSuffix
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$versionNameSuffix\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
@@ -258,6 +263,8 @@ dependencies {
 
     // serialization
     implementation(libs.kotlinx.serialization.json)
+    // Offline semantic recall: pinned CPU runtime, no external embedding service.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
     // YAML front matter
     implementation(libs.snakeyaml)

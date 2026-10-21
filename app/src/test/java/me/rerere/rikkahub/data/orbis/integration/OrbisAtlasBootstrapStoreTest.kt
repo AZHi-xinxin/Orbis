@@ -62,6 +62,35 @@ class OrbisAtlasBootstrapStoreTest {
         baseUrl = "https://synthetic.example/proxy/v1")
     private fun Memory.root() = Json.parseToJsonElement(checkNotNull(saved)).jsonObject
 
+    @Test fun manualValidationHasExplicitFailureAndKeepsPriorCredentialWithoutNetwork() = runBlocking {
+        Fixture().use { f ->
+            assertTrue(f.store.saveManual("https://manual.example", oldToken, true))
+            val saved = f.atlasStorage.saved
+            assertFalse(f.store.saveManual("http://203.0.113.7:18796", "a".repeat(64), true))
+            assertTrue(f.store.state.value.error!!.contains("公网地址请使用 HTTPS"))
+            assertFalse(f.store.state.value.error!!.contains("203.0.113.7"))
+            assertEquals(saved, f.atlasStorage.saved)
+            assertFalse(f.store.saveManual("https://manual.example", "test123", true))
+            assertTrue(f.store.state.value.error!!.contains("32～4096"))
+            assertEquals(saved, f.atlasStorage.saved)
+            assertEquals(0, f.transport.capabilities + f.transport.registers + f.transport.revokes)
+            assertTrue(f.store.saveManual("http://100.80.0.1:18796", "a".repeat(64), true))
+            assertNull(f.store.state.value.error)
+        }
+    }
+
+    @Test fun manualStorageFailureReturnsFalseAndDoesNotMasqueradeAsInputError() = runBlocking {
+        Fixture().use { f ->
+            assertTrue(f.store.saveManual("https://manual.example", oldToken, true))
+            val saved = f.atlasStorage.saved
+            f.atlasStorage.failAt = f.atlasStorage.writes + 1
+            assertFalse(f.store.saveManual("https://other.example", "a".repeat(64), true))
+            assertTrue(f.store.state.value.error!!.contains("安全读取或保存"))
+            assertEquals(saved, f.atlasStorage.saved)
+            assertEquals(oldToken, f.atlas.readCredential()?.token)
+        }
+    }
+
     @Test fun passiveConstructionAndReloadAndManualSaveHaveNoNetwork() = runBlocking {
         Fixture().use { f ->
             f.store.reload()

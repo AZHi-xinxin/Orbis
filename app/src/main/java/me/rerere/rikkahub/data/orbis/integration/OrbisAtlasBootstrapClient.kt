@@ -24,6 +24,10 @@ internal class AtlasBootstrapSource(val providerId: String, val root: String, va
     val fingerprint: String)
 
 internal class AtlasBootstrapException(val code: String) : IOException(when (code) {
+    "https_required" -> "公网地址请使用 HTTPS；HTTP 仅允许本机、局域网或 Tailscale IP。输入已保留，尚未保存或联网。"
+    "invalid_address" -> "服务地址格式不正确，请填写不含账号、密码、查询参数的服务基础地址。输入已保留，尚未保存。"
+    "invalid_token" -> "专用 Token 应为 32～4096 个可打印非空格字符。输入已保留，尚未保存。"
+    "token_required" -> "首次设置或更换地址需填写专用只读 Token。输入已保留，尚未保存。"
     "source_invalid" -> "请选择启用的单密钥 OpenAI 兼容连接；地址须为根地址或以 /v1 结尾。"
     "source_changed" -> "原连接已更改或停用，已停止登记；请撤销待确认授权或明确仅忘记本机记录。"
     "atlas_changed" -> "星图本机配置已改变，未覆盖；待确认授权仍保留。"

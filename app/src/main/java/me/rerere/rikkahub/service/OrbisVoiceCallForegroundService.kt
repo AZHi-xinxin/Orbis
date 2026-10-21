@@ -124,12 +124,16 @@ class OrbisVoiceCallForegroundService : Service() {
         }.getOrDefault(false)
     }
 
-    internal fun stopForCall(expectedToken: String) {
-        if (token != expectedToken) return
+    internal fun stopForCall(expectedToken: String): List<String> {
+        if (token != expectedToken) return emptyList()
+        // Invalidate notification/wake-lock callbacks before any platform release.
         token = null
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        val cleanup = VoiceCallCleanup()
+        cleanup.include(releaseWakeLock())
+        cleanup.attempt("VOICE_FOREGROUND_REMOVE") { stopForeground(STOP_FOREGROUND_REMOVE) }
+        cleanup.attempt("VOICE_SERVICE_STOP") { stopSelf() }
+        reportCleanup(cleanup.failures)
+        return cleanup.failures
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
@@ -142,17 +146,27 @@ class OrbisVoiceCallForegroundService : Service() {
     override fun onDestroy() {
         val interrupted = token
         token = null
-        releaseWakeLock()
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        // No automatic restart or fabricated successful hangup after service/process loss.
-        interrupted?.let(runtime::serviceDestroyed)
-        super.onDestroy()
+        val cleanup = VoiceCallCleanup()
+        try {
+            cleanup.include(releaseWakeLock())
+            cleanup.attempt("VOICE_FOREGROUND_REMOVE") { stopForeground(STOP_FOREGROUND_REMOVE) }
+            // Service destruction must reach the owner even if notification removal fails.
+            cleanup.attempt("VOICE_SERVICE_DESTROY_NOTIFY") { interrupted?.let(runtime::serviceDestroyed) }
+            reportCleanup(cleanup.failures)
+        } finally { super.onDestroy() }
     }
 
-    private fun releaseWakeLock() {
-        handler.removeCallbacks(renewWakeLock)
-        wakeLock?.let { lock -> runCatching { if (lock.isHeld) lock.release() } }
+    private fun releaseWakeLock(): List<String> {
+        val cleanup = VoiceCallCleanup()
+        cleanup.attempt("VOICE_WAKE_RENEWAL_REMOVE") { handler.removeCallbacks(renewWakeLock) }
+        val lock = wakeLock
         wakeLock = null
+        cleanup.attempt("VOICE_WAKE_LOCK_RELEASE") { if (lock?.isHeld == true) lock.release() }
+        return cleanup.failures
+    }
+
+    private fun reportCleanup(failures: List<String>) {
+        if (failures.isNotEmpty()) android.util.Log.w("OrbisVoiceCall", "Service cleanup unconfirmed: ${failures.joinToString(",")}")
     }
 
     private fun buildNotification(callToken: String): Notification {
