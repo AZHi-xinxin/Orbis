@@ -105,6 +105,38 @@ class EmergencyBackupActivity : Activity() {
             val button = Button(this).apply { this.text = label; setOnClickListener { action() } }
             controls += button; column.addView(button)
         }
+        button("查看系统退出诊断（不打开聊天）") {
+            runWork("正在读取系统保留的退出原因……", stage = "exit_diagnostics") {
+                // No business-process pause, database access, restoration, or network request.
+                val report = me.rerere.rikkahub.data.recovery.collectEmergencyExitDiagnostics(this)
+                runOnUiThread {
+                    if (isDestroyed || isFinishing) return@runOnUiThread
+                    setStatus("系统退出诊断报告已生成，是否取到记录以报告状态为准。聊天与备份没有被修改。没有记录不代表未发生闪退。")
+                    val body = TextView(this).apply {
+                        text = report; textSize = 13f; setTextIsSelectable(true)
+                        val inset = (16 * resources.displayMetrics.density).toInt()
+                        setPadding(inset, inset, inset, inset)
+                    }
+                    val dialog = AlertDialog.Builder(this)
+                        .setTitle("系统退出诊断")
+                        .setView(ScrollView(this).apply { addView(body) })
+                        .setPositiveButton("复制诊断", null)
+                        .setNegativeButton("关闭", null).create()
+                    dialog.setOnShowListener {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            try {
+                                (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                    .setPrimaryClip(ClipData.newPlainText("Orbis 系统退出诊断", report))
+                                dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "已复制"
+                            } catch (_: Exception) {
+                                dialog.getButton(AlertDialog.BUTTON_POSITIVE).text = "无法复制，可长按文本"
+                            }
+                        }
+                    }
+                    dialog.show()
+                }
+            }
+        }
         button("导出崩溃前内容备份到本机") {
             confirmPause("备份可能包含聊天、咨询记录、文件、服务地址和密钥，未加密，请只保存在自己控制的本机目录，不要发到群或 GitHub。\n\n继续会暂停 Orbis 的通话、生成和后台任务；只备份已经落盘的内容。已发到外部的工具操作不会撤销，也不会自动重放。") {
                 runWork("正在暂停后台并保存原始文件……") {

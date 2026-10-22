@@ -77,14 +77,11 @@ object DeepSeekArchive {
                 val enumeration = zip.entries()
                 while (enumeration.hasMoreElements()) {
                     checkCancelled()
-                    require(entries.size < 2) { "deepseek_zip_entries" }
+                    require(entries.size < 32) { "deepseek_zip_entries" }
                     entries += enumeration.nextElement()
                 }
-                require(entries.size in 1..2 && entries.map { it.name }.toSet().size == entries.size &&
-                    entries.all { !it.isDirectory && it.name in setOf("user.json", "conversations.json") }) { "deepseek_zip_paths" }
-                val entry = entries.single { it.name == "conversations.json" }
+                val entry = selectConversationEntry(entries)
                 ArchiveCapacity.requireSize(entry.size, MAX_JSON_BYTES)
-                entries.firstOrNull { it.name == "user.json" }?.let { require(it.size in 0..(1024L * 1024)) { "deepseek_user_size" } }
                 expectedSize = entry.size
                 expectedCrc = entry.crc
                 val stream = object : FilterInputStream(zip.getInputStream(entry)) {
@@ -126,6 +123,48 @@ object DeepSeekArchive {
             if (bytes != expectedSize || crc.value != expectedCrc) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
         }
         override fun close() { try { reader.close() } finally { zip.close() } }
+    }
+
+    /** A re-zipped export may have one enclosing folder and Finder metadata. Nothing is
+     * extracted; select exactly one data root, never merge multiple exports or read a profile. */
+    private fun selectConversationEntry(entries: List<java.util.zip.ZipEntry>): java.util.zip.ZipEntry {
+        require(entries.isNotEmpty() && entries.map { it.name }.toSet().size == entries.size) { "deepseek_zip_paths" }
+        entries.forEach { entry ->
+            val name = entry.name
+            require(name.length in 1..1024 && !name.startsWith('/') && '\\' !in name && ':' !in name &&
+                name.none { it.isISOControl() }) { "deepseek_zip_paths" }
+            val segments = name.removeSuffix("/").split('/')
+            require(segments.size <= 3 && segments.all { it.isNotEmpty() && it != "." && it != ".." }) { "deepseek_zip_paths" }
+            if (entry.isDirectory) require(entry.size == 0L) { "deepseek_zip_directory" }
+        }
+        val entry = entries.single { !it.isDirectory && it.name.substringAfterLast('/') == "conversations.json" }
+        val segments = entry.name.split('/')
+        require(segments.size <= 2 && segments.first() != "__MACOSX") { "deepseek_zip_paths" }
+        val prefix = entry.name.removeSuffix("conversations.json")
+        val dataNames = setOf(entry.name, prefix + "user.json")
+        val actualDataNames = entries.filter { !it.isDirectory && it.name in dataNames }.map { it.name }.toSet()
+        val directories = buildSet {
+            add("__MACOSX/")
+            if (prefix.isNotEmpty()) { add(prefix); add("__MACOSX/$prefix") }
+        }
+        val finderNames = buildSet {
+            add(".DS_Store"); add(prefix + ".DS_Store")
+            actualDataNames.forEach { name ->
+                val slash = name.lastIndexOf('/')
+                add("__MACOSX/" + name.substring(0, slash + 1) + "._" + name.substring(slash + 1))
+            }
+            if (prefix.isNotEmpty()) add("__MACOSX/._" + prefix.removeSuffix("/"))
+        }
+        entries.forEach { candidate ->
+            when {
+                candidate.isDirectory -> require(candidate.name in directories) { "deepseek_zip_paths" }
+                candidate.name == entry.name -> Unit
+                candidate.name == prefix + "user.json" -> require(candidate.size in 0..(1024L * 1024)) { "deepseek_user_size" }
+                candidate.name in finderNames -> require(candidate.size in 0..(1024L * 1024)) { "deepseek_metadata_size" }
+                else -> error("deepseek_zip_paths")
+            }
+        }
+        return entry
     }
 
     internal inline fun <T> safeRead(block: () -> T): T = try { block() }

@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.checkpoint
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.encodeToStream
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -47,6 +48,39 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
     data class Recovery(val runId: Uuid, val baseline: Conversation, val snapshot: Conversation,
         val durableBaseline: Conversation? = null)
 
+    data class SessionRecovery(val recovery: Recovery?, val conflictPreserved: Boolean = false)
+
+    /** Startup only, under the conversation edit lock, before creating a live lane.
+     * An incompatible but valid copy must not occupy the sole active slot indefinitely.
+     * Preserve exact bytes first, never infer success or replay its old tools. Failed reads,
+     * damaged/foreign records and failed archival leave the active file untouched.
+     */
+    @Synchronized
+    fun recoverForSession(persisted: Conversation,
+        proveInFlightBaseline: (Conversation, Conversation) -> Boolean = { _, _ -> false },
+        mayPreserveConflict: () -> Boolean = { true },
+        beforeRetireConflict: () -> Unit = {},
+    ): SessionRecovery = guarded {
+        val original = store.read(persisted.id)
+        try {
+            SessionRecovery(recover(persisted, proveInFlightBaseline))
+        } catch (failure: Exception) {
+            if (failure is java.util.concurrent.CancellationException) throw failure
+            val bytes = original ?: throw failure
+            // Decode and verify again: an I/O error or malformed file is NOT permission to retire it.
+            val record = read(persisted.id) ?: throw failure
+            if (record.conversationId != persisted.id || record.assistantId != persisted.assistantId ||
+                persisted.consultation != null || !mayPreserveConflict()) throw failure
+            check(store.read(persisted.id)?.contentEquals(bytes) == true)
+            store.preserveConflict(persisted.id, bytes)
+            beforeRetireConflict()
+            check(mayPreserveConflict() && store.read(persisted.id)?.contentEquals(bytes) == true)
+            store.delete(persisted.id)
+            check(store.read(persisted.id) == null)
+            SessionRecovery(null, conflictPreserved = true)
+        }
+    }
+
     class CompactionVoiceMetadataRepair internal constructor(
         val before: Conversation,
         val corrected: Conversation,
@@ -85,7 +119,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             listOf(first.copy(messages = first.messages.map { message ->
                 if (message.id == summary.id) message.copy(orbisVoiceCallId = null, orbisVoiceCallKind = null) else message
             })) + persisted.messageNodes.drop(1))
-        if (hashNodes(normalized.messageNodes.take(record.prefixCount)) != record.prefixHash) return null
+        if (!matchesNodesHash(normalized.messageNodes.take(record.prefixCount), listOf(record.prefixHash))) return null
         if (!retainsCompactionVoiceTail(record.baseTail.single(), record.tail.single(), summary, persisted) ||
             !retainsCompactionVoiceTail(record.tail.single(), persisted.messageNodes[record.prefixCount], summary, persisted)) return null
         return CompactionVoiceMetadataRepair(persisted, normalized, hashRecord(record), record.runId)
@@ -188,7 +222,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             persisted.compactionEpoch != candidate.compactionEpoch || persisted.consultation != candidate.consultation)
             return@guarded false
         requirePrefix(record, persisted)
-        if (record.roomSnapshotHashes.isEmpty() || hashNodes(persisted.messageNodes) !in record.roomSnapshotHashes ||
+        if (!matchesNodesHash(persisted.messageNodes, record.roomSnapshotHashes) ||
             candidate.messageNodes.size < persisted.messageNodes.size) return@guarded false
         validateNodes(candidate.messageNodes)
         persisted.messageNodes.zip(candidate.messageNodes).all { (stored, next) ->
@@ -211,8 +245,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             return@guarded null
         }
         val current = persisted.messageNodes.drop(record.prefixCount)
-        val knownRoomWrite = record.roomSnapshotHashes.isNotEmpty() &&
-            hashNodes(persisted.messageNodes) in record.roomSnapshotHashes
+        val knownRoomWrite = matchesNodesHash(persisted.messageNodes, record.roomSnapshotHashes)
         // A later append, deletion, branch change or unrelated replacement needs explicit
         // reconciliation, not silent truncation. Keep the recovery file on every refusal.
         check(current.size <= record.tail.size)
@@ -290,7 +323,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         check(current.id == record.conversationId && current.assistantId == record.assistantId &&
             current.compactionEpoch == record.epoch && current.consultation == null)
         check(current.messageNodes.size >= record.prefixCount &&
-            hashNodes(current.messageNodes.take(record.prefixCount)) == record.prefixHash)
+            matchesNodesHash(current.messageNodes.take(record.prefixCount), listOf(record.prefixHash)))
     }
 
     private fun read(id: Uuid): Record? {
@@ -298,7 +331,8 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         check(bytes.size <= GenerationCheckpointJournal.MAX_BYTES)
         val envelope = json.decodeFromString<Envelope>(bytes.toString(Charsets.UTF_8))
         val record = envelope.record
-        check(envelope.sha256 == hashRecord(record))
+        check(envelope.sha256 == hashRecord(record) || envelope.sha256 ==
+            CheckpointModelReceiptCompatibility.recordHash(json, json.encodeToJsonElement(record), setOf("baseTail", "tail")))
         check(record.version in 1..2 && record.conversationId == id && record.epoch >= 0 && record.prefixCount >= 0)
         check(record.roomSnapshotHashes.size <= 2 && record.roomSnapshotHashes.all { it.matches(Regex("[0-9a-f]{64}")) })
         validateNodes(record.baseTail)
@@ -320,13 +354,22 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         }
     }
 
-    private fun hashNodes(nodes: List<MessageNode>): String {
+    private fun matchesNodesHash(nodes: List<MessageNode>, expectedHashes: Collection<String>): Boolean =
+        expectedHashes.isNotEmpty() && (hashNodes(nodes) in expectedHashes ||
+            hashNodes(nodes, legacyModelReceipt = true) in expectedHashes)
+
+    private fun hashNodes(nodes: List<MessageNode>, legacyModelReceipt: Boolean = false): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val sink = DigestOutputStream(object : OutputStream() {
             override fun write(value: Int) = Unit
             override fun write(bytes: ByteArray, offset: Int, length: Int) = Unit
         }, digest)
-        nodes.forEach { json.encodeToStream(it, sink); digest.update(0.toByte()) }
+        nodes.forEach { node ->
+            if (legacyModelReceipt) json.encodeToStream(
+                CheckpointModelReceiptCompatibility.node(json.encodeToJsonElement(node)), sink)
+            else json.encodeToStream(node, sink)
+            digest.update(0.toByte())
+        }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
@@ -352,6 +395,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
     }
 
     private inline fun <T> guarded(block: () -> T): T = try { block() }
+    catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
     catch (_: Exception) {
         // Decode errors can contain chat text. No private payload or exception cause in logs/UI.
         throw IllegalStateException("续聊恢复副本暂未能合并，原记录已保留，请勿清除应用数据。")

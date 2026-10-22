@@ -1,12 +1,16 @@
 package me.rerere.rikkahub.data.ai.checkpoint
 
 import android.util.AtomicFile
+import android.system.Os
+import android.system.OsConstants
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.uuid.Uuid
 
 /** Supply Context.noBackupFilesDir. Never place these private chat tails on shared/external storage. */
-class AndroidGenerationCheckpointStore private constructor(private val directory: File) : GenerationCheckpointStore {
+class AndroidGenerationCheckpointStore private constructor(private val directory: File,
+    private val conflicts: File? = null,
+) : GenerationCheckpointStore {
     private fun atomic(id: Uuid): AtomicFile {
         check(directory.isDirectory || directory.mkdirs()) { "checkpoint_directory_unavailable" }
         val file = File(directory, "$id.json")
@@ -62,11 +66,55 @@ class AndroidGenerationCheckpointStore private constructor(private val directory
             !File(file.baseFile.path + ".new").exists()) { "checkpoint_delete_failed" }
     }
 
+    override fun preserveConflict(conversationId: Uuid, bytes: ByteArray) {
+        check(bytes.size in 1..GenerationCheckpointJournal.MAX_BYTES)
+        val folder = checkNotNull(conflicts) { "checkpoint_conflict_preservation_unavailable" }
+        check(!java.nio.file.Files.isSymbolicLink(folder.toPath()))
+        check(folder.isDirectory || folder.mkdirs())
+        check(folder.canonicalFile.parentFile == directory.canonicalFile.parentFile)
+        val target = File(folder, ContinuationConflictCopies.name(conversationId, bytes))
+        check(!java.nio.file.Files.isSymbolicLink(target.toPath()) && target.canonicalFile.parentFile == folder.canonicalFile)
+        for (suffix in listOf(".bak", ".new")) check(!java.nio.file.Files.isSymbolicLink(File(target.path + suffix).toPath()))
+        val file = AtomicFile(target)
+        fun matches(): Boolean = file.openRead().use { input ->
+            val actual = ByteArray(bytes.size + 1)
+            var count = 0
+            while (count < actual.size) {
+                val read = input.read(actual, count, actual.size - count)
+                if (read < 0) break
+                count += read
+            }
+            count == bytes.size && actual.copyOf(count).contentEquals(bytes)
+        }
+        if (target.exists() || File(target.path + ".bak").exists()) {
+            check(matches()) { "checkpoint_conflict_readback_mismatch" }
+        } else {
+            val stream = file.startWrite()
+            try {
+                stream.write(bytes)
+                stream.fd.sync()
+                file.finishWrite(stream)
+                check(matches()) { "checkpoint_conflict_readback_mismatch" }
+            } catch (error: Exception) {
+                file.failWrite(stream)
+                throw error
+            }
+        }
+        // A durable file is insufficient if its directory entry disappears on power loss.
+        // Sync both the archive directory and its parent BEFORE the caller frees the slot.
+        for (dir in listOf(folder, folder.parentFile)) {
+            check(dir.isDirectory)
+            val fd = Os.open(dir.path, OsConstants.O_RDONLY, 0)
+            try { Os.fsync(fd) } finally { Os.close(fd) }
+        }
+    }
+
     companion object {
         fun create(noBackupFilesDir: File): AndroidGenerationCheckpointStore =
             AndroidGenerationCheckpointStore(File(noBackupFilesDir, "orbis-generation-journal-v1"))
 
         fun createHumanContinuation(noBackupFilesDir: File): AndroidGenerationCheckpointStore =
-            AndroidGenerationCheckpointStore(File(noBackupFilesDir, "orbis-human-continuation-v1"))
+            AndroidGenerationCheckpointStore(File(noBackupFilesDir, "orbis-human-continuation-v1"),
+                File(noBackupFilesDir, ContinuationConflictCopies.DIRECTORY))
     }
 }

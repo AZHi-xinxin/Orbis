@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.sync
 
 import kotlinx.serialization.json.*
 import me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointJournal
+import me.rerere.rikkahub.data.ai.checkpoint.ContinuationConflictCopies
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.sync.importer.ArchiveCapacity
 import java.io.File
@@ -19,10 +20,14 @@ import java.security.MessageDigest
 internal object ConversationRecoveryBackup {
     const val GENERATION = "orbis-generation-journal-v1"
     const val CONTINUATION = "orbis-human-continuation-v1"
+    const val CONFLICTS = ContinuationConflictCopies.DIRECTORY
     const val MAX_BYTES = GenerationCheckpointJournal.MAX_BYTES
     private const val UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     private val uuid = Regex(UUID)
-    private val path = Regex("($GENERATION|$CONTINUATION)/($UUID)\\.json")
+    private val activePath = Regex("($GENERATION|$CONTINUATION)/($UUID)\\.json")
+    private val conflictPath = Regex("($CONFLICTS)/($UUID)--([0-9a-f]{64})\\.json")
+    private val namespaces = listOf(GENERATION, CONTINUATION, CONFLICTS)
+    private fun matchPath(name: String) = activePath.matchEntire(name) ?: conflictPath.matchEntire(name)
     private val digest = Regex("[0-9a-f]{64}")
     private val json = Json { encodeDefaults = true }
     const val INVALID = "聊天恢复副本校验未通过，本次备份未应用；原聊天、副本和备份包均保留。"
@@ -42,11 +47,11 @@ internal object ConversationRecoveryBackup {
 
     fun publicError(message: String?): String? = message?.takeIf { it == INVALID || it == CONFLICT }
 
-    fun inNamespace(name: String) = name.substringBefore('/') in setOf(GENERATION, CONTINUATION)
-    fun maxBytes(name: String): Int? = if (path.matches(name)) MAX_BYTES else null
+    fun inNamespace(name: String) = name.substringBefore('/') in namespaces
+    fun maxBytes(name: String): Int? = if (matchPath(name) != null) MAX_BYTES else null
 
     fun exactFile(root: File, name: String): File {
-        require(path.matches(name)) { INVALID }
+        require(matchPath(name) != null) { INVALID }
         val base = root.canonicalFile // Android's trusted /data/user/0 and /data/data aliases are equivalent.
         val folder = File(base, name.substringBefore('/'))
         val file = File(folder, name.substringAfter('/'))
@@ -97,19 +102,38 @@ internal object ConversationRecoveryBackup {
     fun stageSnapshot(root: File, staging: File, owners: Map<String, String>,
         checkCancelled: () -> Unit = {}, beforeFile: (String, Long) -> Unit = { _, _ -> },
     ): List<Pair<String, File>> = buildList {
+        fun stage(name: String, bytes: ByteArray) {
+            checkCancelled()
+            beforeFile(name, bytes.size.toLong())
+            val target = exactFile(staging, name)
+            val parent = checkNotNull(target.parentFile)
+            check(!target.exists() && (parent.isDirectory || parent.mkdirs())) { INVALID }
+            ArchiveCapacity.requireSpace(parent.usableSpace, bytes.size.toLong())
+            FileOutputStream(target).use { it.write(bytes); it.fd.sync() }
+            add(name to target)
+        }
         for (id in owners.keys.sorted()) {
             // Noncanonical legacy/imported IDs cannot be native journal names.
             if (!uuid.matches(id)) continue
             for (namespace in listOf(GENERATION, CONTINUATION)) {
                 checkCancelled()
                 val bytes = readCommitted(root, namespace, id) ?: continue
-                val name = "$namespace/$id.json"
-                beforeFile(name, bytes.size.toLong())
-                val target = exactFile(staging, name)
-                check(!target.exists() && (target.parentFile.isDirectory || target.parentFile.mkdirs())) { INVALID }
-                ArchiveCapacity.requireSpace(target.parentFile.usableSpace, bytes.size.toLong())
-                FileOutputStream(target).use { it.write(bytes); it.fd.sync() }
-                add(name to target)
+                stage("$namespace/$id.json", bytes)
+            }
+        }
+        // Archived conflicts are inert, but may contain the only remaining copy of old turns.
+        // Include committed .bak entries, never an uncommitted .new by itself.
+        val folder = File(root.canonicalFile, CONFLICTS)
+        require(!Files.isSymbolicLink(folder.toPath())) { INVALID }
+        if (folder.exists()) {
+            require(folder.isDirectory) { INVALID }
+            val names = requireNotNull(folder.listFiles()).mapNotNull { file ->
+                val name = "$CONFLICTS/${file.name.removeSuffix(".bak")}"
+                conflictPath.matchEntire(name)?.takeIf { it.groupValues[2] in owners }?.value
+            }.distinct().sorted()
+            for (name in names) {
+                val key = name.substringAfter('/').removeSuffix(".json")
+                stage(name, checkNotNull(readCommitted(root, CONFLICTS, key)) { CHANGED })
             }
         }
     }
@@ -117,8 +141,10 @@ internal object ConversationRecoveryBackup {
     /** Checks container integrity/identity only. A prefix/epoch mismatch remains for native recovery. */
     private fun validate(name: String, bytes: ByteArray, owners: Map<String, String>) {
         try {
-            val match = requireNotNull(path.matchEntire(name))
+            val match = requireNotNull(matchPath(name))
             require(bytes.size in 1..MAX_BYTES)
+            if (match.groupValues[1] == CONFLICTS)
+                require(match.groupValues[3] == ContinuationConflictCopies.hash(bytes))
             val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
             val envelope = json.parseToJsonElement(text).jsonObject
@@ -126,7 +152,7 @@ internal object ConversationRecoveryBackup {
             fun string(key: String) = record.getValue(key).jsonPrimitive.content
             fun count(key: String) = record.getValue(key).jsonPrimitive.int.also { require(it >= 0) }
             val id = string("conversationId")
-            val human = match.groupValues[1] == CONTINUATION
+            val human = match.groupValues[1] != GENERATION
             val owner = string(if (human) "assistantId" else "ownerId")
             require(id == match.groupValues[2] && uuid.matches(owner) && owners[id] == owner &&
                 uuid.matches(string("runId")) && record.getValue("epoch").jsonPrimitive.long >= 0)
@@ -170,7 +196,7 @@ internal object ConversationRecoveryBackup {
         val rawRoot = File(payload, "no-backup")
         require(!Files.isSymbolicLink(rawRoot.toPath())) { INVALID }
         val root = rawRoot.canonicalFile
-        for (namespace in listOf(GENERATION, CONTINUATION)) {
+        for (namespace in namespaces) {
             val folder = File(root, namespace)
             require(!Files.isSymbolicLink(folder.toPath())) { INVALID }
             if (!Files.exists(folder.toPath(), NOFOLLOW_LINKS)) continue

@@ -14,6 +14,42 @@ import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HumanContinuationContextTest {
+    @Test fun `stop then edit and send persists through a fresh journal instance`() = runTest {
+        val f = Fixture(backgroundScope, base())
+        val entered = CompletableDeferred<Unit>()
+        f.lane.send(UIMessage.user("typo")) { snapshot, _, publish ->
+            publish(snapshot.copy(messageNodes = snapshot.messageNodes + UIMessage.assistant("partial").toMessageNode()))
+            entered.complete(Unit)
+            awaitCancellation()
+        }
+        entered.await()
+        f.lane.stop()
+        runCurrent()
+        val stopped = f.lane.state.value
+        assertTrue(sameDurableGenerationSnapshot(stopped, f.disk))
+        // The coalesced checkpoint may still be in its 250 ms debounce. An immediate
+        // edit must wait for that writer, not retire it or erase a successor's journal.
+        assertFalse(f.lane.retireForHistoryEdit(stopped))
+        advanceTimeBy(300)
+        runCurrent()
+        assertTrue(f.journal.clearCommitted(f.runId, f.disk))
+        assertTrue(f.lane.retireForHistoryEdit(stopped))
+        val edited = f.disk.copy(messageNodes = f.disk.messageNodes.map { node ->
+            if (node.currentMessage.toText() != "typo") node else node.copy(messages = node.messages +
+                UIMessage.user("corrected"), selectIndex = node.messages.size)
+        })
+        val fresh = Fixture(backgroundScope, edited)
+        fresh.lane.send(UIMessage.user("next")) { snapshot, _, publish ->
+            publish(snapshot.copy(messageNodes = snapshot.messageNodes + UIMessage.assistant("saved reply").toMessageNode()))
+        }
+        runCurrent()
+        assertTrue(sameDurableGenerationSnapshot(fresh.lane.state.value, fresh.disk))
+        assertNull(HumanContinuationJournal(fresh.bytes).recoverForSession(fresh.disk).recovery)
+        assertEquals(listOf("old input", "old answer", "corrected", "partial", "next", "saved reply"),
+            fresh.disk.currentMessages.map { it.toText() })
+        assertEquals(listOf("typo", "corrected"), fresh.disk.messageNodes[2].messages.map { it.toText() })
+    }
+
     @Test fun `late durable four character chunk merges all continuation turns and permits compaction`() = runTest {
         val oldStore = Store(); val continuationStore = Store()
         val old = GenerationCheckpointJournal(oldStore)

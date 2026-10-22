@@ -247,6 +247,7 @@ private val outputTransformers by lazy {
         ThinkTagTransformer,
         Base64ImageToLocalFileTransformer,
         RegexOutputTransformer,
+        me.rerere.rikkahub.data.ai.transformers.OrbisInternalMetadataOutputTransformer,
     )
 }
 
@@ -1706,7 +1707,16 @@ class ChatService(
             if (conversation != null) {
                 val continuation = try {
                     withContext(Dispatchers.IO) {
-                        humanContinuationJournal.recover(conversation, generationJournal::provesInFlightBaseline)
+                        val result = humanContinuationJournal.recoverForSession(conversation,
+                            generationJournal::provesInFlightBaseline,
+                            mayPreserveConflict = { session.humanContinuation.value == null &&
+                                !session.hasUnfinishedJobs() && session.submittingMessage == null },
+                            beforeRetireConflict = {
+                                requireAutomaticRecoveryHold { holdAutomaticWakes(session, "continuation_conflict_preserved") }
+                            })
+                        if (result.conflictPreserved) addError(IllegalStateException(
+                            "旧续聊副本与当前历史不一致，已单独保留并纳入备份，未覆盖或自动合并聊天。新消息将重新核对保存。"), conversationId)
+                        result.recovery
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) {

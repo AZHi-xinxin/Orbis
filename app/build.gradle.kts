@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 275
-        versionName = "2.6.12"
+        versionCode = 276
+        versionName = "2.6.13"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
@@ -96,6 +96,9 @@ android {
             signingConfig = signingConfigs.getByName("release").takeIf { it.storeFile != null }
             optimization {
                 enable = true
+                keepRules {
+                    files.add(project.file("onnx-jni.pro"))
+                }
             }
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$candidateSuffix\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
@@ -119,9 +122,13 @@ android {
         create("rescue") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
-            versionNameSuffix = "-rescue"
+            val diagnosticSuffix = providers.gradleProperty("orbisRescueCandidateSuffix").orNull.orEmpty()
+            require(diagnosticSuffix.isEmpty() || diagnosticSuffix.matches(Regex("-[a-z][a-z0-9.-]{0,47}"))) {
+                "Invalid Orbis rescue candidate suffix"
+            }
+            versionNameSuffix = "-rescue$diagnosticSuffix"
             buildConfigField("boolean", "ORBIS_EMERGENCY_RESCUE_ENABLED", "true")
-            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}-rescue\"")
+            buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}$versionNameSuffix\"")
         }
     }
     testBuildType = providers.gradleProperty("orbisTestBuildType").orElse("debug").get().also {
@@ -264,7 +271,9 @@ dependencies {
     // serialization
     implementation(libs.kotlinx.serialization.json)
     // Offline semantic recall: pinned CPU runtime, no external embedding service.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    // 1.20.0's JNI wrapper is only 4 KB aligned; keep Java and native libraries
+    // together from the same official AAR, including the upstream 16 KB fix.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
 
     // YAML front matter
     implementation(libs.snakeyaml)

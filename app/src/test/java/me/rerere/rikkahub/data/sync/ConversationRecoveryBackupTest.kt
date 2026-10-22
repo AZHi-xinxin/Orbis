@@ -61,6 +61,39 @@ class ConversationRecoveryBackupTest {
         source, File(target, "no-backup"), sample.owners)
     private fun validate(sample: Sample) = ConversationRecoveryBackup.validateStaged(payload, sample.owners)
 
+    @Test fun archivedConflictRoundTripsAsInertEvidenceAlongsideActiveCopies() {
+        val sample = sample()
+        val bytes = file(source, namespaces[1], sample.base.id).readBytes()
+        val name = "${ConversationRecoveryBackup.CONFLICTS}/${ContinuationConflictCopies.name(sample.base.id, bytes)}"
+        write(ConversationRecoveryBackup.exactFile(source, name), bytes)
+        val copies = snapshot(sample)
+        assertEquals(3, copies.size)
+        validate(sample)
+        ConversationRecoveryBackup.requireNoConflicts(payload, live)
+        val archived = copies.single { it.first == name }
+        assertArrayEquals(bytes, archived.second.readBytes())
+        write(ConversationRecoveryBackup.exactFile(live, name), archived.second.readBytes())
+        // An archive by itself is not an active recovery or permission to execute tools.
+        assertNull(HumanContinuationJournal(Store(live, namespaces[1])).recover(sample.base))
+        assertArrayEquals(bytes, File(live, name).readBytes())
+    }
+
+    @Test fun archivedConflictChecksContentAddressAndOwnerAndIncludesCommittedBackup() {
+        val sample = sample()
+        val bytes = file(source, namespaces[1], sample.base.id).readBytes()
+        val name = "${ConversationRecoveryBackup.CONFLICTS}/${ContinuationConflictCopies.name(sample.base.id, bytes)}"
+        write(File(ConversationRecoveryBackup.exactFile(source, name).path + ".bak"), bytes)
+        assertTrue(snapshot(sample).any { it.first == name })
+        validate(sample)
+        assertThrows(IllegalArgumentException::class.java) {
+            ConversationRecoveryBackup.validateStaged(payload, mapOf(sample.base.id.toString() to Uuid.random().toString()))
+        }
+        val staged = ConversationRecoveryBackup.exactFile(File(payload, "no-backup"), name)
+        staged.appendText(" ") // JSON still valid, content-address proof is not.
+        assertThrows(IllegalArgumentException::class.java) { validate(sample) }
+        assertNull(ConversationRecoveryBackup.maxBytes("${ConversationRecoveryBackup.CONFLICTS}/../escape.json"))
+    }
+
     @Test fun databaseCommitRetiringJournalDuringCaptureCannotReturnSuccessfulBackup() {
         val sample = sample()
         var version = 1L

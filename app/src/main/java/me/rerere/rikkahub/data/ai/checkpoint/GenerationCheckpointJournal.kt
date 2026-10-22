@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.ai.checkpoint
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.encodeToStream
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.HostToolFailure
@@ -27,6 +28,12 @@ interface GenerationCheckpointStore {
      */
     fun exists(conversationId: Uuid): Boolean = read(conversationId) != null
     fun writeAtomic(conversationId: Uuid, bytes: ByteArray)
+    /** Preserve an incompatible human recovery copy durably, without changing the active slot.
+     * Unsupported stores must fail closed; a successful return is a durability/readback receipt.
+     */
+    fun preserveConflict(conversationId: Uuid, bytes: ByteArray) {
+        error("checkpoint_conflict_preservation_unavailable")
+    }
     fun delete(conversationId: Uuid)
 }
 
@@ -198,7 +205,8 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         val rawHash = protectedNodesHash(record.tail, record.version)
         val restoredTail = recoveryTail(record)
         val recoveryHash = protectedNodesHash(restoredTail, record.version)
-        checkSafe(storedHash == record.baseTailHash || storedHash == rawHash || storedHash == recoveryHash,
+        checkSafe(storedHash == rawHash || storedHash == recoveryHash ||
+            matchesProtectedNodesHash(storedTail, record.version, record.baseTailHash, storedHash),
             "database_tail_changed")
         val changed = storedHash != recoveryHash
         // Favorite state is derived from its separate Room table and is intentionally transient
@@ -263,7 +271,7 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
             record.tools.any { it.status == GenerationToolStatus.STARTED } && !unknownEffectsRetained ||
             persisted.messageNodes.size.toLong() < record.prefixCount.toLong() + record.tail.size ||
             persisted.messageNodes.map { it.id }.distinct().size != persisted.messageNodes.size) return@guarded false
-        if (protectedNodesHash(persisted.messageNodes.take(record.prefixCount), record.version) != record.prefixHash)
+        if (!matchesProtectedNodesHash(persisted.messageNodes.take(record.prefixCount), record.version, record.prefixHash))
             return@guarded false
         val storedTail = persisted.messageNodes.drop(record.prefixCount).take(record.tail.size)
         val expected = record.tail.zip(storedTail).map { (oldNode, storedNode) ->
@@ -383,7 +391,7 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
                 message.getTools().any { !it.isExecuted }
             } } || persisted.messageNodes.size.toLong() < record.prefixCount.toLong() + record.tail.size ||
             persisted.messageNodes.map { it.id }.distinct().size != persisted.messageNodes.size) return@guarded false
-        if (protectedNodesHash(persisted.messageNodes.take(record.prefixCount), record.version) != record.prefixHash ||
+        if (!matchesProtectedNodesHash(persisted.messageNodes.take(record.prefixCount), record.version, record.prefixHash) ||
             protectedNodesHash(persisted.messageNodes.drop(record.prefixCount).take(record.tail.size), record.version) !=
             protectedNodesHash(record.tail, record.version)) return@guarded false
         store.delete(persisted.id)
@@ -405,8 +413,8 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
             current.compactionEpoch == record.epoch, "owner_or_epoch_changed")
         checkSafe(record.prefixCount <= current.messageNodes.size &&
             record.suffixCount <= current.messageNodes.size - record.prefixCount &&
-            protectedNodesHash(current.messageNodes.take(record.prefixCount), record.version) == record.prefixHash, "database_prefix_changed")
-        checkSafe(protectedNodesHash(current.messageNodes.takeLast(record.suffixCount), record.version) == record.suffixHash,
+            matchesProtectedNodesHash(current.messageNodes.take(record.prefixCount), record.version, record.prefixHash), "database_prefix_changed")
+        checkSafe(matchesProtectedNodesHash(current.messageNodes.takeLast(record.suffixCount), record.version, record.suffixHash),
             "database_suffix_changed")
     }
 
@@ -476,7 +484,9 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         checkSafe(record.version in 1..2 && record.conversationId == id && record.epoch >= 0 &&
             record.prefixCount >= 0 && record.suffixCount >= 0 && record.suffixCount <= Int.MAX_VALUE - record.prefixCount,
             "invalid_checkpoint_header")
-        checkSafe(envelope.sha256 == hashJson(record), "checkpoint_checksum_mismatch")
+        checkSafe(envelope.sha256 == hashJson(record) || envelope.sha256 ==
+            CheckpointModelReceiptCompatibility.recordHash(json, json.encodeToJsonElement(record), setOf("tail")),
+            "checkpoint_checksum_mismatch")
         validateTail(record.tail, record.anchors)
         validateTools(record.tail, record.tools)
         return record
@@ -496,7 +506,13 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
     private fun protectedNodesHash(nodes: List<MessageNode>, version: Int): String =
         nodesHash(nodes, normalizeEventPresentation = version >= 2)
 
-    private fun nodesHash(nodes: List<MessageNode>, normalizeEventPresentation: Boolean = false): String {
+    private fun matchesProtectedNodesHash(nodes: List<MessageNode>, version: Int, expectedHash: String,
+        standardHash: String = protectedNodesHash(nodes, version)): Boolean =
+        standardHash == expectedHash || nodesHash(nodes, normalizeEventPresentation = version >= 2,
+            legacyModelReceipt = true) == expectedHash
+
+    private fun nodesHash(nodes: List<MessageNode>, normalizeEventPresentation: Boolean = false,
+        legacyModelReceipt: Boolean = false): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val out = DigestOutputStream(NullOutput, digest)
         nodes.forEach { node ->
@@ -505,7 +521,9 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
                 message.orbisEvent?.let { event -> message.copy(orbisEvent = event.copy(read = false, collapsed = true)) }
                     ?: message
             })
-            json.encodeToStream(protectedNode, out)
+            if (legacyModelReceipt) json.encodeToStream(
+                CheckpointModelReceiptCompatibility.node(json.encodeToJsonElement(protectedNode)), out)
+            else json.encodeToStream(protectedNode, out)
             // Literal NUL never occurs in serialized JSON; delimit nodes without a history blob.
             digest.update(0.toByte())
         }

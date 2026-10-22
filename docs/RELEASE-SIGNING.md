@@ -4,7 +4,7 @@ Orbis 的公开 Android 安装包使用独立、长期保留的发布签名；�
 
 - 应用包名：`org.orbis.agent`
 - 首次公开版本：`2.6.0`（版本代码 `231`）
-- 当前发布版本：`2.6.10`（版本代码 `273`）
+- 当前源码候选：`2.6.13`（版本代码 `276`）；正式下载版本以 GitHub Releases 的签名附件为准，不能从源码版本号推断 APK 已发布。
 - 签名证书 SHA-256：`527b1f22ac8baebed936e98d77e3e05881752adc5a88af6aecfd012351f39258`
 
 APK 的文件摘要与证书摘要不是同一个值。每次发布的 APK 文件 SHA-256 见对应 GitHub Release 附带的 `SHA256SUMS.txt`；上面的证书摘要用于核对发布者签名。
@@ -25,3 +25,27 @@ APK 的文件摘要与证书摘要不是同一个值。每次发布的 APK 文�
 Dev 与正式版仍为独立应用，不自动迁移彼此数据。[2.6.9 发布说明](RELEASE-2.6.9.md)。
 
 2.6.10 沿用同一发布证书，版本代码 `273`，可直接覆盖既有正式版，不卸载、不清数据；旧标签与资产保留。[2.6.10 发布说明](RELEASE-2.6.10.md)。
+
+## 本地语义模型的成品包验收
+
+包含 ONNX 本地语义召回的版本，不能以 debug 测试通过或“首页能打开”替代优化后的 APK 验收。
+`app/onnx-jni.pro` 必须同时用于 release 和继承它的 rescue；只保留 native 方法或类名不足以保留 JNI 反射调用的构造签名。
+该规则依据 [ONNX Runtime Android 的 R8 要求](https://onnxruntime.ai/docs/build/android.html)。
+
+签名／分发前，对所有待交付 ABI（包括 universal）分别执行：
+
+```text
+python tools/verify_onnx_jni.py --aar <本次依赖解析所得的onnxruntime-android.aar> --apk <本次优化后的APK>
+```
+
+必须退出为 0、`passed=true`。检查包含 AAR 的原始 Java 类／成员签名、各 ABI 原生库配对和加载段一致性，以及 APK 内所有原生库的 16 KB ELF LOAD 段对齐；APK ZIP 对齐仍需另用 `zipalign -c -P 16 4` 检查。
+原生库经 Android 打包工具去除调试信息后整文件摘要可能不同，不能仅凭该差异断言版本混用。
+这是一道显式运行的本地验收步骤，不是已经部署的 CI。
+
+ONNX 1.20.0 的 JNI 包装库虽然与 Java 版本一致，仍只有 4 KB ELF 对齐；不能只核对主运行库。
+当前依赖整体固定到官方 `onnxruntime-android:1.23.2`，不混用不同版本的 Java 与 `.so`；包含上游 [JNI 16 KB 修复](https://github.com/microsoft/onnxruntime/pull/24947)。
+ELF／ZIP 静态检查通过不等于已经在 16 KB 内核真机上运行通过，报告须分别标明。
+
+还须运行优化成品里的真实离线推理（冷加载、重复调用、关闭重开），并回归首次索引、已有／损坏缓存、关闭召回、轻量模式、编辑删除及角色隔离。
+隔离 instrumentation 的功能测试不能替代成品包 JNI 验证，因为测试本身可能影响优化器保留结果。
+测试记录应列明 API／ABI 和未覆盖机型；受影响用户的覆盖安装反馈通过前，不将诊断候选包公开发布，也不要要求卸载、清应用数据或删除恢复副本。
