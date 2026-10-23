@@ -37,7 +37,7 @@ MuPDF 的 AGPL、PRoot 的 GPL、Simple 的原始双许可、libandroid-shmem �
 
 本版新增 BAAI `bge-small-zh-v1.5` 的 Xenova 量化 ONNX 转换与词表，固定转换仓库 revision `75c43b069aac4d136ba6bc1122f995fedcfd2781`。BAAI 模型卡声明 MIT；保留 [FlagEmbedding 许可](../app/src/main/assets/orbis-memory/LICENSE-FlagEmbedding.txt)和[模型来源 NOTICE](../app/src/main/assets/orbis-memory/NOTICE.txt)，不将转换模型标作 Orbis 自行训练。
 
-推理由 Microsoft `com.microsoft.onnxruntime:onnxruntime-android:1.20.0` 提供。该固定版本的 [MIT 原文](../app/src/main/assets/licenses/onnxruntime/LICENSE.txt)、[第三方声明原文](../app/src/main/assets/licenses/onnxruntime/ThirdPartyNotices.txt)与[取得及散列记录](../app/src/main/assets/licenses/onnxruntime/NOTICE.txt)随源码及 APK 保留。新增原生库是各支持 ABI 的 `libonnxruntime.so` 和 `libonnxruntime4j_jni.so`，不属于上节“继承的八个文件”。完整来源、模型/词表散列、AAR 原始散列与原生构建核对边界见[离线记忆来源](OFFLINE-MEMORY-SOURCES.md)。
+推理由 Microsoft `com.microsoft.onnxruntime:onnxruntime-android:1.23.2` 提供。该固定版本的 [MIT 原文](../app/src/main/assets/licenses/onnxruntime/LICENSE.txt)、[第三方声明原文](../app/src/main/assets/licenses/onnxruntime/ThirdPartyNotices.txt)与[取得及散列记录](../app/src/main/assets/licenses/onnxruntime/NOTICE.txt)随源码及 APK 保留。新增原生库是各支持 ABI 的 `libonnxruntime.so` 和 `libonnxruntime4j_jni.so`，不属于上节“继承的八个文件”。完整来源、模型/词表散列、AAR 原始散列与原生构建核对边界见[离线记忆来源](OFFLINE-MEMORY-SOURCES.md)。
 
 这些组件的 MIT 许可不改变 Orbis 整体的 AGPL-3.0，也不替代其他资源的许可。最终 APK 应保留模型声明及 ONNX Runtime 的原始许可文本，不能仅保留说明页链接。
 
