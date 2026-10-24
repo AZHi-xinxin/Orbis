@@ -62,6 +62,18 @@ sealed class LocalToolOption {
     data object LocalGallery : LocalToolOption()
 
     @Serializable
+    @SerialName("orbis_human_health")
+    data object HumanHealth : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_desire")
+    data object LocalDesire : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_theme")
+    data object ThemeDesign : LocalToolOption()
+
+    @Serializable
     @SerialName("orbis_context_pruning")
     data object ContextPruning : LocalToolOption()
 }

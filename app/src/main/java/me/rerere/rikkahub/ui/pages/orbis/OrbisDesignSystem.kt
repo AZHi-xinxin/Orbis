@@ -200,7 +200,14 @@ object OrbisTheme {
         @Composable
         @ReadOnlyComposable
         get() = resolveOrbisVisualColors(LocalDarkMode.current, LocalOrbisDeepSeekStyle.current,
-            inherited = LocalOrbisColors.current, season = LocalOrbisSeason.current)
+            inherited = LocalOrbisColors.current, season = LocalOrbisSeason.current).let { original ->
+                LocalChatTheme.current?.body?.colors?.let { c ->
+                    fun color(hex: String) = Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(hex))
+                    original.copy(page = color(c.background), pageTop = color(c.background), panel = color(c.surface),
+                        raisedPanel = color(c.surface), tintedPanel = color(c.surface), ink = color(c.text), mutedInk = color(c.textSecondary),
+                        accent = color(c.primary), onAccent = color(c.onPrimary), border = color(c.textSecondary).copy(alpha = .3f))
+                } ?: original
+            }
 }
 
 /**

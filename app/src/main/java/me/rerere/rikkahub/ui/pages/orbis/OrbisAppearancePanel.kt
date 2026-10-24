@@ -189,6 +189,8 @@ fun OrbisAppearancePanel(
             }
         }
 
+        assistant?.let { ThemePackageManager(it.id.toString()) }
+
         AppearanceCard("个人设置 · 昵称与头像") {
             OrbisNicknameSetting(displaySetting.userNickname, onUpdateUserNickname)
             if (deepSeek) {
@@ -478,6 +480,20 @@ fun OrbisChatBackdrop(
     onImageSettled: (() -> Unit)? = null,
 ) {
     if (!BuildConfig.ORBIS_ENABLED) return
+    val customTheme = LocalChatTheme.current
+    if (customTheme != null) {
+        val body = customTheme.body
+        Box(modifier.background(Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(body.colors.background)))) {
+            if (customTheme.image != null) {
+                val context = LocalContext.current
+                val request = remember(context, customTheme.image) { ImageRequest.Builder(context).data(customTheme.image).size(1440, 2560).build() }
+                AsyncImage(request, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
+                    onSuccess = { onImageSettled?.invoke() }, onError = { customTheme.onImageError?.invoke(); onImageSettled?.invoke() })
+                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = body.background.dim)))
+            }
+        }
+        return
+    }
     val dark = LocalDarkMode.current
     val backgroundStyle = if (appearance.backgroundEnabled) appearance.backgroundStyle else OrbisBackgroundStyle.PAPER
     val deepSeek = LocalOrbisDeepSeekStyle.current

@@ -77,12 +77,38 @@ class StMemoryImageAttachmentsTest {
         assertFalse(tool.needsApproval(buildJsonObject {}))
     }
 
-    @Test fun `latest user without a photo never picks an earlier image`() {
+    @Test fun `earlier visible image remains selectable when latest user has no photo`() {
         val current = conversation.copy(messageNodes = conversation.messageNodes + UIMessage.user("New text only").toMessageNode())
         val currentScope = StImageAttachmentScope.capture(current.assistantId, current.id, current,
             current.currentMessages.map { it.id }.toSet())
-        assertTrue(currentScope.images(current).isEmpty())
+        assertEquals(listOf(image), currentScope.images(current))
         try { scope.images(current); fail("old user scope must not follow a later message") } catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun `context limit and compact epoch exclude unavailable history`() {
+        val latest = UIMessage.user("New text only")
+        val current = conversation.copy(messageNodes = conversation.messageNodes + latest.toMessageNode())
+        val selected = StImageAttachmentScope.capture(current.assistantId, current.id, current,
+            current.currentMessages.map { it.id }.toSet(), contextMessageLimit = 1)
+        assertTrue(selected.images(current).isEmpty())
+        assertThrows(IllegalArgumentException::class.java) { scope.images(conversation.copy(compactionEpoch = 1)) }
+    }
+
+    @Test fun `list pages reads only eight originals and missing file does not hide other pictures`() = runTest {
+        val source = user.copy(parts = (0 until 10).map { UIMessagePart.Image("file:///owned/$it.png") })
+        val current = conversation.copy(messageNodes = listOf(source.toMessageNode()))
+        val selected = StImageAttachmentScope.capture(current.assistantId, current.id, current, setOf(source.id))
+        var reads = 0
+        val tool = createStImageListTool(selected, listOf(destination), StMemoryImageAttachmentRegistry(), { current },
+            { url -> reads++; if (url.endsWith("/2.png")) error("private-path"); original }, { true })
+        val first = Json.parseToJsonElement((tool.execute(buildJsonObject {}).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(8, reads); assertEquals(8, first["images"]!!.jsonArray.size)
+        assertEquals(8, first["next_offset"]!!.jsonPrimitive.int)
+        assertEquals("original_unavailable", first["images"]!!.jsonArray[2].jsonObject["state"]!!.jsonPrimitive.content)
+        assertFalse(first.toString().contains("file:")); assertFalse(first.toString().contains("private-path"))
+        val second = Json.parseToJsonElement((tool.execute(buildJsonObject { put("offset", 8) }).single() as UIMessagePart.Text).text).jsonObject
+        assertEquals(10, reads); assertEquals(2, second["images"]!!.jsonArray.size)
+        assertEquals(JsonNull, second["next_offset"])
     }
 
     @Test fun `historical generation selects only its explicit source range and fails if branch advances`() {

@@ -151,6 +151,24 @@ private fun AssistantLocalToolContent(
                     onCheckedChange = { toggleLocalTool(LocalToolOption.ContextPruning, it) }) },
             )
             item(
+                headlineContent = { Text("人类健康记录") },
+                supportingContent = { Text("允许当前助手读写你在本机的人类记录。调用时所选记录随工具结果交给当前模型；不自动注入、不进云备份。你修正过的字段需要本人确认才可覆盖。") },
+                trailingContent = { Switch(checked = LocalToolOption.HumanHealth in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.HumanHealth, it) }) },
+            )
+            item(
+                headlineContent = { Text("本机愿望") },
+                supportingContent = { Text("让伙伴给已有本机记忆附上想做的事。星图只显示未完成数量；关闭后工具与自动浮现均停止。") },
+                trailingContent = { Switch(checked = LocalToolOption.LocalDesire in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.LocalDesire, it) }) },
+            )
+            item(
+                headlineContent = { Text("AI 自定义美化") },
+                supportingContent = { Text("让当前助手创作主题草稿。到侧栏“自定义美化”预览后应用，可回退；关闭不注册工具。") },
+                trailingContent = { Switch(checked = LocalToolOption.ThemeDesign in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.ThemeDesign, it) }) },
+            )
+            item(
                 headlineContent = { Text("格子 · 允许 AI 创作与填写问卷") },
                 supportingContent = { Text("AI 默认可按需读取自己格子的作品与已提交答案。开启后可经批准写入、修改、删除自己创作的作品，或回答给 AI 的问卷；支持此次允许 / 以后允许。未提交的人类答案不可读取。正文不自动进上下文。") },
                 trailingContent = { Switch(checked = LocalToolOption.LocalGallery in assistant.localTools,

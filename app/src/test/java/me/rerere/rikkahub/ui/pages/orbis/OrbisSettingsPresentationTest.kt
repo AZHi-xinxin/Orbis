@@ -127,7 +127,8 @@ class OrbisSettingsPresentationTest {
         val workspace = orbisToolEntries.single { it.destination == OrbisToolDestination.WORKSPACE }
         assertEquals(OrbisToolGroup.WORK, workspace.group)
         listOf("文件", "终端", "技能").forEach { assertTrue(workspace.subtitle.contains(it)) }
-        assertEquals(5, orbisToolEntries.count { it.group == OrbisToolGroup.WORK })
+        assertEquals(6, orbisToolEntries.count { it.group == OrbisToolGroup.WORK })
+        assertEquals(1, orbisToolEntries.count { it.destination == OrbisToolDestination.HUMAN_HEALTH })
     }
 
     @Test fun toolsDoNotAdvertiseConfigurationOrUnavailablePlaceholders() {

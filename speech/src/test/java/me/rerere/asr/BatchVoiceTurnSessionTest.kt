@@ -19,6 +19,25 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 class BatchVoiceTurnSessionTest {
+    @Test fun manualDictationSurvivesLongPauseAndCompletesOnlyOnExplicitStop() = runBlocking<Unit> {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val requests = AtomicInteger()
+        val session = BatchVoiceTurnSession(scope, 16_000, { requests.incrementAndGet(); "both phrases" }, automaticEndpoint = false)
+        try {
+            repeat(10) { session.acceptPcm(pcmFrame(1_500)) }
+            repeat(300) { session.acceptPcm(pcmFrame(0)) }
+            assertTrue(session.isCaptureOpen)
+            assertFalse(session.state.value.voiceTurn.speechEnded)
+            repeat(10) { session.acceptPcm(pcmFrame(1_500)) }
+            assertEquals(0, requests.get())
+            session.finish()
+            session.pauseCapture()
+            val result = withTimeout(2_000) { session.state.first { it.voiceTurn.isComplete } }
+            assertEquals("both phrases", result.voiceTurn.finalText)
+            assertEquals(1, requests.get())
+        } finally { session.cancel(); scope.cancel() }
+    }
+
     @Test fun silenceProducesNoRequests() = runBlocking<Unit> {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val requests = AtomicInteger()

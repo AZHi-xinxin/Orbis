@@ -63,7 +63,7 @@ internal data class OrbisSpeechRules(
 internal fun orbisSettingsInitialItem(startAtMcp: Boolean): Int = if (startAtMcp) 1 else 0
 
 internal enum class OrbisToolGroup { WORK, PLAY }
-internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER, PET, STUDY, BODY }
+internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER, PET, STUDY, BODY, HUMAN_HEALTH }
 internal data class OrbisToolEntry(
     val destination: OrbisToolDestination,
     val group: OrbisToolGroup,
@@ -89,6 +89,7 @@ internal val orbisToolEntries = listOf(
     OrbisToolEntry(OrbisToolDestination.PHOTO_WALL, OrbisToolGroup.PLAY, "▧", "照片墙", "把相片和背面的心情留住"),
     OrbisToolEntry(OrbisToolDestination.CHARACTER, OrbisToolGroup.PLAY, "✧", "小部件设置", "效果预览 · 人物素材 · 桌面卡片"),
     OrbisToolEntry(OrbisToolDestination.STUDY, OrbisToolGroup.WORK, "▤", "学习机", "练习、学习计划与错题本"),
+    OrbisToolEntry(OrbisToolDestination.HUMAN_HEALTH, OrbisToolGroup.WORK, "♡", "人类记录", "睡眠、活动与每天的变化"),
     OrbisToolEntry(OrbisToolDestination.PET, OrbisToolGroup.PLAY, "♡", "宠物区", "共同领养与照料"),
     OrbisToolEntry(OrbisToolDestination.BODY, OrbisToolGroup.PLAY, "♡", "身体表达", "此刻的状态与身体记录"),
 )

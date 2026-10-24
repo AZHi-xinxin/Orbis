@@ -97,6 +97,9 @@ internal object OrbisVoiceCallPreflight {
             is ASRProviderSetting.MiMo -> {
                 endpoint = provider.baseUrl; key = provider.apiKey; model = provider.model; sampleRate = provider.sampleRate
             }
+            is ASRProviderSetting.SiliconFlow -> {
+                endpoint = provider.baseUrl; key = provider.apiKey; model = provider.model; sampleRate = provider.sampleRate
+            }
             is ASRProviderSetting.Step -> {
                 endpoint = provider.baseUrl; key = provider.apiKey; model = provider.model; sampleRate = provider.sampleRate
             }
@@ -104,7 +107,8 @@ internal object OrbisVoiceCallPreflight {
         val host = endpointHost(endpoint, provider.supportsServerVadVoiceMode) ?: return OrbisCallFailure.ASR_ENDPOINT
         if (key.isBlank() && host in authenticatedSpeechHosts) return OrbisCallFailure.ASR_CREDENTIAL
         if (model.isBlank()) return OrbisCallFailure.ASR_MODEL
-        if (sampleRate <= 0 || (!provider.supportsServerVadVoiceMode && sampleRate !in batchSampleRates))
+        if (sampleRate <= 0 || (!provider.supportsServerVadVoiceMode && sampleRate !in batchSampleRates) ||
+            (provider is ASRProviderSetting.SiliconFlow && sampleRate != 16000))
             return OrbisCallFailure.ASR_SAMPLE_RATE
         return null
     }
@@ -150,7 +154,7 @@ internal object OrbisVoiceCallPreflight {
 
     private val batchSampleRates = setOf(8000, 16000, 24000, 32000, 44100, 48000)
     private val authenticatedSpeechHosts = setOf(
-        "api.openai.com", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "openspeech.bytedance.com",
+        "api.siliconflow.cn", "api.siliconflow.com", "api.openai.com", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "openspeech.bytedance.com",
         "api.xiaomimimo.com", "api.stepfun.com", "generativelanguage.googleapis.com", "api.minimaxi.com",
         "api.minimax.io", "api.minimax.chat", "api.groq.com", "api.x.ai", "api.elevenlabs.io", "api.fish.audio",
     )

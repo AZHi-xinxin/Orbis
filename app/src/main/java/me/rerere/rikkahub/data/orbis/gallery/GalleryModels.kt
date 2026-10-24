@@ -21,8 +21,13 @@ internal val galleryJson = Json { encodeDefaults = true; ignoreUnknownKeys = fal
     val version: Int = 1, val customName: String = "", val items: List<GalleryItem> = emptyList(),
     val answers: List<GalleryAnswerRef> = emptyList(),
 )
-@Serializable internal data class GalleryQuestion(val id: String, val text: String, val type: String = "text", val options: List<String> = emptyList(), val required: Boolean = false)
-@Serializable internal data class GalleryQuestionnaire(val version: Int = 1, val respondent: String = "human", val description: String = "", val questions: List<GalleryQuestion>)
+@Serializable internal data class GalleryCondition(val questionId: String, val anyOf: List<String>)
+@Serializable internal data class GalleryQuestion(val id: String, val text: String, val type: String = "text", val options: List<String> = emptyList(), val required: Boolean = false,
+    val page: String = "", val visibleWhen: List<GalleryCondition> = emptyList())
+@Serializable internal data class GalleryFormPage(val id: String, val title: String, val description: String = "")
+@Serializable internal data class GalleryFormStyle(val palette: String = "ocean", val background: String = "waves", val heading: String = "serif", val cornerRadius: Int = 24)
+@Serializable internal data class GalleryQuestionnaire(val version: Int = 1, val respondent: String = "human", val description: String = "", val questions: List<GalleryQuestion>,
+    val pages: List<GalleryFormPage> = emptyList(), val style: GalleryFormStyle = GalleryFormStyle())
 @Serializable internal data class GalleryAnswers(val ref: GalleryAnswerRef, val questions: List<GalleryQuestion>, val answers: Map<String, List<String>>)
 @Serializable internal data class GalleryDraft(val id: String, val itemId: String, val title: String, val kind: String, val expectedRevision: Int, val actor: String, val createdAt: Long)
 
@@ -78,7 +83,7 @@ internal fun gallerySlice(bytes: ByteArray, offset: Int, budget: Int = GalleryLi
 internal fun parseGalleryQuestionnaire(text: String): GalleryQuestionnaire {
     require(text.toByteArray().size <= GalleryLimits.QUESTIONNAIRE_BYTES) { "gallery_questionnaire_too_large" }
     return galleryJson.decodeFromString<GalleryQuestionnaire>(text).also { form ->
-        require(form.version == 1 && form.respondent in setOf("human", "ai")) { "gallery_questionnaire_invalid" }
+        require(form.version in 1..2 && form.respondent in setOf("human", "ai")) { "gallery_questionnaire_invalid" }
         require(form.description.length <= 8000 && form.questions.size in 1..200) { "gallery_questionnaire_invalid" }
         require(form.questions.map { it.id }.distinct().size == form.questions.size) { "gallery_questionnaire_invalid" }
         form.questions.forEach { q ->
@@ -86,21 +91,24 @@ internal fun parseGalleryQuestionnaire(text: String): GalleryQuestionnaire {
             require(q.options.size <= 50 && q.options.distinct().size == q.options.size && q.options.all { it.isNotBlank() && it.length <= 500 }) { "gallery_questionnaire_invalid" }
             require(if (q.type == "text") q.options.isEmpty() else q.options.size >= 2) { "gallery_questionnaire_invalid" }
         }
+        validateGalleryFormLayout(form)
     }
 }
 
 internal class GalleryAnswerProblem(val questionId: String, val reason: String) : IllegalArgumentException("gallery_answers_invalid")
 
-internal fun validateGalleryAnswers(form: GalleryQuestionnaire, answers: Map<String, List<String>>) {
+internal fun validateGalleryAnswers(form: GalleryQuestionnaire, answers: Map<String, List<String>>, requiredIds: Set<String>? = null) {
     answers.keys.firstOrNull { id -> form.questions.none { it.id == id } }?.let {
         // Unknown keys may be arbitrary model content: never echo them in diagnostics.
         throw GalleryAnswerProblem("", "unknown_question")
     }
+    val visible = visibleGalleryQuestions(form, answers).map { it.id }.toSet()
     form.questions.forEach { q ->
         val values = answers[q.id].orEmpty()
         fun invalid(reason: String): Nothing = throw GalleryAnswerProblem(q.id, reason)
         if(values.size > 50 || values.distinct().size != values.size) invalid("duplicate_or_too_many_values")
-        if(q.required && values.none { it.isNotBlank() }) invalid("required")
+        if (q.id !in visible && values.isNotEmpty()) invalid("hidden_question")
+        if(q.id in visible && (requiredIds == null || q.id in requiredIds) && q.required && values.none { it.isNotBlank() }) invalid("required")
         if(q.type == "text") {
             if(values.size > 1) invalid("text_requires_one_string")
             if(values.any { it.toByteArray(Charsets.UTF_8).size > GalleryLimits.TEXT_ANSWER_BYTES }) invalid("text_byte_limit")
@@ -120,6 +128,7 @@ internal fun galleryErrorText(error: Throwable): String = if(error is GalleryAns
         "option_not_in_question" -> "选项必须与原题一致，请重新读取该题。"
         "single_requires_one_option" -> "单选题只能填一个选项。"
         "unknown_question" -> "答案包含问卷中不存在的题目 ID，请核对原题。"
+        "hidden_question" -> "前面的选择已改变，这道分支题不在本次填写路径中，请移除它的答案。"
         else -> "答案项重复或数量超限，请核对该题。"
     }
 } else when (error.message) {

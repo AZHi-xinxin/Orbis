@@ -357,6 +357,8 @@ dependencies {
     implementation(project(":lcbridge"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
+    // Bundled on-device OCR for explicit human-health screenshot import; no cloud vision call.
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 
     // Leak Canary
     // debugImplementation(libs.leakcanary.android)

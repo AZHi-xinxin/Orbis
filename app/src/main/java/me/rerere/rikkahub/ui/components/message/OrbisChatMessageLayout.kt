@@ -33,10 +33,11 @@ import me.rerere.rikkahub.utils.toMessageTimeString
 @Composable
 internal fun rememberChatMessageTextStyle(): TextStyle {
     val display = LocalSettings.current.displaySetting
+    val themeType = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body?.typography
     val family = LocalChatFontFamily.current ?: rememberChatFontFamily(display)
     return LocalTextStyle.current.copy(
-        fontSize = (if (BuildConfig.ORBIS_ENABLED) 14.sp else LocalTextStyle.current.fontSize) * display.fontSizeRatio,
-        lineHeight = (if (BuildConfig.ORBIS_ENABLED) 22.4.sp else LocalTextStyle.current.lineHeight) * display.fontSizeRatio,
+        fontSize = (if (BuildConfig.ORBIS_ENABLED) 14.sp else LocalTextStyle.current.fontSize) * display.fontSizeRatio * (themeType?.fontSizeScale ?: 1f),
+        lineHeight = (if (BuildConfig.ORBIS_ENABLED) (14 * (themeType?.lineHeight ?: 1.6f)).sp else LocalTextStyle.current.lineHeight) * display.fontSizeRatio * (themeType?.fontSizeScale ?: 1f),
         fontFamily = family,
     )
 }

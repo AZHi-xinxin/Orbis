@@ -189,6 +189,10 @@ private class CustomAsrStateImpl(
                 MiMoASRController(context, httpClient, provider)
             }
 
+            is ASRProviderSetting.SiliconFlow -> {
+                if (provider.apiKey.isBlank()) return null
+                me.rerere.asr.providers.BatchVoiceASRController(context, httpClient, provider, dictationMode = true)
+            }
             is ASRProviderSetting.Step -> {
                 if (provider.apiKey.isBlank()) return null
                 StepASRController(context, httpClient, provider)

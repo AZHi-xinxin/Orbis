@@ -37,6 +37,7 @@ fun ASRProviderConfigure(
                     is ASRProviderSetting.Volcengine -> "Volcengine"
                     is ASRProviderSetting.MiMo -> "MiMo"
                     is ASRProviderSetting.Step -> "Step"
+                    is ASRProviderSetting.SiliconFlow -> "硅基流动"
                 },
                 onValueChange = {},
                 readOnly = true,
@@ -62,6 +63,7 @@ fun ASRProviderConfigure(
             is ASRProviderSetting.Volcengine -> VolcengineASRConfiguration(setting, onValueChange)
             is ASRProviderSetting.MiMo -> MiMoASRConfiguration(setting, onValueChange)
             is ASRProviderSetting.Step -> StepASRConfiguration(setting, onValueChange)
+            is ASRProviderSetting.SiliconFlow -> SiliconFlowASRConfiguration(setting, onValueChange)
         }
     }
 }
@@ -543,4 +545,17 @@ private fun StepASRConfiguration(
             placeholder = { Text("热词1, 热词2, 热词3") }
         )
     }
+}
+
+@Composable
+private fun SiliconFlowASRConfiguration(setting: ASRProviderSetting.SiliconFlow, onValueChange: (ASRProviderSetting) -> Unit) {
+    Text("录音在本机分段，上传硅基流动识别。通话使用本机停顿检测；不是实时双向打断模式。")
+    OutlinedTextField(setting.apiKey, { onValueChange(setting.copy(apiKey = it)) },
+        label = { Text("API Key") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    OutlinedTextField(setting.baseUrl, { onValueChange(setting.copy(baseUrl = it)) },
+        label = { Text("接口基础地址（含 /v1）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+    OutlinedTextField(setting.model, { onValueChange(setting.copy(model = it)) },
+        label = { Text("模型名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+    Text("默认 FunAudioLLM/SenseVoiceSmall，也可填写平台当前支持的其他转写模型。录音为 16 kHz 单声道。")
 }

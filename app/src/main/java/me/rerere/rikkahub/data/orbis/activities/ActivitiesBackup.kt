@@ -13,7 +13,7 @@ internal object ActivityFileLocks {
 
 /** Three local documents per owner. Art can be reimported without replacing identities. */
 internal object ActivitiesBackup {
-    private val path = Regex("orbis-activities/([A-Za-z0-9_-]{1,80})/(pet|study|body)\\.json")
+    private val path = Regex("orbis-activities/([A-Za-z0-9_-]{1,80})/(pet|study|body|desires)\\.json")
     private val json = Json { encodeDefaults = true }
     fun maxBytes(name: String): Int? = if(path.matches(name)) 16 * 1024 * 1024 else null
     private fun exact(root: File, name: String): File = File(root.canonicalFile, name).also {
@@ -25,7 +25,7 @@ internal object ActivitiesBackup {
         require(folder.isDirectory) { "activity_backup_path" }
         return folder.listFiles().orEmpty().flatMap { owner ->
             require(owner.isDirectory && owner.name.matches(Regex("[A-Za-z0-9_-]{1,80}")) && owner.canonicalFile == owner.absoluteFile) { "activity_backup_path" }
-            listOf("pet", "study", "body").mapNotNull { kind ->
+            listOf("pet", "study", "body", "desires").mapNotNull { kind ->
                 val name = "orbis-activities/${owner.name}/$kind.json"
                 val target = exact(root, name)
                 if(target.exists() || File(target.path + ".bak").exists()) name to target else null
@@ -47,6 +47,7 @@ internal object ActivitiesBackup {
         try {
             val text = Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
             if(name.endsWith("/pet.json")) PetRules.validate(json.decodeFromString<PetState>(text))
+            else if(name.endsWith("/desires.json")) me.rerere.rikkahub.data.orbis.desire.LocalDesireRepository.validate(json.decodeFromString<me.rerere.rikkahub.data.orbis.desire.LocalDesireState>(text))
             else if(name.endsWith("/body.json")) {
                 require(bytes.size <= me.rerere.rikkahub.data.orbis.body.BodyRules.MAX_BYTES)
                 me.rerere.rikkahub.data.orbis.body.BodyRules.validate(json.decodeFromString<me.rerere.rikkahub.data.orbis.body.BodyState>(text))

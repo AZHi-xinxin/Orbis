@@ -21,6 +21,7 @@ internal data class MemoryInjectionNote(
 data class OrbisMemorySelected(
     val id: String, val text: String, val revision: Int, val kind: String,
     val sourceEventId: String? = null, val sourceCreatedAt: Long? = null, val minIntervalTurns: Int = 0,
+    val desire: String? = null,
 )
 
 @Serializable
@@ -78,6 +79,7 @@ internal fun selectOrbisMemory(
 }
 
 private fun renderMemoryEntry(entry: OrbisMemorySelected): String = buildJsonObject {
+    entry.desire?.let { put("desire",it) }
     put("id", entry.id); put("kind", entry.kind); put("text", entry.text)
     if (entry.kind == "compaction_excerpt") {
         put("source", "压缩摘要片段，不是当年逐字原话")

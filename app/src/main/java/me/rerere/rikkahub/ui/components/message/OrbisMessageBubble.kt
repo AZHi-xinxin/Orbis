@@ -3,6 +3,11 @@ package me.rerere.rikkahub.ui.components.message
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.Alignment
+import me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme
+import me.rerere.rikkahub.data.orbis.theme.themeArgb
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -36,6 +41,19 @@ internal fun OrbisMessageBubble(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val custom = LocalChatTheme.current?.body?.bubbles?.let { if (user) it.user else it.assistant }
+    if (custom != null) {
+        BoxWithConstraints(modifier, contentAlignment = if (user) Alignment.TopEnd else Alignment.TopStart) {
+            val shape = RoundedCornerShape(custom.radius.dp)
+            Box(Modifier.widthIn(max = maxWidth * custom.maxWidthRatio).clip(shape).background(Color(themeArgb(custom.bg)))) {
+                CompositionLocalProvider(LocalContentColor provides Color(themeArgb(custom.text)),
+                    LocalOrbisChatTextColor provides Color(themeArgb(custom.text))) {
+                    Column(Modifier.padding(custom.padding.dp), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
+                }
+            }
+        }
+        return
+    }
     val options = appearance.normalized()
     val dark = LocalDarkMode.current
     val colors = OrbisTheme.colors

@@ -295,6 +295,7 @@ fun ChatPage(
         }
     }
 
+    me.rerere.rikkahub.ui.pages.orbis.AssistantThemeProvider(conversation.assistantId.toString()) {
     when {
         isBigScreen -> {
             PermanentNavigationDrawer(
@@ -386,6 +387,7 @@ fun ChatPage(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -429,9 +431,11 @@ private fun ChatPageContent(
         inCall = batchVoiceState.phase != VoicePhase.Off)
 
     val startupAppearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
-    val startupInheritBackground = !startupAppearance.backgroundEnabled &&
+    val activeTheme = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current
+    val startupInheritBackground = activeTheme == null && !startupAppearance.backgroundEnabled &&
         (assistant.background != null || assistant.useGradientBackground)
     val startupImage = when {
+        activeTheme != null -> activeTheme.image
         BuildConfig.ORBIS_ENABLED && !startupInheritBackground ->
             startupAppearance.backgroundImage?.takeIf { startupAppearance.backgroundEnabled && it.isNotBlank() }
         assistant.useGradientBackground -> null
@@ -489,7 +493,7 @@ private fun ChatPageContent(
     ) {
         if (BuildConfig.ORBIS_ENABLED) {
             val appearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
-            val inheritBackground = !appearance.backgroundEnabled &&
+            val inheritBackground = activeTheme == null && !appearance.backgroundEnabled &&
                 (assistant.background != null || assistant.useGradientBackground)
             if (inheritBackground) AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState),
                 onImageSettled = imageSettled)

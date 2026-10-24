@@ -39,4 +39,5 @@ internal fun ASRProviderSetting.forVoiceCallSilence(): ASRProviderSetting = when
     // segmentDurationSec still belongs to dictation, and must not delay every call turn.
     is ASRProviderSetting.MiMo -> copy()
     is ASRProviderSetting.Step -> copy()
+    is ASRProviderSetting.SiliconFlow -> copy()
 }

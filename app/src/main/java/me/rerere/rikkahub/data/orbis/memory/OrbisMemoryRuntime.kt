@@ -26,6 +26,7 @@ class OrbisMemoryRuntime(
     private val repository: OrbisMemoryRepository,
     private val settingsStore: SettingsStore,
     private val semanticRecall: SemanticRecall? = null,
+    private val desireAnnotations: suspend (String) -> Map<String,String> = { emptyMap() },
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -43,6 +44,11 @@ class OrbisMemoryRuntime(
             } else emptyList()
         } catch (cancel: CancellationException) { throw cancel
         } catch (_: Exception) { emptyList() }
+        val wants = try {
+            if (!readOnly && me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.LocalDesire in assistant.localTools &&
+                assistant.orbisMemoryAutoInject && assistant.orbisMemoryMode != OrbisMemoryMode.LIGHT)
+                withTimeoutOrNull(80) { desireAnnotations(owner) }.orEmpty() else emptyMap()
+        } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { emptyMap() }
         val frozen = try {
             database.withTransaction {
                 val dao = database.orbisMemoryTurnDao()
@@ -81,8 +87,9 @@ class OrbisMemoryRuntime(
                 val semanticHits = semantic.filter { entry -> previous[entry.id]?.let {
                     ordinal - it >= entry.minIntervalTurns.coerceAtLeast(1)
                 } ?: true }
-                val selection = limitFrozenMemory(OrbisMemorySelection(lexical.entries + semanticHits),
-                    assistant.orbisMemoryMode)
+                val selection = me.rerere.rikkahub.data.orbis.desire.attachLocalDesires(
+                    limitFrozenMemory(OrbisMemorySelection(lexical.entries + semanticHits), assistant.orbisMemoryMode),
+                    wants, assistant.orbisMemoryMode)
                 if (!readOnly) {
                     dao.insert(OrbisMemoryTurnEntity(owner, key, ordinal, json.encodeToString(selection), System.currentTimeMillis()))
                     if (selection.entries.isNotEmpty()) dao.recordSurfacing(selection.entries.map {
@@ -103,7 +110,9 @@ class OrbisMemoryRuntime(
             if (current == null || !current.orbisMemoryAutoInject || current.orbisMemoryMode == OrbisMemoryMode.LIGHT) {
                 projectOrbisMemory(request, OrbisMemorySelection())
             } else {
-                val ordinary = selected.entries.filter { it.kind != "compaction_excerpt" }
+                val ordinary = selected.entries.filter { it.kind != "compaction_excerpt" }.map {
+                    if (!readOnly && me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.LocalDesire in current.localTools) it else it.copy(desire=null)
+                }
                 val ids = try { repository.eligibleInjectionIds(owner, ordinary.map { it.id })
                 } catch (cancel: CancellationException) { throw cancel
                 } catch (_: Exception) { emptySet() }

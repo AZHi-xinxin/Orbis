@@ -582,7 +582,7 @@ fun ChatInput(
                                 canStartVideo = videoUnavailableReason == null,
                                 videoUnavailableReason = videoUnavailableReason,
                                 batchVoiceMode = settings.getSelectedASRProvider().let {
-                                    it is ASRProviderSetting.MiMo || it is ASRProviderSetting.Step
+                                    it is ASRProviderSetting.MiMo || it is ASRProviderSetting.Step || it is ASRProviderSetting.SiliconFlow
                                 },
                                 canSpeak = ttsAvailable,
                                 speaking = ttsSpeaking,

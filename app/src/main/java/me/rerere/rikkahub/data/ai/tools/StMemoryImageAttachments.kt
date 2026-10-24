@@ -16,7 +16,7 @@ import kotlin.uuid.Uuid
 internal const val ST_IMAGE_LIST_TOOL = "orbis_list_current_images"
 internal const val ST_IMAGE_STAGE_TOOL = "stage_memory_image_upload"
 internal const val ST_IMAGE_MAX_BYTES = 4 * 1024 * 1024
-private const val MAX_CURRENT_IMAGES = 8
+private const val IMAGE_PAGE_SIZE = 8
 
 /** Only used after the server explicitly advertises the upload-reference protocol. */
 internal fun stImageReferenceSchema(schema: InputSchema?): InputSchema {
@@ -37,40 +37,42 @@ internal data class StImageAttachmentScope(
     val conversationId: Uuid,
     val userMessageId: Uuid?,
     val branchTailUserMessageId: Uuid? = userMessageId,
+    val sourceMessageIds: Set<Uuid> = userMessageId?.let(::setOf).orEmpty(),
+    val compactionEpoch: Long? = null,
 ) {
     fun images(conversation: Conversation?): List<StChatImage> {
         require(conversation != null && conversation.id == conversationId &&
             conversation.assistantId == assistantId) { "st_image_conversation_changed" }
         val branch = conversation.currentMessages
+        require(compactionEpoch == null || conversation.compactionEpoch == compactionEpoch) { "st_image_source_scope_changed" }
         require(branch.lastOrNull { it.role == MessageRole.USER }?.id == branchTailUserMessageId) {
             "st_image_source_message_changed"
         }
-        if (userMessageId == null) return emptyList()
-        val user = branch.singleOrNull { it.id == userMessageId }
-        require(user != null && user.role == MessageRole.USER) { "st_image_source_message_changed" }
-        if (user.orbisEvent != null || user.isSynthetic) return emptyList()
-        val images = user.parts.mapIndexedNotNull { index, part ->
-            (part as? UIMessagePart.Image)?.let { StChatImage(index, it.url) }
-        }
-        require(images.size <= MAX_CURRENT_IMAGES) { "st_image_too_many_current_images" }
-        return images
+        require(branch.map { it.id }.toSet().containsAll(sourceMessageIds)) { "st_image_source_scope_changed" }
+        return branch.filter { it.id in sourceMessageIds &&
+            it.role in setOf(MessageRole.USER, MessageRole.ASSISTANT) && it.orbisEvent == null && !it.isSynthetic
+        }.flatMap { message -> message.parts.mapIndexedNotNull { index, part ->
+            (part as? UIMessagePart.Image)?.let { StChatImage(index, it.url, message.id, message.role.name) }
+        } }
     }
 
     companion object {
         fun capture(assistantId: Uuid, conversationId: Uuid, conversation: Conversation?,
-                    sourceMessageIds: Set<Uuid>): StImageAttachmentScope {
+                    sourceMessageIds: Set<Uuid>, contextMessageLimit: Int = 0): StImageAttachmentScope {
             require(conversation != null && conversation.id == conversationId &&
                 conversation.assistantId == assistantId) { "st_image_conversation_changed" }
             val branch = conversation.currentMessages
             require(branch.map { it.id }.toSet().containsAll(sourceMessageIds)) { "st_image_source_scope_changed" }
+            val selected = me.rerere.rikkahub.data.ai.GenerationContextSelection(
+                branch.filter { it.id in sourceMessageIds }, contextMessageLimit).requestMessages().map { it.id }.toSet()
             return StImageAttachmentScope(assistantId, conversationId,
                 branch.lastOrNull { it.id in sourceMessageIds && it.role == MessageRole.USER }?.id,
-                branch.lastOrNull { it.role == MessageRole.USER }?.id)
+                branch.lastOrNull { it.role == MessageRole.USER }?.id, selected, conversation.compactionEpoch)
         }
     }
 }
 
-internal data class StChatImage(val partIndex: Int, val url: String)
+internal data class StChatImage(val partIndex: Int, val url: String, val messageId: Uuid? = null, val role: String = "USER")
 internal data class StImageOriginal(val bytes: ByteArray, val mimeType: String) {
     val sha256: String get() = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
 }
@@ -125,7 +127,7 @@ internal class StMemoryImageAttachmentRegistry(
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 255) }
 
-/** Listing reads only the current user message. It does not contact ST or grant upload authority. */
+/** Bounded pages from this generation's selected branch; no compressed or other-chat history. */
 internal fun createStImageListTool(
     scope: StImageAttachmentScope,
     destinations: List<StImageDestination>,
@@ -135,23 +137,34 @@ internal fun createStImageListTool(
     isCurrent: () -> Boolean,
 ): Tool = Tool(
     name = ST_IMAGE_LIST_TOOL,
-    description = "列出本次生成范围最后一条用户消息中的图片，获得对应 ST 的 upload_ref、mime_type 和原件 SHA-256。" +
+    description = "分页列出当前助手、当前聊天、本轮未压缩上下文中仍可见的图片（含前面的消息），每页最多8张。offset默认为0，按next_offset翻页。获得对应 ST 的 upload_ref、mime_type 和原件 SHA-256。" +
         "仅本机读取，不上传、不存入记忆。需要记住图片时先创建或找到目标记忆，再把返回的 upload_ref 原样交给该 ST 的 store_memory_image；" +
-        "不要生成 data_base64、使用文件路径或将其它消息图片冒充本次图片。引用失效时重新列出，不自动重放结果未知的存图。",
-    parameters = { InputSchema.Obj(buildJsonObject {}, required = emptyList()) },
-    hostApproval = HostToolApproval("orbis:st_current_images", "st-current-images-v1", "读取当前聊天图片引用"),
+        "不要生成 data_base64、使用文件路径或读取其他聊天/已压缩图片。引用失效时重新列出，不自动重放结果未知的存图。",
+    parameters = { InputSchema.Obj(buildJsonObject {
+        put("offset", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 100000) })
+    }, required = emptyList()) },
+    hostApproval = HostToolApproval("orbis:st_current_images", "st-visible-context-images-v2", "读取当前聊天可见图片引用"),
     isApprovalCurrent = isCurrent,
     execute = { value -> withContext(Dispatchers.IO) {
-        require(value is JsonObject && value.isEmpty()) { "st_image_invalid_list_arguments" }
+        require(value is JsonObject && value.keys.all { it == "offset" }) { "st_image_invalid_list_arguments" }
+        val offset = value["offset"]?.let { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.intOrNull
+            ?: error("st_image_invalid_list_arguments") } ?: 0
+        require(offset in 0..100000) { "st_image_invalid_list_arguments" }
         check(isCurrent()) { "st_image_target_changed" }
         val images = scope.images(readConversation())
         val items = buildJsonArray {
-            images.forEachIndexed { number, image ->
-                val original = readOriginal(image.url)
+            images.drop(offset).take(IMAGE_PAGE_SIZE).forEachIndexed { number, image ->
+                val original = try { readOriginal(image.url) } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { null }
+                if (original == null) {
+                    add(buildJsonObject { put("image_number", offset + number + 1); put("state", "original_unavailable") })
+                    return@forEachIndexed
+                }
                 destinations.forEach { destination ->
                     val prepared = registry.reserve(scope, destination, image, original)
                     add(buildJsonObject {
-                        put("image_number", number + 1); put("server", destination.serverName)
+                        put("image_number", offset + number + 1); put("message_id", image.messageId?.toString())
+                        put("role", image.role); put("part_number", image.partIndex + 1); put("server", destination.serverName)
                         put("store_tool", destination.storeTool); put("upload_ref", prepared.uploadRef)
                         if (destination.storeTool.endsWith("__stbrain_manage")) put("action", "store_memory_image")
                         put("mime_type", prepared.mimeType); put("sha256", prepared.sha256)
@@ -161,7 +174,9 @@ internal fun createStImageListTool(
             }
         }
         listOf(UIMessagePart.Text(buildJsonObject {
-            put("images", items); put("memory_written", false); put("uploaded", false)
+            put("images", items); put("total_images", images.size)
+            put("next_offset", if (offset + IMAGE_PAGE_SIZE < images.size) JsonPrimitive(offset + IMAGE_PAGE_SIZE) else JsonNull)
+            put("memory_written", false); put("uploaded", false)
         }.toString()))
     } },
 )

@@ -38,10 +38,12 @@ class BatchVoiceASRController(
     private val context: Context,
     client: OkHttpClient,
     provider: ASRProviderSetting,
+    private val dictationMode: Boolean = false,
 ) : ASRController {
     private val sampleRate = when (provider) {
         is ASRProviderSetting.MiMo -> provider.sampleRate
         is ASRProviderSetting.Step -> provider.sampleRate
+        is ASRProviderSetting.SiliconFlow -> provider.sampleRate
         else -> error("Not a batch voice provider")
     }
     // At most two queued segments plus the in-flight request, each bounded to 18 seconds.
@@ -56,6 +58,7 @@ class BatchVoiceASRController(
     private var session: BatchVoiceTurnSession? = null
     private var recorder: AudioRecord? = null
     private var recording: Job? = null
+    private var observation: Job? = null
     private var disposed = false
     private var ready = false
     private var paused = false
@@ -63,13 +66,18 @@ class BatchVoiceASRController(
     override fun setPcmObserver(observer: ((ByteArray, Int) -> Unit)?) = pcmObserver.set(observer)
 
     override fun start(onTranscriptChange: (String) -> Unit) = synchronized(lock) {
-        if (disposed || session != null) return@synchronized
+        if (disposed) return@synchronized
+        if (dictationMode && !mutableState.value.isRecording) {
+            observation?.cancel(); session?.cancel(); session = null
+            recording?.cancel(); releaseRecorder(); paused = false; ready = false
+        }
+        if (session != null) return@synchronized
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             mutableState.value = ASRState(status = ASRStatus.Error, isAvailable = true,
                 errorMessage = "请允许麦克风权限后重新发起通话。[ASR_MIC_PERMISSION]")
             return@synchronized
         }
-        val owner = try { BatchVoiceTurnSession(scope, sampleRate, transcriber::transcribe) }
+        val owner = try { BatchVoiceTurnSession(scope, sampleRate, transcriber::transcribe, automaticEndpoint = !dictationMode) }
         catch (_: IllegalArgumentException) {
             mutableState.value = ASRState(status = ASRStatus.Error, isAvailable = true,
                 errorMessage = "语音采样率配置无效，请在识别设置中选择有效采样率。[ASR_SAMPLE_RATE]")
@@ -77,11 +85,12 @@ class BatchVoiceASRController(
         }
         session = owner
         mutableState.value = ASRState(status = ASRStatus.Connecting, isAvailable = true)
-        scope.launch {
+        observation = scope.launch {
             var previousTranscript = ""
             owner.state.collect { value -> synchronized(lock) {
                 if (!disposed && session === owner && ready) {
-                    mutableState.value = value.copy(amplitudes = mutableState.value.amplitudes)
+                    mutableState.value = value.copy(amplitudes = mutableState.value.amplitudes,
+                        status = if (dictationMode && value.voiceTurn.isComplete) ASRStatus.Idle else value.status)
                     if (value.transcript != previousTranscript) {
                         previousTranscript = value.transcript
                         onTranscriptChange(value.transcript)
@@ -102,6 +111,15 @@ class BatchVoiceASRController(
     }
 
     override fun stop() = synchronized(lock) {
+        if (dictationMode && !ready) {
+            observation?.cancel()
+            session?.cancel()
+            session = null
+            pauseCapture()
+            mutableState.value = ASRState(status = ASRStatus.Idle, isAvailable = true)
+            return@synchronized
+        }
+        if (dictationMode && session != null) mutableState.value = mutableState.value.copy(status = ASRStatus.Stopping)
         session?.finish()
         pauseCapture()
     }

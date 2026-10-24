@@ -16,7 +16,7 @@ sealed class ASRProviderSetting {
     /** MiMo/Step use local speech endpointing plus HTTP transcription, not server VAD. */
     val supportsVoiceCall: Boolean
         get() = when (this) {
-            is OpenAIRealtime, is DashScope, is Volcengine, is MiMo, is Step -> true
+            is OpenAIRealtime, is DashScope, is Volcengine, is MiMo, is Step, is SiliconFlow -> true
         }
 
     abstract fun copyProvider(
@@ -94,6 +94,20 @@ sealed class ASRProviderSetting {
                 name = name,
             )
         }
+    }
+
+    /** Multipart WAV transcription, locally segmented. Never treated as server VAD. */
+    @Serializable
+    @SerialName("siliconflow")
+    data class SiliconFlow(
+        override val id: Uuid = Uuid.random(),
+        override val name: String = "硅基流动 ASR",
+        val apiKey: String = "",
+        val baseUrl: String = "https://api.siliconflow.cn/v1",
+        val model: String = "FunAudioLLM/SenseVoiceSmall",
+        val sampleRate: Int = 16000,
+    ) : ASRProviderSetting() {
+        override fun copyProvider(id: Uuid, name: String): ASRProviderSetting = copy(id = id, name = name)
     }
 
     /**
@@ -188,6 +202,7 @@ sealed class ASRProviderSetting {
                 Volcengine::class,
                 MiMo::class,
                 Step::class,
+                SiliconFlow::class,
             )
         }
     }

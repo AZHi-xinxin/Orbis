@@ -207,7 +207,7 @@ class ChatToolFactory(
             readBoundConversation()
                 ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
                 ?.takeIf { current -> current.currentMessages.map { it.id }.toSet().containsAll(imageSourceMessageIds!!) }
-                ?.let { StImageAttachmentScope.capture(assistant.id, imageConversationId, it, imageSourceMessageIds!!) }
+                ?.let { StImageAttachmentScope.capture(assistant.id, imageConversationId, it, imageSourceMessageIds!!, assistant.contextMessageLimit) }
         val readImageConversation: suspend () -> me.rerere.rikkahub.data.model.Conversation? = {
             readBoundConversation()
         }
@@ -262,6 +262,20 @@ class ChatToolFactory(
         if (BuildConfig.ORBIS_ENABLED) {
             if (!consultationReferenceOnly) {
                 fun liveOwner() = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                if (LocalToolOption.HumanHealth in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.health.healthTool(context, assistant.id.toString(),
+                        { liveOwner()?.localTools?.contains(LocalToolOption.HumanHealth) == true }))
+                }
+                if (LocalToolOption.LocalDesire in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.desire.localDesireTool(context, assistant.id.toString(),
+                        org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository>(),
+                        { liveOwner()?.localTools?.contains(LocalToolOption.LocalDesire) == true }))
+                }
+                if (LocalToolOption.ThemeDesign in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.theme.themeTool(
+                        { me.rerere.rikkahub.data.orbis.theme.openThemes(context, assistant.id.toString()) },
+                        { liveOwner()?.localTools?.contains(LocalToolOption.ThemeDesign) == true }))
+                }
                 if (assistant.orbisBodyEnabled && conversationId != null) {
                     // Registering tools must never reinterpret historical human text as a new
                     // event after enable/retry. Only ChatService's accepted-input hooks record it.

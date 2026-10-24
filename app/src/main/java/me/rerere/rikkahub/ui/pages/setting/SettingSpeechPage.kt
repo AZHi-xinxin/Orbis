@@ -579,6 +579,14 @@ private fun AddASRProviderButton(onAdd: (ASRProviderSetting) -> Unit) {
                 }
             )
             DropdownMenuItem(
+                text = { Text("硅基流动") },
+                onClick = {
+                    currentProvider = ASRProviderSetting.SiliconFlow()
+                    showTypeMenu = false
+                    showBottomSheet = true
+                }
+            )
+            DropdownMenuItem(
                 text = { Text("Step") },
                 onClick = {
                     currentProvider = ASRProviderSetting.Step()
@@ -854,6 +862,7 @@ private fun ASRProviderItem(
                             is ASRProviderSetting.Volcengine -> "Volcengine"
                             is ASRProviderSetting.MiMo -> "MiMo"
                             is ASRProviderSetting.Step -> "Step"
+                            is ASRProviderSetting.SiliconFlow -> "硅基流动"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

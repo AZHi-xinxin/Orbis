@@ -38,6 +38,11 @@ internal class BatchVoiceTranscriber(client: OkHttpClient, private val provider:
                     if (source.request(MAX_RESPONSE_BYTES + 1)) invalidResponse()
                     parseMiMoVoiceResponse(source.readUtf8())
                 }
+                is ASRProviderSetting.SiliconFlow -> {
+                    val source = response.body.source()
+                    if (source.request(MAX_RESPONSE_BYTES + 1)) invalidResponse()
+                    parseSiliconFlowResponse(source.readUtf8())
+                }
                 is ASRProviderSetting.Step -> parseStepVoiceResponse(response.body.source())
                 else -> error("Not a batch voice provider")
             }
@@ -47,6 +52,15 @@ internal class BatchVoiceTranscriber(client: OkHttpClient, private val provider:
 
 internal fun batchVoiceRequest(provider: ASRProviderSetting, pcm: ByteArray): Request {
     require(pcm.isNotEmpty() && pcm.size % 2 == 0 && pcm.size <= 1_440_000)
+    if (provider is ASRProviderSetting.SiliconFlow) {
+        require(provider.sampleRate == 16000 && provider.model.isNotBlank())
+        return Request.Builder().url("${provider.baseUrl.trim().trimEnd('/')}/audio/transcriptions")
+            .header("Authorization", "Bearer ${provider.apiKey}")
+            .post(okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                .addFormDataPart("model", provider.model)
+                .addFormDataPart("file", "speech.wav", pcmVoiceWav(pcm, provider.sampleRate).toRequestBody("audio/wav".toMediaType()))
+                .build()).build()
+    }
     val builder = Request.Builder()
     val body = when (provider) {
         is ASRProviderSetting.MiMo -> {
@@ -159,3 +173,12 @@ private fun parseObject(value: String): JsonObject =
 private fun invalidResponse(): Nothing = throw BatchVoiceRecognitionException(
     "识别服务没有返回完整有效结果，本句未提交；请稍后重试。[ASR_BATCH_RESPONSE]")
 private const val MAX_RESPONSE_BYTES = 1_048_576L
+
+/** Reject error envelopes or non-text results instead of pretending recognition succeeded. */
+internal fun parseSiliconFlowResponse(value: String): String {
+    val root = parseObject(value)
+    if (root["error"] != null || root["code"] != null) invalidResponse()
+    val text = (root["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: invalidResponse()
+    if (text.length > 64_000) invalidResponse()
+    return text.trim()
+}

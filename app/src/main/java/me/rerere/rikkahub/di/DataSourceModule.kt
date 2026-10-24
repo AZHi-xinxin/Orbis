@@ -114,8 +114,16 @@ val dataSourceModule = module {
     single { McpManager(settingsStore = get(), appScope = get(), filesManager = get()) }
 
     single { me.rerere.rikkahub.data.orbis.memory.SemanticMemoryRecall(get(), get(), get()) }
-    single { me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime(get(), get(), get(),
-        get<me.rerere.rikkahub.data.orbis.memory.SemanticMemoryRecall>()) }
+    single {
+        val context: Context = get()
+        me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime(get(), get(), get(),
+            get<me.rerere.rikkahub.data.orbis.memory.SemanticMemoryRecall>(), desireAnnotations = { owner ->
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    me.rerere.rikkahub.data.orbis.desire.desireAnnotations(
+                        me.rerere.rikkahub.data.orbis.desire.openDesires(context,owner).snapshot().entries)
+                }
+            })
+    }
 
     single {
         val settings: SettingsStore = get()

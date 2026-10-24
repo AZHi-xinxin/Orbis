@@ -17,9 +17,10 @@ internal class BatchVoiceTurnSession(
     private val transcribe: suspend (ByteArray) -> String,
     segmentMs: Int = 15_000,
     queueCapacity: Int = 2,
+    automaticEndpoint: Boolean = true,
 ) {
     private val lock = Any()
-    private val detector = LocalVoiceEndpointDetector(sampleRate, segmentMs = segmentMs)
+    private val detector = LocalVoiceEndpointDetector(sampleRate, segmentMs = segmentMs, automaticEndpoint = automaticEndpoint)
     private val segments = Channel<ByteArray>(queueCapacity)
     private val id = UUID.randomUUID().toString()
     private val mutableState = MutableStateFlow(ASRState(status = ASRStatus.Listening, isAvailable = true))

@@ -8,6 +8,7 @@ import {
   Image,
   LoaderCircle,
   Mic,
+  Monitor,
   Plus,
   Square,
   Video,
@@ -32,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { Textarea } from "~/components/ui/textarea";
+import { useScreenCapture } from "~/components/input/screen-capture";
 import { resolveFileUrl } from "~/lib/files";
 import { cn } from "~/lib/utils";
 import api from "~/services/api";
@@ -232,6 +234,16 @@ function ChatInputInner({
   const [error, setError] = React.useState<string | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
   const dragDepthRef = React.useRef(0);
+  const uploadIdentity = draftKey ?? conversation?.id ?? currentAssistant?.id ?? "new";
+  const currentUploadIdentity = React.useRef(uploadIdentity);
+  const uploadGeneration = React.useRef(0);
+  if (currentUploadIdentity.current !== uploadIdentity) {
+    currentUploadIdentity.current = uploadIdentity;
+    uploadGeneration.current++;
+  }
+  const uploadMounted = React.useRef(true);
+  React.useEffect(() => { uploadMounted.current = true; return () => { uploadMounted.current = false; uploadGeneration.current++; }; }, []);
+  React.useEffect(() => { setUploading(false); setError(null); }, [uploadIdentity]);
 
   const isEmpty = value.trim().length === 0 && attachments.length === 0;
 
@@ -255,8 +267,11 @@ function ChatInputInner({
   const uploadFiles = React.useCallback(
     async (fileList: FileList | globalThis.File[] | null) => {
       if (!ready || !fileList || fileList.length === 0) {
-        return;
+        return false;
       }
+      const target = uploadIdentity;
+      const generation = uploadGeneration.current;
+      const stillCurrent = () => uploadMounted.current && uploadGeneration.current === generation && currentUploadIdentity.current === target;
 
       const allFiles = Array.from(fileList);
       const results = await Promise.all(
@@ -264,6 +279,7 @@ function ChatInputInner({
       );
       const uploadableFiles = results.filter((r) => r.allowed);
       const skippedFiles = results.filter((r) => !r.allowed);
+      if (!stillCurrent()) return false;
 
       if (skippedFiles.length > 0) {
         toast.warning(
@@ -272,7 +288,7 @@ function ChatInputInner({
       }
 
       if (uploadableFiles.length === 0) {
-        return;
+        return false;
       }
 
       const formData = new FormData();
@@ -293,19 +309,24 @@ function ChatInputInner({
           formData,
         );
         const parts = response.files.map(toMessagePart);
+        if (!stillCurrent()) return false;
         onAddParts(parts);
+        return parts.length > 0;
       } catch (uploadError) {
         const message =
           uploadError instanceof Error
             ? uploadError.message
             : t("chat.upload_failed");
-        setError(message);
+        if (stillCurrent()) setError(message);
+        return false;
       } finally {
-        setUploading(false);
+        if (stillCurrent()) setUploading(false);
       }
     },
-    [onAddParts, ready, t],
+    [onAddParts, ready, t, uploadIdentity],
   );
+
+  const screenCapture = useScreenCapture(uploadIdentity, canUpload, file => uploadFiles([file]));
 
   const handlePrimaryAction = React.useCallback(async () => {
     if (actionDisabled) {
@@ -498,6 +519,7 @@ function ChatInputInner({
         className,
       )}
     >
+      {screenCapture.dialog}
       <div className="mx-auto w-full max-w-3xl px-4 py-4">
         <div
           data-orbis-composer="true"
@@ -649,7 +671,7 @@ function ChatInputInner({
                   <Button
                     variant="ghost"
                     size="icon"
-                    disabled={!canUpload}
+                    disabled={!canUpload || screenCapture.busy}
                     className="size-8 rounded-full text-muted-foreground hover:text-foreground"
                   >
                     <Plus
@@ -665,6 +687,9 @@ function ChatInputInner({
                   side="top"
                   align="start"
                 >
+                  <DropdownMenuItem onSelect={() => { void screenCapture.start(); }}>
+                    <Monitor className="size-4" />截图并裁剪
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => {
                       imageInputRef.current?.click();
@@ -750,6 +775,9 @@ function ChatInputInner({
         </p>
         {error ? (
           <p className="mt-1 text-center text-xs text-destructive">{error}</p>
+        ) : null}
+        {screenCapture.notice ? (
+          <p role="status" className="mt-1 text-center text-xs text-muted-foreground">{screenCapture.notice}</p>
         ) : null}
       </div>
     </div>

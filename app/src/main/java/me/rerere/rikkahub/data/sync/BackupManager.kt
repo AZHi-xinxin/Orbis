@@ -144,6 +144,13 @@ class BackupManager(
                         coroutine.ensureActive()
                         addFile(zip, file, name) { coroutine.ensureActive() }
                     }
+                    val themes = me.rerere.rikkahub.data.orbis.theme.ThemeBackup.stageSnapshot(
+                        context.filesDir, File(staging, "themes-snapshot"),
+                        checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)
+                    for ((name, file) in themes) {
+                        coroutine.ensureActive()
+                        addFile(zip, file, name) { coroutine.ensureActive() }
+                    }
                     val activities = me.rerere.rikkahub.data.orbis.activities.ActivitiesBackup.stageSnapshot(
                         context.filesDir, File(staging, "activities-snapshot"),
                         checkCancelled = { coroutine.ensureActive() }, beforeFile = ::reserve)

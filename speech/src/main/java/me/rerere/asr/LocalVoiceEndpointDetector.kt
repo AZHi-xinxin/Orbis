@@ -13,6 +13,7 @@ internal class LocalVoiceEndpointDetector(
     val sampleRate: Int,
     private val silenceMs: Int = 3_000,
     private val segmentMs: Int = 15_000,
+    private val automaticEndpoint: Boolean = true,
 ) {
     sealed interface Event {
         data object Started : Event
@@ -79,7 +80,7 @@ internal class LocalVoiceEndpointDetector(
             segmentHasSpeech = segmentHasSpeech || voiced
         }
         silentFrames = if (voiced) 0 else silentFrames + 1
-        if (silentFrames * 20 >= silenceMs) {
+        if (automaticEndpoint && silentFrames * 20 >= silenceMs) {
             emitSegment(events)
             ended = true
             events.add(Event.Ended)

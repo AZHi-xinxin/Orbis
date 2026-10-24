@@ -59,6 +59,10 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
         }
     }
 
+    suspend fun availableDesireParents(assistantId: String, ids: List<String>): Set<String> {
+        owner(assistantId); require(ids.size <= 501)
+        return if (ids.isEmpty()) emptySet() else ids.chunked(400).flatMap { dao.desireParentIds(assistantId,it) }.toSet()
+    }
     suspend fun eligibleInjectionIds(assistantId: String, ids: List<String>): Set<String> {
         owner(assistantId)
         if (ids.size > 500) refuse("memory_page_limit")

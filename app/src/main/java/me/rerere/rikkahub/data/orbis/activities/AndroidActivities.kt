@@ -13,7 +13,7 @@ internal class AndroidActivityStorage(files: File, owner: String, kind: String) 
     private var loaded = false
     private var expectedHash: String? = null
     init {
-        require(owner.matches(Regex("[A-Za-z0-9_-]{1,80}")) && kind in setOf("pet", "study", "body"))
+        require(owner.matches(Regex("[A-Za-z0-9_-]{1,80}")) && kind in setOf("pet", "study", "body", "desires"))
         val base = files.canonicalFile
         val target = File(base, "orbis-activities/$owner/$kind.json")
         require(target.canonicalFile == target.absoluteFile)

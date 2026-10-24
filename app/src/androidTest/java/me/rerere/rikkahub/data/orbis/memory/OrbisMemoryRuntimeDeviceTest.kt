@@ -56,7 +56,12 @@ class OrbisMemoryRuntimeDeviceTest {
         val repo = OrbisMemoryRepository(db)
         val conversation = Uuid.random()
         val assistant: Assistant get() = settings.settingsFlow.value.assistants.first { it.id == initialAssistant.id }
-        fun runtime() = OrbisMemoryRuntime(db, repo, settings)
+        var desires: Map<String,String> = emptyMap()
+        val desireOwners = mutableListOf<String>()
+        fun runtime() = OrbisMemoryRuntime(db, repo, settings, desireAnnotations = { requestedOwner ->
+            desireOwners += requestedOwner
+            desires
+        })
         fun changeAssistant(change: (Assistant) -> Assistant) {
             val old = settings.settingsFlow.value
             settings.settingsFlow.value = old.copy(assistants = old.assistants.map {
@@ -211,4 +216,34 @@ class OrbisMemoryRuntimeDeviceTest {
     }
 
     private fun List<UIMessage>.text(): String = joinToString("\n") { it.toText() }
+
+    @Test(timeout = 30_000) fun desiresFollowFrozenSelectedMemoryAndLiveToolPermission() = runBlocking {
+        Fixture().use { f ->
+            val option = me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.LocalDesire
+            f.changeAssistant { it.copy(localTools=it.localTools+option) }
+            val id=f.store("synthetic parent", "synthetic memory")
+            val foreign=f.store("foreign parent",ownerId=f.other)
+            f.desires=mapOf(id to "synthetic frozen wish",foreign to "foreign wish")
+            val human=UIMessage.user("tea")
+            val base=listOf(UIMessage.system("stable system prefix"),human)
+            val first=f.begin(human)
+            assertEquals("synthetic frozen wish",first.selection.entries.single().desire)
+            val projected=first.project(base)
+            assertEquals(base.first(),projected.first())
+            assertTrue(projected.text().contains("synthetic frozen wish"))
+            assertFalse(projected.text().contains("foreign wish"))
+            f.desires=mapOf(id to "later edited wish")
+            assertEquals(first.selection,f.begin(human).selection)
+            f.changeAssistant { it.copy(localTools=it.localTools-option) }
+            assertFalse(first.project(projected).text().contains("synthetic frozen wish"))
+            assertTrue(first.project(projected).text().contains("synthetic memory"))
+            f.changeAssistant { it.copy(localTools=it.localTools+option) }
+            val readonly=checkNotNull(f.runtime().begin(f.assistant,f.conversation,listOf(human),readOnly=true))
+            assertFalse(readonly.project(base).text().contains("synthetic frozen wish"))
+            assertEquals("later edited wish",f.begin(UIMessage.user("tea next")).selection.entries.single().desire)
+            f.execute("delete"){put("id",id)}
+            assertEquals(base,first.project(projected))
+            assertEquals(setOf(f.owner),f.desireOwners.toSet())
+        }
+    }
 }

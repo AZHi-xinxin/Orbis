@@ -48,6 +48,9 @@ interface OrbisMemoryDAO {
     @Query("SELECT id,state,CASE WHEN summary_chars<=2000 THEN summary ELSE '' END AS summary,CASE WHEN body_chars<=300 THEN body ELSE NULL END AS body,CASE WHEN state='pinned' THEN CASE WHEN summary!='' THEN summary ELSE body END ELSE NULL END AS pin_text,tags,keywords,important,min_interval_turns,revision,created_at,updated_at FROM orbis_memory_note WHERE assistant_id=:assistantId AND deleted=0 AND (state='pinned' OR (state='conditional' AND (body_chars<=300 OR (summary!='' AND summary_chars<=2000)))) ORDER BY CASE WHEN state='pinned' THEN 0 ELSE 1 END,important DESC,updated_at DESC,id LIMIT :limit OFFSET :offset")
     suspend fun candidates(assistantId: String, limit: Int, offset: Int): List<OrbisMemoryCandidateRow>
 
+    @Query("SELECT id FROM orbis_memory_note WHERE assistant_id=:assistantId AND id IN (:ids) AND deleted=0 AND state!='paused'")
+    suspend fun desireParentIds(assistantId: String, ids: List<String>): List<String>
+
     @Query("SELECT id FROM orbis_memory_note WHERE assistant_id=:assistantId AND id IN (:ids) AND deleted=0 AND state IN ('conditional','pinned')")
     suspend fun eligibleInjectionIds(assistantId: String, ids: List<String>): List<String>
 

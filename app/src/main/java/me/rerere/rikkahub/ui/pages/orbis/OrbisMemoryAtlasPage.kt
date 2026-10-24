@@ -101,6 +101,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true, assistantIdOverride: Strin
     var localSnapshot by remember(owner) { mutableStateOf<OrbisLocalMemoryAtlas?>(null) }
     var localError by remember(owner) { mutableStateOf<String?>(null) }
     var localLoading by remember(owner) { mutableStateOf(false) }
+    var pendingDesireCount by remember(owner) { mutableIntStateOf(0) }
     val example = remember { Atlas.demo() }
     val graph: Atlas.Graph? = when (source) {
         OrbisAtlasSource.LOCAL -> localSnapshot.takeIf { knownOwner }
@@ -152,6 +153,9 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true, assistantIdOverride: Strin
         localLoading = true; localError = null
         try {
             localSnapshot = withContext(Dispatchers.IO) {
+                val wishes = runCatching { me.rerere.rikkahub.data.orbis.desire.openDesires(context,owner).snapshot().entries }.getOrDefault(emptyList())
+                pendingDesireCount = me.rerere.rikkahub.data.orbis.desire.pendingDesires(wishes,
+                    memories.availableDesireParents(owner,wishes.map { it.memoryId }))
                 val rows = memories.metadataSnapshot(owner, limit = 500)
                 val counts = memories.stats(owner)
                 localMemoryAtlas(rows, (counts.total - counts.deleted).coerceAtLeast(0))
@@ -213,8 +217,13 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true, assistantIdOverride: Strin
                     sourceDescription = if (source == OrbisAtlasSource.LOCAL) "本机助手记忆，只读元信息，不含正文或摘要" else null,
                     typeColor = if (source == OrbisAtlasSource.LOCAL) ::localMemoryAtlasColor else null,
                 )
+                if (source == OrbisAtlasSource.LOCAL && knownOwner) OrbisDesireGlow(pendingDesireCount,
+                    hostVisible && resumed && !paused && !reducedMotion && selected == null && !dragging,
+                    Modifier.fillMaxSize(), showLabel = false)
                 Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(top = if (compact) 16.dp else 25.dp)) {
                     Column(Modifier.padding(horizontal = 22.dp)) {
+                        if (source == OrbisAtlasSource.LOCAL && pendingDesireCount > 0)
+                            Text("${pendingDesireCount} 件想做的事", color = Color(0xFFE5C4C4), fontSize = 11.sp)
                         Text("${source.label} · MEMORY ATLAS", color = Color(0xFFBAA484), fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 2.sp)
                         if (!constrained) Text("记忆星盘", color = AtlasInk, fontSize = if (compact) 25.sp else 28.sp,
                             fontFamily = FontFamily.Serif, lineHeight = 36.sp, letterSpacing = 6.sp,
@@ -277,6 +286,8 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true, assistantIdOverride: Strin
                 }
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (source == OrbisAtlasSource.LOCAL && pendingDesireCount > 10)
+                        Text("想要的有很多…", color = Color(0xFFFFCAD1), fontSize = 14.sp)
                     selected?.let { index -> graph?.stars?.getOrNull(index)?.let { star ->
                         if (!constrained) AtlasMetadata(star, showDemo, onClose = { selected = null },
                             local = if (source == OrbisAtlasSource.LOCAL) localSnapshot?.metadata?.getOrNull(index) else null, modifier = Modifier

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.sync
 
+import me.rerere.rikkahub.data.orbis.theme.ThemeBackup
 import java.io.ByteArrayOutputStream
 import java.io.File
 import me.rerere.rikkahub.data.files.FileProtection
@@ -31,7 +32,7 @@ internal object OrbisLocalToolBackup {
         SCHEDULE -> ORBIS_SCHEDULE_MAX_BYTES
         KAOMOJI -> OrbisKaomojiRepository.MAX_STORAGE_CHARS * 4
         FileProtection.PATH -> FileProtection.MAX_BYTES
-        else -> VoiceCallBackup.maxBytes(path) ?: GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path) ?: CompanionSpacesBackup.maxBytes(path) ?: ActivitiesBackup.maxBytes(path)
+        else -> VoiceCallBackup.maxBytes(path) ?: GalleryBackup.maxBytes(path) ?: ContextPruningBackup.maxBytes(path) ?: CompanionSpacesBackup.maxBytes(path) ?: ActivitiesBackup.maxBytes(path) ?: ThemeBackup.maxBytes(path)
     }
 
     fun encodeSchedule(value: OrbisScheduleSnapshot): ByteArray = json.encodeToString(value).toByteArray(Charsets.UTF_8).also { validate(SCHEDULE, it) }
@@ -43,6 +44,7 @@ internal object OrbisLocalToolBackup {
             KAOMOJI -> kaomoji(bytes)
             FileProtection.PATH -> FileProtection.decode(text(path, bytes, setOf("version", "automatic", "overrides")))
             else -> if (ContextPruningBackup.maxBytes(path) != null) ContextPruningBackup.validate(path, bytes)
+                else if (ThemeBackup.maxBytes(path) != null) ThemeBackup.validate(path, bytes)
                 else if (ActivitiesBackup.maxBytes(path) != null) ActivitiesBackup.validate(path, bytes)
                 else error("local_tool_backup_unknown_path")
         }
@@ -121,6 +123,7 @@ internal object OrbisLocalToolBackup {
     fun validateStaged(payload: File) {
         VoiceCallBackup.validateStaged(payload)
         ActivitiesBackup.validateStaged(payload)
+        ThemeBackup.validateStaged(payload)
         GalleryBackup.validateStaged(payload)
         CompanionSpacesBackup.validateStaged(payload)
         ContextPruningBackup.validateStaged(payload)
@@ -134,6 +137,7 @@ internal object OrbisLocalToolBackup {
     fun prepareBeforeJournal(payload: File, liveFiles: File) {
         VoiceCallBackup.prepareBeforeJournal(payload, liveFiles)
         ActivitiesBackup.prepareBeforeJournal(payload, liveFiles)
+        ThemeBackup.prepareBeforeJournal(payload, liveFiles)
         GalleryBackup.prepareBeforeJournal(payload, liveFiles)
         CompanionSpacesBackup.prepareBeforeJournal(payload, liveFiles)
         ContextPruningBackup.prepareBeforeJournal(payload, liveFiles)
@@ -143,6 +147,7 @@ internal object OrbisLocalToolBackup {
     /** An explicit historical restore may replace progress, but must not unlock protected files. */
     fun prepareReplacementBeforeJournal(payload: File, liveFiles: File) {
         validateStaged(payload)
+        ThemeBackup.stripRestoredPermissions(payload)
         preparePaths(payload, liveFiles, listOf(FileProtection.PATH))
     }
 
@@ -198,6 +203,8 @@ internal object OrbisLocalToolBackup {
     private fun conflict(path: String) = if (path == SCHEDULE) "local_tool_backup_conflict_schedule" else "local_tool_backup_conflict_kaomoji"
 
     fun publicError(code: String?): String? = when (code) {
+        "theme_backup_conflict" -> "主题存在同编号不同版本，恢复已停止，原外观保留。"
+        "theme_backup_invalid", "theme_backup_path", "theme_backup_asset_missing" -> "主题或图片未通过校验，恢复已停止，原外观保留。"
         "voice_backup_owner", "voice_backup_path", "voice_backup_invalid" -> "通话档案内容或助手归属校验失败，未改动本机记录。"
         "voice_backup_conflict" -> "通话档案与本机已有记录不同，未覆盖原记录；可在版本恢复中明确选择要恢复的历史版本。"
         "activity_backup_conflict" -> "宠物或学习机档案与本机已有进度不同，未覆盖本机档案。请保留两份备份，迁移到无冲突的安装中恢复。"

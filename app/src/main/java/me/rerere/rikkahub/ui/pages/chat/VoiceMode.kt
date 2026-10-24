@@ -211,7 +211,7 @@ internal fun createVoiceAsr(context: Context, client: OkHttpClient, provider: AS
         is ASRProviderSetting.Volcengine -> {
             VolcengineASRController(context, client, callProvider, enableEchoCancellation = true)
         }
-        is ASRProviderSetting.MiMo, is ASRProviderSetting.Step -> BatchVoiceASRController(context, client, callProvider)
+        is ASRProviderSetting.MiMo, is ASRProviderSetting.Step, is ASRProviderSetting.SiliconFlow -> BatchVoiceASRController(context, client, callProvider)
     }
     // Audio focus and communication mode belong to the whole call, not each ASR turn.
     return delegate
