@@ -410,7 +410,8 @@ class ConversationRepository(
             }
             conversationDAO.update(
                 conversationToConversationEntity(conversation).let { incoming ->
-                    if (stored != null) incoming.copy(orbisPrompt = stored.orbisPrompt) else incoming
+                    if (stored != null) incoming.copy(orbisPrompt = stored.orbisPrompt,
+                        modeInjectionIds = stored.modeInjectionIds, lorebookIds = stored.lorebookIds) else incoming
                 }
             )
             // Preserve byte-identical historical rows instead of deleting and rebinding them.
@@ -420,6 +421,26 @@ class ConversationRepository(
             // must never re-expose the old page after the compacted page has committed.
             messageFtsManager.indexConversationInTransaction(conversation.copy(messageNodes = nodes))
         }
+    }
+
+    /** Save extension selection without reading/rewriting messages or waiting for recovery. */
+    suspend fun saveInjectionSelection(snapshot: Conversation,
+        edit: me.rerere.rikkahub.data.model.ConversationInjectionEdit,
+    ): me.rerere.rikkahub.data.model.ConversationInjectionSelection = database.withTransaction {
+        val stored = conversationDAO.getConversationById(snapshot.id.toString())
+        val current = stored?.let { conversationEntityToConversation(it, emptyList()) } ?: snapshot
+        val selection = edit.applyTo(current)
+        if (stored == null) {
+            check(snapshot.newConversation) {
+                "原会话已不存在，请重新打开聊天。"
+            }
+            conversationDAO.insert(conversationToConversationEntity(selection.applyTo(snapshot)))
+            saveMessageNodes(snapshot.id.toString(), snapshot.messageNodes)
+        } else {
+            check(conversationDAO.updateInjectionSelection(snapshot.id.toString(), snapshot.assistantId.toString(),
+                JsonInstant.encodeToString(selection.modeIds), JsonInstant.encodeToString(selection.lorebookIds)) == 1)
+        }
+        selection
     }
 
     /** Optional persistence for the independent human lane. Compare and append in ONE Room

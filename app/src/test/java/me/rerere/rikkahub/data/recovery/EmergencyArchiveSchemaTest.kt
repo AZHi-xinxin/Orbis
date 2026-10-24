@@ -15,7 +15,10 @@ import org.junit.rules.TemporaryFolder
 
 class EmergencyArchiveSchemaTest {
     @get:Rule val temporary = TemporaryFolder()
-    private val metadata = EmergencyArchiveMetadata("synthetic.orbis", "fixture", 1L)
+    // A wall-clock default can be omitted by Json's default encoder and then
+    // recreated a millisecond later on decode. Fixture metadata must be stable.
+    private val metadata = EmergencyArchiveMetadata("synthetic.orbis", "fixture", 1L,
+        createdAtEpochMs = 1_700_000_000_000L)
     private val bytes = "unchanged synthetic bytes".toByteArray()
 
     private fun manifest(path: String, schema: Int = 2) = EmergencyArchiveManifest(

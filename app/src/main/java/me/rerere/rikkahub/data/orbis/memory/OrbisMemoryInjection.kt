@@ -116,20 +116,67 @@ internal fun limitFrozenMemory(selection: OrbisMemorySelection, mode: OrbisMemor
     return OrbisMemorySelection(entries)
 }
 
-/** Replace only our tagged request part. Never rewrite saved human text or append a user wake. */
+/** Replace only our host-owned text, including a compact tool's request-only output. */
+private fun removeMemoryProjection(messages: List<UIMessage>): List<UIMessage> {
+    fun cleanParts(parts: List<UIMessagePart>): List<UIMessagePart> = parts.mapNotNull { part ->
+        if (part is UIMessagePart.Text &&
+            (part.metadata?.get(LOCAL_MEMORY_PROJECTION) as? JsonPrimitive)?.booleanOrNull == true &&
+            (part.metadata?.get("source") as? JsonPrimitive)?.contentOrNull == "orbis_local_memory" &&
+            (part.metadata?.get("human_authored") as? JsonPrimitive)?.booleanOrNull == false &&
+            (part.metadata?.get("instruction_authority") as? JsonPrimitive)?.contentOrNull == "none") null
+        else if (part is UIMessagePart.Tool) part.copy(output = cleanParts(part.output))
+        else part
+    }
+    return messages.mapNotNull { message ->
+        val parts = cleanParts(message.parts)
+        if (parts == message.parts) message
+        else if (message.role == MessageRole.SYSTEM && parts.isEmpty()) null
+        else message.copy(parts = parts)
+    }
+}
+
+private fun memoryProjectionPart(text: String) = UIMessagePart.Text(text, buildJsonObject {
+    put(LOCAL_MEMORY_PROJECTION, true); put("source", "orbis_local_memory")
+    put("human_authored", false); put("instruction_authority", "none"); put("request_only", true)
+})
+
+/** Pins stay in the stable prefix; changing recall belongs to this wake's existing input tail.
+ * Only request copies change. Never create another human wake or split a tool call/result pair.
+ */
 internal fun projectOrbisMemory(messages: List<UIMessage>, selection: OrbisMemorySelection): List<UIMessage> {
-    val clean = messages.map { message -> message.copy(parts = message.parts.filterNot {
-        (it.metadata?.get(LOCAL_MEMORY_PROJECTION) as? JsonPrimitive)?.booleanOrNull == true
-    }) }.filterNot { it.role == MessageRole.SYSTEM && it.parts.isEmpty() }
+    val clean = removeMemoryProjection(messages)
     if (selection.entries.isEmpty()) return clean
-    val part = UIMessagePart.Text(renderOrbisMemory(selection.entries), buildJsonObject {
-        put(LOCAL_MEMORY_PROJECTION, true); put("source", "orbis_local_memory")
-        put("human_authored", false); put("instruction_authority", "none")
-    })
-    val index = clean.indexOfFirst { it.role == MessageRole.SYSTEM }
-    return if (index >= 0) clean.mapIndexed { i, message ->
-        if (i == index) message.copy(parts = message.parts + part) else message
-    } else listOf(UIMessage.system("").copy(isSynthetic = true, parts = listOf(part))) + clean
+    val pins = selection.entries.filter { it.kind == "pinned" }
+    val pinned = if (pins.isEmpty()) clean else {
+        val part = memoryProjectionPart(renderOrbisMemory(pins))
+        val index = clean.indexOfFirst { it.role == MessageRole.SYSTEM }
+        if (index >= 0) clean.mapIndexed { i, message ->
+            if (i == index) message.copy(parts = message.parts + part) else message
+        } else listOf(UIMessage.system("").copy(isSynthetic = true, parts = listOf(part))) + clean
+    }
+    val hits = selection.entries.filter { it.kind != "pinned" }
+    if (hits.isEmpty()) return pinned
+    val part = memoryProjectionPart(renderMemoryHits(hits))
+    val userIndex = pinned.indexOfLast { it.role == MessageRole.USER }
+    if (userIndex >= 0) return pinned.mapIndexed { index, message ->
+        if (index == userIndex) message.copy(parts = message.parts + part) else message
+    }
+    // Compaction may have kept no user turn. Use the completed result as the data carrier.
+    for (index in pinned.indices.reversed()) {
+        val message = pinned[index]
+        if (message.role != MessageRole.ASSISTANT) continue
+        val toolIndex = message.parts.indexOfLast { it is UIMessagePart.Tool && it.isExecuted }
+        if (toolIndex < 0) continue
+        return pinned.mapIndexed { i, original ->
+            if (i != index) original else original.copy(parts = original.parts.mapIndexed { j, originalPart ->
+                if (j != toolIndex) originalPart else {
+                    val tool = originalPart as UIMessagePart.Tool
+                    tool.copy(output = tool.output + part)
+                }
+            })
+        }
+    }
+    return pinned
 }
 
 /** Run on original history, before templates, source markers, compaction or injected notes. */

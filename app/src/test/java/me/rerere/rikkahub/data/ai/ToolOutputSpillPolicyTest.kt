@@ -11,6 +11,7 @@ class ToolOutputSpillPolicyTest {
 
     @Test fun memoryDoesNotSpillToOrdinaryFiles() {
         assertTrue(keepCompleteToolOutput(me.rerere.rikkahub.data.ai.tools.ORBIS_MEMORY_TOOL))
+        assertTrue(keepCompleteToolOutput(me.rerere.rikkahub.data.ai.tools.ORBIS_BODY_TOOL))
     }
 
     @Test fun otherToolsKeepExistingSpillPolicy() {

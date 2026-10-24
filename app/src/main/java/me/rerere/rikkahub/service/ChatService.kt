@@ -1788,7 +1788,12 @@ class ChatService(
                 // An interrupted baseline may already be wholly saved before independent
                 // human replies were appended. Acknowledge it without merging or replaying.
                 generationJournal.clearContainedInDurableContinuation(persisted)
-                generationJournal.recover(persisted, allowAlreadyCommittedTail = explicitFreshInput)
+                try {
+                    generationJournal.recover(persisted, allowAlreadyCommittedTail = explicitFreshInput)
+                } catch (failure: me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointException) {
+                    if (!preserveGenerationConflict(session, persisted)) throw failure
+                    null
+                }
             }
             if (recovery == null) {
                 session.generationRecoveryBlocked = false
@@ -1835,6 +1840,31 @@ class ChatService(
                 "code=${me.rerere.rikkahub.data.ai.checkpoint.checkpointDiagnostic(failure)}); private data withheld")
             persisted
         }
+    }
+
+    /** Called only after the previous generation has ended, before mutating its conversation. */
+    private fun preserveGenerationConflict(session: ConversationSession, persisted: Conversation): Boolean {
+        val preserved = generationJournal.preserveIncompatible(persisted,
+            mayRetire = { !session.hasUnfinishedJobs() && session.submittingMessage == null &&
+                !session.manualContextWriteInProgress && !gatewayStopInFlight.contains(session.id) },
+            beforeRetire = {
+                requireAutomaticRecoveryHold { holdAutomaticWakes(session, "generation_conflict_preserved") }
+            })
+        if (preserved) addError(IllegalStateException(
+            "旧回复恢复副本与当前历史不一致，已单独保留并纳入备份；当前聊天未被覆盖，旧工具不会自动重跑。"), persisted.id)
+        return preserved
+    }
+
+    private fun retireGenerationAfterContinuation(session: ConversationSession, persisted: Conversation) {
+        generationJournal.clearContainedInDurableContinuation(persisted)
+        if (!generationJournal.hasCheckpoint(session.id)) return
+        requireAutomaticRecoveryHold { holdAutomaticWakes(session, "interrupted_continuation_saved") }
+        try {
+            generationJournal.clearSettledInDurableContinuation(persisted, unknownEffectsRetained = true)
+        } catch (failure: me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointException) {
+            if (!preserveGenerationConflict(session, persisted)) throw failure
+        }
+        if (generationJournal.hasCheckpoint(session.id)) preserveGenerationConflict(session, persisted)
     }
 
     /** Called only after the previous generation has ended, before mutating its conversation. */
@@ -2998,11 +3028,7 @@ class ChatService(
                 retireOldJournal = { stored ->
                     if (generationJournal.hasCheckpoint(session.id)) {
                         val proof = stored.withCheckpointSelections(baseline)
-                        generationJournal.clearContainedInDurableContinuation(proof)
-                        if (generationJournal.hasCheckpoint(session.id)) {
-                            requireAutomaticRecoveryHold { holdAutomaticWakes(session, "interrupted_continuation_compacted") }
-                            generationJournal.clearSettledInDurableContinuation(proof, unknownEffectsRetained = true)
-                        }
+                        retireGenerationAfterContinuation(session, proof)
                     }
                     check(!generationJournal.hasCheckpoint(session.id)) { "本次整理未提交，原消息保留。" }
                 },
@@ -3052,6 +3078,24 @@ class ChatService(
         synchronized(session) { humanContinuationFor(session).stop() }
     }
 
+    /** Optional local expression: never wait on disk before accepting or saving a human input. */
+    private fun recordBodyHuman(conversation: Conversation, message: UIMessage) {
+        if(!BuildConfig.ORBIS_ENABLED || conversation.isConsultation || message.role != MessageRole.USER ||
+            message.isSynthetic || message.orbisEvent != null || message.orbisUserMessageTime == null) return
+        if(settingsStore.settingsFlow.value.getAssistantById(conversation.assistantId)?.orbisBodyEnabled != true) return
+        appScope.launch(Dispatchers.IO) {
+            try {
+                val current = settingsStore.settingsFlow.value.getAssistantById(conversation.assistantId)
+                if(current?.orbisBodyEnabled == true)
+                    me.rerere.rikkahub.data.orbis.body.OrbisBody.open(context, current.id.toString()).human(
+                        conversation.id.toString(), message.id.toString(),
+                        message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.take(32000),
+                        current.orbisBodyKeywordsEnabled)
+            } catch(cancelled: CancellationException) { throw cancelled }
+            catch(_: Exception) { /* A simulator failure cannot reject, rewrite or lose the human chat. */ }
+        }
+    }
+
     /** Synchronous acceptance, no disk call, no old-job join, and no recovery permission gate. */
     private fun startHumanContinuation(session: ConversationSession, input: QueuedMessage,
         voiceRecord: OrbisVoiceCallRecord? = null): Job {
@@ -3076,6 +3120,7 @@ class ChatService(
                 throw error
             }
         }
+        recordBodyHuman(session.state.value, userMessage)
         generation.invokeOnCompletion { input.reply?.complete(null) }
         if (input.voiceCallId != null) {
             voiceGenerationJobs[input.id] = generation
@@ -3629,6 +3674,7 @@ class ChatService(
                     session.ordinaryInputSaveHandoff = ordinaryInputHandoff
                 }
                 saveConversation(conversationId, newConversation)
+                newConversation.currentMessages.lastOrNull { it.id == queued.id }?.let { recordBodyHuman(newConversation, it) }
                 eventInputCommitted = true
                 onInputCommitted?.invoke()
                 session.submittingMessage = null
@@ -5504,9 +5550,9 @@ class ChatService(
         }
         val beforeUpdate = session.state.value
         session.state.update { current ->
-            if (restoreCommittedPrompt) conversation else withCommittedVoiceNotePlayed(me.rerere.rikkahub.data.model.withCommittedEventPresentation(
+            if (restoreCommittedPrompt) conversation else me.rerere.rikkahub.data.model.ConversationInjectionSelection.from(current).applyTo(withCommittedVoiceNotePlayed(me.rerere.rikkahub.data.model.withCommittedEventPresentation(
                 withCommittedOrbisPrompt(me.rerere.rikkahub.data.model.withCommittedToolRecordEdits(conversation, current), current), current,
-            ), current)
+            ), current))
         }
         checkFilesDelete(session.state.value, beforeUpdate)
         }
@@ -5515,6 +5561,24 @@ class ChatService(
     fun updateConversationState(conversationId: Uuid, update: (Conversation) -> Conversation) {
         val current = getConversationFlow(conversationId).value
         updateConversation(conversationId, update(current))
+    }
+
+    suspend fun saveConversationInjections(edit: me.rerere.rikkahub.data.model.ConversationInjectionEdit) {
+        val session = getOrCreateSession(edit.conversationId)
+        session.withRefSuspend {
+            initializeConversation(edit.conversationId, selectAssistant = false)
+            session.orbisPromptEditMutex.withLock {
+                val settings = settingsStore.settingsFlow.value
+                check(edit.addedModes.all { id -> settings.modeInjections.any { it.id == id } } &&
+                    edit.addedLorebooks.all { id -> settings.lorebooks.any { it.id == id } }) {
+                    "扩展已改变，请重新打开面板选择。"
+                }
+                val selection = conversationRepo.saveInjectionSelection(session.displayedSnapshot(), edit)
+                session.state.update { selection.applyTo(it).copy(newConversation = false) }
+                session.humanContinuation.value?.acceptInjectionSelection(selection)
+                session.isInitialized = true
+            }
+        }
     }
 
     /** Read the live session rather than a UI/paging snapshot; preserve all other current fields. */
@@ -5735,13 +5799,7 @@ class ChatService(
             val stored = kotlinx.coroutines.withTimeoutOrNull(1_500) { withContext(Dispatchers.IO) {
                 val saved = conversationRepo.getConversationById(session.id)
                 if (saved != null && sameDurableGenerationSnapshot(expected, saved)) {
-                    generationJournal.clearContainedInDurableContinuation(saved)
-                    if (generationJournal.hasCheckpoint(session.id)) {
-                        // A settled MCP result remains explicitly unknown. Retaining that fact
-                        // must not leave the saved conversation permanently "generating".
-                        requireAutomaticRecoveryHold { holdAutomaticWakes(session, "interrupted_continuation_saved") }
-                        generationJournal.clearSettledInDurableContinuation(saved, unknownEffectsRetained = true)
-                    }
+                    retireGenerationAfterContinuation(session, saved)
                 }
                 check(!generationJournal.hasCheckpoint(session.id)) {
                     "旧轮恢复记录尚未核对，原历史仍保留；新消息仍可发送。"

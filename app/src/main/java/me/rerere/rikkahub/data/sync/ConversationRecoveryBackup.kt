@@ -21,12 +21,13 @@ internal object ConversationRecoveryBackup {
     const val GENERATION = "orbis-generation-journal-v1"
     const val CONTINUATION = "orbis-human-continuation-v1"
     const val CONFLICTS = ContinuationConflictCopies.DIRECTORY
+    const val GENERATION_CONFLICTS = ContinuationConflictCopies.GENERATION_DIRECTORY
     const val MAX_BYTES = GenerationCheckpointJournal.MAX_BYTES
     private const val UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     private val uuid = Regex(UUID)
     private val activePath = Regex("($GENERATION|$CONTINUATION)/($UUID)\\.json")
-    private val conflictPath = Regex("($CONFLICTS)/($UUID)--([0-9a-f]{64})\\.json")
-    private val namespaces = listOf(GENERATION, CONTINUATION, CONFLICTS)
+    private val conflictPath = Regex("($CONFLICTS|$GENERATION_CONFLICTS)/($UUID)--([0-9a-f]{64})\\.json")
+    private val namespaces = listOf(GENERATION, CONTINUATION, CONFLICTS, GENERATION_CONFLICTS)
     private fun matchPath(name: String) = activePath.matchEntire(name) ?: conflictPath.matchEntire(name)
     private val digest = Regex("[0-9a-f]{64}")
     private val json = Json { encodeDefaults = true }
@@ -123,17 +124,19 @@ internal object ConversationRecoveryBackup {
         }
         // Archived conflicts are inert, but may contain the only remaining copy of old turns.
         // Include committed .bak entries, never an uncommitted .new by itself.
-        val folder = File(root.canonicalFile, CONFLICTS)
-        require(!Files.isSymbolicLink(folder.toPath())) { INVALID }
-        if (folder.exists()) {
-            require(folder.isDirectory) { INVALID }
-            val names = requireNotNull(folder.listFiles()).mapNotNull { file ->
-                val name = "$CONFLICTS/${file.name.removeSuffix(".bak")}"
-                conflictPath.matchEntire(name)?.takeIf { it.groupValues[2] in owners }?.value
-            }.distinct().sorted()
-            for (name in names) {
-                val key = name.substringAfter('/').removeSuffix(".json")
-                stage(name, checkNotNull(readCommitted(root, CONFLICTS, key)) { CHANGED })
+        for (namespace in listOf(CONFLICTS, GENERATION_CONFLICTS)) {
+            val folder = File(root.canonicalFile, namespace)
+            require(!Files.isSymbolicLink(folder.toPath())) { INVALID }
+            if (folder.exists()) {
+                require(folder.isDirectory) { INVALID }
+                val names = requireNotNull(folder.listFiles()).mapNotNull { file ->
+                    val name = "$namespace/${file.name.removeSuffix(".bak")}"
+                    conflictPath.matchEntire(name)?.takeIf { it.groupValues[2] in owners }?.value
+                }.distinct().sorted()
+                for (name in names) {
+                    val key = name.substringAfter('/').removeSuffix(".json")
+                    stage(name, checkNotNull(readCommitted(root, namespace, key)) { CHANGED })
+                }
             }
         }
     }
@@ -143,7 +146,7 @@ internal object ConversationRecoveryBackup {
         try {
             val match = requireNotNull(matchPath(name))
             require(bytes.size in 1..MAX_BYTES)
-            if (match.groupValues[1] == CONFLICTS)
+            if (match.groupValues[1] in setOf(CONFLICTS, GENERATION_CONFLICTS))
                 require(match.groupValues[3] == ContinuationConflictCopies.hash(bytes))
             val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
@@ -152,7 +155,7 @@ internal object ConversationRecoveryBackup {
             fun string(key: String) = record.getValue(key).jsonPrimitive.content
             fun count(key: String) = record.getValue(key).jsonPrimitive.int.also { require(it >= 0) }
             val id = string("conversationId")
-            val human = match.groupValues[1] != GENERATION
+            val human = match.groupValues[1] in setOf(CONTINUATION, CONFLICTS)
             val owner = string(if (human) "assistantId" else "ownerId")
             require(id == match.groupValues[2] && uuid.matches(owner) && owners[id] == owner &&
                 uuid.matches(string("runId")) && record.getValue("epoch").jsonPrimitive.long >= 0)

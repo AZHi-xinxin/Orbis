@@ -61,6 +61,20 @@ class ConversationRecoveryBackupTest {
         source, File(target, "no-backup"), sample.owners)
     private fun validate(sample: Sample) = ConversationRecoveryBackup.validateStaged(payload, sample.owners)
 
+    @Test fun generationConflictRoundTripsWithoutBecomingAnActiveRecovery() {
+        val sample = sample()
+        val bytes = file(source, namespaces[0], sample.base.id).readBytes()
+        val name = "${ConversationRecoveryBackup.GENERATION_CONFLICTS}/${ContinuationConflictCopies.name(sample.base.id, bytes)}"
+        write(ConversationRecoveryBackup.exactFile(source, name), bytes)
+        val copies = snapshot(sample)
+        assertEquals(3, copies.size)
+        validate(sample)
+        ConversationRecoveryBackup.requireNoConflicts(payload, live)
+        write(ConversationRecoveryBackup.exactFile(live, name), copies.single { it.first == name }.second.readBytes())
+        assertNull(GenerationCheckpointJournal(Store(live, namespaces[0])).recover(sample.base))
+        assertArrayEquals(bytes, File(live, name).readBytes())
+    }
+
     @Test fun archivedConflictRoundTripsAsInertEvidenceAlongsideActiveCopies() {
         val sample = sample()
         val bytes = file(source, namespaces[1], sample.base.id).readBytes()

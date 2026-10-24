@@ -67,14 +67,56 @@ class RikkaNodeCapacityTest {
         assertEquals(ArchiveFailure.NODE_LIMIT, ArchiveCapacity.reasonOf(requireNotNull(failure)))
     }
 
-    @Test fun `reasoning Unicode and JSON escaping count with the body`() = runBlocking {
+    @Test fun `large text and reasoning parts remain complete in consecutive bounded records`() = runBlocking {
         val message = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(
             UIMessagePart.Text("文".repeat(110_000)),
             UIMessagePart.Reasoning("\u0001".repeat(80_000)),
         ))
         // Only 190k UTF-16 units, but 810k JSON bytes before the serialized envelope.
-        val failure = runCatching { convert(source(listOf(message))) }.exceptionOrNull()
-        assertEquals(ArchiveFailure.NODE_LIMIT, ArchiveCapacity.reasonOf(requireNotNull(failure)))
+        val nodes = convert(source(listOf(message))).messageNodes
+        assertEquals(2, nodes.size)
+        val restored = nodes.flatMap { it.messages.single().parts }
+        assertEquals((message.parts[0] as UIMessagePart.Text).text, (restored[0] as UIMessagePart.Text).text)
+        assertEquals((message.parts[1] as UIMessagePart.Reasoning).reasoning,
+            (restored[1] as UIMessagePart.Reasoning).reasoning)
+        nodes.forEach { assertTrue(MessageNodeBudget.measureNode(it.messages) <= MessageNodeBudget.MAX_NODE_BYTES) }
+    }
+
+    @Test fun `multi MiB source tool loop retains every part in stable ordered segments`() = runBlocking {
+        val message = UIMessage(role = MessageRole.ASSISTANT, parts = List(2048) { index ->
+            UIMessagePart.Tool(toolCallId = "synthetic-$index", toolName = "historical",
+                input = "{}", output = listOf(UIMessagePart.Text("结果$index:" + "中🙂".repeat(130))))
+        } + UIMessagePart.Text("finished"))
+        val source = source(listOf(message))
+        source.visitNodes(chat.id) { assertTrue(it.messages.toByteArray().size > 1024 * 1024) }
+        val preview = inspectRikkaSource(source, "synthetic")
+        assertEquals(1, preview.conversations.single().totalNodes)
+        val first = convert(source)
+        assertTrue(first.messageNodes.size > 1)
+        assertEquals(first, convert(source))
+        assertEquals(first.messageNodes.size, first.messageNodes.map { it.id }.distinct().size)
+        val restored = first.messageNodes.flatMap { it.messages }
+        assertEquals(restored.size, restored.map { it.id }.distinct().size)
+        first.messageNodes.forEach {
+            assertEquals(0, it.selectIndex)
+            assertTrue(MessageNodeBudget.measureNode(it.messages) <= MessageNodeBudget.MAX_NODE_BYTES)
+        }
+        val expected = RikkaChatContentDecoder.decode(Uuid.random().toString(),
+            JsonInstant.encodeToString(listOf(message))).single()
+        assertEquals(expected.parts, restored.flatMap { it.parts })
+        assertEquals(expected.createdAt, restored.last().createdAt)
+        assertTrue(restored.all { it.role == MessageRole.ASSISTANT && it.parts.none { part -> part is UIMessagePart.Tool } })
+    }
+
+    @Test fun `cancellation while partitioning cannot publish a partial source node`() {
+        val message = UIMessage.assistant("").copy(parts = List(3) { UIMessagePart.Text("x".repeat(400_000)) })
+        var checks = 0
+        val failure = runCatching {
+            partitionRikkaImportedNode(chat.id, Uuid.random().toString(), listOf(message), 0) {
+                if (++checks == 2) throw kotlinx.coroutines.CancellationException("synthetic")
+            }
+        }.exceptionOrNull()
+        assertTrue(failure is kotlinx.coroutines.CancellationException)
     }
 
     @Test fun `check occurs after part mapping and includes added tool output`() = runBlocking {

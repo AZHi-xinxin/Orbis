@@ -35,6 +35,27 @@ class ContinuationConflictDeviceTest {
         messageNodes = listOf(UIMessage.user("synthetic old").toMessageNode()))
     private fun Conversation.append(text: String) = copy(messageNodes = messageNodes + UIMessage.user(text).toMessageNode())
 
+    @Test fun generationConflictUsesSeparateDurableArchiveAndFreshSlotSurvivesReopen() = isolated { root, _ ->
+        val store = AndroidGenerationCheckpointStore.create(root)
+        val journal = GenerationCheckpointJournal(store)
+        val base = old().append("synthetic tail")
+        journal.begin(base)
+        val bytes = checkNotNull(store.read(base.id))
+        val current = base.copy(messageNodes = listOf(UIMessage.user("changed prefix").toMessageNode()) + base.messageNodes.drop(1))
+        var held = false
+        assertTrue(journal.preserveIncompatible(current, { true }, { held = true }))
+        assertTrue(held)
+        assertNull(store.read(base.id))
+        val archive = File(root, ContinuationConflictCopies.GENERATION_DIRECTORY)
+            .resolve(ContinuationConflictCopies.name(base.id, bytes))
+        assertArrayEquals(bytes, archive.readBytes())
+        assertFalse(File(root, ContinuationConflictCopies.DIRECTORY).exists())
+        journal.begin(current)
+        val reopened = GenerationCheckpointJournal(AndroidGenerationCheckpointStore.create(root))
+        assertEquals(current.messageNodes, reopened.recover(current)!!.conversation.messageNodes)
+        assertArrayEquals(bytes, archive.readBytes())
+    }
+
     @Test fun realDirectorySyncPreservesConflictAndFreshJournalSurvivesReopen() = isolated { root, store ->
         val old = old()
         val journal = HumanContinuationJournal(store)

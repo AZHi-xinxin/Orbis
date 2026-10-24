@@ -21,7 +21,12 @@ class OrbisBuildVariantContractTest {
     }
 
     @Test fun appIdentityDoesNotReplaceTheUpstreamApplication() {
-        assertEquals(if (BuildConfig.DEBUG) "org.orbis.agent.dev" else "org.orbis.agent",
-            BuildConfig.APPLICATION_ID)
+        assertTrue(!BuildConfig.ORBIS_BODY_PREVIEW || BuildConfig.DEBUG)
+        val expected = when {
+            BuildConfig.ORBIS_BODY_PREVIEW -> "org.orbis.agent.bodylab"
+            BuildConfig.DEBUG -> "org.orbis.agent.dev"
+            else -> "org.orbis.agent"
+        }
+        assertEquals(expected, BuildConfig.APPLICATION_ID)
     }
 }

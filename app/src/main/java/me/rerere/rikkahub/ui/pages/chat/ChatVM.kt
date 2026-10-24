@@ -727,6 +727,22 @@ class ChatVM(
         }
     }
 
+    fun saveConversationConfiguration(before: Conversation, after: Conversation) {
+        if (before.modeInjectionIds == after.modeInjectionIds && before.lorebookIds == after.lorebookIds) {
+            updateConversation(after)
+            saveConversationAsync()
+            return
+        }
+        val edit = me.rerere.rikkahub.data.model.ConversationInjectionEdit.between(before, after)
+        viewModelScope.launch {
+            try { chatService.saveConversationInjections(edit) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                chatService.addError(IllegalStateException("扩展选择未保存，请重新打开面板后重试；聊天记录未改动。"), _conversationId)
+            }
+        }
+    }
+
     fun toggleMessageFavorite(node: MessageNode) {
         viewModelScope.launch {
             favoriteEditMutex.withLock {

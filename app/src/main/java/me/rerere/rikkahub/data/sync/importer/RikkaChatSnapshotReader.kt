@@ -5,6 +5,8 @@ import io.requery.android.database.sqlite.SQLiteDatabase
 import io.requery.android.database.sqlite.SQLiteDatabaseConfiguration
 import me.rerere.rikkahub.data.db.SQLiteConfiguration
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 
 /**
  * Chat-only projection of a foreign RikkaHub backup, NOT an Orbis Room database.
@@ -29,27 +31,59 @@ internal class RikkaChatSnapshotReader private constructor(private val database:
         }
     }
 
-    fun nodes(conversationId: String): List<Node> = database.query(
-        "SELECT id, messages, select_index FROM message_node WHERE conversation_id COLLATE BINARY = ? ORDER BY node_index",
-        arrayOf(conversationId),
-    ).use { cursor ->
-        buildList {
-            while (cursor.moveToNext()) add(Node(cursor.getString(0), cursor.getString(1), cursor.getInt(2)))
-        }
+    fun nodes(conversationId: String): List<Node> = buildList {
+        visitNodeRows(conversationId) { add(it) }
     }
 
     override suspend fun visitNodes(conversationId: String, visit: suspend (Node) -> Unit) {
+        visitNodeRows(conversationId) { visit(it) }
+    }
+
+    private inline fun visitNodeRows(conversationId: String, visit: (Node) -> Unit) {
         requireRikkaSourceId(conversationId)
+        // A foreign message may be larger than CursorWindow even though it can be imported
+        // as several bounded historical records. Never put the whole source cell in a cursor.
         database.query(
-            "SELECT id, messages, select_index FROM message_node WHERE conversation_id COLLATE BINARY = ? ORDER BY node_index",
+            "SELECT id, length(CAST(messages AS BLOB)), select_index, " +
+                "CASE WHEN length(CAST(messages AS BLOB)) <= 65536 THEN CAST(messages AS BLOB) ELSE NULL END " +
+                "FROM message_node WHERE conversation_id COLLATE BINARY = ? ORDER BY node_index",
             arrayOf(conversationId),
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 checkCancelled()
-                visit(Node(cursor.getString(0), cursor.getString(1), cursor.getInt(2)))
+                val id = cursor.getString(0)
+                val inline = if (cursor.isNull(3)) null else cursor.getBlob(3)
+                visit(Node(id, readMessages(conversationId, id, cursor.getLong(1), inline), cursor.getInt(2)))
             }
         }
     }
+
+    private fun readMessages(conversationId: String, nodeId: String, size: Long, inline: ByteArray?): String =
+        readRikkaStage(RikkaChatReadStage.MESSAGE) {
+            if (size !in 0..RikkaChatLimits.MAX_NODE_BYTES.toLong())
+                throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
+            check(inline == null || inline.size.toLong() == size)
+            val bytes = inline ?: ByteArray(size.toInt())
+            var offset = if (inline == null) 0 else bytes.size
+            while (offset < bytes.size) {
+                checkCancelled()
+                val count = minOf(64 * 1024, bytes.size - offset)
+                database.query(
+                    "SELECT substr(CAST(messages AS BLOB), ?, ?) FROM message_node " +
+                        "WHERE conversation_id COLLATE BINARY = ? AND id COLLATE BINARY = ?",
+                    arrayOf<Any>(offset + 1, count, conversationId, nodeId),
+                ).use { cursor ->
+                    check(cursor.moveToFirst())
+                    val chunk = cursor.getBlob(0)
+                    check(chunk.size == count && !cursor.moveToNext())
+                    chunk.copyInto(bytes, offset)
+                }
+                offset += count
+            }
+            // Decode after joining bytes: a chunk may end in the middle of a Chinese character.
+            Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
+        }
 
     private fun validate() {
         checkCancelled()
@@ -80,9 +114,9 @@ internal class RikkaChatSnapshotReader private constructor(private val database:
             ArchiveCapacity.MAX_STREAM_JSON_BYTES, allowEmpty = true)
         requireRikkaSchema(scalar("SELECT COALESCE(SUM(length(CAST(title AS BLOB))), 0) FROM ConversationEntity") <= 4L * 1024 * 1024,
             RikkaSchemaCheck.TITLE_SIZE)
-        // Stay below Android CursorWindow limits, including UTF-8 -> UTF-16 expansion.
+        // Titles fit a cursor; message payloads use bounded byte chunks instead.
         requireRikkaSchema(scalar("SELECT COALESCE(MAX(length(CAST(title AS BLOB))), 0) FROM ConversationEntity") <= 64L * 1024 &&
-            scalar("SELECT COALESCE(MAX(length(CAST(messages AS BLOB))), 0) FROM message_node") <= 1024L * 1024, RikkaSchemaCheck.ROW_SIZE)
+            scalar("SELECT COALESCE(MAX(length(CAST(messages AS BLOB))), 0) FROM message_node") <= RikkaChatLimits.MAX_NODE_BYTES, RikkaSchemaCheck.ROW_SIZE)
     }
 
     private fun requireTable(name: String, required: Map<String, String>) {

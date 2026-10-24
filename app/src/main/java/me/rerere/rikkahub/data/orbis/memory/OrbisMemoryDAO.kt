@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface OrbisMemoryDAO {
+    @Query("SELECT emotion,updated_at FROM orbis_memory_note WHERE assistant_id=:assistantId AND deleted=0 AND state!='paused' AND emotion IS NOT NULL ORDER BY updated_at DESC,id LIMIT :limit")
+    suspend fun emotions(assistantId: String, limit: Int): List<OrbisMemoryEmotionRow>
     @Insert suspend fun insert(note: OrbisMemoryEntity)
     @Update suspend fun update(note: OrbisMemoryEntity): Int
     @Insert suspend fun insertRevision(note: OrbisMemoryRevisionEntity)

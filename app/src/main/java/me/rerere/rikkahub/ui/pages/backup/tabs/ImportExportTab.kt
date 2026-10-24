@@ -154,7 +154,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         item { BackupCard("北极星聊天记录", "支持北极星导出 ZIP。先预览并选择窗口，再按原顺序追加聊天；思考过程单独保留。图片只显示历史引用说明，不导入附件或配置、密钥、人格与工具授权。重复导入自动跳过。", !busy && !polarisState.busy, "选择北极星备份") {
             openPolaris.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         } }
-        item { BackupCard("RikkaHub 聊天记录", "在 RikkaHub 导出含“聊天记录”的本地 ZIP，建议同时勾选附件。按聊天结构提取正文、分支和附件，不要求版本号一致；工具仅作历史文字。不覆盖现有窗口，不导入账号或模型配置。重复导入自动跳过。", !busy, "选择 RikkaHub 备份") { confirm = "rikka" } }
+        item { BackupCard("RikkaHub 聊天记录", "在 RikkaHub 导出含“聊天记录”的本地 ZIP，建议同时勾选附件。按聊天结构提取正文、分支和附件，不要求版本号一致；工具仅作历史文字，超长工具记录按原顺序分段保留。不覆盖现有窗口，不导入账号或模型配置。重复导入自动跳过。", !busy, "选择 RikkaHub 备份") { confirm = "rikka" } }
         item { BackupCard("DeepSeek 官方聊天记录", "选择官方导出 ZIP，先预览窗口和分支路径。支持长记录逐会话导入；保留正文、思考和时间，不执行历史工具或下载附件。不会改变现有聊天或连接设置。", !busy && !deepSeekState.busy, "选择 DeepSeek 导出包") {
             openDeepSeek.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
         } }

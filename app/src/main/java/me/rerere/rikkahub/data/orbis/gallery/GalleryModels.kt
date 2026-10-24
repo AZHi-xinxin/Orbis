@@ -35,6 +35,7 @@ internal object GalleryLimits {
     const val ITEMS = 2000
     const val VERSIONS = 200
     const val ANSWERS = 10000
+    const val TEXT_ANSWER_BYTES = 64 * 1024
     val kinds = setOf("html", "text", "questionnaire")
     fun id(value: String) = value.matches(Regex("[a-zA-Z0-9_-]{1,80}"))
     fun title(value: String) = value.isNotBlank() && value.length <= 120 && value.none(Char::isISOControl)
@@ -88,17 +89,40 @@ internal fun parseGalleryQuestionnaire(text: String): GalleryQuestionnaire {
     }
 }
 
+internal class GalleryAnswerProblem(val questionId: String, val reason: String) : IllegalArgumentException("gallery_answers_invalid")
+
 internal fun validateGalleryAnswers(form: GalleryQuestionnaire, answers: Map<String, List<String>>) {
-    require(answers.keys.all { id -> form.questions.any { it.id == id } }) { "gallery_answers_invalid" }
+    answers.keys.firstOrNull { id -> form.questions.none { it.id == id } }?.let {
+        // Unknown keys may be arbitrary model content: never echo them in diagnostics.
+        throw GalleryAnswerProblem("", "unknown_question")
+    }
     form.questions.forEach { q ->
         val values = answers[q.id].orEmpty()
-        require(values.size <= 50 && values.distinct().size == values.size && values.all { it.length <= 4000 }) { "gallery_answers_invalid" }
-        require(!q.required || values.any { it.isNotBlank() }) { "gallery_required_answer" }
-        require(if (q.type == "text") values.size <= 1 else values.all { it in q.options } && (q.type != "single" || values.size <= 1)) { "gallery_answers_invalid" }
+        fun invalid(reason: String): Nothing = throw GalleryAnswerProblem(q.id, reason)
+        if(values.size > 50 || values.distinct().size != values.size) invalid("duplicate_or_too_many_values")
+        if(q.required && values.none { it.isNotBlank() }) invalid("required")
+        if(q.type == "text") {
+            if(values.size > 1) invalid("text_requires_one_string")
+            if(values.any { it.toByteArray(Charsets.UTF_8).size > GalleryLimits.TEXT_ANSWER_BYTES }) invalid("text_byte_limit")
+        } else {
+            if(values.any { it !in q.options }) invalid("option_not_in_question")
+            if(q.type == "single" && values.size > 1) invalid("single_requires_one_option")
+        }
     }
 }
 
-internal fun galleryErrorText(error: Throwable): String = when (error.message) {
+internal fun galleryErrorText(error: Throwable): String = if(error is GalleryAnswerProblem) {
+    val field = error.questionId.takeIf { GalleryLimits.id(it) }?.let { "题目 $it：" }.orEmpty()
+    field + when(error.reason) {
+        "required" -> "此题必填，请提供非空答案。"
+        "text_requires_one_string" -> "文本题须用一个字符串保存，可包含换行；请把多段放在同一数组项内，不要拆成多个答案选项。"
+        "text_byte_limit" -> "此题文本超过 64 KiB；原文未截断，答案未提交。"
+        "option_not_in_question" -> "选项必须与原题一致，请重新读取该题。"
+        "single_requires_one_option" -> "单选题只能填一个选项。"
+        "unknown_question" -> "答案包含问卷中不存在的题目 ID，请核对原题。"
+        else -> "答案项重复或数量超限，请核对该题。"
+    }
+} else when (error.message) {
     "gallery_file_too_large" -> "单件作品最多 16 MiB。长作品可分块写入；原有作品未被覆盖。"
     "gallery_chunk_too_large" -> "单次工具写入最多 32 KiB，请拆分为多块；不是整件作品的上限。"
     "gallery_revision_changed" -> "作品已被修改，请重新读取版本后再保存。"

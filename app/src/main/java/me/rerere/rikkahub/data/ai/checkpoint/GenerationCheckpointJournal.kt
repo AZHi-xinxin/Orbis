@@ -398,6 +398,40 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         true
     }
 
+    /** Caller holds the window edit lock, has stopped this journal's producer, and supplies
+     * committed Room history. Preserve only a validated, same-owner incompatible record.
+     * No recovery merge, tool replay, or automatic-wake permission follows from this action.
+     */
+    @Synchronized
+    fun preserveIncompatible(
+        persisted: Conversation,
+        mayRetire: () -> Boolean,
+        beforeRetire: () -> Unit,
+    ): Boolean = guarded {
+        val original = store.read(persisted.id) ?: return@guarded false
+        val record = read(persisted.id) ?: return@guarded false
+        checkSafe(record.ownerId == persisted.assistantId && persisted.consultation == null,
+            "conflict_owner_changed")
+        checkSafe(mayRetire(), "conflict_producer_active")
+        try {
+            recover(persisted)
+            return@guarded false // Recoverable content must follow the ordinary commit path.
+        } catch (failure: GenerationCheckpointException) {
+            checkSafe(failure.code in setOf("owner_or_epoch_changed", "database_prefix_changed",
+                "database_suffix_changed", "database_tail_changed", "checkpoint_overlaps_protected_nodes"),
+                "conflict_not_verified")
+        }
+        checkSafe(store.read(persisted.id)?.contentEquals(original) == true, "conflict_record_changed")
+        store.preserveConflict(persisted.id, original)
+        // The independent, durable safety hold is required even for an apparently completed tool.
+        beforeRetire()
+        checkSafe(mayRetire() && store.read(persisted.id)?.contentEquals(original) == true,
+            "conflict_record_changed")
+        store.delete(persisted.id)
+        checkSafe(store.read(persisted.id) == null, "conflict_retirement_failed")
+        true
+    }
+
     private fun requireCurrent(handle: GenerationCheckpointHandle): CheckpointRecord {
         // Re-read the bounded tail, not the history. A handle from an earlier journal instance
         // must not erase/overwrite a later generation after a restart or explicit recovery.

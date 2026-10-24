@@ -117,6 +117,10 @@ interface ConversationDAO {
     @Query("UPDATE conversationentity SET orbis_prompt = :prompt WHERE id = :id")
     suspend fun updateOrbisPrompt(id: String, prompt: String): Int
 
+    @Query("UPDATE conversationentity SET mode_injection_ids = :modeIds, lorebook_ids = :lorebookIds " +
+        "WHERE id = :id AND assistant_id = :assistantId")
+    suspend fun updateInjectionSelection(id: String, assistantId: String, modeIds: String, lorebookIds: String): Int
+
     @Query("UPDATE conversationentity SET title = :title WHERE id = :id AND assistant_id = :assistantId AND title = :expectedTitle")
     suspend fun updateTitleIfUnchanged(id: String, assistantId: String, expectedTitle: String, title: String): Int
 

@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.material3.Switch
+import androidx.compose.material3.ListItem
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import kotlinx.coroutines.launch
@@ -63,6 +65,20 @@ fun AssistantExtensionsPage(id: String) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            if (pagerState.currentPage == 1 || pagerState.currentPage == 2) {
+                ListItem(
+                    headlineContent = { Text("模式和世界书按会话分别选择") },
+                    supportingContent = {
+                        Text(if (assistant.allowConversationPromptInjection)
+                            "已开启：请在聊天输入框的“+ → 能力”选择当前会话的扩展；下方助手选项在关闭此开关后生效。"
+                        else "已关闭：下方选择用于这个助手的所有会话。")
+                    },
+                    trailingContent = {
+                        Switch(checked = assistant.allowConversationPromptInjection,
+                            onCheckedChange = { vm.update(assistant.copy(allowConversationPromptInjection = it)) })
+                    },
+                )
+            }
             SecondaryTabRow(
                 selectedTabIndex = pagerState.currentPage,
                 containerColor = Color.Transparent,

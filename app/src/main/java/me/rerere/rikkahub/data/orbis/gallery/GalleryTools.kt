@@ -74,6 +74,10 @@ internal fun createGalleryTools(open: () -> GalleryRepository, allowWrites: Bool
                 catch (failure: Exception) {
                     listOf(UIMessagePart.Text(buildJsonObject {
                         put("ok", false); put("message", galleryErrorText(failure)); put("automatic_retry", false)
+                        if(failure is GalleryAnswerProblem) {
+                            put("code", "gallery_answer_validation"); put("reason", failure.reason)
+                            put("question_id", failure.questionId.takeIf { GalleryLimits.id(it) }.orEmpty())
+                        }
                     }.toString()))
                 }
             },

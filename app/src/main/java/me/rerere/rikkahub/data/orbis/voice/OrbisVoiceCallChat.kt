@@ -32,7 +32,7 @@ internal fun collapseVoiceCallNodes(
 internal fun voiceTurnForModel(callId: String, text: String): String =
     OrbisVoiceCallProtocol.userTurn(callId, text).let {
         val line = it.indexOf('\n')
-        it.take(line + 1) + "当前为语音通话：以下是转写文字，并非原始音频。你的回复会被朗读，请用自然短句，避免代码块、装饰符号和括号动作。\n" + it.substring(line + 1)
+        it.take(line + 1) + OrbisVoiceCallProtocol.VOICE_STYLE_HINT + "\n" + it.substring(line + 1)
     }
 
 internal fun voiceArchiveRequest(record: OrbisVoiceCallRecord,

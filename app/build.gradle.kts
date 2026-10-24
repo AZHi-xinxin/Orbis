@@ -28,6 +28,7 @@ android {
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
         buildConfigField("boolean", "ORBIS_ENABLED", "true")
         buildConfigField("boolean", "ORBIS_EMERGENCY_RESCUE_ENABLED", "false")
+        buildConfigField("boolean", "ORBIS_BODY_PREVIEW", "false")
 
         // Explicit synthetic-test opt-in. Keep normal builds on the existing runner.
         // The Android plugin generates this instrumentation name and overrides the
@@ -107,7 +108,11 @@ android {
             // Explicit private test build only; never persisted as a user setting.
             buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED",
                 (providers.gradleProperty("orbisInternalConsultation").orNull == "true").toString())
-            applicationIdSuffix = ".dev"
+            // Dedicated opt-in preview sandbox: never overwrite either public Orbis or Orbis Dev.
+            val bodyPreview = providers.gradleProperty("orbisBodyPreview").orNull == "true"
+            buildConfigField("boolean", "ORBIS_BODY_PREVIEW", bodyPreview.toString())
+            applicationIdSuffix = if (bodyPreview) ".bodylab" else ".dev"
+            manifestPlaceholders["orbisDebugLabel"] = if (bodyPreview) "Orbis BodyLab" else "Orbis Dev"
             val candidateSuffix = providers.gradleProperty("orbisDebugCandidateSuffix")
                 .orElse("-orbis-dev.100").get()
             require(candidateSuffix.matches(Regex("-orbis-dev\\.[a-z0-9.-]{1,40}"))) {
@@ -273,7 +278,9 @@ dependencies {
     // Offline semantic recall: pinned CPU runtime, no external embedding service.
     // 1.20.0's JNI wrapper is only 4 KB aligned; keep Java and native libraries
     // together from the same official AAR, including the upstream 16 KB fix.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
+    // 1.23.2 can select SME2 kernels unsupported by Snapdragon 8 Elite / Android 16.
+    // The Android AAR 1.24.3 contains the corrected CPU capability detection.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
 
     // YAML front matter
     implementation(libs.snakeyaml)

@@ -117,6 +117,16 @@ internal class HumanContinuationLane(
     private var manualContextInProgress = false
     private val streamEnrichments = mutableListOf<me.rerere.rikkahub.data.ai.checkpoint.ContinuationStreamEnrichment>()
     private val selectedBranches = mutableMapOf<kotlin.uuid.Uuid, kotlin.uuid.Uuid>()
+    private var committedInjections: me.rerere.rikkahub.data.model.ConversationInjectionSelection? = null
+
+    /** Room committed only these columns; retain live messages and protect against old streams. */
+    @Synchronized fun acceptInjectionSelection(selection: me.rerere.rikkahub.data.model.ConversationInjectionSelection) {
+        check(!retired)
+        committedInjections = selection
+        state.value = selection.applyTo(state.value)
+        revision++
+        requestSave()
+    }
 
     /** Selecting an existing alternative is not a tool retry or a history-body edit. */
     @Synchronized fun selectBranch(nodeId: kotlin.uuid.Uuid, index: Int) {
@@ -150,6 +160,7 @@ internal class HumanContinuationLane(
                 projected = rebase.project(projected) ?: return null
         }
         for (refresh in manualMetadataRefreshes) projected = refresh.project(projected)
+        projected = committedInjections?.applyTo(projected) ?: projected
         return projected.takeIf { it.compactionEpoch == state.value.compactionEpoch }?.let(::applyBranchSelection)
     }
 

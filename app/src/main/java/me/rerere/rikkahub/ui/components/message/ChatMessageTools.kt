@@ -53,6 +53,8 @@ import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.hostToolFailure
 import me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName
+import me.rerere.rikkahub.data.orbis.privateroom.isBodyToolPart
+import me.rerere.rikkahub.data.orbis.privateroom.BODY_CONTENT_HIDDEN
 import me.rerere.rikkahub.data.orbis.privateroom.PRIVATE_ROOM_CONTENT_HIDDEN
 import me.rerere.rikkahub.data.ai.approval.redactApprovalJson
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
@@ -105,6 +107,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     onDeleteRecord: (() -> Unit)? = null,
 ) {
     // Do not parse partial JSON or inspect failure text before this privacy boundary.
+    if (tool.isBodyToolPart()) {
+        Text(BODY_CONTENT_HIDDEN, style = MaterialTheme.typography.bodySmall)
+        return
+    }
     if (isPrivateRoomToolName(tool.toolName)) {
         Text(PRIVATE_ROOM_CONTENT_HIDDEN, style = MaterialTheme.typography.bodySmall)
         return

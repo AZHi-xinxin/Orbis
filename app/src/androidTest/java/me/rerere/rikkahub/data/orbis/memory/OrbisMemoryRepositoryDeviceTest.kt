@@ -32,6 +32,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Synthetic in-memory Room only: no user settings, filesystem memory, model, audio or network. */
 @RunWith(AndroidJUnit4::class)
 class OrbisMemoryRepositoryDeviceTest {
+    @Test fun optionalEmotionPersistsRevisionsAndNeverLeaksOtherOwners() = runBlocking {
+        Fixture().use { f ->
+            val old = f.store("synthetic untagged note")
+            assertEquals(JsonNull, f.note(old)["emotion"])
+            val added = f.execute("store") { put("body", "synthetic tagged note"); put("emotion", "暖") }
+            val id = added.id()
+            assertEquals("暖", f.note(id).getValue("emotion").jsonPrimitive.content)
+            assertEquals(listOf("暖"), f.repo.emotionLabels(f.owner).map { it.emotion })
+            assertTrue(f.repo.emotionLabels(f.other).isEmpty())
+            f.execute("update") { put("id", id); put("emotion", JsonNull) }
+            assertTrue(f.repo.emotionLabels(f.owner).isEmpty())
+            f.execute("restore") { put("id", id); put("revision", 1) }
+            assertEquals("暖", f.note(id).getValue("emotion").jsonPrimitive.content)
+            val invalid = f.execute("update") { put("id", id); put("emotion", "invented") }
+            assertEquals(false, invalid.getValue("ok").jsonPrimitive.boolean)
+            assertEquals("暖", f.note(id).getValue("emotion").jsonPrimitive.content)
+        }
+    }
     private class Fixture : AutoCloseable {
         private val instrumentation = InstrumentationRegistry.getInstrumentation().also {
             check(it is IsolatedGenerationLoopRunner)

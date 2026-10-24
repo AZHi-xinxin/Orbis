@@ -49,6 +49,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
     var showStickers by rememberSaveable { mutableStateOf(false) }
     var showPet by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showStudy by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showBody by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     val activityScope = rememberCoroutineScope()
     val activitySettings = org.koin.compose.koinInject<me.rerere.rikkahub.data.datastore.SettingsStore>()
     var showCalls by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
@@ -116,12 +117,13 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                                                     OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM,
                                                     OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
                                                     OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.CHARACTER, OrbisToolDestination.IMAGE_WORKSHOP,
-                                                    OrbisToolDestination.PET, OrbisToolDestination.STUDY) || selected != null
+                                                    OrbisToolDestination.PET, OrbisToolDestination.STUDY, OrbisToolDestination.BODY) || selected != null
                                                 val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
                                                 ToolsTile(tile, enabled, Modifier.weight(1f)) {
                                                     when (item.destination) {
                                                         OrbisToolDestination.PET -> showPet = true
                                                         OrbisToolDestination.STUDY -> showStudy = true
+                                                        OrbisToolDestination.BODY -> showBody = true
                                                         OrbisToolDestination.WORKSPACE -> navigator.navigate(Screen.Workspaces)
                                                         OrbisToolDestination.ATTACHMENTS -> navigator.navigate(Screen.SettingFiles)
                                                         OrbisToolDestination.LOCAL_CAPABILITIES -> selected?.id?.toString()?.let {
@@ -168,6 +170,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
         }
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
         if (selected != null) key(selected.id) {
+            if (showBody) OrbisBodyDetails(selected.id.toString(), conversationId) { showBody = false }
             if (showConnections) OrbisConnectionProposals(selected.id.toString(), onClose = { showConnections = false })
             if (showPet) OrbisPetPage(selected.id.toString(), selected.name, selected.orbisPetEnabled,
                 onToggle = { value -> activityScope.launch { activitySettings.update { current ->
@@ -217,7 +220,7 @@ internal fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifie
         OrbisToolDestination.BLUETOOTH_TOY -> HugeIcons.Connect
         OrbisToolDestination.GALLERY -> HugeIcons.Package
         OrbisToolDestination.SCHEDULE -> HugeIcons.Calendar03
-        OrbisToolDestination.SHARED_SPACE -> HugeIcons.Favourite
+        OrbisToolDestination.SHARED_SPACE, OrbisToolDestination.BODY -> HugeIcons.Favourite
         OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.IMAGE_WORKSHOP -> HugeIcons.Image02
         else -> HugeIcons.Package
     }

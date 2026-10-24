@@ -79,13 +79,15 @@ class OrbisMemoryInjectionTest {
         assertTrue(selectOrbisMemory(OrbisMemoryMode.STANDARD, "", (1..8).map { note("p$it", "pinned") }).entries.isEmpty())
         assertTrue(selectOrbisMemory(OrbisMemoryMode.STANDARD, "", listOf(note(state = "pinned", summary = "长".repeat(400)))).entries.isEmpty())
     }
-    @Test fun projectionIsRequestOnlyAndIdempotentWithoutUserTail() {
+    @Test fun projectionIsRequestOnlyAndIdempotentWithoutAnExtraUserWake() {
         val original = listOf(UIMessage.system("base"), UIMessage.user("tea"))
         val selection = OrbisMemorySelection(listOf(OrbisMemorySelected("id", "private note", 1, "summary")))
         val once = projectOrbisMemory(original, selection)
         assertEquals(once, projectOrbisMemory(once, selection))
         assertEquals(original, projectOrbisMemory(once, OrbisMemorySelection()))
-        assertEquals(original.last(), once.last())
+        assertEquals(original.first(), once.first())
+        assertEquals(original.last().id, once.last().id)
+        assertEquals(original.last().parts, once.last().parts.take(original.last().parts.size))
         assertEquals("base", original.first().toText())
         assertEquals(1, once.count { it.role == MessageRole.USER })
     }
@@ -96,6 +98,32 @@ class OrbisMemoryInjectionTest {
             UIMessage.user("ending").copy(orbisVoiceCallKind = "ended_notice"),
             UIMessage.user("synthetic").copy(isSynthetic = true),
             UIMessage.user("host").copy(parts = listOf(UIMessagePart.Text("host", buildJsonObject { put("human_authored", false) }))))))
+    }
+
+    @Test fun legacySystemProjectionIsRemovedButUnrelatedTextAndMetadataSurvive() {
+        val legacy = UIMessagePart.Text("old recalled content", buildJsonObject {
+            put(LOCAL_MEMORY_PROJECTION, true); put("source", "orbis_local_memory")
+            put("human_authored", false); put("instruction_authority", "none")
+        })
+        val literal = UIMessagePart.Text("[本机历史资料；literal user text", buildJsonObject {
+            put(LOCAL_MEMORY_PROJECTION, true)
+        })
+        val original = listOf(UIMessage.system("base"), UIMessage.user("").copy(parts = listOf(literal)))
+        val oldRequest = listOf(original.first().copy(parts = original.first().parts + legacy), original.last())
+        assertEquals(original, projectOrbisMemory(oldRequest, OrbisMemorySelection()))
+        val selection = OrbisMemorySelection(listOf(OrbisMemorySelected("id", "new recall", 1, "summary")))
+        val projected = projectOrbisMemory(oldRequest, selection)
+        assertEquals(original.first(), projected.first())
+        assertEquals(literal, projected.last().parts.first())
+        assertFalse(projected.any { it.toText().contains("old recalled content") })
+    }
+
+    @Test fun pendingToolIsNeverGivenAResultToCarryRecall() {
+        val pending = UIMessagePart.Tool("pending", "synthetic_tool", "{}")
+        val original = listOf(UIMessage.system("base"), UIMessage.assistant("").copy(parts = listOf(pending)))
+        val selection = OrbisMemorySelection(listOf(OrbisMemorySelected("id", "data", 1, "summary")))
+        assertEquals(original, projectOrbisMemory(original, selection))
+        assertTrue(pending.output.isEmpty())
     }
 
     @Test fun loweringModeOnlyNarrowsTheFrozenSelectionWithoutRescoring() {

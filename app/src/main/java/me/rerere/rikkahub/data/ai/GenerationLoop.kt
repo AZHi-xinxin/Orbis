@@ -12,7 +12,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.orbis.cloudtools.CloudToolInvocationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -527,8 +526,6 @@ class GenerationLoop(
                                     // A remembered grant may have been revoked after model generation.
                                     return@dispatchProvidedTool tool.awaitHostApproval(toolDef)
                                 }
-                                val cloudNative = toolDef.name.startsWith("cloud_orbis_") ||
-                                    toolDef.name.startsWith("cloud_reading_") || toolDef.name.startsWith("cloud_turtlesoup_")
                                 val args = runCatching {
                                     json.parseToJsonElement(tool.input.ifBlank { "{}" })
                                 }.getOrElse {
@@ -538,9 +535,8 @@ class GenerationLoop(
                                 durableBoundary(withCurrentToolResults(), tool, completed = false)
                                 requireActiveTurn()
                                 executionStarted = true
-                                val result = if (cloudNative || toolDef.name == me.rerere.rikkahub.data.ai.tools.ORBIS_MEMORY_TOOL) {
-                                    withContext(CloudToolInvocationContext(tool.toolCallId, messages.last().id.toString(), conversationId?.toString())) { toolDef.execute(args) }
-                                } else toolDef.execute(args)
+                                val result = executeGenerationTool(toolDef, args, tool.toolCallId,
+                                    messages.last().id.toString(), conversationId?.toString())
                                 val hasShellAccess = tools.any { it.name == "workspace_shell" }
                                 val completed = tool.withGenerationToolOutput(
                                     // Private results must not spill; native paged reads must retain

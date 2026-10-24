@@ -25,7 +25,10 @@ data class OrbisMemoryEntity(
     @ColumnInfo("updated_at") val updatedAt: Long,
     val revision: Int,
     val deleted: Boolean,
+    @ColumnInfo(defaultValue = "NULL") val emotion: String? = null,
 )
+
+data class OrbisMemoryEmotionRow(val emotion: String, @ColumnInfo("updated_at") val updatedAt: Long)
 
 /** Every revision is a complete immutable original, including paused/deleted transitions. */
 @Entity(tableName = "orbis_memory_revision", primaryKeys = ["assistant_id", "id", "revision"])

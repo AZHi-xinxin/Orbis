@@ -23,13 +23,14 @@ data class OrbisVoiceCallMarker(
 object OrbisVoiceCallProtocol {
     const val PREFIX = "ORBIS_VOICE_CALL_V1 "
     const val CALL_MODE_PREFIX = "CALL_MODE_V1 "
+    internal const val VOICE_STYLE_HINT = "【语音通话中】仅转写文字；回复会朗读。用短句，不写代码块或动作。"
     private val json = Json { encodeDefaults = false }
 
     fun begin(id: String, video: Boolean = false): String {
         validateVoiceCallId(id)
         return encode(OrbisVoiceCallMarker(OrbisVoiceCallMarkerKind.BEGIN, id)) +
             (if (video) "\n【已进入视频通话】\n画面由相机定期抽帧提供，并非连续视频流；可用 orbis_video_frame_now 即时看一帧。" else "\n【已进入语音通话】") +
-            "\n语音输入是转写后的文字，不含音频本身、语调或呼吸信息。回答会被朗读，请用自然短句，不写代码块、装饰符号或括号动作。"
+            "\n" + VOICE_STYLE_HINT
     }
 
     fun userTurn(id: String, text: String): String {

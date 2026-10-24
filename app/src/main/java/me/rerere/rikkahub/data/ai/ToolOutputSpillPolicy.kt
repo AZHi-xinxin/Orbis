@@ -4,4 +4,5 @@ package me.rerere.rikkahub.data.ai
 internal fun keepCompleteToolOutput(toolName: String): Boolean =
     me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName(toolName) ||
         toolName == me.rerere.rikkahub.data.ai.tools.ORBIS_MEMORY_TOOL ||
+        toolName == me.rerere.rikkahub.data.ai.tools.ORBIS_BODY_TOOL ||
         toolName == "workspace_read_file"

@@ -230,6 +230,8 @@ object EmergencyArchive {
             // Do not read contents/links, count, archive, or claim this ephemeral subtree.
             // Its manifest/index also expires with the cache contract, not with a rescue ZIP.
             if (name == "no_backup/orbis-video-frames") return
+            // Human display consent is device-local, including when a rescue ZIP is shared/uploaded.
+            if (name == "no_backup/orbis-body-display-local") return
             if (++recordCount > MAX_RECORDS || depth > 128) throw IOException("Backup has too many entries or levels")
             val attrs = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
             onProgress(EmergencyArchiveProgress(phase, 0, 0, recordCount.toLong()))

@@ -260,6 +260,13 @@ class ChatToolFactory(
         if (BuildConfig.ORBIS_ENABLED) {
             if (!consultationReferenceOnly) {
                 fun liveOwner() = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                if (assistant.orbisBodyEnabled && conversationId != null) {
+                    // Registering tools must never reinterpret historical human text as a new
+                    // event after enable/retry. Only ChatService's accepted-input hooks record it.
+                    add(bodyTool(conversationId, { liveOwner()?.orbisBodyEnabled == true }) {
+                        me.rerere.rikkahub.data.orbis.body.OrbisBody.open(context, assistant.id.toString())
+                    })
+                }
                 if (assistant.orbisPetEnabled) add(petTool({ liveOwner()?.orbisPetEnabled == true }, { action, text ->
                     me.rerere.rikkahub.data.orbis.activities.PetAiRuntime.enqueue(context, assistant.id.toString(), action, text)
                 }) {

@@ -28,6 +28,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.orbis.privateroom.isPrivateRoomToolName
+import me.rerere.rikkahub.data.orbis.privateroom.isBodyToolPart
+import me.rerere.rikkahub.data.orbis.privateroom.BODY_CONTENT_HIDDEN
 import me.rerere.rikkahub.data.orbis.privateroom.PRIVATE_ROOM_CONTENT_HIDDEN
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
@@ -134,6 +136,10 @@ fun DefaultToolPreview(
     context: ToolUIContext,
     headerActions: (@Composable () -> Unit)? = null,
 ) {
+    if (context.tool.isBodyToolPart()) {
+        Text(BODY_CONTENT_HIDDEN, modifier = Modifier.padding(16.dp))
+        return
+    }
     if (isPrivateRoomToolName(context.tool.toolName)) {
         Text(PRIVATE_ROOM_CONTENT_HIDDEN, modifier = Modifier.padding(16.dp))
         return

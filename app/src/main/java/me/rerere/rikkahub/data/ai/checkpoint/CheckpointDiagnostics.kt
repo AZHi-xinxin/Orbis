@@ -17,4 +17,6 @@ private val checkpointDiagnosticCodes = setOf(
     "tool_receipt_changed", "tool_receipt_limit_or_duplicate", "tool_receipt_target_missing_or_ambiguous",
     "tool_start_receipt_missing", "unknown_tool_cannot_rebase", "unknown_tool_requires_interrupted_receipt",
     "unknown_tool_requires_manual_review", "unresolved_previous_generation",
+    "conflict_owner_changed", "conflict_producer_active", "conflict_not_verified",
+    "conflict_record_changed", "conflict_retirement_failed",
 )

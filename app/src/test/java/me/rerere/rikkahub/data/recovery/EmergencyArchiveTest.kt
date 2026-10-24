@@ -27,6 +27,22 @@ class EmergencyArchiveTest {
         writeBytes(bytes)
     }
 
+    @Test fun bodyDisplayConsentNeverLeavesDeviceButBodyRulesAndLogsRemainRecoverable() {
+        val source = temporary.newFolder("body-local-display")
+        val local = write(source, "no_backup/orbis-body-display-local/owner.json", "{\"privateVisible\":true}".toByteArray())
+        write(source, "no_backup/orbis-body-display-local/owner.json.bak", "local preference".toByteArray())
+        val body = write(source, "files/orbis-activities/owner/body.json", "synthetic private rules and logs".toByteArray())
+        val output = File(temporary.root, "body-display-excluded.zip")
+        val manifest = EmergencyArchive.create(roots(source), output, metadata)
+        assertEquals(listOf("files/orbis-activities/owner/body.json"), manifest.files.map { it.path })
+        assertFalse(manifest.directories.any { "orbis-body-display-local" in it })
+        val extracted = File(temporary.root, "body-local-extracted")
+        EmergencyArchive.extractVerified(output, extracted)
+        assertArrayEquals(body.readBytes(), File(extracted, "files/orbis-activities/owner/body.json").readBytes())
+        assertFalse(File(extracted, "no_backup/orbis-body-display-local").exists())
+        assertTrue(local.exists())
+    }
+
     @Test fun temporaryVideoFramesAreExcludedButNearbyNoBackupDataRemainsByteExact() {
         val source = temporary.newFolder("video-source")
         val jpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte())

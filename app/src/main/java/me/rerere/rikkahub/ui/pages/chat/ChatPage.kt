@@ -142,7 +142,6 @@ import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.hooks.EditStateContent
 import me.rerere.rikkahub.ui.hooks.useEditState
-import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -270,10 +269,11 @@ fun ChatPage(
             // Keep an existing draft if every imported item failed; never send automatically.
             if (parts.isNotEmpty()) inputState.messageContent = inputState.messageContent + parts
         }
-        text?.base64Decode()?.let { decodedText ->
-            if (decodedText.isNotEmpty()) {
-                inputState.setMessageText(decodedText)
-            }
+        val decodedText = decodeChatRouteDraft(text)
+        if (text != null && decodedText == null) {
+            sharedAttachmentToaster.show("未能读取带入聊天的文字，请返回原页面重新带回。原有草稿未修改。", type = ToastType.Error)
+        } else if (!decodedText.isNullOrEmpty()) {
+            inputState.setMessageText(decodedText)
         }
     }
 
@@ -796,7 +796,7 @@ private fun ChatPageContent(
                 onUpdateAssistant = { updated ->
                     vm.updateSettings(setting.copy(assistants = setting.assistants.map { if (it.id == updated.id) updated else it }))
                 },
-                onUpdateConversation = { updated -> vm.updateConversation(updated); vm.saveConversationAsync() },
+                onUpdateConversation = { updated -> vm.saveConversationConfiguration(conversation, updated) },
                 onDismiss = { showOrbisExtensions = false },
                 onDismissAll = { showOrbisExtensions = false },
             )
@@ -871,8 +871,7 @@ private fun ChatFilesPickerSheet(
                 )
             },
             onUpdateConversation = {
-                vm.updateConversation(it)
-                vm.saveConversationAsync()
+                vm.saveConversationConfiguration(conversation, it)
             },
             showInjectionSheet = showInjectionSheet,
             onShowInjectionSheetChange = { showInjectionSheet = it },
@@ -984,13 +983,21 @@ private fun TopBar(
             Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 52.dp)
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).heightIn(min = 48.dp)
-                    .clickable { titleState.open(conversation.title) }, contentAlignment = Alignment.CenterStart) {
+                Row(Modifier.weight(1f).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f, fill = false).clickable { titleState.open(conversation.title) }) {
                     OrbisHeaderControlSurface(headerOpacity) {
-                        Text(conversation.title.ifBlank { "和${assistant.name.ifBlank { "AI" }}说话" },
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        Column(Modifier.padding(horizontal = 10.dp, vertical = 5.dp)) {
+                        Text(assistant.name.ifBlank { "AI" },
                             fontSize = 14.sp, lineHeight = 20.sp, maxLines = 1,
                             color = OrbisTheme.colors.ink, overflow = TextOverflow.Ellipsis)
+                        if (conversation.title.isNotBlank() && conversation.title != assistant.name)
+                            Text(conversation.title, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 1,
+                                color = OrbisTheme.colors.mutedInk, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    }
+                    if (assistant.orbisBodyEnabled && !conversation.isConsultation) {
+                        me.rerere.rikkahub.ui.pages.orbis.OrbisBodyEntry(assistant.id.toString(), conversation.id.toString())
                     }
                 }
                 OrbisHeaderControlSurface(headerOpacity, shape = CircleShape) {

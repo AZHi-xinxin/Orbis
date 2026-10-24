@@ -222,10 +222,33 @@ class SemanticMemoryDeviceTest {
             val turn = runtime.begin(f.assistant, Uuid.random(), listOf(human))!!
             assertEquals(listOf(id), turn.selection.entries.map { it.id })
             val projected = turn.project(listOf(human))
-            assertEquals(human, projected.last())
-            assertTrue(projected.first().toText().contains("花生"))
-            assertTrue(projected.first().toText().contains("不是当年逐字原话"))
+            assertEquals(human.parts.first(), projected.single().parts.first())
+            assertTrue(projected.single().toText().contains("花生"))
+            assertTrue(projected.single().toText().contains("不是当年逐字原话"))
             assertTrue(projected.all { it.getTools().isEmpty() })
+        }
+    }
+
+    @Test fun realModelSurvivesModeSwitchAndWorkerRestartWithCanonicalMemoryIntact() = runBlocking {
+        Fixture().use { f ->
+            val (_, id) = f.source("她对花生过敏，点餐时需要提前告诉服务员不要放花生。")
+            val human = UIMessage.user("她吃饭有什么需要忌口的？")
+            val before = f.db.orbisMemoryDao().get(f.owner, id)
+            val first = f.service({ LocalMemoryEmbedding(f.context) })
+            f.ready(first)
+            for (mode in listOf(OrbisMemoryMode.STANDARD, OrbisMemoryMode.INDEPENDENT)) {
+                f.change { it.copy(orbisMemoryMode = mode) }
+                assertEquals(listOf(id), first.recall(f.owner, listOf(human)).map { it.id })
+            }
+            f.change { it.copy(orbisMemoryMode = OrbisMemoryMode.LIGHT) }
+            assertTrue(first.recall(f.owner, listOf(human)).isEmpty())
+            withTimeout(5_000) { while (first.indexedCount(f.owner) != 0) delay(20) }
+            first.close()
+            f.change { it.copy(orbisMemoryMode = OrbisMemoryMode.STANDARD) }
+            val restarted = f.service({ LocalMemoryEmbedding(f.context) })
+            f.ready(restarted)
+            assertEquals(listOf(id), restarted.recall(f.owner, listOf(human)).map { it.id })
+            assertEquals(before, f.db.orbisMemoryDao().get(f.owner, id))
         }
     }
 

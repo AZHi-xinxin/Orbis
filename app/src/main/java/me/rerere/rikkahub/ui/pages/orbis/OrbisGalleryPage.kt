@@ -43,7 +43,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
-import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import me.rerere.rikkahub.data.ai.tools.local.withNativeToolSelection
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -315,7 +314,7 @@ internal fun GalleryNavigationPanel(expanded: Boolean, onToggle: () -> Unit, act
     }
     AlertDialog(onDismissRequest = onClose, title = { Text("带回哪个聊天？") }, text = { Column {
         Text("先放入输入框，你确认发送后 AI 才会收到。只带作品 / 答案编号，不自动塞入整份长文件。", style = MaterialTheme.typography.bodySmall)
-        LazyColumn(Modifier.heightIn(max = 350.dp)) { items(entries, key = { it.id.toString() }) { entry -> TextButton(onClick = { onNavigate(); navigator.navigate(Screen.Chat(entry.id.toString(), text = text)) }) { Text(entry.title.ifBlank { "未命名窗口" }, maxLines = 2) } } }
+        LazyColumn(Modifier.heightIn(max = 350.dp)) { items(entries, key = { it.id.toString() }) { entry -> TextButton(onClick = { onNavigate(); navigator.navigate(galleryChatRoute(entry.id.toString(), text)) }) { Text(entry.title.ifBlank { "未命名窗口" }, maxLines = 2) } } }
         if (error) Text("未读到窗口，请关闭后重试。")
         if (entries.isEmpty() && !error) Text("请先为当前助手建立聊天窗口。")
         Row { if (offset > 0) TextButton(onClick = { offset = (offset - 20).coerceAtLeast(0) }) { Text("上一页") }; next?.let { page -> TextButton(onClick = { offset = page }) { Text("下一页") } } }

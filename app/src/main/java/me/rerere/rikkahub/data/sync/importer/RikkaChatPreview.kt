@@ -29,7 +29,7 @@ internal interface RikkaChatSource : Closeable {
 internal object RikkaChatLimits {
     // Source admission is independent of the smaller target SQLite write budget. Conversion
     // can remove a legacy system payload, or grow tools/attachment references, so check again.
-    const val MAX_NODE_BYTES = 1024 * 1024
+    const val MAX_NODE_BYTES = 8 * 1024 * 1024
     const val MAX_WINDOW_BYTES = 32L * 1024 * 1024
     const val MAX_WINDOW_NODES = 50_000
     const val MAX_WINDOW_MESSAGES = 100_000
@@ -105,15 +105,58 @@ internal suspend fun convertRikkaChat(source: RikkaChatSource, chat: RikkaChatSn
                             message.parts.firstOrNull()?.metadata ?: RikkaChatContentDecoder.marker()))
                     else message.parts.map { mapPart(it, chat.id) })
             }
-            try { MessageNodeBudget.measureNode(converted) }
-            catch (_: MessageNodeCapacityException) { throw ArchiveReadException(ArchiveFailure.NODE_LIMIT) }
-            nodes += MessageNode(id = rikkaImportId("node", "${chat.id}/${node.id}"),
-                messages = converted, selectIndex = node.selectIndex)
+            nodes += partitionRikkaImportedNode(chat.id, node.id, converted, node.selectIndex, checkCancelled)
         }
     }
     return Conversation(id = rikkaImportId("conversation", chat.id), assistantId = assistantId,
         title = chat.title, createAt = Instant.ofEpochMilli(chat.createAt), updateAt = Instant.ofEpochMilli(chat.updateAt),
         messageNodes = nodes)
+}
+
+/** Split only at existing part boundaries, never truncate text or separate alternative branches.
+ * Large upstream tool loops are inert text here and can occupy consecutive historical messages.
+ * A single oversized part or an oversized set of alternatives still fails before this chat commits.
+ * The ordinary/live database write limit is deliberately unchanged.
+ */
+internal fun partitionRikkaImportedNode(chatId: String, nodeId: String, messages: List<UIMessage>,
+    selectIndex: Int, checkCancelled: () -> Unit = {}): List<MessageNode> {
+    val originalId = rikkaImportId("node", "$chatId/$nodeId")
+    try {
+        MessageNodeBudget.measureNode(messages)
+        return listOf(MessageNode(id = originalId, messages = messages, selectIndex = selectIndex))
+    } catch (_: MessageNodeCapacityException) {
+        if (messages.size != 1) throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
+    }
+    val message = messages.single()
+    val envelopeBytes = MessageNodeBudget.measureNode(listOf(message.copy(parts = emptyList())))
+    val groups = mutableListOf<List<UIMessagePart>>()
+    var parts = mutableListOf<UIMessagePart>()
+    var bytes = envelopeBytes
+    for (part in message.parts) {
+        checkCancelled()
+        val partBytes = try {
+            MessageNodeBudget.measureNode(listOf(message.copy(parts = listOf(part)))) - envelopeBytes
+        } catch (_: MessageNodeCapacityException) { throw ArchiveReadException(ArchiveFailure.NODE_LIMIT) }
+        if (bytes + partBytes + (if (parts.isEmpty()) 0 else 1) > MessageNodeBudget.MAX_NODE_BYTES) {
+            check(parts.isNotEmpty())
+            groups += parts
+            parts = mutableListOf()
+            bytes = envelopeBytes
+        }
+        bytes += partBytes + if (parts.isEmpty()) 0 else 1
+        parts += part
+    }
+    if (parts.isNotEmpty()) groups += parts
+    return groups.mapIndexed { index, group ->
+        checkCancelled()
+        val segment = message.copy(
+            id = if (index == 0) message.id else rikkaImportId("message-segment", "$chatId/$nodeId/${message.id}/$index"),
+            parts = group,
+        )
+        MessageNodeBudget.measureNode(listOf(segment))
+        MessageNode(id = if (index == 0) originalId else rikkaImportId("node-segment", "$chatId/$nodeId/$index"),
+            messages = listOf(segment), selectIndex = 0)
+    }
 }
 
 internal fun rikkaArchiveFingerprint(file: File, checkCancelled: () -> Unit = {}): String {

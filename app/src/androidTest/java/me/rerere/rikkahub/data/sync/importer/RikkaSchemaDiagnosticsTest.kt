@@ -70,4 +70,22 @@ class RikkaSchemaDiagnosticsTest {
             assertTrue(ArchiveCapacity.publicError(failure).contains("[RIKKA_SCHEMA/$check]"))
         }
     }
+
+    @Test fun largeForeignCellIsReadInByteChunksWithoutChangingUnicodeOrSource() {
+        // More than a CursorWindow, with four-byte characters crossing the 64 KiB chunk edges.
+        val payload = "[\"" + "中🙂".repeat(450_000) + "\"]"
+        val file = database { it.execSQL("UPDATE message_node SET messages=?", arrayOf(payload)) }
+        val before = java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
+        RikkaChatSnapshotReader.open(context, file).use { source ->
+            assertEquals(payload, source.nodes(chat).single().messages)
+        }
+        assertArrayEquals(before, java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes()))
+    }
+
+    @Test fun sourceBeyondBoundStillRefusesBeforeReadingPayload() {
+        val file = database { it.execSQL("UPDATE message_node SET messages=CAST(zeroblob(?) AS TEXT)",
+            arrayOf(RikkaChatLimits.MAX_NODE_BYTES + 1)) }
+        val failure = runCatching { RikkaChatSnapshotReader.open(context, file).close() }.exceptionOrNull()!!
+        assertTrue(ArchiveCapacity.publicError(failure).contains("[RIKKA_SCHEMA/ROW_SIZE]"))
+    }
 }

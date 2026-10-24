@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
 import me.rerere.ai.util.orbisSourceHeaders
+import me.rerere.ai.util.chatCompletionsHostMemoryLayout
 import me.rerere.ai.util.observeOrbisGatewayRequest
 import me.rerere.ai.util.observeOrbisGatewayResponse
 
@@ -193,7 +194,7 @@ class ChatCompletionsAPI(
         val supportsGoogleSignatures = host == "generativelanguage.googleapis.com" ||
             host == "aiplatform.googleapis.com" || host.endsWith(".aiplatform.googleapis.com") ||
             params.model.modelId.contains("gemini", ignoreCase = true)
-        return buildJsonObject {
+        val request = buildJsonObject {
             put("model", params.model.modelId)
             put(
                 "messages",
@@ -406,6 +407,31 @@ class ChatCompletionsAPI(
                 }
             }
         }.mergeCustomBody(params.customBody)
+        return withDeepSeekToolHistoryFields(request, host, providerSetting.includeHistoryReasoning)
+    }
+
+    /** DeepSeek tool requests require a reasoning_content member on every assistant entry,
+     * including prose-only compaction summaries and replies with no reasoning. An empty member
+     * represents absent reasoning; never invent thoughts, drop an answer, or replay a tool.
+     * Preserve explicit fields/custom bodies and the user's history opt-out. A relay model name
+     * selects this wire compatibility only, not the relay's thinking-control dialect. */
+    private fun withDeepSeekToolHistoryFields(request: JsonObject, host: String, includeHistory: Boolean): JsonObject {
+        val model = (request["model"] as? JsonPrimitive)?.content.orEmpty()
+            .substringAfterLast('/').lowercase()
+        if (!includeHistory || host == "openrouter.ai" ||
+            (host != "api.deepseek.com" && !model.startsWith("deepseek-")) ||
+            (request["tools"] as? JsonArray).isNullOrEmpty()) return request
+        val messages = request["messages"] as? JsonArray ?: return request
+        var changed = false
+        val projected = messages.map { element ->
+            val message = element as? JsonObject
+            if ((message?.get("role") as? JsonPrimitive)?.content == "assistant" &&
+                "reasoning_content" !in message && "reasoning_details" !in message) {
+                changed = true
+                JsonObject(message + ("reasoning_content" to JsonPrimitive("")))
+            } else element
+        }
+        return if (changed) JsonObject(request + ("messages" to JsonArray(projected))) else request
     }
 
     private fun isModelAllowTemperature(model: Model): Boolean {
@@ -424,7 +450,7 @@ class ChatCompletionsAPI(
         includeOpenRouterReasoningDetails: Boolean = false,
         supportInputModalities: List<Modality> = listOf(Modality.TEXT, Modality.IMAGE),
     ) = buildJsonArray {
-        val filteredMessages = messages.filter { it.isValidToUpload() }
+        val filteredMessages = chatCompletionsHostMemoryLayout(messages).filter { it.isValidToUpload() }
 
         filteredMessages.forEach { message ->
             if (message.role == MessageRole.ASSISTANT) {

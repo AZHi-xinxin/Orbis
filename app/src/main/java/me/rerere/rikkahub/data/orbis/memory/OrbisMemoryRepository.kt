@@ -73,6 +73,10 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
     }
 
     suspend fun stats(assistantId: String): OrbisMemoryStats { owner(assistantId); return dao.stats(assistantId) }
+    suspend fun emotionLabels(assistantId: String, limit: Int = 20): List<OrbisMemoryEmotionRow> {
+        owner(assistantId); require(limit in 1..50)
+        return dao.emotions(assistantId, limit)
+    }
     fun observeStats(assistantId: String): Flow<OrbisMemoryStats> { owner(assistantId); return dao.observeStats(assistantId) }
 
     /** Owns neither the stream nor its destination. A partial failed export is NOT a success. */
@@ -129,13 +133,15 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
                         body = request.requiredString("body"), summary = request.string("summary").orEmpty(),
                         state = request.string("state") ?: "static", tags = request.stringList("tags") ?: emptyList(),
                         keywords = request.stringList("keywords") ?: emptyList(), important = request.optionalBoolean("important") ?: false,
-                        minIntervalTurns = request.optionalInt("minIntervalTurns") ?: 0, createdAt = now, updatedAt = now)
+                        minIntervalTurns = request.optionalInt("minIntervalTurns") ?: 0, createdAt = now, updatedAt = now,
+                        emotion = request.emotion())
                 }
                 "update" -> checkNotNull(old).model().let { base ->
                     if (base.deleted) refuse("memory_note_deleted")
                     base.copy(body = request.string("body") ?: base.body, summary = request.string("summary") ?: base.summary,
                         tags = request.stringList("tags") ?: base.tags, keywords = request.stringList("keywords") ?: base.keywords,
                         important = request.optionalBoolean("important") ?: base.important,
+                        emotion = if("emotion" in request) request.emotion() else base.emotion,
                         minIntervalTurns = request.optionalInt("minIntervalTurns") ?: base.minIntervalTurns).let {
                         request.string("state")?.let { state -> transition(it, state) } ?: it
                     }
@@ -267,6 +273,7 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
     }
 
     private fun validate(note: OrbisMemoryNote): OrbisMemoryNote {
+        if(!OrbisMemoryEmotions.valid(note.emotion)) refuse("memory_emotion_invalid", "emotion")
         OrbisMemoryBudget.compactionCapacityError(note.body)?.let { refuse(it) }
         if (note.summary.toByteArray(Charsets.UTF_8).size > OrbisMemoryBudget.MAX_SUMMARY_BYTES)
             refuse("memory_capacity_exceeded")
@@ -290,10 +297,10 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
     }
 
     private fun OrbisMemoryEntity.model() = OrbisMemoryNote(id, assistantId, body, summary, state, previousState,
-        strings(tags), strings(keywords), important, minIntervalTurns, createdAt, updatedAt, revision, deleted)
+        strings(tags), strings(keywords), important, minIntervalTurns, createdAt, updatedAt, revision, deleted, emotion)
     private fun OrbisMemoryNote.entity() = OrbisMemoryEntity(assistantId, id, body, summary,
         OrbisMemoryBudget.codepoints(body), OrbisMemoryBudget.codepoints(summary), state, previousState,
-        Json.encodeToString(tags), Json.encodeToString(keywords), important, minIntervalTurns, createdAt, updatedAt, revision, deleted)
+        Json.encodeToString(tags), Json.encodeToString(keywords), important, minIntervalTurns, createdAt, updatedAt, revision, deleted, emotion)
     private fun OrbisMemoryMetadataRow.model() = OrbisMemoryMetadata(id, state, strings(tags), createdAt, updatedAt, revision, deleted)
 
     private class MemoryRequestFailure(val code: String, val field: String?) : IllegalArgumentException(code)
@@ -303,6 +310,7 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
         field?.let { put("field", it) }
     }
     private fun errorMessage(code: String): String = when (code) {
+        "memory_emotion_invalid" -> "emotion 可选：暖、软、要、闷、烦、冷、火；传 null 可清除。只存自标标签，不推测或改写内容。"
         "memory_body_required" -> "请提供非空原文 body；不会保存空记录。"
         "memory_capacity_exceeded" -> "原文最多 512 KiB，摘要最多 64 KiB；请分条保存，内容不会被截断。"
         "memory_pin_summary_required" -> "超过 300 字的原文需要另填摘要才能置顶；原文不会被截断。"
@@ -340,6 +348,14 @@ class OrbisMemoryRepository(private val database: AppDatabase) {
         return value.content
     }
     private fun JsonObject.requiredString(key: String): String = string(key) ?: refuse("memory_field_required", key)
+    private fun JsonObject.emotion(): String? {
+        val raw = get("emotion") ?: return null
+        if(raw == JsonNull) return null
+        val value = (raw as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?: refuse("memory_emotion_invalid", "emotion")
+        if(!OrbisMemoryEmotions.valid(value)) refuse("memory_emotion_invalid", "emotion")
+        return value
+    }
     private fun JsonObject.optionalInt(key: String): Int? {
         val value = get(key) ?: return null
         if (value !is JsonPrimitive || value.isString) refuse("memory_field_invalid", key)

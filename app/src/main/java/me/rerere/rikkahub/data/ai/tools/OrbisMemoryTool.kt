@@ -21,6 +21,7 @@ internal fun buildOrbisMemoryTool(
     description = """
         你的本机随身便签，同一助手跨窗口可用，与 ST 和旧记忆库独立。一个工具完成存、改、删、看、设状态；不需要人类审批。
         存：只传 body 即可；可选 summary、tags、keywords、important、state。正文完整保存，默认 static（仅存），不自动提炼或改写。
+        可选 emotion=暖/软/要/闷/烦/冷/火，仅保存你自标的情绪，不做语义猜测；不填兼容旧记录，传null清除。不改身体计算值、不依赖ST。
         读：action=read，可用 id 或 query；支持 offset/limit 分页。改：action=update、id 和要修改的字段。删：action=delete、id，为可恢复的软删。
         状态：action=set_state、id、state=static/conditional/pinned/paused。暂停只停浮现；恢复用 action=restore（可指定 revision），版本查询 action=history、id。
         你自行决定内容、标签、摘要、关键词、重要性、状态和 minIntervalTurns（条件浮现最小人类轮次间隔）。工具可能返回词面相似候选，由你决定是否合并，不会自动合并。
@@ -38,6 +39,8 @@ internal fun buildOrbisMemoryTool(
         field("id", "string", "已有便签 ID；不能选择其他助手")
         field("body", "string", "完整正文；只有存入时必填，可长于300字")
         field("summary", "string", "可选，由你写的带入摘要，不影响完整正文")
+        put("emotion", buildJsonObject { put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
+            put("enum", JsonArray(me.rerere.rikkahub.data.orbis.memory.OrbisMemoryEmotions.labels.map(::JsonPrimitive) + JsonNull)) })
         for (name in listOf("tags", "keywords")) put(name, buildJsonObject {
             put("type", "array"); put("items", buildJsonObject { put("type", "string") })
         })

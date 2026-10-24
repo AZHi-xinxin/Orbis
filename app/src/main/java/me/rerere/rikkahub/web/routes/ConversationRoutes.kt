@@ -515,7 +515,7 @@ private suspend fun applyInitialConversationInjections(
         return
     }
 
-    val conversation = chatService.getConversationFlow(conversationId).first()
+    val conversation = chatService.getDisplayedConversationFlow(conversationId).first()
     val settings = settingsStore.settingsFlow.first()
     val assistant = settings.assistants.firstOrNull { it.id == conversation.assistantId }
         ?: throw NotFoundException("Assistant not found")
@@ -532,10 +532,6 @@ private suspend fun applyInitialConversationInjections(
         lorebookIds = lorebookIds ?: conversation.lorebookIds.map { it.toString() },
     )
 
-    chatService.updateConversationState(conversationId) {
-        it.copy(
-            modeInjectionIds = requestedModeInjectionIds,
-            lorebookIds = requestedLorebookIds,
-        )
-    }
+    chatService.saveConversationInjections(me.rerere.rikkahub.data.model.ConversationInjectionEdit.between(
+        conversation, conversation.copy(modeInjectionIds = requestedModeInjectionIds, lorebookIds = requestedLorebookIds)))
 }

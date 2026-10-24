@@ -17,6 +17,7 @@ import me.rerere.rikkahub.ui.pages.chat.orbisCallFiles
 import me.rerere.rikkahub.ui.pages.chat.prunedContextFiles
 import me.rerere.rikkahub.ui.pages.chat.prunedContextMedia
 import me.rerere.rikkahub.ui.pages.orbis.manualContextMessageSnippet
+import me.rerere.rikkahub.web.dto.toDto
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.time.Duration.Companion.seconds
@@ -40,6 +41,39 @@ class PrivateRoomPresentationTest {
         assertFalse(visible.privateRoomPendingPresentation)
         assertFalse(visible.hasPrivateRoomToolContent())
         assertFalse(Json.encodeToString(visible).contains(secret))
+    }
+
+    @Test fun bodyStateIsAvailableToAiButNotRawHumanDetailsWebOrFavorites() {
+        val source = message(tool("orbis_body"))
+        val original = stableJson.encodeToString(source)
+        assertRecordsHidden(source)
+        assertFalse(Json.encodeToString(source.toDto()).contains(secret))
+        assertEquals(publicReply, manualContextMessageSnippet(source.toMessageNode()))
+        val node = source.toMessageNode()
+        val target = NodeFavoriteTarget(Uuid.random(), "body", node.id, node)
+        assertFalse(Json.encodeToString(target.favoriteSnapshot()).contains(secret))
+        assertEquals(original, stableJson.encodeToString(source))
+        assertEquals(secret, (source.getTools().single().output.single() as UIMessagePart.Text).text)
+        assertFalse(isPrivateRoomToolName("orbis_body")) // Presentation must not grant room privileges.
+    }
+
+    @Suppress("DEPRECATION")
+    @Test fun bodyStreamingLegacyAndDeletedRecordsCannotBypassThePanel() {
+        for (name in listOf("", "orbis_b", "orbis_body")) {
+            assertRecordsHidden(message(tool(name).copy(input = "{invalid:$secret")))
+        }
+        assertRecordsHidden(message(UIMessagePart.ToolCall("old", "orbis_body", secret)))
+        assertRecordsHidden(message(UIMessagePart.ToolResult("old", "orbis_body", JsonPrimitive(secret), JsonPrimitive(secret))))
+        val original = UIMessage.assistant(publicReply).copy(parts = listOf(
+            UIMessagePart.Text(publicReply), UIMessagePart.Reasoning(secret)))
+        val deleted = original.copy(deletedToolRecords = listOf(DeletedToolRecord(tool("orbis_body"), 1, original.createdAt)))
+        assertRecordsHidden(deleted)
+        assertTrue(deleted.privateRoomSafePresentation().deletedToolRecords.isEmpty())
+        assertRecordsHidden(UIMessage.assistant("").copy(parts = listOf(tool("orbis_body"))), BODY_CONTENT_HIDDEN)
+        for (name in listOf("orbis_body_other", "mcp__orbis_body", "body", "search_web")) {
+            val unrelated = message(tool(name))
+            assertSame(unrelated, unrelated.privateRoomSafePresentation())
+        }
     }
 
     @Test fun allSevenLocalToolsHideRecordsButKeepPublicReplyAndOriginalContext() {

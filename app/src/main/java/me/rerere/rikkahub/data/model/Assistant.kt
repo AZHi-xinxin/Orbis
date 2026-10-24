@@ -45,6 +45,8 @@ data class Assistant(
     // Independent optional areas: disabled means no catalogue, state reads or background work.
     val orbisPetEnabled: Boolean = false,
     val orbisStudyEnabled: Boolean = false,
+    val orbisBodyEnabled: Boolean = false,
+    val orbisBodyKeywordsEnabled: Boolean = false,
     val orbisModelContinuityEnabled: Boolean = true,
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),

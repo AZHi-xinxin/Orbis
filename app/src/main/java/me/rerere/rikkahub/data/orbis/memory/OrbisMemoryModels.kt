@@ -23,7 +23,14 @@ data class OrbisMemoryNote(
     val updatedAt: Long,
     val revision: Int = 1,
     val deleted: Boolean = false,
+    val emotion: String? = null,
 )
+
+/** Explicit AI-authored labels, not an inference engine and not a numerical body-state input. */
+object OrbisMemoryEmotions {
+    val labels = setOf("暖", "软", "要", "闷", "烦", "冷", "火")
+    fun valid(value: String?) = value == null || value in labels
+}
 
 /** SQL projects only these columns: no body, summary, keywords or hidden content payload. */
 @Serializable
