@@ -124,6 +124,7 @@ val appModule = module {
             folderRepository = get(),
             compactionRepository = get(),
             httpClient = get(),
+            bodyStatus = get(),
         )
     }
 

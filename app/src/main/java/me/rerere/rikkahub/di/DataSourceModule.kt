@@ -17,6 +17,7 @@ import me.rerere.rikkahub.data.ai.TranslationHandler
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
 import me.rerere.rikkahub.data.api.RikkaHubAPI
 import me.rerere.rikkahub.data.api.SponsorAPI
+import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.orbis.OrbisCloudSettingsStore
 import me.rerere.rikkahub.data.sync.BackupManager
@@ -117,11 +118,22 @@ val dataSourceModule = module {
         get<me.rerere.rikkahub.data.orbis.memory.SemanticMemoryRecall>()) }
 
     single {
+        val settings: SettingsStore = get()
+        val context: Context = get()
+        me.rerere.rikkahub.data.orbis.body.BodyStatusRuntime(get<me.rerere.rikkahub.AppScope>(), options = { owner ->
+            kotlin.runCatching { kotlin.uuid.Uuid.parse(owner) }.getOrNull()?.let {
+                settings.settingsFlow.value.getAssistantById(it)
+            }?.let { me.rerere.rikkahub.data.orbis.body.BodyStatusOptions(it.orbisBodyEnabled, it.orbisBodyKeywordsEnabled) }
+        }, open = { owner -> me.rerere.rikkahub.data.orbis.body.OrbisBody.open(context, owner) })
+    }
+
+    single {
         GenerationLoop(
             context = get(),
             providerManager = get(),
             json = get(),
             localMemory = get(),
+            bodyStatus = get(),
             observation = me.rerere.rikkahub.data.orbis.observation.AiObservationRuntime(get(), get(), get()),
         )
     }

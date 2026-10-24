@@ -51,6 +51,9 @@ import me.rerere.rikkahub.data.datastore.NetworkSetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.orbis.body.*
+import me.rerere.rikkahub.data.orbis.activities.ActivityStorage
+import me.rerere.ai.ui.OrbisUserMessageTime
 import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.PromptInjection
@@ -865,9 +868,9 @@ class GenerationLoopLoopbackTest {
                     it.value["content"].toString().contains("Orbis 上下文用量参考")
                 }.single()
                 assertEquals(JsonPrimitive("system"), notice.value["role"])
-                assertEquals("synthetic current human", messages.last {
+                assertEquals("synthetic current human", wireText(messages.last {
                     it["role"] == JsonPrimitive("user")
-                }.getValue("content").jsonPrimitive.content)
+                }.getValue("content")))
                 assertEquals(JsonPrimitive("tool"), messages.last()["role"])
                 val callIndex = messages.indexOfFirst { it["tool_calls"] != null }
                 assertTrue("The host notice must precede the complete assistant/tool unit", notice.index < callIndex)
@@ -1077,6 +1080,57 @@ class GenerationLoopLoopbackTest {
         }
     }
 
+    @Test fun bodyStatusAfterHumanReachesFirstHttpRequestAndStaysFrozenThroughTools() = runBlocking<Unit> {
+        fixture(streaming = false, approval = false, expectedRequests = 2, batchWithEmptyResult = true) { f ->
+            val storage = object : ActivityStorage {
+                var value: String? = null
+                override fun read() = value
+                override fun write(text: String) { value = text }
+            }
+            var clock = BodyClock("synthetic", 0, 1_000_000)
+            val repo = BodyRepository(storage) { clock }
+            repo.define(BodyDefinition(listOf(BodyDimension("mood", "心情", halfLifeMinutes = 1.0),
+                BodyDimension("secret", "私密合成指标", baseline = 37.0, isPrivate = true)),
+                listOf(BodyRule("rest", mapOf("mood" to 8.0), listOf("synthetic"))), triggerMode = "auto"), 0, "define")
+            repo.activate(1, "activate"); repo.setRunning(true)
+            val runtime = BodyStatusRuntime(this, { BodyStatusOptions(it == f.assistantId.toString(), true) }, { repo })
+            f.bodyStatusRuntime = runtime
+            val conversation = Uuid.random()
+            val source = f.initial.dropLast(1) + f.initial.last().copy(orbisUserMessageTime = OrbisUserMessageTime(1_000_000, "UTC", 0))
+            runtime.recordHuman(f.assistantId.toString(), conversation.toString(), source.last())
+            f.afterToolExecution = { clock = clock.copy(activeMs = 60_000); repo.refresh() }
+            val final = f.collect(from = source, conversationId = conversation)
+            val requests = f.server.requests.toList()
+            val firstWire = requests.first().json.getValue("messages").jsonArray
+            val status = firstWire.map { it.jsonObject }.single { it.toString().contains("当前身体状态") }
+            assertEquals(JsonPrimitive("system"), status["role"])
+            assertTrue(status.toString().contains("心情"))
+            assertTrue(status.toString().contains("58"))
+            assertTrue(status.toString().contains("私密合成指标"))
+            assertEquals(source.last().toText(), wireText(firstWire.last().jsonObject.getValue("content")))
+            assertEquals(firstWire, JsonArray(requests.last().json.getValue("messages").jsonArray.take(firstWire.size)))
+            assertEquals(1, Regex("当前身体状态").findAll(requests.last().encodedMessages).count())
+            assertFalse(final.toString().contains("当前身体状态"))
+            assertEquals(source, final.take(source.size))
+            assertEquals(0, f.context.privateStorageAccesses.get())
+        }
+    }
+
+    // The fixture has one authored text block. Orbis may append its existing model receipt;
+    // assert that separately instead of confusing host metadata with the human's own text.
+    private fun wireText(content: JsonElement): String = when (content) {
+        is JsonPrimitive -> content.content
+        is JsonArray -> {
+            val texts = content.map {
+                check(it.jsonObject["type"] == JsonPrimitive("text"))
+                it.jsonObject.getValue("text").jsonPrimitive.content
+            }
+            assertTrue(texts.drop(1).all { it.startsWith("[Orbis 客户端模型信息：") })
+            texts.first()
+        }
+        else -> error("Expected synthetic text content")
+    }
+
     private suspend fun fixture(
         streaming: Boolean,
         approval: Boolean,
@@ -1204,7 +1258,9 @@ class GenerationLoopLoopbackTest {
         var lastPublished: List<UIMessage> = initial
             private set
         private val manager = ProviderManager(client, context)
-        private val loop = GenerationLoop(context, manager, Json)
+        var bodyStatusRuntime: BodyStatusRuntime? = null
+        val assistantId get() = assistant.id
+        private val loop get() = GenerationLoop(context, manager, Json, bodyStatus = bodyStatusRuntime)
         private val tool = Tool(
             name = if (privateMode) "orbis_private_room_write" else if (memoryMode) "orbis_memory" else "synthetic_tool", description = "Synthetic local counter only.",
             parameters = {

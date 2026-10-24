@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.orbis.memory
 
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
+import me.rerere.rikkahub.data.orbis.body.projectBodyStatus
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
@@ -135,6 +136,68 @@ class MemoryProviderWireTest(private val protocol: String) {
         val noCarrier = listOf(UIMessage.system("base"), UIMessage.assistant("summary"))
         assertEquals(noCarrier, projectOrbisMemory(noCarrier,
             OrbisMemorySelection(listOf(OrbisMemorySelected("hit", "data", 1, "summary")))))
+    }
+
+    @Test fun bodyStatusAndRecallChangeOnlyLateHostDataAcrossAllProtocols() {
+        val input = projectOrbisMemory(stored, selection("memory A"))
+        val a = request(projectBodyStatus(input, "【当前身体状态：心情：58】"))
+        val b = request(projectBodyStatus(input, "【当前身体状态：心情：66】"))
+        assertEquals(system(a), system(b))
+        val tail = if (protocol == "chat") 2 else 1
+        assertEquals(JsonArray(wireMessages(a).dropLast(tail)), JsonArray(wireMessages(b).dropLast(tail)))
+        assertNotEquals(a, b)
+        if (protocol == "chat") {
+            assertEquals(wireMessages(request(stored)).last(), wireMessages(a).last())
+            assertEquals("system", wireMessages(a)[wireMessages(a).lastIndex - 1].jsonObject["role"]?.jsonPrimitive?.content)
+            val directory = java.io.File("build/reports/memory-wire").apply { mkdirs() }
+            java.io.File(directory, "body-a.json").writeText(a.toString())
+            java.io.File(directory, "body-b.json").writeText(b.toString())
+        }
+        assertEquals(request(input), request(projectBodyStatus(projectBodyStatus(input, "status"), null)))
+        assertFalse(stored.toString().contains("当前身体状态"))
+    }
+
+    @Test fun bodySnapshotPreservesEntireFirstRequestAcrossToolContinuation() = runTest {
+        val report = "【当前身体状态：心情：58；自定义：37.3（私密）】"
+        val snapshot = GenerationInputSnapshot(bodyStatus = report)
+        val frozen = selection("one wake")
+        val first = snapshot.input { projectOrbisMemory(stored, frozen) }
+        val call = UIMessagePart.Tool("body-call", "synthetic_tool", "{}")
+        val response = UIMessage.assistant("").copy(parts = listOf(call))
+        val result = call.copy(output = listOf(UIMessagePart.Text("synthetic result")), approvalState = ToolApprovalState.Auto)
+        snapshot.appendCompletedResponse(response, listOf(result))
+        val next = projectBodyStatus(projectOrbisMemory(snapshot.input { error("Cannot rerender") }, frozen), report)
+        val firstWire = request(projectBodyStatus(projectOrbisMemory(first, frozen), report))
+        val nextWire = request(next)
+        assertEquals(system(firstWire), system(nextWire))
+        assertEquals(wireMessages(firstWire), JsonArray(wireMessages(nextWire).take(wireMessages(firstWire).size)))
+        assertEquals(1, Regex("当前身体状态").findAll(nextWire.toString()).count())
+        if (protocol == "chat") {
+            val directory = java.io.File("build/reports/memory-wire").apply { mkdirs() }
+            directory.resolve("body-first.json").writeText(firstWire.toString())
+            directory.resolve("body-tool.json").writeText(nextWire.toString())
+        }
+    }
+
+    @Test fun compactionRetainsFrozenBodyInCompletedToolWithoutInventingHuman() = runTest {
+        val report = "【当前身体状态：心情：58】"
+        val snapshot = GenerationInputSnapshot(bodyStatus = report)
+        snapshot.input { stored }
+        val call = UIMessagePart.Tool("compact-body", "compact", "{}")
+        val response = UIMessage.assistant("").copy(parts = listOf(call))
+        val result = call.copy(output = listOf(UIMessagePart.Text("compact receipt")), approvalState = ToolApprovalState.Auto)
+        val bubble = response.copy(parts = listOf(result))
+        val summary = UIMessage.assistant("summary").copy(parts = listOf(
+            UIMessagePart.Text("summary", buildJsonObject { put(COMPACTION_SUMMARY_MARKER, true) })))
+        val rebased = snapshot.prepareCompactionInput(listOf(summary, bubble), response, listOf(result), bubble.id)
+        assertFalse(rebased.any { it.role == MessageRole.USER })
+        assertEquals(result.output, rebased.last().getTools().single().output.take(1))
+        val wire = request(rebased)
+        assertEquals(1, Regex("当前身体状态").findAll(wire.toString()).count())
+        assertTrue(wireMessages(wire).last().toString().contains("compact receipt"))
+        assertEquals(rebased, projectBodyStatus(rebased, report))
+        assertFalse(projectBodyStatus(rebased, null).toString().contains("当前身体状态"))
+        assertEquals(listOf(result), bubble.parts)
     }
 
     private fun request(messages: List<UIMessage>): JsonObject = when (protocol) {

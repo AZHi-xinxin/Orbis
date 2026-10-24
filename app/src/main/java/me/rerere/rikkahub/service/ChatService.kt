@@ -269,6 +269,7 @@ class ChatService(
     private val folderRepository: FolderRepository,
     private val compactionRepository: OrbisCompactionRepository,
     private val httpClient: okhttp3.OkHttpClient,
+    private val bodyStatus: me.rerere.rikkahub.data.orbis.body.BodyStatusRuntime? = null,
 ) {
     private val gatewayRequests = OrbisGatewayRequestLedger()
     private val gatewayInvocations = GatewayInvocationTracker<OrbisGatewayRequest>(key = { it.requestId })
@@ -3078,22 +3079,10 @@ class ChatService(
         synchronized(session) { humanContinuationFor(session).stop() }
     }
 
-    /** Optional local expression: never wait on disk before accepting or saving a human input. */
+    /** Register before generation; accepting/saving input never waits for simulator disk I/O. */
     private fun recordBodyHuman(conversation: Conversation, message: UIMessage) {
-        if(!BuildConfig.ORBIS_ENABLED || conversation.isConsultation || message.role != MessageRole.USER ||
-            message.isSynthetic || message.orbisEvent != null || message.orbisUserMessageTime == null) return
-        if(settingsStore.settingsFlow.value.getAssistantById(conversation.assistantId)?.orbisBodyEnabled != true) return
-        appScope.launch(Dispatchers.IO) {
-            try {
-                val current = settingsStore.settingsFlow.value.getAssistantById(conversation.assistantId)
-                if(current?.orbisBodyEnabled == true)
-                    me.rerere.rikkahub.data.orbis.body.OrbisBody.open(context, current.id.toString()).human(
-                        conversation.id.toString(), message.id.toString(),
-                        message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.take(32000),
-                        current.orbisBodyKeywordsEnabled)
-            } catch(cancelled: CancellationException) { throw cancelled }
-            catch(_: Exception) { /* A simulator failure cannot reject, rewrite or lose the human chat. */ }
-        }
+        if (!BuildConfig.ORBIS_ENABLED || conversation.isConsultation) return
+        bodyStatus?.recordHuman(conversation.assistantId.toString(), conversation.id.toString(), message)
     }
 
     /** Synchronous acceptance, no disk call, no old-job join, and no recovery permission gate. */
@@ -3104,6 +3093,7 @@ class ChatService(
         val userMessage = UIMessage(id = input.id, role = MessageRole.USER, parts = input.parts,
             orbisQuote = input.orbisQuote, orbisUserMessageTime = input.orbisUserMessageTime,
             orbisVoiceCallId = input.voiceCallId, orbisVoiceCallKind = input.voiceCallKind)
+        recordBodyHuman(session.state.value, userMessage)
         val generation = lane.send(userMessage, input.answer) { snapshot, owner, publish ->
             try {
                 val completed = generateHumanContinuation(session, lane, snapshot, owner, publish, voiceRecord)
@@ -3120,7 +3110,6 @@ class ChatService(
                 throw error
             }
         }
-        recordBodyHuman(session.state.value, userMessage)
         generation.invokeOnCompletion { input.reply?.complete(null) }
         if (input.voiceCallId != null) {
             voiceGenerationJobs[input.id] = generation

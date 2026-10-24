@@ -17,8 +17,10 @@ internal fun chatCompletionsHostMemoryLayout(messages: List<UIMessage>): List<UI
         if (message.role != MessageRole.USER) { add(message); continue }
         val (memory, authored) = message.parts.partition { part ->
             part is UIMessagePart.Text && part.metadata?.let { tag ->
-                (tag["orbis_local_memory_projection"] as? JsonPrimitive)?.booleanOrNull == true &&
-                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_local_memory" &&
+                (((tag["orbis_local_memory_projection"] as? JsonPrimitive)?.booleanOrNull == true &&
+                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_local_memory") ||
+                    ((tag["orbis_body_status_projection"] as? JsonPrimitive)?.contentOrNull == "v1" &&
+                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_body_status")) &&
                     (tag["human_authored"] as? JsonPrimitive)?.booleanOrNull == false &&
                     (tag["instruction_authority"] as? JsonPrimitive)?.contentOrNull == "none" &&
                     (tag["request_only"] as? JsonPrimitive)?.booleanOrNull == true

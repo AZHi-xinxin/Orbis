@@ -146,6 +146,7 @@ class GenerationLoop(
     private val json: Json,
     private val localMemory: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime? = null,
     private val observation: me.rerere.rikkahub.data.orbis.observation.AiObservationRuntime? = null,
+    private val bodyStatus: me.rerere.rikkahub.data.orbis.body.BodyStatusRuntime? = null,
 ) {
     fun generateText(
         settings: Settings,
@@ -203,9 +204,12 @@ class GenerationLoop(
             observation?.report(settings, assistant, conversationId, messages, model.modelId,
                 previousModel?.let { it.modelId != model.modelId || it.providerId != provider.id.toString() })
             else null
+        val bodyStatusTurn = if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && allowObservation &&
+            !readOnlyLocalMemory && conversationId != null)
+            bodyStatus?.begin(assistant.id.toString(), conversationId.toString(), messages) else null
         val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime,
             modelNotice = if (settings.aiGlobalObservation) null else ModelContinuity.notice(modelReceipt, previousModel),
-            observation = observationReport)
+            observation = observationReport, bodyStatus = bodyStatusTurn?.report)
         val screenShareTurn = if (allowLocalMemory && !readOnlyLocalMemory) me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn.bind(
             me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()?.state?.value,
             assistant.id.toString(), conversationId?.toString()) else null
@@ -343,6 +347,7 @@ class GenerationLoop(
                     compactionControl = compactionControl,
                     includeCompactionReminder = includeCompactionReminder,
                     localMemoryTurn = localMemoryTurn,
+                    bodyStatusTurn = bodyStatusTurn,
                     maxAutomaticContinuations = maxAutomaticContinuations,
                     consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis.takeIf {
                         stepIndex == 0 && messages.lastOrNull()?.role == MessageRole.USER
@@ -705,6 +710,7 @@ class GenerationLoop(
         compactionControl: ConversationCompactionControl? = null,
         includeCompactionReminder: Boolean = false,
         localMemoryTurn: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryTurn? = null,
+        bodyStatusTurn: me.rerere.rikkahub.data.orbis.body.BodyStatusTurn? = null,
         screenShareTurn: me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn? = null,
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
@@ -785,8 +791,10 @@ class GenerationLoop(
             // Host-bound identity survives in-turn compaction and message-count projection.
             requireActiveTurn()
             if (readOnlyPreflight) return localMemoryTurn?.project(internalMessages) ?: internalMessages
+            val withMemory = localMemoryTurn?.project(internalMessages) ?: internalMessages
+            val withBody = bodyStatusTurn?.project(withMemory) ?: withMemory
             return me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages(
-                context, assistant.id.toString(), localMemoryTurn?.project(internalMessages) ?: internalMessages,
+                context, assistant.id.toString(), withBody,
                 modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE)).let { projected ->
                 me.rerere.rikkahub.data.ai.transformers.projectOrbisScreenShareImages(screenShareTurn, projected,
                     model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE))

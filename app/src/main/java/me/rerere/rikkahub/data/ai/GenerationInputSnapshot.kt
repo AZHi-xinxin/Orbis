@@ -29,7 +29,7 @@ import kotlin.uuid.Uuid
  * a fresh snapshot using the existing approval path. No model-compatibility header is emitted.
  */
 internal class GenerationInputSnapshot(private val enableUserMessageTime: Boolean = false, private val modelNotice: String? = null,
-    private val observation: String? = null) {
+    private val observation: String? = null, private val bodyStatus: String? = null) {
     private var accepted: List<UIMessage>? = null
     private val continuationToolIds = mutableSetOf<String>()
     private val segmentOwners = mutableMapOf<Uuid, Uuid>()
@@ -41,8 +41,9 @@ internal class GenerationInputSnapshot(private val enableUserMessageTime: Boolea
     suspend fun initializeInput(buildInitial: suspend () -> List<UIMessage>) {
         if (accepted == null) {
             // Publish only after successful transformation; cancellation cannot leave a half input.
-            accepted = me.rerere.rikkahub.data.orbis.observation.projectObservation(
-                ModelContinuity.project(buildInitial(), modelNotice), observation).map(::copyGenerationMessage)
+            accepted = me.rerere.rikkahub.data.orbis.body.projectBodyStatus(
+                me.rerere.rikkahub.data.orbis.observation.projectObservation(
+                    ModelContinuity.project(buildInitial(), modelNotice), observation), bodyStatus).map(::copyGenerationMessage)
             reminderAddedThisWake = accepted!!.any { it.isCompactionReminder() }
         }
     }
@@ -191,7 +192,8 @@ internal class GenerationInputSnapshot(private val enableUserMessageTime: Boolea
         // Compaction may discard the USER that carried this wake's observation. Re-project
         // only into the request copy (and deduplicate retained projections), never the durable
         // summary/replacement. With no USER, the completed compact tool receipt is the carrier.
-        return me.rerere.rikkahub.data.orbis.observation.projectObservation(rebased, observation)
+        return me.rerere.rikkahub.data.orbis.body.projectBodyStatus(
+            me.rerere.rikkahub.data.orbis.observation.projectObservation(rebased, observation), bodyStatus)
             .map(::copyGenerationMessage)
     }
 
