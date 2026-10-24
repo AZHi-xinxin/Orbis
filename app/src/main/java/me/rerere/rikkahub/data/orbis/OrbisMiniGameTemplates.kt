@@ -10,6 +10,9 @@ internal object OrbisMiniGameTemplates {
         人类执 X；O 是本地简易程序，不是 AI 模型实时下棋。胜负以人类 X 为视角，move_count 统计双方实际落子总数。
         页面顶部对齐、正常文档流可滚动；棋盘按真实 innerWidth/innerHeight 扣除自身标题、说明和按钮高度，监听 resize。
         矮窗/大字体下先保留标题和可读控件，放不下时纵向滚动，不用固定 100vh 整页居中或裁掉顶部。
+        进度：先读取 JSON.parse(OrbisGame.loadState()) 的 ok/revision/state；state=null 才初始化新局。
+        每回合调用 OrbisGame.saveState(JSON.stringify({revision:上次回执版本,state:完整可恢复JSON对象}))；ok=true 后记下新 revision。
+        state 最多 64KiB、嵌套最多32层，只属于这局游戏。保存失败先停住并提示重试，不能假装已经存档；源码改版后不套用旧进度。
         终局只调用 OrbisGame.finish(JSON.stringify({result:'win'|'loss'|'draw',move_count:整数}))；返回 JSON 的 ok===true 才确认保存。
         失败不宣称成功，只允许重试同一终局结果；不在同一个宿主 session 清空棋盘写第二局。
         想重开时关闭当前游戏，回游戏库重新打开，由宿主建立新 session。无外联、CDN、storage 或其他原生权限。
@@ -72,6 +75,7 @@ internal object OrbisMiniGameTemplates {
             <p class="muted">横、竖或斜线连成三个即获胜。小窗口放不下时可以向下滑动。</p>
             <p id="result-receipt" role="status" aria-live="polite" data-saved="false">本局尚未结束，暂未提交战绩。</p>
             <div id="game-actions">
+              <button id="retry-state" type="button" hidden>重试保存进度</button>
               <button id="retry-result" type="button" hidden>重试保存本局结果</button>
               <button id="replay-guide" type="button">如何再来一局</button>
             </div>
@@ -89,6 +93,43 @@ internal object OrbisMiniGameTemplates {
           const retryButton = document.getElementById('retry-result');
           const buttons = [];
           let moves = 0, terminal = null, saved = false, submitting = false;
+          let revision = 0, checkpointEnabled = false, storageReady = true;
+          const retryStateButton = document.getElementById('retry-state');
+          function saveProgress() {
+            if (!checkpointEnabled) return true;
+            try {
+              const receipt = JSON.parse(OrbisGame.saveState(JSON.stringify({revision: revision,
+                state: {version: 1, board: board, moves: moves}})));
+              if (!receipt || receipt.ok !== true) throw new Error('not_saved');
+              revision = receipt.revision; storageReady = true; retryStateButton.hidden = true;
+              return true;
+            } catch (_) {
+              storageReady = false;
+              receiptElement.textContent = '本步进度尚未确认保存，已暂停落子。请重试保存，再继续。';
+              retryStateButton.hidden = false; paint(); scheduleFit(); return false;
+            }
+          }
+          function restoreProgress() {
+            if (!window.OrbisGame || typeof OrbisGame.loadState !== 'function') return;
+            try {
+              const receipt = JSON.parse(OrbisGame.loadState());
+              if (receipt && receipt.error === 'checkpoint_not_supported') return;
+              if (!receipt || receipt.ok !== true) throw new Error('load_failed');
+              checkpointEnabled = true; revision = receipt.revision;
+              if (receipt.state !== null) {
+                const state = receipt.state;
+                if (state.version !== 1 || !Array.isArray(state.board) || state.board.length !== 9 ||
+                    state.board.some(function(v){return !['','X','O'].includes(v);}) ||
+                    !Number.isInteger(state.moves) || state.moves !== state.board.filter(Boolean).length)
+                  throw new Error('invalid_checkpoint');
+                state.board.forEach(function(mark,index){board[index]=mark;}); moves=state.moves;
+                receiptElement.textContent = '已恢复同一局 · 双方共 ' + moves + ' 手。';
+              } else saveProgress();
+            } catch (_) {
+              storageReady = false;
+              statusElement.textContent = '旧进度未能读取，已保留原记录。请返回游戏库重新读取，不会用空棋盘覆盖旧局。';
+            }
+          }
 
           // Content is top-aligned. When readable/tappable content needs more room,
           // grow the document and scroll instead of centering it above the viewport.
@@ -124,7 +165,7 @@ internal object OrbisMiniGameTemplates {
             buttons.forEach(function (button, index) {
               button.textContent = board[index] || '·';
               button.dataset.mark = board[index];
-              button.disabled = !!terminal || board[index] !== '';
+              button.disabled = !storageReady || !!terminal || board[index] !== '';
               button.setAttribute('aria-label', '第 ' + (index + 1) + ' 格，' + (board[index] || '空格，落 X'));
             });
           }
@@ -180,19 +221,19 @@ internal object OrbisMiniGameTemplates {
             statusElement.textContent = result === 'win' ? '你赢了！X 连成三个。' : result === 'loss' ? '本地程序赢了，O 连成三个。' : '和棋，棋盘已满。';
             receiptElement.dataset.result = result;
             receiptElement.dataset.moveCount = String(moves);
+            if (saveProgress()) submitResult();
             paint();
-            submitResult();
             return true;
           }
           function humanMove(index) {
-            if (terminal || board[index]) return;
+            if (!storageReady || terminal || board[index]) return;
             board[index] = 'X'; moves++;
             if (finishIfNeeded()) return;
             const localMove = chooseLocalMove();
             if (localMove !== undefined) { board[localMove] = 'O'; moves++; }
             if (finishIfNeeded()) return;
             statusElement.textContent = '轮到你：选一个空格落 X。';
-            paint();
+            saveProgress(); paint();
           }
           for (let index = 0; index < 9; index++) {
             const button = document.createElement('button');
@@ -201,6 +242,9 @@ internal object OrbisMiniGameTemplates {
             buttons.push(button); boardElement.appendChild(button);
           }
           retryButton.addEventListener('click', submitResult);
+          retryStateButton.addEventListener('click', function(){
+            if (saveProgress()) { if (terminal) submitResult(); paint(); }
+          });
           document.getElementById('replay-guide').addEventListener('click', function () {
             document.getElementById('replay-note').hidden = false;
             scheduleFit();
@@ -212,6 +256,8 @@ internal object OrbisMiniGameTemplates {
             observer.observe(document.getElementById('game-header'));
             observer.observe(document.getElementById('game-footer'));
           }
+          restoreProgress();
+          if (storageReady) finishIfNeeded();
           paint(); scheduleFit();
         })();
         </script>

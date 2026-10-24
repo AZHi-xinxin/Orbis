@@ -30,8 +30,10 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
 
-internal class OrbisMiniGameJavascriptBridge(private val gate: OrbisMiniGameResultGate) {
+internal class OrbisMiniGameJavascriptBridge(private val gate: OrbisMiniGameResultGate, private val state: OrbisMiniGameStateGate? = null) {
     @JavascriptInterface fun finish(payload: String): String = gate.finish(payload)
+    @JavascriptInterface fun loadState(): String = state?.load() ?: "{\"ok\":false,\"error\":\"checkpoint_not_supported\"}"
+    @JavascriptInterface fun saveState(payload: String): String = state?.save(payload) ?: "{\"ok\":false,\"error\":\"checkpoint_not_supported\"}"
 }
 
 /** This WebView deliberately does not share the general rich-text/local-assets WebView client. */
@@ -77,6 +79,7 @@ internal fun createOrbisMiniGameWebView(
     gate: OrbisMiniGameResultGate,
     onRendererFailure: () -> Unit,
     onLoaded: () -> Unit = {},
+    stateGate: OrbisMiniGameStateGate? = null,
 ): WebView = WebView(context).apply {
     setBackgroundColor(android.graphics.Color.TRANSPARENT)
     settings.javaScriptEnabled = true
@@ -107,7 +110,7 @@ internal fun createOrbisMiniGameWebView(
     // An inline prefix alone is insufficient for newly-created about:blank realms. Refuse to
     // execute imported JS on old engines that cannot protect every document before its scripts.
     if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-        gate.close()
+        gate.close(); stateGate?.close()
         settings.javaScriptEnabled = false
         loadData("<p>请更新 Android System WebView 后再打开小游戏。原生五子棋仍可使用。</p>", "text/html", "UTF-8")
         onLoaded()
@@ -115,7 +118,7 @@ internal fun createOrbisMiniGameWebView(
     }
     WebViewCompat.addDocumentStartJavaScript(this, OrbisMiniGamePolicy.BOOTSTRAP, setOf("*"))
     webViewClient = OrbisMiniGameWebViewClient(policy, html, onRendererFailure, onLoaded)
-    addJavascriptInterface(OrbisMiniGameJavascriptBridge(gate), "OrbisGame")
+    addJavascriptInterface(OrbisMiniGameJavascriptBridge(gate, stateGate), "OrbisGame")
     loadUrl(policy.pageUrl)
 }
 
@@ -126,12 +129,17 @@ internal fun OrbisMiniGameWebView(
     onFinish: (OrbisMiniGameResult) -> Unit,
     onRendererFailure: () -> Unit,
     modifier: Modifier = Modifier,
+    onLoadState: (() -> Pair<Long, String?>)? = null,
+    onSaveState: ((Long, String) -> Long)? = null,
 ) {
     // Never update the writer of an already mounted frame to a different session's callback.
     val boundFinish = remember(sessionId) { onFinish }
     val latestFailure = rememberUpdatedState(onRendererFailure)
     val policy = remember(sessionId) { OrbisMiniGamePolicy() }
     val gate = remember(sessionId) { OrbisMiniGameResultGate(boundFinish) }
+    val stateGate = remember(sessionId) {
+        if (onLoadState != null && onSaveState != null) OrbisMiniGameStateGate(onLoadState, onSaveState) else null
+    }
     val holder = remember { arrayOfNulls<WebView>(1) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(sessionId, lifecycle) {
@@ -143,13 +151,13 @@ internal fun OrbisMiniGameWebView(
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer); gate.close() }
+        onDispose { lifecycle.removeObserver(observer); gate.close(); stateGate?.close() }
     }
     key(sessionId) { AndroidView(modifier = modifier.fillMaxSize(), factory = { context ->
         createOrbisMiniGameWebView(context, policy, html, gate,
-            onRendererFailure = { latestFailure.value() }).also { holder[0] = it }
+            onRendererFailure = { latestFailure.value() }, stateGate = stateGate).also { holder[0] = it }
     }, onRelease = { view ->
-        gate.close()
+        gate.close(); stateGate?.close()
         if (holder[0] === view) holder[0] = null
         view.removeJavascriptInterface("OrbisGame")
         view.stopLoading()

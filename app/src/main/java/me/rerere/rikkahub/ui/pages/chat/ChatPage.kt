@@ -424,6 +424,10 @@ private fun ChatPageContent(
     val eventInbox by vm.eventInbox.collectAsStateWithLifecycle()
     val assistant = setting.getCurrentAssistant()
     val composerAssistant = conversationComposerScope(setting, conversation.assistantId)?.assistant
+    if (BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.ui.pages.orbis.OrbisConnectionSetupPrompt(
+        conversation.assistantId.toString(), conversation.id.toString(), setting,
+        inCall = batchVoiceState.phase != VoicePhase.Off)
+
     val startupAppearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val startupInheritBackground = !startupAppearance.backgroundEnabled &&
         (assistant.background != null || assistant.useGradientBackground)

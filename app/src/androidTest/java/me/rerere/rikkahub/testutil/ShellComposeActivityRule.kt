@@ -137,7 +137,10 @@ class ShellComposeActivityRule : TestRule {
     }
 
     private companion object {
-        const val TARGET_PACKAGE = "org.orbis.agent.dev"
+        val TARGET_PACKAGE: String
+            get() = InstrumentationRegistry.getInstrumentation().targetContext.packageName.also {
+                check(it in setOf("org.orbis.agent.dev", "org.orbis.agent.bodylab"))
+            }
         const val TEST_ACTIVITY = "androidx.activity.ComponentActivity"
         const val NONCE_KEY = "orbis_synthetic_compose_nonce"
         const val LAUNCH_TIMEOUT_MS = 10_000L

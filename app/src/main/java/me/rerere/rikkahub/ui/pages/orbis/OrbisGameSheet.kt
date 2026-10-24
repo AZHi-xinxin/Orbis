@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -155,10 +156,17 @@ internal fun GameContent(
 ) {
     val state by repository.state.collectAsStateWithLifecycle()
     val miniState by miniRepository.state.collectAsStateWithLifecycle()
-    val writeBlocked by repository.writeBlocked.collectAsStateWithLifecycle()
+    val nativeWriteBlocked by repository.writeBlocked.collectAsStateWithLifecycle()
+    val miniWriteBlocked by miniRepository.writeBlocked.collectAsStateWithLifecycle()
+    val writeBlocked = nativeWriteBlocked || miniWriteBlocked
     var viewedId by rememberSaveable { mutableStateOf<String?>(null) }
     var htmlGame by remember { mutableStateOf<OpenHtmlGame?>(null) }
     var htmlCrashed by remember { mutableStateOf(false) }
+    var htmlRestartChoice by remember { mutableStateOf<OrbisMiniGameSession?>(null) }
+    var htmlRecordsExpanded by rememberSaveable { mutableStateOf(false) }
+    var nativeRecordsExpanded by rememberSaveable { mutableStateOf(false) }
+    var htmlRecordsPage by rememberSaveable { mutableStateOf(0) }
+    var nativeRecordsPage by rememberSaveable { mutableStateOf(0) }
     var useModel by rememberSaveable { mutableStateOf(false) }
     var callLimit by rememberSaveable { mutableStateOf(40) }
     var busy by remember { mutableStateOf(false) }
@@ -233,19 +241,35 @@ internal fun GameContent(
             try {
                 // Same monitor as the repository mutations: source and session revision are atomic.
                 val opened = withContext(Dispatchers.IO) { synchronized(miniRepository) {
-                    val session = miniRepository.start(gameId)
+                    val before = miniRepository.readSnapshot()
+                    val pending = before.sessions.lastOrNull { it.gameId == gameId && it.finishedAt == null }
+                    val currentSource = before.games.single { it.id == gameId }
+                    if (pending != null && (pending.checkpoint == null || pending.gameSha256 != currentSource.sha256))
+                        return@synchronized pending to null
+                    val session = miniRepository.openSession(gameId)
                     val source = miniRepository.readSnapshot().games.single {
                         it.id == session.gameId && it.sha256 == session.gameSha256
                     }
-                    OpenHtmlGame(session, source)
+                    null to OpenHtmlGame(session, source)
                 } }
                 htmlCrashed = false
                 detailsExpanded = false
-                htmlGame = opened
+                htmlRestartChoice = opened.first
+                htmlGame = opened.second
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) { saveFailed = true }
             finally { busy = false }
         }
+    }
+    htmlRestartChoice?.let { previous ->
+        AlertDialog(onDismissRequest = { htmlRestartChoice = null }, title = { Text("旧局尚不能恢复") },
+            text = { Text(if (previous.checkpoint == null)
+                "这份游戏没有保存可恢复的局面。旧局仍保留，你可以先返回，或明确结束旧局后重新开始。新游戏可使用本地进度保存接口。"
+                else "这份游戏的源码已更新，旧进度保留，但不能直接放进新版游戏。你可以先返回，或结束旧局后重新开始。") },
+            confirmButton = { TextButton(onClick = {
+                perform({ miniRepository.abandon(previous.id) }, { htmlRestartChoice = null; scope.launch { kotlinx.coroutines.yield(); startHtml(previous.gameId) } })
+            }, enabled = !busy) { Text("结束旧局并重开") } },
+            dismissButton = { TextButton(onClick = { htmlRestartChoice = null }) { Text("保留旧局，返回") } })
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) stopModel() }
@@ -255,6 +279,8 @@ internal fun GameContent(
     val active = state.active?.takeIf { it.id == viewedId }
     val finished = state.records.find { it.match.id == viewedId }
     val match = active ?: finished?.match
+    val nativeHistory = gameRecordPage(state.records, nativeRecordsPage)
+    val htmlHistory = gameRecordPage(miniState.sessions, htmlRecordsPage)
     val opened = htmlGame
     val htmlSession = opened?.let { shown -> miniState.sessions.find { it.id == shown.session.id } ?: shown.session }
     LaunchedEffect(viewedId, detailsExpanded) {
@@ -295,14 +321,16 @@ internal fun GameContent(
            Column(Modifier.fillMaxSize()) {
             if (htmlCrashed) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("游戏画面已停止。已保存记录保留；可以回游戏库重新开局。", Modifier.padding(24.dp), color = colors.ink)
+                    Text("游戏画面已停止。已保存记录和进度保留；可以回游戏库继续或处理旧局。", Modifier.padding(24.dp), color = colors.ink)
                 }
             } else OrbisMiniGameWebView(opened.session.id, opened.source.html,
                 onFinish = { result ->
                     try { miniRepository.finish(opened.session.id, result.result, result.moveCount, result.score, result.maxTile, result.scoringVersion) }
                     catch (error: Exception) { scope.launch { saveFailed = true }; throw error }
                 }, onRendererFailure = { htmlCrashed = true },
-                modifier = Modifier.weight(1f).fillMaxWidth().testTag("orbis-html-game"))
+                modifier = Modifier.weight(1f).fillMaxWidth().testTag("orbis-html-game"),
+                onLoadState = { miniRepository.checkpoint(opened.session.id).let { it.checkpointRevision to it.checkpoint } },
+                onSaveState = { revision, payload -> miniRepository.saveCheckpoint(opened.session.id, revision, payload) })
             Column(Modifier.fillMaxWidth().heightIn(max = chromeMaxHeight)
                 .verticalScroll(rememberScrollState()).testTag("orbis-html-controls")) {
              // Exit controls come first, so expanding details never buries the way out.
@@ -316,7 +344,7 @@ internal fun GameContent(
              if (htmlSession.finishedAt != null) Text("${resultLabel(htmlSession.result ?: "")} · ${if (htmlSession.result == "abandoned") "主动结束" else "游戏上报 / 宿主计时"}",
                  Modifier.padding(horizontal = 8.dp, vertical = 2.dp).testTag("orbis-html-result"), color = colors.mutedInk, fontSize = 11.sp)
              if (detailsExpanded) GameExplanation(
-                 "这是 ${opened.source.authorName} 写的自包含游戏。结果由游戏上报，非宿主验胜负；时长由宿主记录。关闭画面不自动判输，也不保存游戏内部进度；重新打开会开新局。")
+                 "这是 ${opened.source.authorName} 写的自包含游戏。结果由游戏上报，非宿主验胜负；时长由宿主记录。接入进度保存接口的游戏会在重新打开时恢复同一局；旧游戏未保存进度时会先说明，关闭画面不自动判输。")
             }
            }
           }
@@ -439,14 +467,25 @@ internal fun GameContent(
                 }
                 items(miniState.games.chunked(2), key = { "html-grid-${it.first().id}" }) { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        row.forEach { game -> MiniGameCard(game, !busy, Modifier.weight(1f)) { startHtml(game.id) } }
+                        row.forEach { game ->
+                            val pending = miniState.sessions.lastOrNull { it.gameId == game.id && it.finishedAt == null }
+                            val label = when {
+                                pending == null -> "开始游玩"
+                                pending.checkpoint != null && pending.gameSha256 == game.sha256 -> "继续本局"
+                                else -> "查看未完成的旧局"
+                            }
+                            MiniGameCard(game, !busy, Modifier.weight(1f), label) { startHtml(game.id) }
+                        }
                         if (row.size == 1) Box(Modifier.weight(1f))
                     }
                 }
                 if (miniState.sessions.isNotEmpty()) item("html-records") {
-                    Text("小游戏记录", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
-                    miniState.sessions.asReversed().take(30).forEach { session ->
-                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    GameHistoryToggle("小游戏记录", miniState.sessions.size, htmlRecordsExpanded, "html-records-toggle") {
+                        htmlRecordsExpanded = !htmlRecordsExpanded
+                    }
+                    if (htmlRecordsExpanded) {
+                    htmlHistory.records.forEach { session ->
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).testTag("html-record-${session.id}")) {
                             Text("${session.gameTitle} · ${session.result?.let(::resultLabel) ?: "未结算"}", fontSize = 12.sp, color = colors.ink)
                             Text(if (session.finishedAt == null) "未上报结果；离开页面不会自动判负。"
                                 else "${session.moveCount ?: 0} 步 · ${(session.finishedAt - session.startedAt) / 1000} 秒" +
@@ -456,7 +495,15 @@ internal fun GameContent(
                             if (session.finishedAt == null) TextButton(onClick = { perform({ miniRepository.abandon(session.id) }) }, enabled = !busy) { Text("结束这局") }
                         }
                     }
+                    GameHistoryPager(htmlHistory.index, htmlHistory.pages, "html-records") { htmlRecordsPage = it }
+                    }
                 }
+                item("native-records-toggle") {
+                    GameHistoryToggle("五子棋战绩", state.records.size, nativeRecordsExpanded, "native-records-toggle") {
+                        nativeRecordsExpanded = !nativeRecordsExpanded
+                    }
+                }
+                if (nativeRecordsExpanded) {
                 item("stats") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("win", "loss", "draw", "abandoned").forEach { result ->
@@ -475,13 +522,16 @@ internal fun GameContent(
                     if (state.records.isEmpty()) Text("还没有结束的对局。", Modifier.padding(top = 12.dp),
                         fontSize = 12.sp, color = colors.mutedInk)
                 }
-                items(state.records.asReversed().take(100), key = { it.match.id }) { record ->
+                items(nativeHistory.records, key = { it.match.id }) { record ->
                     RecordRow(record) { viewedId = record.match.id }
+                }
+                item("native-records-pages") {
+                    GameHistoryPager(nativeHistory.index, nativeHistory.pages, "native-records") { nativeRecordsPage = it }
+                }
                 }
                 item("game-boundaries") {
                     Text("游戏与记录保存在本应用私有目录。AI 查询战绩时会收到结果摘要；开启模型五子棋会发送该局棋盘，不发送聊天记录。HTML 游戏结果来自游戏自身上报，并不等于宿主验胜负。游戏及记录尚未纳入备份 ZIP，卸载或清除数据会丢失。",
                         fontSize = 11.sp, lineHeight = 18.sp, color = colors.mutedInk)
-                    if (state.records.size > 100) Text("此处显示最近 100 局，较早记录仍保留在本地。", fontSize = 11.sp, color = colors.mutedInk)
                 }
             }
         }
@@ -512,16 +562,17 @@ internal fun ModelOpponentOptions(enabled: Boolean, assistantName: String, avail
 }
 
 @Composable
-private fun MiniGameCard(game: OrbisInstalledGame, enabled: Boolean, modifier: Modifier, onOpen: () -> Unit) {
+private fun MiniGameCard(game: OrbisInstalledGame, enabled: Boolean, modifier: Modifier, action: String, onOpen: () -> Unit) {
     val colors = OrbisTheme.colors
     Surface(modifier.clip(RoundedCornerShape(18.dp)).clickable(enabled = enabled, role = Role.Button,
-        onClickLabel = "开一局${game.title}", onClick = onOpen), shape = RoundedCornerShape(18.dp), color = colors.tintedPanel,
+        onClickLabel = "$action · ${game.title}", onClick = onOpen), shape = RoundedCornerShape(18.dp), color = colors.tintedPanel,
         border = BorderStroke(1.dp, colors.border)) {
         Column(Modifier.padding(14.dp).heightIn(min = 120.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OrbisEntryArt(OrbisEntryArtwork.ARCADE, Modifier.fillMaxWidth().height(70.dp))
             Text(game.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = colors.ink)
             Text(game.description.ifBlank { "点开游玩" }, maxLines = 3, fontSize = 11.sp, color = colors.mutedInk)
             Text("${game.authorName} · 本地游戏", maxLines = 1, fontSize = 10.sp, color = colors.mutedInk)
+            Text(action, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = colors.ink)
         }
     }
 }

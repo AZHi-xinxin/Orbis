@@ -246,7 +246,7 @@ fun ChatDrawerContent(
                 .padding(horizontal = 12.dp, vertical = if (BuildConfig.ORBIS_ENABLED || compactLayout) 6.dp else 12.dp),
             verticalArrangement = Arrangement.spacedBy(if (BuildConfig.ORBIS_ENABLED || compactLayout) 6.dp else 10.dp),
         ) {
-            // Fixed same-assistant header; history and all DIY controls share the list below it.
+            // Fixed identity header; appearance has its own drawer page below it.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -361,6 +361,50 @@ fun ChatDrawerContent(
 
             if (BuildConfig.ORBIS_ENABLED) {
                 HorizontalDivider(color = colors.border)
+                OrbisDrawerPages(
+                    ownerKey = current.assistantId.toString(), drawerOpen = drawerOpen,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    newConversation = {
+                            Button(onClick = { selectedAssistant?.let { assistant ->
+                                creating = true
+                                scope.launch {
+                                    try {
+                                        val id = drawerVm.createConversation(assistant)
+                                        onClose?.invoke(); navigateToChatPage(navController, id)
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+                                    } catch (_: Exception) { toaster.show("新会话未创建，请重试。", type = ToastType.Error)
+                                    } finally { creating = false }
+                                }
+                            } }, enabled = selectedAssistant != null && !creating, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(13.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text(if (creating) "正在创建…" else "+  新建同一${assistantName ?: "AI"}会话", fontSize = 11.sp)
+                            }
+                    },
+                    appearance = { backToHistory ->
+                OrbisAppearancePanel(
+                    displaySetting = settings.displaySetting,
+                    assistant = settings.assistants.firstOrNull { it.id == current.assistantId },
+                    onUpdateDisplay = { transform ->
+                        val latest = vm.settings.value
+                        if (!latest.init) vm.updateSettings(latest.copy(displaySetting = transform(latest.displaySetting)))
+                    },
+                    onUpdateUserNickname = saveUserNickname,
+                    onUpdateAssistantAvatar = { avatar ->
+                        val latest = vm.settings.value
+                        if (!latest.init) vm.updateSettings(latest.copy(assistants = latest.assistants.map { item ->
+                            if (item.id == current.assistantId) item.copy(avatar = avatar, useAssistantAvatar = true) else item
+                        }))
+                    },
+                    onNavigate = { navController.navigate(it) },
+                    onBack = backToHistory,
+                    embedded = true,
+                    showDoneButton = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                    if (!manualVisible) TextButton(onClick = { manualVisible = true; onClose?.invoke() },
+                        modifier = Modifier.fillMaxWidth()) { Text("重新显示聊天说明书提示", fontSize = 11.sp) }
+                    },
+                    history = {
                 ConversationList(
                     current = current, conversations = conversations, conversationJobs = conversationJobs.keys,
                     listState = conversationListState, modifier = Modifier.fillMaxWidth().weight(1f),
@@ -380,20 +424,6 @@ fun ChatDrawerContent(
                         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("同一身份下的聊天窗口；聊天与外观保存在本机。", fontSize = 9.sp,
                                 lineHeight = 14.sp, color = colors.mutedInk)
-                            Button(onClick = { selectedAssistant?.let { assistant ->
-                                creating = true
-                                scope.launch {
-                                    try {
-                                        val id = drawerVm.createConversation(assistant)
-                                        onClose?.invoke(); navigateToChatPage(navController, id)
-                                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
-                                    } catch (_: Exception) { toaster.show("新会话未创建，请重试。", type = ToastType.Error)
-                                    } finally { creating = false }
-                                }
-                            } }, enabled = selectedAssistant != null && !creating, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                                shape = RoundedCornerShape(13.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-                                Text(if (creating) "正在创建…" else "+  新建同一${assistantName ?: "AI"}会话", fontSize = 11.sp)
-                            }
                             TextButton(onClick = { beginRename(current) }, modifier = Modifier.heightIn(min = 48.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.textButtonColors(containerColor = colors.sand, contentColor = colors.onSand)) {
@@ -422,31 +452,7 @@ fun ChatDrawerContent(
                             if (searchError != null) TextButton(onClick = { navController.navigate(Screen.MessageSearch) }) { Text("打开完整搜索") }
                         }
                     },
-                    footer = {
-                Column(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OrbisAppearancePanel(
-                    displaySetting = settings.displaySetting,
-                    assistant = settings.assistants.firstOrNull { it.id == current.assistantId },
-                    onUpdateDisplay = { transform ->
-                        val latest = vm.settings.value
-                        if (!latest.init) vm.updateSettings(latest.copy(displaySetting = transform(latest.displaySetting)))
-                    },
-                    onUpdateUserNickname = saveUserNickname,
-                    onUpdateAssistantAvatar = { avatar ->
-                        val latest = vm.settings.value
-                        if (!latest.init) vm.updateSettings(latest.copy(assistants = latest.assistants.map { item ->
-                            if (item.id == current.assistantId) item.copy(avatar = avatar, useAssistantAvatar = true) else item
-                        }))
-                    },
-                    onNavigate = { navController.navigate(it) },
-                    onBack = { onClose?.invoke() },
-                    embedded = true,
-                    showDoneButton = onClose != null,
-                    modifier = Modifier.fillMaxWidth(),
                 )
-                    if (!manualVisible) TextButton(onClick = { manualVisible = true; onClose?.invoke() },
-                        modifier = Modifier.fillMaxWidth()) { Text("重新显示聊天说明书提示", fontSize = 11.sp) }
-                }
                     },
                 )
             } else {

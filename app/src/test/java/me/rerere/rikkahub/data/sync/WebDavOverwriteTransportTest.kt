@@ -107,4 +107,39 @@ class WebDavOverwriteTransportTest {
             assertEquals(0, server.requestCount)
         } }
     }
+
+    @Test fun directoryAuthOrServerFailureDoesNotAttemptCreationAndKeepsOriginalStep() = runBlocking {
+        for (code in listOf(401, 403, 405, 500)) Server().use { server -> client().use { http ->
+            server.enqueue(Response().setResponseCode(code).setBody("synthetic-private-response"))
+            val error = dav(server, http).ensureCollectionExists().exceptionOrNull()!!
+            assertTrue(error.message!!.contains("读取目录"))
+            assertTrue(error.message!!.contains("HTTP $code"))
+            assertFalse(error.message!!.contains("synthetic-private-response"))
+            assertEquals("PROPFIND", server.takeRequest().method)
+            assertEquals(1, server.requestCount)
+        } }
+    }
+
+    @Test fun confirmedMissingDirectoryCreatesExactlyOnce() = runBlocking {
+        Server().use { server -> client().use { http ->
+            server.enqueue(Response().setResponseCode(404).setBody(""))
+            server.enqueue(Response().setResponseCode(201).setBody(""))
+            dav(server, http).ensureCollectionExists().getOrThrow()
+            assertEquals("PROPFIND", server.takeRequest().method)
+            assertEquals("MKCOL", server.takeRequest().method)
+            assertEquals(2, server.requestCount)
+        } }
+    }
+
+    @Test fun largeUploadExplainsServerLimitWithoutExposingBodyOrUrl() = runBlocking {
+        Server().use { server -> client().use { http ->
+            server.enqueue(Response().setResponseCode(413).setBody("private-provider-body"))
+            val error = dav(server, http).put("private-name.zip", byteArrayOf(1, 2)).exceptionOrNull()!!
+            assertTrue(error.message!!.contains("上传备份"))
+            assertTrue(error.message!!.contains("HTTP 413"))
+            assertTrue(error.message!!.contains("上传大小限制"))
+            assertFalse(error.toString().contains("private-"))
+            assertEquals(1, server.requestCount)
+        } }
+    }
 }

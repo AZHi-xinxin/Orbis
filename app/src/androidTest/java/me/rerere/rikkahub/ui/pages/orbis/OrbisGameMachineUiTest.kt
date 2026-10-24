@@ -75,6 +75,41 @@ class OrbisGameMachineUiTest {
         }
     }
 
+    @Test fun htmlHistoryStartsFoldedAndPagesFiveWithoutDroppingOldRecords() {
+        val mini = OrbisMiniGameRepository(MemoryStorage())
+        val game = mini.install("synthetic", "合成助手", "合成游戏", "离线测试", "<html>synthetic</html>")
+        val ids = (0 until 12).map { mini.start(game.id).also { mini.finish(it.id, "draw", 2) }.id }
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
+            GameContent(OrbisGameRepository(MemoryStorage()), mini, null, "未选择 AI", { error("No model") }, {})
+        } } }
+        compose.onNodeWithTag("orbis-game-list").performScrollToNode(hasTestTag("html-records-toggle"))
+        compose.onNodeWithTag("html-record-${ids.last()}").assertDoesNotExist()
+        compose.onNodeWithTag("html-records-toggle").performClick()
+        ids.takeLast(5).forEach { compose.onNodeWithTag("html-record-$it").assertExists() }
+        compose.onNodeWithTag("html-record-${ids[6]}").assertDoesNotExist()
+        compose.onNodeWithTag("html-records-next").performScrollTo().performClick()
+        compose.onNodeWithTag("html-record-${ids.last()}").assertDoesNotExist()
+        ids.subList(2, 7).forEach { compose.onNodeWithTag("html-record-$it").assertExists() }
+        compose.onNodeWithTag("html-records-next").performScrollTo().performClick()
+        ids.take(2).forEach { compose.onNodeWithTag("html-record-$it").assertExists() }
+        compose.onNodeWithTag("html-records-next").assertIsNotEnabled()
+        assertEquals(12, mini.readSnapshot().sessions.size)
+    }
+
+    @Test fun legacyGameWithoutCheckpointRequiresExplicitDecisionAndPreservesItsOldSession() {
+        val mini = OrbisMiniGameRepository(MemoryStorage())
+        val game = mini.install("synthetic", "合成助手", "旧模板", "离线测试", "<html>synthetic</html>")
+        val old = mini.start(game.id)
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
+            GameContent(OrbisGameRepository(MemoryStorage()), mini, null, "未选择 AI", { error("No model") }, {})
+        } } }
+        compose.onNodeWithTag("orbis-game-list").performScrollToNode(hasText("旧模板"))
+        compose.onNodeWithText("旧模板").performClick()
+        compose.onNodeWithText("保留旧局，返回").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(listOf(old), mini.readSnapshot().sessions) }
+        compose.onNodeWithTag("orbis-html-game").assertDoesNotExist()
+    }
+
     private class MemoryStorage : OrbisGameStorage {
         private var text: String? = null
         override fun read() = text

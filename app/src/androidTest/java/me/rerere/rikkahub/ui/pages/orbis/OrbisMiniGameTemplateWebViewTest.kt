@@ -56,7 +56,7 @@ class OrbisMiniGameTemplateWebViewTest {
         assertRendererAlive()
     }
 
-    private fun mount(failFirstSave: Boolean = false) {
+    private fun mount(failFirstSave: Boolean = false, checkpoints: Boolean = false, failCheckpointOnce: Boolean = false) {
         val game = repository.install("synthetic-ai", "合成 AI", "井字棋模板", "本地程序对手", OrbisMiniGameTemplates.html)
         assertTrue(repository.readSnapshot().sessions.isEmpty())
         sessionId = repository.start(game.id).id
@@ -64,6 +64,14 @@ class OrbisMiniGameTemplateWebViewTest {
             if (saves.incrementAndGet() == 1 && failFirstSave) error("synthetic failure before saving")
             repository.finish(sessionId, it.result, it.moveCount)
         }
+        val checkpointWrites = AtomicInteger()
+        val stateGate = if (checkpoints) OrbisMiniGameStateGate(
+            read = { repository.checkpoint(sessionId).let { it.checkpointRevision to it.checkpoint } },
+            save = { revision, payload ->
+                if (checkpointWrites.incrementAndGet() == 2 && failCheckpointOnce) error("synthetic unavailable storage")
+                repository.saveCheckpoint(sessionId, revision, payload)
+            },
+        ) else null
         compose.setContent {
             AndroidView(
                 modifier = Modifier.requiredSize(width.value.dp, height.value.dp),
@@ -75,8 +83,10 @@ class OrbisMiniGameTemplateWebViewTest {
                         ready.set(true) // Wake the test thread, which reports the failure without crashing the UI thread.
                     },
                     onLoaded = { ready.set(true) },
+                    stateGate = stateGate,
                 ).also { view = it } },
                 onRelease = { owned ->
+                    stateGate?.close()
                     owned.removeJavascriptInterface("OrbisGame")
                     owned.stopLoading()
                     owned.destroy()
@@ -89,6 +99,36 @@ class OrbisMiniGameTemplateWebViewTest {
         assertEquals(0, saves.get())
         assertNull(repository.readSnapshot().sessions.single().finishedAt)
         assertEquals("9", evaluate("document.querySelectorAll('#game-board button').length"))
+    }
+
+    @Test fun checkpointRestoresBoardAfterPageReloadWithoutStartingAnotherGame() {
+        mount(checkpoints = true)
+        play(0)
+        val before = evaluate("document.getElementById('game-board').textContent")
+        val checkpoint = repository.checkpoint(sessionId)
+        assertTrue(checkpoint.checkpointRevision > 0)
+        assertTrue(checkpoint.checkpoint!!.contains("X"))
+        ready.set(false)
+        instrumentation.runOnMainSync { view.reload() }
+        compose.waitUntil(15_000) { ready.get() }
+        assertEquals(before, evaluate("document.getElementById('game-board').textContent"))
+        assertEquals(checkpoint, repository.checkpoint(sessionId))
+        assertEquals(1, repository.readSnapshot().sessions.size)
+        play(7, 6, 8)
+        assertRecorded("win", 7)
+    }
+
+    @Test fun checkpointWriteFailurePausesInputAndExplicitRetrySavesOnlyCurrentTurn() {
+        mount(checkpoints = true, failCheckpointOnce = true)
+        val initial = repository.checkpoint(sessionId)
+        play(0)
+        assertEquals(initial, repository.checkpoint(sessionId))
+        assertEquals("true", evaluate("Array.from(document.querySelectorAll('#game-board button')).every(b=>b.disabled)"))
+        assertEquals("false", evaluate("document.getElementById('retry-state').hidden"))
+        evaluate("document.getElementById('retry-state').click(); void 0")
+        assertTrue(repository.checkpoint(sessionId).checkpointRevision > initial.checkpointRevision)
+        play(7, 6, 8)
+        assertRecorded("win", 7)
     }
 
     private fun evaluate(script: String): String {

@@ -57,7 +57,7 @@ class WebDavClient(
         data: ByteArray,
         contentType: String = "application/octet-stream",
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("上传备份") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -88,7 +88,7 @@ class WebDavClient(
         file: File,
         contentType: String = "application/octet-stream",
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("上传备份") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -116,7 +116,7 @@ class WebDavClient(
     }
 
     suspend fun get(path: String): Result<ByteArray> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("下载备份") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -138,7 +138,7 @@ class WebDavClient(
     }
 
     suspend fun getStream(path: String): Result<InputStream> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("下载备份") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -160,7 +160,7 @@ class WebDavClient(
 
     suspend fun downloadToFile(path: String, targetFile: File, maxBytes: Long = me.rerere.rikkahub.data.sync.importer.ArchiveCapacity.MAX_ZIP_BYTES,
         envelope: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("下载备份") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -185,7 +185,7 @@ class WebDavClient(
 
     /** Read metadata without buffering the whole archive when a server ignores Range. */
     suspend fun readPrefix(path: String, maxBytes: Int): Result<ByteArray> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("读取备份头") {
             require(path == OverwriteBackupNames.LATEST && maxBytes in 1..OverwriteBackupNames.MAX_HEADER_BYTES)
             httpClient.prepareRequest(config.buildUrl(path)) {
                 method = HttpMethod.Get
@@ -213,7 +213,7 @@ class WebDavClient(
 
     /** Generic DAV MOVE may delete the old file first: require the explicit server contract. */
     suspend fun supportsAtomicBackupReplace(): Result<Boolean> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("检查覆盖能力") {
             httpClient.prepareRequest(config.buildUrl().trimEnd('/') + "/") {
                 method = HttpMethod.Options
                 basicAuth(config.username, config.password)
@@ -228,7 +228,7 @@ class WebDavClient(
     }
 
     suspend fun replaceBackup(temporaryName: String, expectedGeneration: String?, requireEmpty: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("提交覆盖备份") {
             require(OverwriteBackupNames.isTemporary(temporaryName))
             require(expectedGeneration == null || OverwriteBackupNames.isGeneration(expectedGeneration))
             require(!requireEmpty || expectedGeneration == null)
@@ -256,7 +256,7 @@ class WebDavClient(
     }
 
     suspend fun delete(path: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("删除远端备份") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -278,7 +278,7 @@ class WebDavClient(
     }
 
     suspend fun head(path: String): Result<WebDavResourceInfo> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("读取文件信息") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -303,7 +303,7 @@ class WebDavClient(
     }
 
     suspend fun mkcol(path: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("创建备份目录") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -329,7 +329,7 @@ class WebDavClient(
         path: String = "",
         depth: Int = 1,
     ): Result<List<WebDavResourceInfo>> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("读取目录") {
             val url = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -372,7 +372,7 @@ class WebDavClient(
     }
 
     suspend fun ensureCollectionExists(path: String = ""): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("检查备份目录") {
             val targetUrl = config.buildUrl(path)
             // Do not log storage URLs, object names or remote response bodies.
 
@@ -380,16 +380,23 @@ class WebDavClient(
             val propfindResult = propfind(path, depth = 0)
             if (propfindResult.isSuccess) {
                 // Do not log storage URLs, object names or remote response bodies.
-                return@runCatching
+                return@davResult
             }
 
-            // Create collection if not exists
+            // Only a confirmed missing collection permits creation. Preserve auth/network failures.
+            val failure = propfindResult.exceptionOrNull()
+            val status = when (failure) {
+                is WebDavOperationFailure -> failure.code
+                is WebDavException -> failure.statusCode
+                else -> 0
+            }
+            if (status != 404) throw checkNotNull(failure)
             mkcol(path).getOrThrow()
         }
     }
 
     suspend fun list(path: String = ""): Result<List<WebDavResourceInfo>> = withContext(Dispatchers.IO) {
-        runCatching {
+        davResult("列出备份") {
             val result = propfind(path, depth = 1).getOrThrow()
             // Filter out the parent directory itself (first entry)
             if (result.isNotEmpty()) {

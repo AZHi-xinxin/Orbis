@@ -22,7 +22,7 @@ internal fun createOrbisGameLibraryTools(
 ): List<Tool> = listOf(
     Tool(
         name = "orbis_games_install",
-        description = "将你写的自包含单文件HTML/JS小游戏保存到本机游戏机，用户点开才运行。新建必须省略game_id和expected_sha256，由宿主返回新ID；更新必须使用目录中已有game_id及其当前expected_sha256，不要自拟ID。可先用orbis_games_library(include_template=true)按需读取自适应井字棋模板。无网络、文件访问或通用原生接口。结局用 window.OrbisGame.finish(JSON.stringify({result:'win',move_count:5})) 回流；result为人类玩家视角的win/loss/draw/completed，move_count为非负手数，返回JSON字符串ok回执。时长由宿主记录，旧战绩保留。不自动生成或改写源码。",
+        description = "将你写的自包含单文件HTML/JS小游戏保存到本机游戏机，用户点开才运行。新建必须省略game_id和expected_sha256，由宿主返回新ID；更新必须使用目录中已有game_id及其当前expected_sha256，不要自拟ID。可先用orbis_games_library(include_template=true)按需读取自适应井字棋模板。无网络、文件访问或通用原生接口。结局用 window.OrbisGame.finish(JSON.stringify({result:'win',move_count:5})) 回流；result为人类玩家视角的win/loss/draw/completed，move_count为非负手数，返回JSON字符串ok回执。进度用OrbisGame.loadState()/saveState(JSON.stringify({revision,state}))，读取与保存都检查ok；完整接口和示例见include_template=true。时长由宿主记录，旧战绩保留。不自动生成或改写源码。",
         parameters = { InputSchema.Obj(buildJsonObject {
             put("title", buildJsonObject { put("type", "string"); put("maxLength", 100) })
             put("description", buildJsonObject { put("type", "string"); put("maxLength", 2000) })

@@ -21,6 +21,7 @@ data class OrbisMiniGameSession(
     val startedAt: Long, val finishedAt: Long? = null, val result: String? = null,
     val moveCount: Int? = null,
     val score: Long? = null, val maxTile: Int? = null, val scoringVersion: String? = null,
+    val checkpoint: String? = null, val checkpointRevision: Long = 0,
 )
 
 @Serializable
@@ -38,7 +39,11 @@ class OrbisMiniGameRepository(
 ) {
     private val json = Json { encodeDefaults = true }
     private var expected = false
-    private var blocked = false
+    private val mutableWriteBlocked = MutableStateFlow(false)
+    val writeBlocked = mutableWriteBlocked.asStateFlow()
+    private var blocked: Boolean
+        get() = mutableWriteBlocked.value
+        set(value) { mutableWriteBlocked.value = value }
     private val mutableState = MutableStateFlow(load())
     val state = mutableState.asStateFlow()
 
@@ -77,6 +82,8 @@ class OrbisMiniGameRepository(
             require(it.gameTitle.isNotBlank() && it.gameTitle.length <= 100 && it.gameSha256.matches(Regex("[a-f0-9]{64}"))) { "invalid_game_session" }
             require(it.startedAt >= 0) { "invalid_game_time" }
             validateScore(it.score, it.maxTile, it.scoringVersion)
+            require(it.checkpointRevision >= 0)
+            it.checkpoint?.let(::validateCheckpoint)
             if (it.finishedAt == null) require(it.score == null && it.maxTile == null && it.scoringVersion == null)
             if (it.finishedAt == null) require(it.result == null && it.moveCount == null) { "unfinished_game_result" }
             else require(it.finishedAt >= it.startedAt && it.result in RESULTS && it.moveCount != null && it.moveCount in 0..1_000_000) { "invalid_game_result" }
@@ -122,6 +129,37 @@ class OrbisMiniGameRepository(
         return session
     }
 
+    /** Reopening is not a new match. Old sources without a checkpoint require an explicit choice. */
+    @Synchronized fun openSession(gameId: String): OrbisMiniGameSession {
+        val before = readSnapshot()
+        val game = before.games.single { it.id == gameId }
+        val unfinished = before.sessions.lastOrNull { it.gameId == gameId && it.finishedAt == null } ?: return start(gameId)
+        check(unfinished.gameSha256 == game.sha256) { "game_source_changed_cannot_resume" }
+        check(unfinished.checkpoint != null) { "game_checkpoint_unavailable" }
+        return unfinished
+    }
+
+    @Synchronized fun checkpoint(sessionId: String): OrbisMiniGameSession = readSnapshot().let { before ->
+        val session = before.sessions.single { it.id == sessionId }
+        check(session.finishedAt == null && before.games.any { it.id == session.gameId && it.sha256 == session.gameSha256 }) {
+            "game_session_not_current"
+        }
+        session
+    }
+
+    /** Bound frame can save only its own opaque game state, never another path/session/result. */
+    @Synchronized fun saveCheckpoint(sessionId: String, expectedRevision: Long, payload: String): Long {
+        validateCheckpoint(payload)
+        val before = readSnapshot()
+        val old = checkpoint(sessionId)
+        if (old.checkpoint == payload) return old.checkpointRevision
+        check(old.checkpointRevision == expectedRevision) { "game_checkpoint_changed" }
+        check(old.checkpointRevision < Long.MAX_VALUE) { "game_checkpoint_limit" }
+        val next = old.copy(checkpoint = payload, checkpointRevision = old.checkpointRevision + 1)
+        commit(before.copy(sessions = before.sessions.map { if (it.id == sessionId) next else it }))
+        return next.checkpointRevision
+    }
+
     /** Only the host-created frame's bound session reaches this API, never an arbitrary JS id. */
     @Synchronized fun finish(sessionId: String, result: String, moveCount: Int, score: Long? = null, maxTile: Int? = null, scoringVersion: String? = null): OrbisMiniGameSession {
         val before = readSnapshot()
@@ -133,7 +171,7 @@ class OrbisMiniGameRepository(
             return old
         }
         val finished = old.copy(finishedAt = maxOf(now(), old.startedAt), result = result, moveCount = moveCount,
-            score = score, maxTile = maxTile, scoringVersion = scoringVersion)
+            score = score, maxTile = maxTile, scoringVersion = scoringVersion, checkpoint = null)
         commit(before.copy(sessions = before.sessions.map { if (it.id == old.id) finished else it }))
         return finished
     }
@@ -148,6 +186,22 @@ class OrbisMiniGameRepository(
             require(score == null || score in 0..9_007_199_254_740_991L) { "invalid_game_score" }
             require(maxTile == null || maxTile in 1..1_073_741_824) { "invalid_game_max_tile" }
             require(version == null || version.matches(Regex("[A-Za-z0-9._-]{1,64}"))) { "invalid_scoring_version" }
+        }
+        const val MAX_CHECKPOINT_CHARS = 64 * 1024
+        fun validateCheckpoint(payload: String) {
+            require(payload.length in 2..MAX_CHECKPOINT_CHARS) { "game_checkpoint_size" }
+            // Bound nesting before invoking the JSON parser, including malformed imported state.
+            var depth = 0; var quoted = false; var escaped = false
+            payload.forEach { c ->
+                if (quoted) {
+                    if (escaped) escaped = false else if (c == '\\') escaped = true else if (c == '"') quoted = false
+                } else when (c) {
+                    '"' -> quoted = true
+                    '{', '[' -> { depth++; require(depth <= 32) { "game_checkpoint_depth" } }
+                    '}', ']' -> depth--
+                }
+            }
+            require(Json.parseToJsonElement(payload) is kotlinx.serialization.json.JsonObject) { "game_checkpoint_object" }
         }
         const val MAX_HTML_CHARS = 2 * 1024 * 1024
         private const val MAX_STORAGE_CHARS = 32 * 1024 * 1024

@@ -88,7 +88,9 @@ class ChatToolFactory(
                 enabled = { settingsStore.settingsFlow.value.aiGlobalObservation &&
                     settingsStore.settingsFlow.value.getAssistantById(assistant.id) != null },
                 read = { limit, offset -> conversationRepository.observationWindows(assistant.id.toString(), limit, offset) }))
-            add(connectionProposalTool(settingsStore, assistant.id.toString()))
+            add(connectionProposalTool(settingsStore, assistant.id.toString()) { proposal ->
+                if (conversationId != null) me.rerere.rikkahub.data.orbis.integration.connectionSetupQueue.offer(conversationId, proposal)
+            })
             add(orbisSelfConfigurationTool(settingsStore, assistant.id.toString(), context, mcpManager, workspaceRepository))
             hostWorkspaceId(assistant, consultationReferenceOnly)?.let { workspaceId ->
                 val owner = assistant.id.toString()

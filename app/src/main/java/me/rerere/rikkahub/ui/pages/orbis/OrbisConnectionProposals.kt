@@ -17,14 +17,23 @@ import me.rerere.rikkahub.data.orbis.integration.*
 import org.koin.compose.koinInject
 
 @Composable
-internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store: SettingsStore = koinInject()) {
+internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store: SettingsStore = koinInject(),
+    initialRequest: ConnectionProposal? = null) {
     val settings by store.settingsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var selected by remember { mutableStateOf<ConnectionProposal?>(null) }
-    var credential by remember { mutableStateOf("") } // never saved in UI state/clipboard/chat
+    var selected by remember(owner) { mutableStateOf<ConnectionProposal?>(null) }
+    var credential by remember(owner) { mutableStateOf("") } // never saved in UI state/clipboard/chat
     var rememberChoice by remember { mutableStateOf(true) }
+    LaunchedEffect(owner, initialRequest) {
+        val target = initialRequest?.takeIf { it.owner == owner }?.let { requested ->
+            settings.connectionProposals.singleOrNull { it.owner == owner && it.id == requested.id && it.draft == requested.draft }
+        }
+        if (target?.status == "pending") {
+            selected = target; credential = ""; rememberChoice = target.alwaysAllow
+        }
+    }
     fun apply(transform: (me.rerere.rikkahub.data.datastore.Settings) -> me.rerere.rikkahub.data.datastore.Settings) {
         if (busy) return
         busy = true
@@ -48,6 +57,7 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
             Text("AI 填配置，你只补必要的密钥", style = MaterialTheme.typography.titleLarge)
             Text("模型、语音和 MCP 均可由 AI 填好。不需要密钥的服务会直接保存；MCP 只需在这里开启。密钥只进入原生设置，不回传给 AI。", style = MaterialTheme.typography.bodyMedium)
             val entries = settings.connectionProposals.filter { it.owner == owner }.asReversed()
+                .sortedBy { if (it.id == initialRequest?.id) 0 else 1 }
             if (entries.isEmpty()) Text("还没有连接建议。可以在聊天中请 AI 填好语音或 MCP 的连接配置，再到这里确认。")
             entries.forEach { p ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
