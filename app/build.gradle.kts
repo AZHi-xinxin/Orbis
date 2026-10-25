@@ -21,7 +21,7 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 276
+        versionCode = 277
         versionName = "2.6.13"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
