@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
 import kotlinx.serialization.json.*
+import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.CustomBody
@@ -21,13 +22,13 @@ class ChatCompletionsDeepSeekHistoryTest {
     private fun request(messages: List<UIMessage>, stream: Boolean = false,
         host: String = "api.deepseek.com", modelId: String = "deepseek-flash",
         tools: Boolean = true, history: Boolean = true,
-        customBody: List<CustomBody> = emptyList()): JsonObject {
+        customBody: List<CustomBody> = emptyList(), catalogue: List<Tool>? = null): JsonObject {
         val method = ChatCompletionsAPI::class.java.getDeclaredMethod("buildChatCompletionRequest",
             List::class.java, TextGenerationParams::class.java, ProviderSetting.OpenAI::class.java,
             Boolean::class.javaPrimitiveType).apply { isAccessible = true }
         val params = TextGenerationParams(
             Model(modelId = modelId, abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING)),
-            tools = if (tools) listOf(Tool("compact", "synthetic", execute = { error("must not execute") })) else emptyList(),
+            tools = catalogue ?: if (tools) listOf(Tool("compact", "synthetic", execute = { error("must not execute") })) else emptyList(),
             customBody = customBody,
         )
         return method.invoke(api, messages, params,
@@ -107,4 +108,24 @@ class ChatCompletionsDeepSeekHistoryTest {
             assertEquals(messages, body["messages"])
         }
     }
+    @Test fun `official catalogue reconnect order does not rewrite the prefix or lose schemas`() {
+        fun catalogue(reversed: Boolean) = listOf("z_read", "a_lookup").let { if (reversed) it.reversed() else it }.map { name ->
+            Tool(name, "unchanged $name", parameters = {
+                InputSchema.Obj(properties = JsonObject(listOf("query", "limit").let { if (reversed) it.reversed() else it }
+                    .associateWith { buildJsonObject { put("type", "string") } }), required = listOf("query"))
+            }, execute = { error("not executed") })
+        }
+        listOf(false, true).forEach { stream ->
+            val a = request(listOf(UIMessage.user("test")), stream, modelId = "deepseek-v4-pro", catalogue = catalogue(false))
+            val b = request(listOf(UIMessage.user("test")), stream, modelId = "deepseek-v4-pro", catalogue = catalogue(true))
+            assertEquals(a.toString(), b.toString())
+            val names = a.getValue("tools").jsonArray.map { it.jsonObject.getValue("function").jsonObject.getValue("name").jsonPrimitive.content }
+            assertEquals(listOf("a_lookup", "z_read"), names)
+            val generic = request(emptyList(), host = "relay.invalid", catalogue = catalogue(false))
+            assertEquals("z_read", generic.getValue("tools").jsonArray.first().jsonObject.getValue("function").jsonObject.getValue("name").jsonPrimitive.content)
+            val overridden = request(emptyList(), catalogue = catalogue(false), customBody = listOf(CustomBody("tools", JsonArray(emptyList()))))
+            assertTrue(overridden.getValue("tools").jsonArray.isEmpty())
+        }
+    }
+
 }

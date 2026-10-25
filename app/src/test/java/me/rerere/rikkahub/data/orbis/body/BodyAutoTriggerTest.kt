@@ -84,7 +84,8 @@ class BodyAutoTriggerTest {
         assertEquals(0, f.repo.snapshot().logs.count { it.event == "engage" })
         f.clock = f.clock.copy(wallMs = f.clock.wallMs + 5 * 60_000L + 1)
         f.repo.human("chat", "four", "新的目标", false)
-        assertEquals(20.0, value(f, "focus"), .0)
+        val beforeEvent = 20 - 8 * kotlin.math.exp(-kotlin.math.ln(2.0) * 300001 / (30 * 60000.0))
+        assertEquals(beforeEvent + 8, value(f, "focus"), .000001)
     }
     @Test fun noDefaultCoolingWordsAndAnotherAssistantCanUseDifferentResponse() {
         val f = prepare(definition.copy(cooling = BodyCooling()))

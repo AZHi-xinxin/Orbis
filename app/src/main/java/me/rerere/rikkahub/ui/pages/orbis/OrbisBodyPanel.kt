@@ -32,6 +32,10 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -196,7 +200,7 @@ private data class BodyDisplayUi(val visible: Boolean, val ready: Boolean, val c
     }
     failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     val repo = repository ?: return
-    val state by repo.state.collectAsStateWithLifecycle()
+    val state = rememberLiveBodyState(repo) { failure = "暂时无法更新状态，原记录已保留。" }
     var emotionLabels by remember(owner) { mutableStateOf<List<String>>(emptyList()) }
     val memories = org.koin.compose.koinInject<me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository>()
     LaunchedEffect(owner) {
@@ -216,6 +220,25 @@ private data class BodyDisplayUi(val visible: Boolean, val ready: Boolean, val c
     }
     BodyStateView(state, conversation, controls, busy, emotionLabels,
         onRefresh = { run { repo.refresh() } }, privateVisible = privateVisible)
+}
+
+/** Projection only: a visible panel ticks without disk writes, AI calls or a background worker. */
+@Composable internal fun rememberLiveBodyState(repo: BodyRepository, onFailure: () -> Unit = {}): BodyState {
+    val stored by repo.state.collectAsStateWithLifecycle()
+    var state by remember(repo) { mutableStateOf(stored) }
+    val failed by rememberUpdatedState(onFailure)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(repo, lifecycle, stored) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                try { state = withContext(Dispatchers.IO) { repo.viewSnapshot() } }
+                catch(cancelled: CancellationException) { throw cancelled }
+                catch(_: Exception) { failed() }
+                delay(1000)
+            }
+        }
+    }
+    return state
 }
 
 /** Every display surface consumes the same filtered projection; hidden values never reach a card/chart. */

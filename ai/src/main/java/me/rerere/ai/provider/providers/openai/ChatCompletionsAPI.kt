@@ -388,7 +388,11 @@ class ChatCompletionsAPI(
 
             if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
                 putJsonArray("tools") {
-                    params.tools.forEach { tool ->
+                    // MCP reconnects may return the same catalogue in a different order.
+                    // Keep the official DeepSeek tool prefix stable; explicit custom bodies
+                    // still win below. Other providers retain their existing wire layout.
+                    val orderedTools = if (host == "api.deepseek.com") params.tools.sortedBy { it.name } else params.tools
+                    orderedTools.forEach { tool ->
                         add(buildJsonObject {
                             put("type", "function")
                             put("function", buildJsonObject {
@@ -399,7 +403,9 @@ class ChatCompletionsAPI(
                                     json.encodeToJsonElement(
                                         tool.parameters()
                                             ?: InputSchema.Obj(properties = JsonObject(emptyMap()))
-                                    ).validateToolSchemaReferences(tool.name)
+                                    ).validateToolSchemaReferences(tool.name).let {
+                                        if (host == "api.deepseek.com") stableSchemaObjects(it) else it
+                                    }
                                 )
                             })
                         })
@@ -408,6 +414,12 @@ class ChatCompletionsAPI(
             }
         }.mergeCustomBody(params.customBody)
         return withDeepSeekToolHistoryFields(request, host, providerSetting.includeHistoryReasoning)
+    }
+
+    private fun stableSchemaObjects(value: JsonElement): JsonElement = when (value) {
+        is JsonObject -> JsonObject(value.toSortedMap().mapValues { stableSchemaObjects(it.value) })
+        is JsonArray -> JsonArray(value.map(::stableSchemaObjects))
+        else -> value
     }
 
     /** DeepSeek tool requests require a reasoning_content member on every assistant entry,

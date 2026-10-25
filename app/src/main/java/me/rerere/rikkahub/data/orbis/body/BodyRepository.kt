@@ -10,12 +10,19 @@ import java.security.MessageDigest
 class BodyRepository(private val storage: ActivityStorage, private val now: () -> BodyClock) {
     private val mutable = MutableStateFlow(storage.read()?.let { BodyRules.json.decodeFromString<BodyState>(it).also(BodyRules::validate) } ?: BodyState())
     val state = mutable.asStateFlow()
+    init {
+        // Start the new clock at upgrade/open, never retroactively reinterpret a legacy gap.
+        // Persist once so closing/reopening before another message still keeps this origin.
+        val old = mutable.value
+        if (old.running && old.timeline == null) {
+            val clock = now()
+            commit(old.copy(clock = clock, timeline = BodyTime.anchor(old, clock.wallMs),
+                undo = old.undo?.copy(clock = clock, timeline = BodyTime.anchor(old, clock.wallMs))))
+        }
+    }
     @Synchronized fun snapshot(): BodyState = mutable.value
     @Synchronized fun viewSnapshot(): BodyState = settle(snapshot(), now())
-    private fun settle(old: BodyState, clock: BodyClock) = old.copy(clock = clock,
-        snapshot = if (old.running && old.resumedProcess == clock.process) old.versions.lastOrNull()?.let {
-            BodyRules.materialize(old.snapshot, it.definition, BodyRules.elapsed(old.clock, clock))
-        } ?: old.snapshot else old.snapshot)
+    private fun settle(old: BodyState, clock: BodyClock) = BodyTime.settle(old, clock)
     private fun commit(next: BodyState): BodyState {
         BodyRules.validate(next)
         val text = BodyRules.json.encodeToString(next)
@@ -52,7 +59,7 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
         require(!running || old.versions.lastOrNull()?.definition?.dimensions?.isNotEmpty() == true) { "body_definition_empty" }
         val settled = settle(old, now())
         // A paused/disabled interval is never converted into an absence penalty on restart.
-        commit(logged(settled.copy(running = running, lastHumanAt = 0, undo = null,
+        commit(logged(BodyTime.reset(settled).copy(running = running, lastHumanAt = 0, undo = null,
             resumedProcess = if(running) settled.clock.process else ""), "host", if(running) "host_start" else "host_pause"))
     }
     @Synchronized fun define(definition: BodyDefinition, expected: Long, key: String) {
@@ -77,7 +84,7 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
             require(now().wallMs >= old.auto.cooldownUntil) { "body_cooling_active" }
         require(!running || old.versions.lastOrNull()?.definition?.dimensions?.isNotEmpty() == true) { "body_definition_empty" }
         val settled = settle(old, now())
-        val next = logged(settled.copy(running = running, lastHumanAt = if (old.running == running) old.lastHumanAt else 0,
+        val next = logged((if (old.running == running) settled else BodyTime.reset(settled)).copy(running = running, lastHumanAt = if (old.running == running) old.lastHumanAt else 0,
             undo = null, auto = if (running) settled.auto.copy(pausedByCooling = false) else settled.auto,
             resumedProcess = if (running) settled.clock.process else ""), conversation,
             if (running) "host_start" else "host_pause")
@@ -114,7 +121,7 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
         val updated = BodyRules.apply(settled.snapshot, conversation, version.definition, rule.deltas.mapValues { it.value * (1 + strength * 0.25) })
         val current = updated.sessions.getValue(conversation)
         val next = logged(settled.copy(snapshot = updated.copy(sessions = updated.sessions + (conversation to current.copy(visible = visible)))), conversation, event, strength)
-        commit(next.copy(receipts = receipt(next, key, payload), undo = BodyUndo(next.revision, version.version, conversation, settled.snapshot, settled.clock)))
+        commit(next.copy(receipts = receipt(next, key, payload), undo = BodyUndo(next.revision, version.version, conversation, settled.snapshot, settled.clock, settled.timeline)))
     }
     /** A new host-identified human message only. Never called for a page render, AI event or model retry. */
     @Synchronized fun human(conversation: String, messageId: String, text: String, keywordsEnabled: Boolean) {
@@ -132,18 +139,18 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
         }
         if(!old.running) return
         val settled = settle(old, now()); val def = old.versions.last().definition
-        val gap = BodyRules.gap(old.lastHumanAt, settled.clock.wallMs)
-        val hours = ((gap / 60000.0 - def.absence.graceMinutes).coerceAtLeast(0.0) / 60.0).coerceAtMost(def.absence.capHours.toDouble())
+        val gap = BodyTime.gap(old, conversation, settled.clock.wallMs)
         var value = settled.snapshot
-        if(hours > 0) {
-            value = BodyRules.apply(value, conversation, def, def.absence.perHour.mapValues { it.value * hours })
+        if(gap > def.absence.graceMinutes * 60_000L) {
             def.rules.find { it.event == def.absence.returnEvent }?.let { value = BodyRules.apply(value, conversation, def, it.deltas) }
         }
         // Plain substring matching, opt-in; no regex, network, inferred emotion or stored human text.
         if(keywordsEnabled) def.rules.filter { rule -> rule.keywords.any { text.take(32000).contains(it, ignoreCase = true) } }
             .take(8).forEach { value = BodyRules.apply(value, conversation, def, it.deltas) }
-        val next = logged(settled.copy(snapshot = value, lastHumanAt = maxOf(old.lastHumanAt, settled.clock.wallMs), undo = null,
-            resumedProcess = settled.clock.process),
+        // Materialize the session even if this input has no matching event.
+        value = BodyRules.apply(value, conversation, def, emptyMap())
+        val next = logged(BodyTime.human(settled.copy(snapshot = value, lastHumanAt = maxOf(old.lastHumanAt, settled.clock.wallMs), undo = null,
+            resumedProcess = settled.clock.process), conversation),
             conversation, "host_human", gap = gap)
         commit(next.copy(receipts = receipt(next, key, payload)))
     }
@@ -156,13 +163,10 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
             // Consume new messages while paused, never catch up with them after resuming.
             next = logged(next, conversation, "host_human", at = time)
         } else {
-            val gap = BodyRules.gap(old.lastHumanAt, time)
-            val hours = ((gap / 60000.0 - definition.absence.graceMinutes).coerceAtLeast(0.0) / 60.0)
-                .coerceAtMost(definition.absence.capHours.toDouble())
+            val gap = BodyTime.gap(old, conversation, time)
             var value = next.snapshot
-            if (hours > 0 && !(decision.cooled && definition.cooling.pauseAuto)) {
+            if (gap > definition.absence.graceMinutes * 60_000L && !(decision.cooled && definition.cooling.pauseAuto)) {
                 // Cooling affects only the configured event set; it does not freeze every dimension.
-                value = BodyRules.apply(value, conversation, definition, definition.absence.perHour.mapValues { it.value * hours })
                 definition.rules.find { it.event == definition.absence.returnEvent }?.takeUnless {
                     time < decision.auto.cooldownUntil && it.event in decision.auto.blockedEvents
                 }?.let { rule ->
@@ -185,7 +189,7 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
                     strength = kotlin.math.ceil(event.concentration).toInt().coerceIn(0, 3), concentration = event.concentration, at = time)
             }
             val pause = decision.cooled && definition.cooling.pauseAuto
-            next = logged(next.copy(lastHumanAt = if (pause) 0 else time, running = !pause,
+            next = logged((if (pause) BodyTime.reset(next) else BodyTime.human(next, conversation)).copy(lastHumanAt = if (pause) 0 else time, running = !pause,
                 resumedProcess = if (pause) "" else clock.process), conversation,
                 if (decision.cooled) "host_cooling" else "host_human", gap = gap, at = time)
         }
@@ -210,8 +214,8 @@ class BodyRepository(private val storage: ActivityStorage, private val now: () -
         require(undo.seq == expectedSeq && undo.seq == old.revision && undo.conversation == conversation &&
             undo.version == old.versions.last().version) { "body_undo_changed" }
         val clock = now()
-        val restored = if(old.running && old.resumedProcess == clock.process) BodyRules.materialize(undo.before, old.versions.last().definition, BodyRules.elapsed(undo.clock, clock)) else undo.before
-        val next = logged(old.copy(snapshot = restored, clock = clock, undo = null), conversation, "host_undo")
+        val restored = settle(old.copy(snapshot = undo.before, clock = undo.clock, timeline = undo.timeline), clock)
+        val next = logged(restored.copy(undo = null), conversation, "host_undo")
         commit(next.copy(receipts = receipt(next, key, payload)))
     }
     @Synchronized fun selfReport(conversation: String, text: String, key: String) {

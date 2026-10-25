@@ -25,7 +25,8 @@ internal fun bodyTool(conversation: String, enabled: () -> Boolean, open: () -> 
         可选cooling={keywords:[],synonyms:[],event:null,blockedEvents:[],cooldownMinutes:5,pauseAuto:false}。词、反应事件、冷却的事件、时长及是否暂停全由规则定义；默认没有冷静词或固定反应，不把“停”、某个人的喜好或所有指标下降写成通用规则。命中时只触发配置的event，冷却只拦blockedEvents；可让某指标降低、另一个稳定指标升高。配置pauseAuto才暂停；AI须等配置的冷静期结束才能resume。此配置同样只可在暂停阶段修改。
         维度可加private布尔字段，默认false；设为true后不能改为false，删除再建同ID也不能解除。action=visibility用shared布尔值及expected_revision决定你是否公开当前会话私密层，默认不公开；不影响数值。人类本机privateVisible查看开关默认false，只能人类UI改，你不能提交或查询。只有你愿意公开且人类选择展开时才渲染私密值/峰值/曲线；隐藏仍计算和记日志。
         manual模式才允许action=event，传event、version、strength(0–3)、visible；不传数值，回执仅已记及seq。visible控制普通面板，不覆盖私密层双条件。manual的undo需最新seq，仅撤回当前会话最近事件。重试由宿主标识去重，不要另造事件重试。
-        action=self_report、text最多300字，仅显示“自述”，不改任何计算值。规则/历史不自动带入上下文。App关闭冻结，重新进入后新的人类消息才按有上限的离开规则补算；不要借负面量表催促人类留下。
+        时间变化无需调用event：运行期间按真实经过的时间自然回归baseline；absence.graceMinutes是静默多少分钟后开始，perHour指定各指标每小时正负变化速率，capHours限制每段静默的累计作用时间。时间速率与自然回归连续合算，结果仍受min/max限制；maxDelta限制离散事件，不按刷新次数累加。session维度各会话独立计时，persistent维度按该助手最近一次人类消息计时，多个窗口不重复叠加。returnEvent仅在对应会话静默超过graceMinutes后收到新的人类消息时触发一次。后台/关闭重开也按经过时间计算，不调用模型；暂停或关闭模块期间冻结，恢复后重新计时。旧版升级从首次打开起建立新时钟，不追算升级前的空白。修改这些时间规则同样由你pause→draft→activate→resume。
+        action=self_report、text最多300字，仅显示“自述”，不改任何计算值。规则/历史不自动带入上下文；不要借负面量表催促人类留下。
     """.trimIndent(),
     parameters = { InputSchema.Obj(buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("rules", "state", "visibility", "pause", "resume", "draft", "activate", "event", "undo", "self_report").map(::JsonPrimitive))) })

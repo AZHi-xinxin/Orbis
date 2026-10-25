@@ -31,8 +31,16 @@ object BodyPresentation {
         if (state.snapshot.sessions[conversation]?.visible != true) return emptyList()
         val dim = dimensions(state, privateVisible, conversation).find { it.id == dimensionId } ?: return emptyList()
         // No cross-chat logs in a chat-specific view, including shared persistent dimensions.
-        return state.logs.filter { it.conversation == conversation && it.at in from..to && dim.id in it.values }
+        val history = state.logs.filter { it.conversation == conversation && it.at in from..to && dim.id in it.values }
             .map { it.copy(values = mapOf(dim.id to it.values.getValue(dim.id))) }
+        // A live endpoint, not a fabricated historical event or persisted receipt.
+        val at = state.clock.wallMs
+        return if (state.running && state.timeline != null && at in from..to &&
+            at > (history.maxOfOrNull { it.at } ?: Long.MIN_VALUE)) {
+            val value = BodyRules.values(state.snapshot, conversation, state.versions.last().definition).getValue(dim.id)
+            history + BodyLog(state.revision, at, state.versions.last().version, conversation,
+                "host_time", values = mapOf(dim.id to value))
+        } else history
     }
     fun history(state: BodyState, conversation: String, privateVisible: Boolean): List<BodyLog> {
         if (state.snapshot.sessions[conversation]?.visible != true) return emptyList()

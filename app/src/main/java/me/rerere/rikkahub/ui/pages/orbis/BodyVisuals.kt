@@ -132,7 +132,7 @@ internal fun bodyNumber(value: Double) = String.format(Locale.ROOT, "%.1f", valu
             Row(Modifier.fillMaxWidth().padding(start = 35.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 listOf(start, start + (end - start) / 2, end).forEach { time -> Text(bodyTime(time), fontSize = 10.sp, color = p.muted) }
             }
-            if (points.size == 1) Text("已有一次记录，新的事件会让曲线继续延伸。", fontSize = 11.sp, color = p.muted)
+            Text(if (state.running) "右端为此刻状态，静默时也会按规则变化。" else "当前已暂停，状态保持不变。", fontSize = 11.sp, color = p.muted)
         }
     }
 }

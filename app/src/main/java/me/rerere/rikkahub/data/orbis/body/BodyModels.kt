@@ -36,6 +36,9 @@ import kotlin.math.pow
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER) val autoPolicy: BodyAutoPolicy = BodyAutoPolicy())
 @Serializable data class BodyVersion(val version: Int, val effectiveAt: Long, val definition: BodyDefinition)
 @Serializable data class BodyClock(val process: String = "", val activeMs: Long = 0, val wallMs: Long = 0)
+/** Durable elapsed-time origin; session clocks never borrow another chat's human activity. */
+@Serializable data class BodyTimeline(val at: Long = 0,
+    val humanAt: Map<String, Long> = emptyMap(), val sharedHumanAt: Long = 0)
 @Serializable data class BodySession(val values: Map<String, Double> = emptyMap(),
     val peaks: Map<String, Double> = emptyMap(), val visible: Boolean = false, val selfReport: String = "",
     val privateShared: Boolean = false)
@@ -45,7 +48,7 @@ import kotlin.math.pow
     val event: String, val strength: Int = 0, val gapMs: Long = 0,
     val values: Map<String, Double> = emptyMap(), val concentration: Double? = null)
 @Serializable data class BodyUndo(val seq: Long, val version: Int, val conversation: String,
-    val before: BodySnapshot, val clock: BodyClock)
+    val before: BodySnapshot, val clock: BodyClock, val timeline: BodyTimeline? = null)
 @Serializable data class BodyState(val schema: Int = 1, val revision: Long = 0, val running: Boolean = false,
     val versions: List<BodyVersion> = emptyList(), val draft: BodyDefinition? = null,
     val clock: BodyClock = BodyClock(), val snapshot: BodySnapshot = BodySnapshot(),
@@ -56,6 +59,7 @@ import kotlin.math.pow
     // Sticky classification, including drafts: removing/readding a draft must not unveil a dimension.
     val privateDimensionIds: Set<String> = emptySet(),
     val auto: BodyAutoState = BodyAutoState(),
+    val timeline: BodyTimeline? = null,
 )
 
 object BodyRules {
@@ -161,6 +165,11 @@ object BodyRules {
         require(!state.running || state.versions.lastOrNull()?.definition?.dimensions?.isNotEmpty() == true) { "body_definition_empty" }
         require(state.clock.activeMs >= 0 && state.clock.wallMs >= 0 && state.lastHumanAt >= 0) { "body_clock_invalid" }
         require(state.clock.process.length <= 80 && state.resumedProcess.length <= 80 && state.checkpointSeq in 0..state.revision) { "body_storage_invalid" }
+        fun checkTimeline(t: BodyTimeline) {
+            require(t.at >= 0 && t.sharedHumanAt in 0..t.at && t.humanAt.size <= 128 &&
+                t.humanAt.all { (key, at) -> id(key) && at in 0..t.at }) { "body_timeline_invalid" }
+        }
+        state.timeline?.let(::checkTimeline)
         fun checkValues(values: Map<String, Double>, dimensions: List<BodyDimension>) {
             require(values.all { (key, value) -> value.isFinite() && dimensions.any { it.id == key && value in it.min..it.max } }) { "body_storage_bounds" }
         }
@@ -184,6 +193,7 @@ object BodyRules {
         }) { "body_log_invalid" }
         state.logs.forEach { checkValues(it.values, state.versions.getOrNull(it.version - 1)?.definition?.dimensions.orEmpty()) }
         state.undo?.let {
+            it.timeline?.let(::checkTimeline)
             require(it.seq == state.revision && it.version == state.versions.lastOrNull()?.version && id(it.conversation) &&
                 it.clock.activeMs >= 0 && it.clock.wallMs >= 0 && it.clock.process.length <= 80) { "body_undo_invalid" }
             checkSnapshot(it.before, state.versions.last().definition)

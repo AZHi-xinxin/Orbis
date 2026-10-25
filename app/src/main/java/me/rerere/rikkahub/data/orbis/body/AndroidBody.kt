@@ -10,7 +10,8 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import java.util.UUID
 import me.rerere.rikkahub.data.orbis.activities.AndroidActivityStorage
 
-/** Foreground elapsed time only; no alarm, service, polling loop, network or app launch at startup. */
+/** Wall-clock projection; legacy foreground counters are retained for document compatibility.
+ * No alarm, background polling, network request or app launch is needed for elapsed time. */
 object OrbisBody {
     private val repositories = mutableMapOf<String, BodyRepository>()
     private val process = UUID.randomUUID().toString()

@@ -54,19 +54,25 @@ class BodyRepositoryTest {
         assertEquals(before, f.repo.snapshot()); f.memory.fail = false
         f.repo.event("chat1", "rest", 0, true, "one"); assertEquals(58.0, value(f, "energy"), 0.0)
     }
-    @Test fun foregroundHalfLifeIsPureAndZeroAfterReboot() {
+    @Test fun wallClockHalfLifeContinuesAcrossReboot() {
         val f = prepared(); f.repo.event("chat1", "rest", 0, true, "one")
-        f.clock = f.clock.copy(activeMs = 60_000); f.repo.refresh()
+        f.clock = f.clock.copy(wallMs = 1_060_000); f.repo.refresh()
         assertEquals(54.0, value(f, "energy"), .000001)
-        f.clock = BodyClock("p2", 0, 999_000_000); f.repo.refresh()
-        assertEquals(54.0, value(f, "energy"), .000001)
+        f.clock = BodyClock("p2", 0, 1_120_000); f.repo.refresh()
+        assertEquals(52.0, value(f, "energy"), .000001)
     }
-    @Test fun absenceNeedsNewHumanAndIsBoundedAndIdempotent() {
+    @Test fun absenceSettlesBeforeNextHumanAndIsNotAppliedTwice() {
         val f = prepared(); f.repo.human("chat1", "h1", "", false)
         f.clock = f.clock.copy(wallMs = f.clock.wallMs + 100L * 3600000)
-        f.repo.refresh(); assertEquals(50.0, value(f, "bond"), 0.0)
+        f.repo.refresh()
+        // Drift runs for the configured 24 hours, then natural decay runs alone.
+        val k = kotlin.math.ln(2.0) / (1000.0 * 60)
+        val expected = 50 + (2.0 / 3600 / k) * (1 - kotlin.math.exp(-k * 24 * 3600)) *
+            kotlin.math.exp(-k * 75.5 * 3600)
+        assertEquals(expected, value(f, "bond"), .000001)
         f.repo.human("chat1", "h2", "", false)
-        assertEquals(60.0, value(f, "bond"), 0.0) // 24h calculation but single-event delta cap 10
+        assertEquals(expected, value(f, "bond"), .000001)
+        assertEquals(52.0, value(f, "energy"), .000001) // only the configured return event
         val before = f.memory.text; f.repo.human("chat1", "h2", "edited", false)
         assertEquals(before, f.memory.text)
     }
@@ -92,12 +98,12 @@ class BodyRepositoryTest {
     }
     @Test fun newVersionDoesNotReinterpretOldDecayAndIsContinuous() {
         val f = prepared(); f.repo.event("chat1", "rest", 0, true, "one")
-        f.clock = f.clock.copy(activeMs = 60000); f.repo.setRunning(false)
+        f.clock = f.clock.copy(wallMs = 1_060_000); f.repo.setRunning(false)
         assertEquals(54.0, value(f, "energy"), .000001)
         val next = definition().copy(dimensions = listOf(local.copy(halfLifeMinutes = 2.0), slow))
         f.repo.define(next, f.repo.snapshot().revision, "d2"); f.repo.activate(f.repo.snapshot().revision, "a2")
         assertEquals(54.0, value(f, "energy"), .000001)
-        f.repo.setRunning(true); f.clock = f.clock.copy(activeMs = 180000); f.repo.refresh()
+        f.repo.setRunning(true); f.clock = f.clock.copy(wallMs = 1_180_000); f.repo.refresh()
         assertEquals(52.0, value(f, "energy"), .000001)
         assertEquals(2, f.repo.snapshot().versions.size)
     }
@@ -169,14 +175,15 @@ class BodyRepositoryTest {
         assertThrows(IllegalArgumentException::class.java) { f.repo.event("chat1", "rest", 0, true, "one", 9) }
         assertEquals(before, f.memory.text)
     }
-    @Test fun reopeningAndRefreshingNeverResumesDecayUntilNewHuman() {
+    @Test fun reopeningAndRefreshingContinuesWithoutNewHuman() {
         val f = prepared(); f.repo.event("chat1", "rest", 0, true, "one")
-        f.clock = BodyClock("p2", 0, 2_000_000); f.repo.refresh()
-        f.clock = f.clock.copy(activeMs = 60000); f.repo.refresh()
-        assertEquals(58.0, value(f, "energy"), .000001)
+        f.clock = BodyClock("p2", 0, 1_060_000)
+        val reopened = BodyRepository(f.memory) { f.clock }
+        reopened.refresh()
+        assertEquals(54.0, BodyRules.values(reopened.snapshot().snapshot, "chat1", definition()).getValue("energy"), .000001)
         f.repo.human("chat1", "h2", "", false)
-        f.clock = f.clock.copy(activeMs = 120000); f.repo.refresh()
-        assertEquals(54.0, value(f, "energy"), .000001)
+        f.clock = f.clock.copy(wallMs = 1_120_000); f.repo.refresh()
+        assertEquals(52.0, value(f, "energy"), .000001)
     }
     @Test fun invalidImportedValuesAndUndoCannotBypassBounds() {
         val f = prepared(); f.repo.event("chat1", "rest", 0, true, "one")
