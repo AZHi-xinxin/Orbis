@@ -151,6 +151,7 @@ import kotlin.uuid.Uuid
 @Composable
 fun ChatPage(
     id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null,
+    draftId: String? = null,
     onDrawerVisibilityChange: (Boolean) -> Unit = {},
     onStartupReady: (() -> Unit)? = null,
 ) {
@@ -261,7 +262,7 @@ fun ChatPage(
     }
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
-    LaunchedEffect(id, files, text) {
+    ConsumeIncomingChatDraft(id.toString(), draftId, text, files.map { it.toString() }) {
         if (files.isNotEmpty()) {
             val parts = importSystemSharedAttachments(files, filesManager) { notice ->
                 sharedAttachmentToaster.show(notice, type = ToastType.Error)

@@ -138,11 +138,12 @@ internal object ConnectionProposalRules {
         }
     }
     /** Human UI action; intentionally not exposed by the configuration tools. */
-    fun enableMcp(settings: Settings, owner: String, id: String): Settings {
+    fun enableMcp(settings: Settings, owner: String, id: String): Settings = setMcpEnabled(settings, owner, id, true)
+    fun setMcpEnabled(settings: Settings, owner: String, id: String, enabled: Boolean): Settings {
         val p = settings.connectionProposals.single { it.owner == owner && it.id == id }
         check(p.draft.kind.startsWith("mcp_") && matchesInstalled(settings, p))
         return settings.copy(mcpServers = settings.mcpServers.map {
-            if (it.id.toString() == id) it.clone(commonOptions = it.commonOptions.copy(enable = true)) else it
+            if (it.id.toString() == id) it.clone(commonOptions = it.commonOptions.copy(enable = enabled)) else it
         })
     }
     fun connectionModelId(proposalId: String): Uuid = Uuid.parse(

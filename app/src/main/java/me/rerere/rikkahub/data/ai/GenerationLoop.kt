@@ -827,6 +827,9 @@ class GenerationLoop(
             orbisConversationId = conversationId?.toString(),
             maxAutomaticContinuations = maxAutomaticContinuations,
             onGatewayRequest = onGatewayRequest,
+            onPrefixObservation = if (me.rerere.rikkahub.BuildConfig.DEBUG && !readOnlyPreflight) ({ evidence ->
+                LocalPrefixDiagnostics.record(context, evidence)
+            }) else null,
         )
         try {
             if (stream) {

@@ -84,4 +84,38 @@ class ThemeRepositoryTest {
         assertEquals("图片候选",s.snapshot().resolve(ref)?.name)
     }
 
+    @Test fun humanGrantCoversNewThemesAndRevocationImmediatelyStopsAiApplication() = fixture { s, root ->
+        val first=published(s,"猫的信"); assertFalse(s.requestApply(first))
+        s.allowAiApply(true)
+        val second=published(s,"兔的信")
+        assertTrue(s.requestApply(second))
+        assertEquals(second,ThemeRepository(root.resolve("orbis-themes/owner")).snapshot().active)
+        assertThrows(Exception::class.java) { executeThemeTool(s, buildJsonObject { put("action","allowAiApply");put("enabled",true) }) }
+        assertThrows(Exception::class.java) { s.write("{\"name\":\"bad\",\"allowAiApply\":true}") }
+        s.allowAuto(first.id,true);s.allowAiApply(false)
+        assertFalse(s.requestApply(first));assertEquals(second,s.snapshot().active)
+        s.allowAiApply(true);s.renderFailed(second)
+        assertFalse(s.snapshot().allowAiApply)
+    }
+
+    @Test fun globalHumanPermissionIsNeverExportedOrRestored() = fixture { s, root ->
+        val theme=published(s,"可迁移");s.confirm(theme);s.allowAiApply(true)
+        val staging=root.resolve("snapshot-global")
+        val files=ThemeBackup.stageSnapshot(root,staging)
+        val copy=themeJson.decodeFromString<ThemeState>(files.single().second.readText())
+        assertFalse(copy.allowAiApply);assertTrue(copy.autoApply.isEmpty())
+        assertTrue(s.snapshot().allowAiApply)
+    }
+
+    @Test fun shapesPatternsAndChromeAreValidatedAndLegacyDefaultsRemainReadable() = fixture { s, _ ->
+        for(shape in listOf("round","cat","rabbit","ticket","speech")) {
+            val p=ThemePackage(name=shape,bubbles=ThemeBubbles(assistant=ThemeBubble(shape=shape,pattern="stars",decoration="heart")),chrome=ThemeChrome(dock="#E7EEF5",onDock="#233449"))
+            assertEquals(shape,parseTheme(themeJson.encodeToString(p)).bubbles.assistant.shape)
+        }
+        assertEquals("round",parseTheme("{\"name\":\"旧主题\"}").bubbles.assistant.shape)
+        assertThrows(Exception::class.java){s.write(themeJson.encodeToString(ThemePackage(name="bad",bubbles=ThemeBubbles(assistant=ThemeBubble(shape="script")))))}
+        assertThrows(Exception::class.java){s.write(themeJson.encodeToString(ThemePackage(name="bad",chrome=ThemeChrome(dock="#FFFFFF",onDock="#FFFFFF"))))}
+        assertThrows(Exception::class.java){s.write(themeJson.encodeToString(ThemePackage(name="bad",bubbles=ThemeBubbles(assistant=ThemeBubble(decorationAsset="a".repeat(64)+".png")))))}
+    }
+
 }

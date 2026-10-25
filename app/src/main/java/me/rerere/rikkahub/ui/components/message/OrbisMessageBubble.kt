@@ -43,15 +43,7 @@ internal fun OrbisMessageBubble(
 ) {
     val custom = LocalChatTheme.current?.body?.bubbles?.let { if (user) it.user else it.assistant }
     if (custom != null) {
-        BoxWithConstraints(modifier, contentAlignment = if (user) Alignment.TopEnd else Alignment.TopStart) {
-            val shape = RoundedCornerShape(custom.radius.dp)
-            Box(Modifier.widthIn(max = maxWidth * custom.maxWidthRatio).clip(shape).background(Color(themeArgb(custom.bg)))) {
-                CompositionLocalProvider(LocalContentColor provides Color(themeArgb(custom.text)),
-                    LocalOrbisChatTextColor provides Color(themeArgb(custom.text))) {
-                    Column(Modifier.padding(custom.padding.dp), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
-                }
-            }
-        }
+        OrbisThemedBubble(user, custom, modifier, content)
         return
     }
     val options = appearance.normalized()

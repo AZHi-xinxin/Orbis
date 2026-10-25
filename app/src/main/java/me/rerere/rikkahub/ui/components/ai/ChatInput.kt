@@ -364,7 +364,7 @@ fun ChatInput(
                 orbis = orbis,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 color = composerColor,
-                contentColor = if (orbis) OrbisTheme.colors.ink else contentColorFor(composerColor),
+                contentColor = if (orbis) me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body?.chrome?.onComposer?.let { androidx.compose.ui.graphics.Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(it)) } ?: OrbisTheme.colors.ink else contentColorFor(composerColor),
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -642,12 +642,12 @@ private fun SendButton(
     val containerColor = when {
         showStop -> MaterialTheme.colorScheme.errorContainer
         empty -> if (BuildConfig.ORBIS_ENABLED) OrbisTheme.colors.accent else MaterialTheme.colorScheme.surfaceContainerHigh
-        else -> MaterialTheme.colorScheme.primary
+        else -> if (BuildConfig.ORBIS_ENABLED) OrbisTheme.colors.accent else MaterialTheme.colorScheme.primary
     }
     val contentColor = when {
         showStop -> MaterialTheme.colorScheme.onErrorContainer
         empty -> if (BuildConfig.ORBIS_ENABLED) OrbisTheme.colors.onAccent.copy(alpha = .6f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        else -> MaterialTheme.colorScheme.onPrimary
+        else -> if (BuildConfig.ORBIS_ENABLED) OrbisTheme.colors.onAccent else MaterialTheme.colorScheme.onPrimary
     }
     Box(
         contentAlignment = Alignment.Center,

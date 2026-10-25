@@ -274,7 +274,14 @@ class ChatToolFactory(
                 if (LocalToolOption.ThemeDesign in assistant.localTools) {
                     add(me.rerere.rikkahub.data.orbis.theme.themeTool(
                         { me.rerere.rikkahub.data.orbis.theme.openThemes(context, assistant.id.toString()) },
-                        { liveOwner()?.localTools?.contains(LocalToolOption.ThemeDesign) == true }))
+                        { liveOwner()?.localTools?.contains(LocalToolOption.ThemeDesign) == true },
+                        readWorkspaceImage = { path ->
+                            val workspace = liveOwner()?.workspaceId?.toString() ?: error("theme_workspace_unavailable")
+                            val bytes = org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.repository.WorkspaceRepository>()
+                                .readNativeBytes(workspace, path)
+                            check(liveOwner()?.workspaceId?.toString() == workspace) { "theme_workspace_changed" }
+                            bytes
+                        }))
                 }
                 if (assistant.orbisBodyEnabled && conversationId != null) {
                     // Registering tools must never reinterpret historical human text as a new

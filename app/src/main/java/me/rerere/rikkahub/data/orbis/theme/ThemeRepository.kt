@@ -73,7 +73,7 @@ internal class ThemeRepository(private val root: File) {
     /** AI can request only a published immutable version. Human grants never come from JSON. */
     fun requestApply(ref: ThemeRef): Boolean = synchronized(lock) {
         val state = snapshot(); check(state.resolve(ref) != null) { "theme_version_missing" }
-        if (ref.id in state.autoApply) { applyLocked(state, ref); true }
+        if (state.allowAiApply || ref.id in state.autoApply) { applyLocked(state, ref); true }
         else { save(state.copy(pending = ref)); false }
     }
     fun confirm(ref: ThemeRef) = synchronized(lock) {
@@ -85,6 +85,10 @@ internal class ThemeRepository(private val root: File) {
         save(state.copy(active = ref, pending = null, previous = if (ref == state.active) state.previous else (state.previous + state.active).takeLast(20)))
     }
     fun dismissPending() = synchronized(lock) { save(snapshot().copy(pending = null)) }
+    /** Native human control only; never exposed as a tool action or accepted theme property. */
+    fun allowAiApply(allowed: Boolean) = synchronized(lock) {
+        save(snapshot().copy(allowAiApply = allowed, autoApply = if(allowed) snapshot().autoApply else emptySet()))
+    }
     fun allowAuto(id: String, allowed: Boolean) = synchronized(lock) {
         val state = snapshot(); check(state.entries.any { it.id == id }) { "theme_not_found" }
         save(state.copy(autoApply = if (allowed) state.autoApply + id else state.autoApply - id))
@@ -95,7 +99,7 @@ internal class ThemeRepository(private val root: File) {
     }
     fun renderFailed(ref: ThemeRef) = synchronized(lock) {
         val state = snapshot()
-        if (state.active == ref) save(state.copy(active = null, pending = null, autoApply = state.autoApply - ref.id))
+        if (state.active == ref) save(state.copy(active = null, pending = null, autoApply = state.autoApply - ref.id, allowAiApply = false))
     }
     fun useOriginal() = synchronized(lock) {
         val state = snapshot(); save(state.copy(active = null, pending = null, previous = if (state.active != null) (state.previous + state.active).takeLast(20) else state.previous))

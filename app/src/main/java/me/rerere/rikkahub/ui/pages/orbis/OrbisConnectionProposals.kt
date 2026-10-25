@@ -1,18 +1,27 @@
 package me.rerere.rikkahub.ui.pages.orbis
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.*
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.orbis.integration.*
 import org.koin.compose.koinInject
 
@@ -23,105 +32,127 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
-    var selected by remember(owner) { mutableStateOf<ConnectionProposal?>(null) }
-    var credential by remember(owner) { mutableStateOf("") } // never saved in UI state/clipboard/chat
-    var rememberChoice by remember { mutableStateOf(true) }
-    LaunchedEffect(owner, initialRequest) {
-        val target = initialRequest?.takeIf { it.owner == owner }?.let { requested ->
-            settings.connectionProposals.singleOrNull { it.owner == owner && it.id == requested.id && it.draft == requested.draft }
-        }
-        if (target?.status == "pending") {
-            selected = target; credential = ""; rememberChoice = target.alwaysAllow
-        }
-    }
-    fun apply(transform: (me.rerere.rikkahub.data.datastore.Settings) -> me.rerere.rikkahub.data.datastore.Settings) {
+    var selectedId by remember(owner) { mutableStateOf(initialRequest?.id) }
+    val entries = settings.connectionProposals.filter { it.owner == owner }.asReversed()
+    val selected = entries.firstOrNull { it.id == selectedId } ?: entries.firstOrNull { it.status == "pending" } ?: entries.firstOrNull()
+    fun apply(transform: (Settings) -> Settings) {
         if (busy) return
         busy = true
         scope.launch {
             try {
                 val ok = withContext(Dispatchers.IO) { store.update(transform) }
-                if (ok) { credential = ""; selected = null; notice = "设置已保存。AI 可以继续选择工具型号、音色并检查连接。未自动发起付费试听。" }
-                else notice = "本次没有保存，原配置保留。聊天不受影响。"
+                notice = if (ok) "已保存。连接状态可由 AI 继续检查；聊天随时可以继续。" else "这次没有保存，原配置保留。"
             } catch(c: CancellationException) { throw c }
-            catch(_: Exception) { notice = "未保存：请确认密钥已填写、建议仍是当前版本，且原生配置未被另外修改。原配置保留，聊天继续。" }
+            catch(_: Exception) { notice = "未保存：请检查密钥或建议版本。原有设置和聊天仍保留。" }
             finally { busy = false }
         }
     }
-    CompanionWindow(onClose) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onClose) { Text("返回") }
-            Text("AI 连接建议", style = MaterialTheme.typography.headlineSmall)
-        }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)
-            .testTag("connection-proposals"), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Text("AI 填配置，你只补必要的密钥", style = MaterialTheme.typography.titleLarge)
-            Text("模型、语音和 MCP 均可由 AI 填好。不需要密钥的服务会直接保存；MCP 只需在这里开启。密钥只进入原生设置，不回传给 AI。", style = MaterialTheme.typography.bodyMedium)
-            val entries = settings.connectionProposals.filter { it.owner == owner }.asReversed()
-                .sortedBy { if (it.id == initialRequest?.id) 0 else 1 }
-            if (entries.isEmpty()) Text("还没有连接建议。可以在聊天中请 AI 填好语音或 MCP 的连接配置，再到这里确认。")
-            entries.forEach { p ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(p.draft.name, style = MaterialTheme.typography.titleMedium)
-                    Text(when(p.draft.kind) {
-                        "tts_openai" -> "OpenAI 兼容语音服务"
-                        "model_openai" -> "OpenAI 兼容模型 / ST 聊天 API"
-                        "mcp_sse" -> "MCP · SSE"
-                        else -> "MCP · Streamable HTTP"
-                    }, style = MaterialTheme.typography.labelLarge)
-                    Text(p.draft.endpoint, style = MaterialTheme.typography.bodySmall)
-                    if(p.draft.kind == "tts_openai") Text("模型 ${p.draft.model} · 音色 ${p.draft.voice}", style = MaterialTheme.typography.bodySmall)
-                    if(p.draft.kind == "model_openai") Text("模型 ${p.draft.model}", style = MaterialTheme.typography.bodySmall)
-                    Text(when(p.status) { "saved" -> "已保存 · 未在此页验证连接"; "rejected" -> "已拒绝 · 聊天继续"; "changed_in_settings" -> "原生配置已变更，未自动覆盖"; else -> "待确认 · 不阻塞聊天" })
-                    if(p.alwaysAllow) Text("已允许此助手以后调整同地址、同用途的配置", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (p.draft.kind.startsWith("mcp_") && p.status == "saved" &&
-                            settings.mcpServers.any { it.id.toString() == p.id && !it.commonOptions.enable }) {
-                            Button(enabled = !busy, onClick = { apply { latest ->
-                                ConnectionProposalRules.enableMcp(latest, owner, p.id)
-                            } }) { Text("开启这个 MCP") }
-                        }
-                        OutlinedButton(enabled = !busy && !settings.init && p.status != "changed_in_settings", onClick = {
-                            selected = p; credential = ""; rememberChoice = p.alwaysAllow || p.status == "pending"
-                        }) { Text(if(p.status == "saved") "查看授权 / 更新密钥" else "查看并填写") }
-                        TextButton(enabled = !busy, onClick = { apply { latest ->
-                            val current = latest.connectionProposals.single { it.id == p.id }
-                            ConnectionProposalRules.replace(latest, current.copy(alwaysAllow = false, status = if(current.installed == null) "rejected" else current.status))
-                        } }) { Text(if(p.installed == null) "拒绝" else "取消以后允许") }
-                    }
-                    if(p.status == "changed_in_settings") Text("原生设置中的修改优先。如需重建，请在原生设置中处理这条连接；这里不会覆盖你的改动。", style = MaterialTheme.typography.bodySmall)
-                    HorizontalDivider()
+    ConnectionProposalSheet(entries, selected, busy || settings.init, notice, onClose,
+        onSelect = { selectedId = it.id; notice = null },
+        enabled = selected?.let { p -> settings.mcpServers.any { it.id.toString() == p.id && it.commonOptions.enable } } == true,
+        onSave = { p, key, allow, enable -> apply { latest ->
+            check(latest.connectionProposals.single { it.owner == owner && it.id == p.id }.draft == p.draft)
+            val next = ConnectionProposalRules.approve(latest, p.id, key, allow, enableMcp = enable)
+            if (p.draft.kind.startsWith("mcp_")) ConnectionProposalRules.setMcpEnabled(next, owner, p.id, enable) else next
+        } },
+        onToggle = { p, enabled -> apply { ConnectionProposalRules.setMcpEnabled(it, owner, p.id, enabled) } },
+        onRevoke = { p -> apply { latest ->
+            val current = latest.connectionProposals.single { it.owner == owner && it.id == p.id }
+            ConnectionProposalRules.replace(latest, current.copy(alwaysAllow = false,
+                status = if (current.installed == null) "rejected" else current.status))
+        } })
+}
+
+/** A compact, chat-owned sheet. Credentials never enter saved state, clipboard, or AI output. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable internal fun ConnectionProposalSheet(entries: List<ConnectionProposal>, selected: ConnectionProposal?,
+    busy: Boolean, notice: String?, onClose: () -> Unit, onSelect: (ConnectionProposal) -> Unit,
+    enabled: Boolean, onSave: (ConnectionProposal, String?, Boolean, Boolean) -> Unit,
+    onToggle: (ConnectionProposal, Boolean) -> Unit, onRevoke: (ConnectionProposal) -> Unit) {
+    val colors = OrbisTheme.colors
+    val height = LocalConfiguration.current.screenHeightDp.dp * .74f
+    var key by remember(selected?.id, selected?.draft, selected?.status, notice) { mutableStateOf("") }
+    var showKey by remember(selected?.id) { mutableStateOf(false) }
+    var advanced by remember(selected?.id) { mutableStateOf(false) }
+    var rememberChoice by remember(selected?.id, selected?.alwaysAllow) { mutableStateOf(selected?.alwaysAllow ?: true) }
+    var enableChoice by remember(selected?.id, enabled) { mutableStateOf(if(selected?.installed == null) true else enabled) }
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = sheet,
+        containerColor = colors.page, contentColor = colors.ink,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = height).imePadding().padding(horizontal = 20.dp)
+            .testTag("connection-proposals")) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text("完成连接", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text("AI 已填好配置，只需最后一步。", color = colors.mutedInk, modifier = Modifier.padding(top = 5.dp))
                 }
+                IconButton(onClick = onClose, modifier = Modifier.testTag("connection-close")) { Text("×", style = MaterialTheme.typography.headlineMedium) }
             }
-            notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        }
-        selected?.let { p ->
-            AlertDialog(onDismissRequest = { if(!busy) { selected = null; credential = "" } }, title = { Text("确认连接范围") }, text = {
-                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(p.draft.name)
-                    Text(p.draft.endpoint)
-                    Text(when (p.draft.kind) {
-                        "tts_openai" -> "保存语音服务配置；AI 可继续选择为朗读音色，或发起试听检查。"
-                        "model_openai" -> "保存模型服务配置；AI 可继续选择为工具模型或自己的聊天模型。"
-                        else -> "允许此助手连接这个 MCP 服务并使用其工具。"
-                    })
-                    if(p.draft.endpoint.startsWith("http:")) Text("这是未加密的 HTTP 地址。只建议用于你信任的本机、局域网或私有网络。")
-                    if(p.draft.auth == "bearer") OutlinedTextField(credential, { credential = it.take(8192) },
-                        label = { Text(if(p.installed == null) "API Key / 令牌" else "新密钥（留空保留原值）") },
-                        visualTransformation = PasswordVisualTransformation(), singleLine = true,
-                        supportingText = { Text("只存原生设置，不回传给 AI。不需要另设恢复密码。") })
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(rememberChoice, { rememberChoice = it }); Text("以后允许此助手调整这个地址、用途和授权方式", Modifier.weight(1f))
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (entries.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    entries.forEach { p -> FilterChip(p.id == selected?.id, onClick = { onSelect(p) }, label = { Text(p.draft.name, maxLines = 1) }) }
+                }
+                if (selected == null) Text("还没有连接建议。回到聊天，让 AI 帮你填好模型、语音或 MCP 的配置。", Modifier.padding(16.dp))
+                selected?.let { p ->
+                    val mcp = p.draft.kind.startsWith("mcp_")
+                    val editable = p.status != "changed_in_settings"
+                    Surface(shape = RoundedCornerShape(22.dp), color = colors.panel, border = BorderStroke(1.dp, colors.border.copy(alpha = .55f))) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(Modifier.size(48.dp).background(colors.accent.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
+                                    Text(if(mcp) "✦" else "◉", color = colors.accent, style = MaterialTheme.typography.headlineSmall)
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(p.draft.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                    Text(when { !editable -> "原配置已在别处修改"; p.status == "pending" -> "● 等待完成设置"
+                                        mcp && !enabled -> "● 已保存 · 尚未开启"; else -> "● 配置已保存" }, color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                            HorizontalDivider(color = colors.border.copy(alpha = .45f))
+                            if (p.draft.auth == "bearer") {
+                                OutlinedTextField(key, { key = it.take(8192) }, label = { Text("API Key") }, singleLine = true,
+                                    placeholder = { Text(if(p.installed == null) "填写访问密钥" else "留空保留原密钥") },
+                                    visualTransformation = if(showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                                    trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if(showKey) "隐藏" else "显示") } },
+                                    shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().testTag("connection-key"), enabled = editable && !busy)
+                            } else Text("这个服务不需要密钥。", color = colors.mutedInk)
+                            Button(enabled = editable && !busy && (p.draft.auth == "none" || p.installed != null || key.isNotBlank()),
+                                onClick = { onSave(p, key.takeIf(String::isNotBlank), rememberChoice, if(mcp) enableChoice else false) },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(15.dp)) {
+                                Text(if(busy) "正在保存…" else if(mcp && enableChoice) "保存并开启连接" else "保存设置")
+                            }
+                        }
                     }
-                    notice?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    Surface(shape = RoundedCornerShape(20.dp), color = colors.panel, border = BorderStroke(1.dp, colors.border.copy(alpha = .5f))) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            TextButton(onClick = { advanced = !advanced }, modifier = Modifier.fillMaxWidth()) {
+                                Text("⚙  高级设置", Modifier.weight(1f), color = colors.ink); Text(if(advanced) "⌃" else "⌄")
+                            }
+                            if(advanced) {
+                                OutlinedTextField(p.draft.endpoint, {}, readOnly = true, label = { Text("服务地址（URL）") }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+                                if(p.draft.model.isNotBlank()) Text("模型  ${p.draft.model}", style = MaterialTheme.typography.bodySmall)
+                                if(p.draft.kind == "tts_openai") Text("音色  ${p.draft.voice}", style = MaterialTheme.typography.bodySmall)
+                                if(mcp) Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) { Text("启用连接"); Text("仅连接当前服务", color = colors.mutedInk, style = MaterialTheme.typography.bodySmall) }
+                                    Switch(enableChoice, onCheckedChange = { enableChoice = it; if(p.status == "saved") onToggle(p, it) }, enabled = !busy && editable)
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("允许 AI 以后调整同地址、同用途的配置", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                    Switch(rememberChoice, { rememberChoice = it }, enabled = !busy && editable)
+                                }
+                                if(p.alwaysAllow) TextButton(enabled = !busy, onClick = { onRevoke(p) }) { Text("收回以后的调整授权") }
+                            }
+                        }
+                    }
                 }
-            }, confirmButton = { TextButton(enabled = !busy && (p.draft.auth == "none" || p.installed != null || credential.isNotBlank()), onClick = {
-                val key = credential.takeIf(String::isNotBlank); val remembered = rememberChoice
-                apply { latest ->
-                    check(latest.connectionProposals.single { it.id == p.id }.draft == p.draft)
-                    ConnectionProposalRules.approve(latest, p.id, key, remembered)
-                }
-            }) { Text(if(busy) "保存中…" else if(rememberChoice) "保存并以后允许" else "仅保存这一次") } },
-                dismissButton = { TextButton(enabled = !busy, onClick = { selected = null; credential = "" }) { Text("稍后填写") } })
+                notice?.let { Text(it, color = colors.accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-notice")) }
+            }
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("密钥不回传给 AI", Modifier.weight(1f), color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
+                OutlinedButton(onClick = onClose, shape = RoundedCornerShape(12.dp)) { Text("回到聊天") }
+            }
         }
     }
 }

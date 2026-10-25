@@ -208,7 +208,7 @@ internal fun GameContent(
             finally { if (attempt == modelAttempt) { modelBusy = false; modelJob = null } }
         }
     }
-    fun leaveBoard() { stopModel(); viewedId = null; htmlGame = null; modelError = null; detailsExpanded = false }
+    fun leaveBoard() { stopModel(); viewedId = null; htmlGame = null; htmlRestartChoice = null; modelError = null; detailsExpanded = false }
     fun perform(action: () -> Unit, onSuccess: () -> Unit = {}) {
         if (busy) return
         busy = true
@@ -269,7 +269,11 @@ internal fun GameContent(
             confirmButton = { TextButton(onClick = {
                 perform({ miniRepository.abandon(previous.id) }, { htmlRestartChoice = null; scope.launch { kotlinx.coroutines.yield(); startHtml(previous.gameId) } })
             }, enabled = !busy) { Text("结束旧局并重开") } },
-            dismissButton = { TextButton(onClick = { htmlRestartChoice = null }) { Text("保留旧局，返回") } })
+            dismissButton = { TextButton(onClick = {
+                // This is a navigation action, not merely dismissal of a warning over the same page.
+                // Never abandon or recreate the stored session when the user chooses to leave.
+                leaveBoard(); onDismiss()
+            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("保留旧局，返回") } })
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) stopModel() }

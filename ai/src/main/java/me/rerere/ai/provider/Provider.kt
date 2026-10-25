@@ -82,6 +82,8 @@ data class TextGenerationParams(
     // Application-only callback; the handle contains the exact in-memory transport credentials.
     @kotlinx.serialization.Transient
     val onGatewayRequest: ((me.rerere.ai.util.OrbisGatewayRequest) -> Unit)? = null,
+    @kotlinx.serialization.Transient
+    val onPrefixObservation: ((me.rerere.ai.provider.providers.openai.PrefixObservation) -> Unit)? = null,
 ) {
     init { require(maxAutomaticContinuations in 0..5) { "invalid_automatic_continuation_limit" } }
 }

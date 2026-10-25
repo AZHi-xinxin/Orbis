@@ -60,7 +60,7 @@ internal object ThemeBackup {
             ThemeRepository(owner).withLock {
                 validateOwner(filesDir, owner).forEach { (name, source) ->
                     checkCancelled()
-                    val bytes = if (source.name == "themes.json") themeJson.encodeToString(ThemeRepository(owner).snapshot().copy(autoApply = emptySet(), pending = null)).toByteArray() else read(source,name)
+                    val bytes = if (source.name == "themes.json") themeJson.encodeToString(ThemeRepository(owner).snapshot().copy(autoApply = emptySet(), pending = null, allowAiApply = false)).toByteArray() else read(source,name)
                     beforeFile(name, bytes.size.toLong())
                     val target = exact(destination,name); require(!target.exists()); require(target.parentFile.isDirectory || target.parentFile.mkdirs())
                     ArchiveCapacity.requireSpace(target.parentFile.usableSpace, bytes.size.toLong())
@@ -82,7 +82,7 @@ internal object ThemeBackup {
             require(source.entries.all { byId[it.id] == null || byId[it.id] == it }) { "theme_backup_conflict" }
             val merged = old.copy(entries = old.entries + source.entries.filter { it.id !in byId })
             require(merged.entries.size <= 30) { "theme_backup_conflict" }
-            val restored = if (old.entries.isEmpty()) source.copy(autoApply=emptySet(), pending=null) else merged
+            val restored = if (old.entries.isEmpty()) source.copy(autoApply=emptySet(), pending=null, allowAiApply=false) else merged
             old.entries.flatMap { e -> e.versions.flatMap { it.body.assets } + e.draft?.assets.orEmpty() }.distinct().forEach { asset ->
                 val name = "orbis-themes/${incoming.name}/$asset"
                 val destination = exact(root,name)
@@ -103,7 +103,7 @@ internal object ThemeBackup {
     fun stripRestoredPermissions(payload: File) {
         owners(File(payload,"files")).forEach { owner ->
             val state=ThemeRepository(owner).snapshot()
-            FileOutputStream(exact(owner,"themes.json")).use { it.write(themeJson.encodeToString(state.copy(autoApply=emptySet(),pending=null)).toByteArray());it.fd.sync() }
+            FileOutputStream(exact(owner,"themes.json")).use { it.write(themeJson.encodeToString(state.copy(autoApply=emptySet(),pending=null,allowAiApply=false)).toByteArray());it.fd.sync() }
         }
     }
 }

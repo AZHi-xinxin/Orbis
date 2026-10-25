@@ -22,11 +22,12 @@ internal fun importThemeImage(store: ThemeRepository, bytes: ByteArray): String 
     val extension = when (opts.outMimeType) { "image/png" -> "png"; "image/jpeg" -> "jpg"; "image/webp" -> "webp"; else -> error("theme_asset_invalid") }
     return store.importAsset(bytes, extension)
 }
-internal fun themeTool(open: () -> ThemeRepository, enabled: () -> Boolean) = Tool(
+internal fun themeTool(open: () -> ThemeRepository, enabled: () -> Boolean,
+    readWorkspaceImage: (suspend (String) -> ByteArray)? = null) = Tool(
     name = "orbis_theme",
-    description = "为当前助手设计聊天外观，默认关闭。action=list/read/write/publish/apply/revert/delete。write只写数据草稿，body为JSON字符串，最多32KiB；新建不传id，修改需id和expected_revision，不能修改人类主题或其他助手。publish校验草稿并生成不可变版本；apply带id和revision，只请求人类在侧栏“自定义美化”预览确认，只有人类对该主题开启自动应用才会直接应用。revert一步回到上次已用外观，不改全局手工设置。list也列出人类导入的图片asset名称。schemaVersion=1,name,basedOn=builtin:default；缺省字段继承内置值。colors含background/surface/primary/onPrimary/text/textSecondary，均#RRGGBB；typography:{fontFamily:default|sans|serif|monospace|NotoSerifSC,fontSizeScale:0.85到1.4,lineHeight:1.2到2}，NotoSerifSC使用系统衬线后备；bubbles:{assistant:{bg,text,radius:0到32,padding:6到24,maxWidthRatio:0.55到1,tail:none},user:{同上}}；background:{type:solid|image,asset:已导入文件名,dim:0到0.8,scroll:fixed}，assets:[该文件名]，纯色不带asset。文字需足够对比度。禁止脚本、CSS、远程URL、文件路径。不会修改系统栏或输入法，不读取聊天正文。",
+    description = "为当前助手设计聊天外观，默认关闭。action=list/read/write/publish/apply/revert/delete/import_asset。先list读取授权；人类打开“交给AI自由装扮”后，新建主题也能通过write→publish→apply立即更换，不再每套确认。import_asset传path=/workspace/内已有图片，返回asset文件名；可做背景或气泡角标。write只写数据草稿，body为JSON字符串，最多32KiB；新建不传id，修改需id和expected_revision，不能修改人类主题或其他助手。publish校验草稿并生成不可变版本；apply带id和revision，只请求人类在侧栏“自定义美化”预览确认，人类全局允许AI装扮或对该主题开启自动应用时直接生效。revert一步回到上次已用外观，不改全局手工设置。list也列出人类导入的图片asset名称。schemaVersion=1,name,basedOn=builtin:default；缺省字段继承内置值。colors含background/surface/primary/onPrimary/text/textSecondary，均#RRGGBB；typography:{fontFamily:default|sans|serif|monospace|NotoSerifSC,fontSizeScale:0.85到1.4,lineHeight:1.2到2}，NotoSerifSC使用系统衬线后备；bubbles:{assistant:{bg,text,radius:0到32,padding:6到24,maxWidthRatio:0.55到1,tail:none,shape:round|cat|rabbit|ticket|speech,pattern:none|dots|stars|gingham,decoration:none|paw|heart|star,decorationAsset:可选已导入文件名},user:{同上}}；background:{type:solid|image,asset:已导入文件名,dim:0到0.8,scroll:fixed}，assets:[该文件名]，纯色不带asset。chrome:{dock,onDock,star,composer,onComposer}可选#RRGGBB，控制底栏、星星与输入框。文字需足够对比度。主题正文禁止脚本、CSS、远程URL、文件路径；只有import_asset接受当前助手工作区路径。不会修改系统栏或输入法，不读取聊天正文。",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
-        listOf("action", "id", "body").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
+        listOf("action", "id", "body", "path").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
         listOf("expected_revision", "revision").forEach { key -> put(key, buildJsonObject { put("type", "integer") }) }
     }, required = listOf("action")) },
     needsApproval = { it.jsonObject["action"]?.jsonPrimitive?.content !in setOf("list", "read") },
@@ -34,7 +35,18 @@ internal fun themeTool(open: () -> ThemeRepository, enabled: () -> Boolean) = To
     isApprovalCurrent = { enabled() },
     execute = { args ->
         try {
-            val result = withContext(Dispatchers.IO) { check(enabled()) { "theme_tool_disabled" }; executeThemeTool(open(), args) }
+            val result = withContext(Dispatchers.IO) { check(enabled()) { "theme_tool_disabled" }
+                if (args.jsonObject["action"]?.jsonPrimitive?.content == "import_asset") {
+                    val objectArgs = args.jsonObject
+                    require(objectArgs.keys == setOf("action", "path")) { "theme_invalid_parameters" }
+                    val path = objectArgs["path"]?.jsonPrimitive?.takeIf { it.isString }?.content ?: error("theme_invalid_parameters")
+                    require(path.startsWith("/workspace/") && path.length <= 512 && path.split('/').none { it == ".." || it == "." } &&
+                        path.none { it.isISOControl() || it == '\\' }) { "theme_asset_invalid" }
+                    val bytes = (readWorkspaceImage ?: error("theme_workspace_unavailable"))(path)
+                    check(enabled()) { "theme_tool_disabled" }
+                    val asset = importThemeImage(open(), bytes)
+                    buildJsonObject { put("ok", true); put("asset", asset); put("status", "asset_imported") }
+                } else executeThemeTool(open(), args) }
             listOf(UIMessagePart.Text(result.toString()))
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { listOf(UIMessagePart.Text(buildJsonObject {
@@ -62,11 +74,13 @@ internal fun executeThemeTool(store: ThemeRepository, raw: JsonElement): JsonObj
         when (action) {
             "list" -> {
                 val state = store.snapshot()
+                put("ai_may_apply_new_themes", state.allowAiApply)
+                put("next_step", if(state.allowAiApply) "write → publish → apply，可直接更换新主题" else "可设计并请求预览；人类在主题工作室打开交给AI自由装扮后可直接切换")
                 put("entries", JsonArray(state.entries.map { entry -> buildJsonObject {
                     put("id", entry.id); put("name", entry.draft?.name ?: entry.versions.lastOrNull()?.body?.name.orEmpty())
                     put("authorRole", entry.authorRole); put("revision", entry.revision); put("has_draft", entry.draft != null)
                     put("published_revisions", JsonArray(entry.versions.map { JsonPrimitive(it.revision) }))
-                    put("auto_apply", entry.id in state.autoApply)
+                    put("auto_apply", state.allowAiApply || entry.id in state.autoApply)
                 } }))
                 put("assets", JsonArray(store.assets().map(::JsonPrimitive)))
                 put("active", themeJson.encodeToJsonElement(state.active)); put("pending", themeJson.encodeToJsonElement(state.pending))
@@ -78,7 +92,7 @@ internal fun executeThemeTool(store: ThemeRepository, raw: JsonElement): JsonObj
                 val e = store.write(text("body"), id, if ("expected_revision" in args) number("expected_revision") else { check(id == null) { "theme_revision_required" }; 0 })
                 put("id", e.id); put("revision", e.revision); put("status", "draft") }
             "publish" -> { val e = store.publish(text("id"), number("expected_revision")); put("id", e.id); put("revision", e.revision); put("status", "published_not_applied") }
-            "apply" -> { val applied = store.requestApply(ThemeRef(text("id"), number("revision"))); put("status", if (applied) "applied" else "awaiting_human_preview"); put("message", if (applied) "已按该主题的人类自动应用授权生效。" else "请在侧栏“自定义美化”查看预览并确认。尚未更换外观。") }
+            "apply" -> { val applied = store.requestApply(ThemeRef(text("id"), number("revision"))); put("status", if (applied) "applied" else "awaiting_human_preview"); put("message", if (applied) "已按人类的装扮授权更换外观。" else "请在侧栏“自定义美化”查看预览并确认。尚未更换外观。") }
             "revert" -> { store.revert(); put("status", "reverted") }
             "delete" -> { store.delete(text("id"), number("expected_revision")); put("status", "deleted") }
         }

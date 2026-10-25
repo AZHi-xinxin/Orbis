@@ -90,6 +90,7 @@ class ChatCompletionsAPI(
                 providerSetting = providerSetting
             )
 
+        observePrefix(providerSetting, params, requestBody)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.orbisSourceHeaders())
@@ -146,6 +147,7 @@ class ChatCompletionsAPI(
             stream = true,
         )
 
+        observePrefix(providerSetting, params, requestBody)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.orbisSourceHeaders())
@@ -182,6 +184,15 @@ class ChatCompletionsAPI(
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
+
+    private fun observePrefix(provider: ProviderSetting.OpenAI, params: TextGenerationParams, body: JsonObject) {
+        val callback=params.onPrefixObservation ?: return
+        val session=params.orbisConversationId ?: return
+        if(provider.baseUrl.toHttpUrl().host!="api.deepseek.com") return
+        try {
+            callback(DeepSeekPrefixProbe.shared.observe("${provider.id}|$session|${body["model"]}",body))
+        } catch(_: Exception) { /* Diagnostics must not change or prevent a model request. */ }
+    }
 
     private fun buildChatCompletionRequest(
         messages: List<UIMessage>,

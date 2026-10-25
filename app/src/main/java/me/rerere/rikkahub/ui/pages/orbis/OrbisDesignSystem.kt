@@ -203,8 +203,11 @@ object OrbisTheme {
             inherited = LocalOrbisColors.current, season = LocalOrbisSeason.current).let { original ->
                 LocalChatTheme.current?.body?.colors?.let { c ->
                     fun color(hex: String) = Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(hex))
-                    original.copy(page = color(c.background), pageTop = color(c.background), panel = color(c.surface),
-                        raisedPanel = color(c.surface), tintedPanel = color(c.surface), ink = color(c.text), mutedInk = color(c.textSecondary),
+                    val chrome = LocalChatTheme.current!!.body.chrome
+                    original.copy(dock = color(chrome.dock ?: c.surface), onDock = color(chrome.onDock ?: c.text),
+                        star = color(chrome.star ?: c.primary), homeButton = color(c.surface),
+                        page = color(c.background), pageTop = color(c.background), panel = color(c.surface),
+                        raisedPanel = color(chrome.composer ?: c.surface), tintedPanel = color(c.surface), ink = color(c.text), mutedInk = color(c.textSecondary),
                         accent = color(c.primary), onAccent = color(c.onPrimary), border = color(c.textSecondary).copy(alpha = .3f))
                 } ?: original
             }
@@ -531,7 +534,7 @@ fun OrbisBottomDock(
 ) {
     val colors = OrbisTheme.colors
     val deepSeekStyle = LocalOrbisDeepSeekStyle.current
-    val themedDock = deepSeekStyle || LocalOrbisSeason.current != OrbisSeason.NONE
+    val themedDock = LocalChatTheme.current != null || deepSeekStyle || LocalOrbisSeason.current != OrbisSeason.NONE
     val starColor = if (themedDock) colors.star else Color(0xFFFFE3A7)
     Box(modifier.fillMaxWidth().windowInsetsPadding(windowInsets)
         .padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {

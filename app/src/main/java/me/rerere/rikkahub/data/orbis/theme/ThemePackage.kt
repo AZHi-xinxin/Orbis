@@ -17,6 +17,12 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
 @Serializable internal data class ThemeBubble(
     val bg: String = "#FFFFFF", val text: String = "#263342", val radius: Int = 20,
     val padding: Int = 12, val maxWidthRatio: Float = .92f, val tail: String = "none",
+    val shape: String = "round", val pattern: String = "none", val decoration: String = "none",
+    val decorationAsset: String? = null,
+)
+@Serializable internal data class ThemeChrome(
+    val dock: String? = null, val onDock: String? = null, val star: String? = null,
+    val composer: String? = null, val onComposer: String? = null,
 )
 @Serializable internal data class ThemeBubbles(
     val assistant: ThemeBubble = ThemeBubble(),
@@ -31,6 +37,7 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
     val basedOn: String = "builtin:default", val colors: ThemeColors = ThemeColors(),
     val typography: ThemeTypography = ThemeTypography(), val bubbles: ThemeBubbles = ThemeBubbles(),
     val background: ThemeBackground = ThemeBackground(), val assets: List<String> = emptyList(),
+    val chrome: ThemeChrome = ThemeChrome(),
 ) {
     fun validate() {
         require(schemaVersion == 1 && basedOn == "builtin:default") { "theme_schema_unsupported" }
@@ -42,6 +49,10 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
         listOf(bubbles.assistant, bubbles.user).forEach {
             require(it.radius in 0..32 && it.padding in 6..24 && it.maxWidthRatio.isFinite() && it.maxWidthRatio in .55f..1f && it.tail == "none") { "theme_bubble_invalid" }
             require(themeContrast(it.text, it.bg) >= 4.5) { "theme_contrast_too_low" }
+            require(it.shape in setOf("round", "cat", "rabbit", "ticket", "speech") &&
+                it.pattern in setOf("none", "dots", "stars", "gingham") &&
+                it.decoration in setOf("none", "paw", "heart", "star")) { "theme_bubble_invalid" }
+            require(it.decorationAsset == null || it.decorationAsset in assets) { "theme_asset_missing" }
         }
         require(typography.fontFamily in setOf("default", "sans", "serif", "monospace", "NotoSerifSC") &&
             typography.fontSizeScale.isFinite() && typography.fontSizeScale in .85f..1.4f &&
@@ -50,6 +61,9 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
             background.dim.isFinite() && background.dim in 0f.. .8f) { "theme_background_invalid" }
         require(assets.size <= 8 && assets.distinct().size == assets.size && assets.all { it.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)")) }) { "theme_asset_invalid" }
         require(if (background.type == "image") background.asset in assets else background.asset == null) { "theme_asset_missing" }
+        listOfNotNull(chrome.dock, chrome.onDock, chrome.star, chrome.composer, chrome.onComposer).forEach(::themeArgb)
+        require(themeContrast(chrome.onDock ?: colors.text, chrome.dock ?: colors.surface) >= 4.5 &&
+            themeContrast(chrome.onComposer ?: colors.text, chrome.composer ?: colors.surface) >= 4.5) { "theme_contrast_too_low" }
     }
 }
 internal fun themeArgb(value: String): Int {
@@ -75,6 +89,6 @@ internal fun parseTheme(text: String): ThemePackage {
 @Serializable internal data class ThemeRef(val id: String, val revision: Int)
 @Serializable internal data class ThemeState(val schema: Int = 1, val entries: List<ThemeEntry> = emptyList(),
     val active: ThemeRef? = null, val previous: List<ThemeRef?> = emptyList(), val pending: ThemeRef? = null,
-    val autoApply: Set<String> = emptySet()) {
+    val autoApply: Set<String> = emptySet(), val allowAiApply: Boolean = false) {
     fun resolve(ref: ThemeRef? = active) = entries.firstOrNull { it.id == ref?.id }?.versions?.firstOrNull { it.revision == ref?.revision }?.body
 }

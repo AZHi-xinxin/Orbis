@@ -100,12 +100,19 @@ class OrbisGameMachineUiTest {
         val mini = OrbisMiniGameRepository(MemoryStorage())
         val game = mini.install("synthetic", "合成助手", "旧模板", "离线测试", "<html>synthetic</html>")
         val old = mini.start(game.id)
+        val shown = androidx.compose.runtime.mutableStateOf(true)
         compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
-            GameContent(OrbisGameRepository(MemoryStorage()), mini, null, "未选择 AI", { error("No model") }, {})
+            if(shown.value) androidx.compose.ui.window.Dialog(onDismissRequest = { shown.value = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                GameContent(OrbisGameRepository(MemoryStorage()), mini, null, "未选择 AI", { error("No model") }, { shown.value = false })
+            }
         } } }
         compose.onNodeWithTag("orbis-game-list").performScrollToNode(hasText("旧模板"))
         compose.onNodeWithText("旧模板").performClick()
-        compose.onNodeWithText("保留旧局，返回").assertIsDisplayed().performClick()
+        compose.onNodeWithText("保留旧局，返回").assertIsDisplayed().performTouchInput { click(center) }
+        compose.onNodeWithText("旧局尚不能恢复").assertDoesNotExist()
+        compose.onNodeWithText("保留旧局，返回").assertDoesNotExist()
+        compose.onNodeWithText("旧模板").assertDoesNotExist()
+        compose.runOnIdle { assertFalse(shown.value) }
         compose.runOnIdle { assertEquals(listOf(old), mini.readSnapshot().sessions) }
         compose.onNodeWithTag("orbis-html-game").assertDoesNotExist()
     }

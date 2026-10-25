@@ -474,6 +474,7 @@ class RouteActivity : ComponentActivity() {
                                     ChatPage(
                                         id = Uuid.parse(key.id),
                                         text = key.text,
+                                        draftId = key.draftId,
                                         files = key.files.map { it.toUri() },
                                         nodeId = key.nodeId?.let { Uuid.parse(it) },
                                         onDrawerVisibilityChange = { visible ->
@@ -816,7 +817,8 @@ sealed interface Screen : NavKey {
         val id: String,
         val text: String? = null,
         val files: List<String> = emptyList(),
-        val nodeId: String? = null
+        val nodeId: String? = null,
+        val draftId: String? = null,
     ) : Screen
 
     @Serializable

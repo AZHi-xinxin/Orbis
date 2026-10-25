@@ -32,10 +32,10 @@ class OrbisHealthDeviceTest {
         val date=java.time.LocalDate.now().toString()
         repo.propose(date,0,mapOf("sleepMinutes" to JsonPrimitive(588),"steps" to JsonPrimitive(293)),"screenshot","ai:fixture","合成截图测试")
         compose.setContent{MaterialTheme{HealthPageContent(repo,{})}}
-        compose.waitUntil(5000){compose.onAllNodesWithText("检查建议").fetchSemanticsNodes().isNotEmpty()}
+        compose.onNodeWithTag("health-dashboard").performScrollToNode(hasText("检查建议"))
         assertEquals(0,repo.day(date).revision)
-        compose.onNodeWithText("检查建议").performClick()
-        compose.onNodeWithText("睡眠时长").performScrollTo().performTextReplacement("590")
+        compose.onNodeWithText("检查建议").performScrollTo().performClick()
+        compose.onNode(hasText("睡眠时长") and hasSetTextAction()).performScrollTo().performTextReplacement("590")
         compose.onNodeWithText("确认保存").performClick()
         compose.waitUntil(5000){repo.day(date).revision==1}
         assertEquals(590,repo.day(date).fields["sleepMinutes"]?.value?.int)

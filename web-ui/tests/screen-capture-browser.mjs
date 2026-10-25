@@ -126,15 +126,16 @@ try {
     };
     await page.getByRole("textbox").last().waitFor();
     const before=uploaded.length;
-    await open(); await page.getByRole("dialog").waitFor();
+    await open(); await page.getByTestId("capture-preview").waitFor();
     assert.equal(uploaded.length,before,"preview is local");
     assert.equal(await page.evaluate(()=>captureTracks.every(t=>t.readyState==="ended")),true,"capture tracks stopped after single frame");
     await page.getByRole("button",{name:"取消",exact:true}).click();
     assert.equal(uploaded.length,before);
     await page.evaluate(()=>window.captureMode="cancel"); await open();
-    await page.getByRole("status").filter({hasText:"已取消截图"}).waitFor();
+    await page.getByRole("alert").filter({hasText:"已取消截图"}).waitFor();
+    await page.getByRole("button",{name:"取消",exact:true}).click();
     await page.evaluate(()=>window.captureMode="success"); await open();
-    await page.getByRole("dialog").waitFor();
+    await page.getByTestId("capture-preview").waitFor();
     for (const [name,value] of [["左边",25],["上边",20],["宽度",50],["高度",50]]) await page.getByRole("spinbutton",{name:`${name}百分比`}).fill(String(value));
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
     await page.screenshot({path:resolve(outputDirectory,`capture-preview-${width}.png`)});
@@ -151,6 +152,26 @@ try {
     assert.equal(sent.at(-1).parts.some(p=>p.type==="image"),true);
     await context.close();
   }
+  // LAN HTTP disables native capture: the click must still open a working local crop dialog.
+  const fallback=await browser.newContext({viewport:{width:1280,height:900},locale:"zh-CN"});
+  await fallback.addInitScript(()=>{
+    localStorage.setItem("rikkahub:web-auth",JSON.stringify({token:"synthetic-local-only",expiresAt:Date.now()+600000}));
+    Object.defineProperty(window,"isSecureContext",{value:false});
+  });
+  const offline=await fallback.newPage();offline.on("pageerror",e=>errors.push(e.message));
+  await offline.goto(`${origin}/c/${conversationId}`);
+  await offline.locator('button[aria-haspopup=menu]:has(svg.lucide-plus)').click();
+  await offline.getByRole("menuitem",{name:"截图并裁剪"}).click();
+  await offline.getByRole("alert").filter({hasText:"普通 HTTP"}).waitFor();
+  const fallbackBefore=uploaded.length;
+  const png=await offline.evaluate(()=>{const c=document.createElement("canvas");c.width=640;c.height=480;c.getContext("2d").fillRect(0,0,640,480);return c.toDataURL().split(",")[1]});
+  await offline.getByLabel("选择截图文件").setInputFiles({name:"local-screenshot.png",mimeType:"image/png",buffer:Buffer.from(png,"base64")});
+  await offline.getByTestId("capture-preview").waitFor();assert.equal(uploaded.length,fallbackBefore);
+  await offline.getByRole("spinbutton",{name:"宽度百分比"}).fill("50");
+  await offline.getByRole("button",{name:"添加到输入框",exact:true}).click();
+  await offline.getByRole("dialog").waitFor({state:"hidden"});
+  assert.deepEqual(uploaded.at(-1),{width:320,height:480});assert.equal(sent.length,2);
+  await fallback.close();
   // Real Chromium tab capture of our synthetic page, never the desktop or a user tab.
   const real = await browser.newContext({viewport:{width:1000,height:800}});
   const source = await real.newPage();
@@ -165,11 +186,11 @@ try {
   await actual.goto(`${origin}/c/${conversationId}`);
   await actual.locator('button[aria-haspopup=menu]:has(svg.lucide-plus)').click();
   await actual.getByRole("menuitem",{name:"截图并裁剪"}).click();
-  try { await actual.getByRole("dialog").waitFor({timeout:15000}); } catch(e) { console.log(await actual.locator("body").innerText()); console.log(await actual.evaluate(()=>realTracks.map(t=>({state:t.readyState,label:t.label})))); throw e; }
+  try { await actual.getByTestId("capture-preview").waitFor({timeout:15000}); } catch(e) { console.log(await actual.locator("body").innerText()); console.log(await actual.evaluate(()=>realTracks.map(t=>({state:t.readyState,label:t.label})))); throw e; }
   assert.equal(await actual.evaluate(()=>realTracks.length>0 && realTracks.every(t=>t.readyState==="ended")),true);
   await actual.screenshot({path:resolve(outputDirectory,"capture-real-tab.png")});
   await actual.getByRole("button",{name:"取消",exact:true}).click();
   await real.close();
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({cases:2,syntheticCanvasCapture:true,nativeChooserTested:false,nativeChromiumTabCapture:true,localPreview:true,cancel:true,croppedPixels:uploaded,uploadFailureRetained:true,explicitSend:sent.length,pageErrors:0}));
+  console.log(JSON.stringify({cases:3,insecureHttpFallback:true,syntheticCanvasCapture:true,nativeChooserTested:false,nativeChromiumTabCapture:true,localPreview:true,cancel:true,croppedPixels:uploaded,uploadFailureRetained:true,explicitSend:sent.length,pageErrors:0}));
 } finally { await browser?.close(); server.closeAllConnections(); await new Promise(done=>server.close(done)); }

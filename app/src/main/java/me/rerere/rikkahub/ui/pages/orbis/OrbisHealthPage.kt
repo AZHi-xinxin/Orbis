@@ -73,66 +73,12 @@ private data class HealthEditing(val day:HealthDay,val proposal:HealthProposal?=
     val start=if(month)end.withDayOfMonth(1)else end.minusDays(6)
     val summary=remember(state.days,start,end){healthSummary(state.days,start.toString(),end.toString())}
     val colors=OrbisTheme.colors
-    Surface(Modifier.fillMaxSize(),color=colors.page,contentColor=colors.ink){
-        Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()){
-            Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically){
-                TextButton(onClick=onClose){Text("返回")};Text("人类记录",style=MaterialTheme.typography.headlineSmall,modifier=Modifier.weight(1f))
-                TextButton(enabled=!busy,onClick={task{}}){Text("刷新")}
-            }
-            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
-                item{Text("你的日常，认真留一份。",style=MaterialTheme.typography.titleLarge)}
-                item{Text("只保存在本机，不进入云备份。截图先本机识别，检查后再保存；没记录的项目留空。",style=MaterialTheme.typography.bodySmall,color=colors.mutedInk)}
-                error?.let{message->item{Text(message,color=MaterialTheme.colorScheme.error)}}
-                item{OutlinedTextField(date,{date=it},label={Text("记录日期 YYYY-MM-DD")},singleLine=true,modifier=Modifier.fillMaxWidth(),isError=!validHealthDate(date))}
-                item{Row(verticalAlignment=Alignment.CenterVertically){
-                    Button(enabled=!busy&&validHealthDate(date),onClick={editor=HealthEditing(selected)}){Text("填写或修改当天")}
-                    importScreenshot(date){fields,text->editor=HealthEditing(selected,imported=fields,ocr=text)}
-                }}
-                if(state.proposals.isNotEmpty())item{Text("待你确认 · ${state.proposals.size}",style=MaterialTheme.typography.titleMedium)}
-                items(state.proposals,key={it.id}){proposal->
-                    Surface(color=colors.panel,shape=RoundedCornerShape(18.dp)){
-                        Column(Modifier.fillMaxWidth().padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){
-                            Text("${proposal.date} · ${proposal.fields.size} 项建议")
-                            Text(proposal.evidence,style=MaterialTheme.typography.bodySmall)
-                            Row{
-                                TextButton(enabled=!busy,onClick={editor=HealthEditing(state.days.firstOrNull{it.date==proposal.date}?:HealthDay(proposal.date),proposal=proposal)}){Text("检查建议")}
-                                TextButton(enabled=!busy,onClick={task{repo.dismiss(proposal.id)}}){Text("不采用")}
-                            }
-                        }
-                    }
-                }
-                item{Surface(color=colors.panel,shape=RoundedCornerShape(22.dp)){
-                    Column(Modifier.fillMaxWidth().padding(18.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
-                        Text("$date · ${if(selected.revision==0)"尚未记录"else"第 ${selected.revision} 版"}",style=MaterialTheme.typography.titleMedium)
-                        healthFields.filter{selected.fields[it.id]?.value!=null&&selected.fields[it.id]?.value!=JsonNull}.forEach{field->
-                            val cell=selected.fields.getValue(field.id)
-                            Text("${field.label}：${healthDisplay(field.id,cell.value)} ${if(field.min!=null)field.unit else ""}")
-                            Text("${healthSource(cell.source)} · ${if(cell.actor=="human")"本人确认"else"助手记录"}",style=MaterialTheme.typography.labelSmall,color=colors.mutedInk)
-                        }
-                        if(selected.fields.values.none{it.value!=JsonNull})Text("还没有数据，不按 0 计算。",color=colors.mutedInk)
-                        if(selected.revision>0)TextButton(onClick={historyDate=date}){Text("查看修改记录")}
-                    }
-                }}
-                item{Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){FilterChip(!month,{month=false},label={Text("近 7 天")});FilterChip(month,{month=true},label={Text("本月")})}}
-                item{Surface(color=colors.panel,shape=RoundedCornerShape(22.dp)){
-                    Column(Modifier.fillMaxWidth().padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
-                        Text("$start 至 $end",style=MaterialTheme.typography.titleSmall)
-                        Text("有记录 ${summary["recorded_days"]} 天 / 共 ${summary["calendar_days"]} 天")
-                        val minutes=summary["average_sleep_minutes"]?.jsonPrimitive?.doubleOrNull
-                        Text(if(minutes==null)"平均睡眠：暂无记录"else"平均睡眠：${minutes.toInt()/60} 小时 ${minutes.toInt()%60} 分钟")
-                        Text("低于 6 小时：${summary["below_target_days"]} 天（仅统计已有记录）",style=MaterialTheme.typography.bodySmall)
-                        Text("步数趋势",style=MaterialTheme.typography.titleSmall)
-                        HealthStepsChart(state.days,start,end)
-                        Text("缺失数据留空；这里只做记录和统计。",style=MaterialTheme.typography.labelSmall,color=colors.mutedInk)
-                    }
-                }}
-                item{Text("最近记录",style=MaterialTheme.typography.titleMedium)}
-                items(state.days.sortedByDescending{it.date}.take(30),key={it.date}){day->
-                    TextButton(onClick={date=day.date}){Text("${day.date} · ${day.fields.values.count{it.value!=JsonNull}} 项")}
-                }
-            }
-        }
-    }
+    HealthDashboard(state, selected, date, month, busy, error, summary, start, end,
+        onClose = onClose, onRefresh = { task {} }, onDate = { date = it }, onMonth = { month = it },
+        onEdit = { editor = HealthEditing(selected) }, onHistory = { historyDate = date },
+        importScreenshot = { importScreenshot(date) { fields, text -> editor = HealthEditing(selected, imported = fields, ocr = text) } },
+        onReview = { proposal -> editor = HealthEditing(state.days.firstOrNull { it.date == proposal.date } ?: HealthDay(proposal.date), proposal = proposal) },
+        onDismissProposal = { proposal -> task { repo.dismiss(proposal.id) } })
     editor?.let{edit->HealthEditor(edit,saving=busy,saveError=error,onDismiss={if(!busy)editor=null},onSave={patch->
         // Snapshot in editor remains revision-bound if AI updates the same day while it is open.
         task(onSuccess={editor=null}){
@@ -151,8 +97,8 @@ private data class HealthEditing(val day:HealthDay,val proposal:HealthProposal?=
 }
 
 private val periodLabels=linkedMapOf("" to "未记录","none" to "非经期","active" to "经期中","pre" to "经前","post" to "经后")
-private fun healthDisplay(key:String,value:JsonPrimitive)=if(key=="periodStatus") periodLabels[value.content]?:value.content else value.content
-private fun healthSource(source:String)=when(source){"manual"->"手动";"screenshot"->"截图校对";"mcp"->"设备或服务";else->"对话事实"}
+internal fun healthDisplay(key:String,value:JsonPrimitive)=if(key=="periodStatus") periodLabels[value.content]?:value.content else value.content
+internal fun healthSource(source:String)=when(source){"manual"->"手动";"screenshot"->"截图校对";"mcp"->"设备或服务";else->"对话事实"}
 @Composable private fun HealthEditor(edit:HealthEditing,saving:Boolean,saveError:String?,onDismiss:()->Unit,onSave:(Map<String,JsonPrimitive>)->Unit){
     val base=edit.day.fields.mapValues{it.value.value}
     val seed=base+edit.proposal?.fields.orEmpty()+edit.imported.orEmpty()
