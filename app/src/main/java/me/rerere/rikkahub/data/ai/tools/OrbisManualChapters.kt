@@ -140,7 +140,10 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("多选与全部清理", "多选模式可选择未锁定附件，确认后只删除所选目标；全部清理和按时间清理也会跳过锁定项。保护状态读取失败时先停止清理，不能把未知状态当作未锁定。删除附件可能使历史消息无法再打开其原图或文件，且不可撤销；请先保存需要保留的内容。照片墙、秘密基地等独立空间不属于聊天附件清理范围。"),
         OrbisManualSection("备份范围", "新版完整备份勾选‘文件’包含附件锁定清单、多行颜文字、课表、格子及共同空间资料（秘密基地、动态、照片与备注）。共同空间按助手身份恢复，不能用聊天追加导入替代。恢复会校验数据和图片，保留本机独有记录；同编号内容冲突会停止，不静默覆盖。合并锁定清单不会自动解锁本机已保护附件。旧包没有某一资料时不会凭空恢复它；临时视频图片、未打包的工作区及外部云库需另行处理。"),
     )),
-    OrbisManualChapter("appearance", "格子、四季主题与银河星图", "工具与娱乐 → 格子；外观设置 → 主题；记忆星盘 → 展示切换", emptyList(), listOf(
+    OrbisManualChapter("appearance", "AI自定义美化、格子与银河星图", "侧栏 → 自定义美化；工具与娱乐 → 格子；外观设置 → 主题；记忆星盘 → 展示切换", listOf("orbis_theme"), listOf(
+        OrbisManualSection("AI主题工作室", "orbis_theme 默认关闭；人类允许使用后，先 list 查看当前助手主题、图片与授权。write 写 JSON 字符串草稿，publish 生成版本，再 apply 请求应用；只有人类打开‘交给AI自由装扮’或允许该主题自动应用时才能直接生效，否则在侧栏‘自定义美化’预览确认。AI不能自己授权。修改原主题需 id 与 expected_revision，apply 用 id 与 revision；revert 回到上一套。不改模型、身份或聊天内容。"),
+        OrbisManualSection("气泡形状与透明度", "bubbles.assistant 和 bubbles.user 可分别配置 bg/text（#RRGGBB）、radius（0–32）、padding（6–24）、maxWidthRatio（0.55–1）。opacity 为0–1，默认1，只影响底色、花纹和尾巴，不把文字与角标一起淡化；0为透明。tail 支持 none/cat/curl，随消息方向镜像；shape 支持 round/cat/rabbit/ticket/speech，shape:cat 配 tail:cat 可做猫耳猫尾。pattern 支持 none/dots/stars/gingham；decoration 支持 none/paw/heart/star。颜色不接受8位RGBA；透明气泡应预览检查壁纸上的文字是否清楚。"),
+        OrbisManualSection("背景、角标与输入框", "import_asset(path=/workspace/内已有图片) 导入当前助手工作区的 PNG/JPG/WebP，返回 asset 名称；也可由人类添加图片，list 查看资产。把名称写入 assets；背景使用 background:{type:image,asset:名称,dim:0到0.8,scroll:fixed}，气泡图片角标用 decorationAsset。chrome 的 dock/onDock 控制底栏底色/文字，star 控制星星，composer/onComposer 控制输入框底色/文字，均为#RRGGBB。主题 body 不允许脚本、CSS、远程网址或直接文件路径；图片先 import_asset 再引用。"),
         OrbisManualSection("格子与入口", "格子的导航、搜索与筛选默认折叠，点击再展开；收起不清空筛选，当前筛选仍有效。作品内容可按原方式打开与全屏阅读；导航外观不改变 HTML 沙箱的禁网、文件和设备权限限制。游戏机、秘密基地与隐私室入口采用星星主题卡片，美化不改变各自权限，秘密基地不是隐私室。"),
         OrbisManualSection("四季主题", "春·樱信、夏·萤夏、秋·枫笺、冬·雪灯提供各自默认壁纸与漂浮装饰；自定义壁纸仍可覆盖默认背景。四季分别以花瓣、萤光、叶片和雪为装饰，沿用漂浮物开关；关闭动态效果仍可使用主题。主题不会修改助手提示词、模型、聊天或记忆。"),
         OrbisManualSection("轻量与银河", "记忆星盘可切换轻量与银河，并在本机记住选择。银河采用倾斜星盘、细密星尘和柔光，装饰星尘不可点击，不会伪造记忆；可点击星点仍只来自当前真实元信息快照。演示模式另行标识，不与真实记忆混为一谈。低性能设备可改用轻量；切换只改变展示，不修改 ST 记录，也不保证所有机型都同样流畅。"),

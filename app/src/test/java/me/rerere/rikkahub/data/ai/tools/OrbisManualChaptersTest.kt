@@ -9,6 +9,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisManualChaptersTest {
+    @Test fun appearanceExplainsAiThemeFeaturesAndHumanGrant() {
+        val appearance = guide("appearance")
+        listOf("orbis_theme", "shape", "pattern", "decoration", "chrome", "import_asset",
+            "opacity", "tail", "cat/curl", "交给AI自由装扮", "AI不能自己授权").forEach {
+            assertTrue(it, appearance.contains(it))
+        }
+    }
     private val build = OrbisHelpBuild("org.orbis.agent", "1.0", "1", "release")
     private fun call(tool: Tool, args: String) = runBlocking {
         Json.parseToJsonElement((tool.execute(Json.parseToJsonElement(args)).single() as UIMessagePart.Text).text).jsonObject

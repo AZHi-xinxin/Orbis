@@ -18,7 +18,7 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
     val bg: String = "#FFFFFF", val text: String = "#263342", val radius: Int = 20,
     val padding: Int = 12, val maxWidthRatio: Float = .92f, val tail: String = "none",
     val shape: String = "round", val pattern: String = "none", val decoration: String = "none",
-    val decorationAsset: String? = null,
+    val decorationAsset: String? = null, val opacity: Float = 1f,
 )
 @Serializable internal data class ThemeChrome(
     val dock: String? = null, val onDock: String? = null, val star: String? = null,
@@ -47,7 +47,9 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
         require(themeContrast(colors.text, colors.background) >= 4.5 && themeContrast(colors.text, colors.surface) >= 4.5 &&
             themeContrast(colors.onPrimary, colors.primary) >= 4.5 && themeContrast(colors.textSecondary, colors.background) >= 3) { "theme_contrast_too_low" }
         listOf(bubbles.assistant, bubbles.user).forEach {
-            require(it.radius in 0..32 && it.padding in 6..24 && it.maxWidthRatio.isFinite() && it.maxWidthRatio in .55f..1f && it.tail == "none") { "theme_bubble_invalid" }
+            require(it.radius in 0..32 && it.padding in 6..24 && it.maxWidthRatio.isFinite() && it.maxWidthRatio in .55f..1f &&
+                it.tail in setOf("none", "cat", "curl")) { "theme_bubble_invalid" }
+            require(it.opacity.isFinite() && it.opacity in 0f..1f) { "theme_bubble_opacity_invalid" }
             require(themeContrast(it.text, it.bg) >= 4.5) { "theme_contrast_too_low" }
             require(it.shape in setOf("round", "cat", "rabbit", "ticket", "speech") &&
                 it.pattern in setOf("none", "dots", "stars", "gingham") &&
