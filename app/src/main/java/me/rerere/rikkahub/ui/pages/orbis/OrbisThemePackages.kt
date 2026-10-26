@@ -11,6 +11,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.unit.em
+import me.rerere.rikkahub.ui.components.message.ThemeMotionProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,7 +67,9 @@ internal fun themeFont(name: String) = when (name) {
         }
     }
     CompositionLocalProvider(LocalChatTheme provides theme,
-        LocalChatFontFamily provides (theme?.body?.typography?.fontFamily?.let(::themeFont) ?: LocalChatFontFamily.current), content = content)
+        LocalChatFontFamily provides (theme?.body?.typography?.fontFamily?.let(::themeFont) ?: LocalChatFontFamily.current)) {
+        ThemeMotionProvider(theme?.body?.let { listOf(it.bubbles.assistant,it.bubbles.user).any { b -> b.drawing?.layers.orEmpty().any { layer -> layer.motion != null } } } == true, content)
+    }
 }
 
 @Composable internal fun ThemePackageManager(owner: String) {
@@ -83,6 +90,8 @@ internal fun themeFont(name: String) = when (name) {
     var error by remember(store) { mutableStateOf<String?>(null) }
     var preview by remember(store) { mutableStateOf<ThemeRef?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var page by rememberSaveable(store) { mutableIntStateOf(0) }
+    var selectedId by rememberSaveable(store) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(store, signal) {
         try { state = withContext(Dispatchers.IO) { store.snapshot() }; error = null }
@@ -108,21 +117,19 @@ internal fun themeFont(name: String) = when (name) {
             Text("让伙伴布置你们的聊天空间", color = colors.mutedInk, style = MaterialTheme.typography.bodySmall)
         }
         val active = state.resolve()
-        Surface(color = colors.panel, shape = RoundedCornerShape(24.dp), shadowElevation = 1.dp) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThemeChatPreview(active ?: ThemePackage(name = "原来的手工外观"), active?.background?.asset?.let { store.asset(it).absolutePath },
-                    assets = active?.assets.orEmpty().associateWith { store.asset(it).absolutePath })
-                Text(active?.name ?: "原来的手工外观", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    val palette = active?.colors ?: ThemeColors()
-                    listOf(palette.background, palette.primary, palette.surface, palette.text, palette.textSecondary).forEach { hex ->
-                        Box(Modifier.size(26.dp).background(Color(themeArgb(hex)), androidx.compose.foundation.shape.CircleShape))
+        Surface(color = colors.panel, shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("当前外观", color=colors.mutedInk, style=MaterialTheme.typography.labelSmall)
+                        Text(active?.name ?: "原来的手工外观", maxLines=1, overflow=TextOverflow.Ellipsis,
+                            style=MaterialTheme.typography.titleSmall, fontWeight=FontWeight.SemiBold)
                     }
-                    Spacer(Modifier.weight(1f)); Text("Aa", style = MaterialTheme.typography.titleLarge, fontFamily = themeFont(active?.typography?.fontFamily ?: "default"))
+                    if(state.active!=null) TextButton(onClick={ preview=state.active }) { Text("查看") }
                 }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(enabled = !busy && state.previous.isNotEmpty(), onClick = { task { store.revert() } }) { Text("回到上一套") }
-                    TextButton(enabled = !busy && state.active != null, onClick = { task { store.useOriginal() } }) { Text("使用手工外观") }
+                FlowRow(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                    TextButton(enabled=!busy && state.previous.isNotEmpty(),onClick={task { store.revert() }}) { Text("回到上一套") }
+                    TextButton(enabled=!busy && state.active!=null,onClick={task { store.useOriginal() }}) { Text("使用手工外观") }
                 }
             }
         }
@@ -144,38 +151,58 @@ internal fun themeFont(name: String) = when (name) {
             Text("${state.entries.size} 套", color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
         }
         if (state.entries.isEmpty()) Text("还没有主题。开启当前助手的“AI 自定义美化”工具后，让它设计第一套吧。", color = colors.mutedInk, style = MaterialTheme.typography.bodySmall)
+        val entries=state.entries.sortedByDescending { it.id == state.active?.id }
+        val pageCount=((entries.size+5)/6).coerceAtLeast(1)
+        val shownPage=page.coerceIn(0,pageCount-1)
+        LaunchedEffect(pageCount) { page=page.coerceIn(0,pageCount-1) }
+        val selected=state.entries.firstOrNull { it.id==selectedId } ?: entries.firstOrNull()
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val columns = if(maxWidth >= 360.dp) 2 else 1
-            val width = (maxWidth - 12.dp * (columns - 1)) / columns
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                state.entries.sortedByDescending { it.id == state.active?.id }.forEach { entry ->
-                    val version = entry.versions.lastOrNull()
-                    val body = version?.body ?: entry.draft
-                    Surface(Modifier.width(width), color = colors.panel, shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(if(entry.id == state.active?.id) 1.5.dp else .5.dp, if(entry.id == state.active?.id) colors.accent else colors.border)) {
-                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if(body != null) ThemeChatPreview(body, body.background.asset?.let { store.asset(it).absolutePath },
-                                compact = true, assets = body.assets.associateWith { store.asset(it).absolutePath })
-                            Text(body?.name.orEmpty(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Text(if(entry.id == state.active?.id) "当前使用" else if(entry.draft != null) "设计草稿" else "第 ${entry.revision} 版", color = colors.mutedInk, style = MaterialTheme.typography.labelSmall)
-                            FlowRow {
-                                if(version != null) TextButton(enabled = !busy, onClick = { preview = ThemeRef(entry.id, version.revision) }) { Text("预览主题") }
-                                if(entry.authorRole == "ai") TextButton(enabled = !busy, onClick = { task { store.delete(entry.id, entry.revision) } }) { Text("删除") }
-                            }
+            val columns=if(maxWidth>=280.dp) 3 else 2
+            Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+              entries.drop(shownPage*6).take(6).chunked(columns).forEach { row ->
+               Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                row.forEach { entry ->
+                    val body=entry.draft ?: entry.versions.lastOrNull()?.body
+                    Surface(Modifier.weight(1f).testTag("theme-tile-${entry.id}").clickable { selectedId=entry.id },
+                        color=colors.panel,shape=RoundedCornerShape(14.dp),
+                        border=BorderStroke(if(selected?.id==entry.id) 1.5.dp else .5.dp,if(selected?.id==entry.id) colors.accent else colors.border)) {
+                        Column(Modifier.padding(6.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                            if(body!=null) ThemeMiniSwatch(body)
+                            Text(body?.name.orEmpty(),maxLines=2,minLines=2,overflow=TextOverflow.Ellipsis,
+                                style=MaterialTheme.typography.labelMedium)
+                            Text(if(entry.id==state.active?.id) "当前使用" else if(entry.draft!=null) "草稿" else "第 ${entry.revision} 版",
+                                color=colors.mutedInk,style=MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
+                repeat(columns-row.size) { Spacer(Modifier.weight(1f)) }
+               }
+              }
+            }
+        }
+        if(entries.isNotEmpty()) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,
+            horizontalArrangement=Arrangement.SpaceBetween) {
+            TextButton(enabled=shownPage>0,onClick={page=shownPage-1;selectedId=entries.getOrNull((shownPage-1)*6)?.id},modifier=Modifier.testTag("theme-page-prev")) { Text("上一页") }
+            Text("${shownPage+1} / $pageCount",style=MaterialTheme.typography.labelMedium,modifier=Modifier.testTag("theme-page-number"))
+            TextButton(enabled=shownPage+1<pageCount,onClick={page=shownPage+1;selectedId=entries.getOrNull((shownPage+1)*6)?.id},modifier=Modifier.testTag("theme-page-next")) { Text("下一页") }
+        }
+        selected?.let { entry ->
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                entry.versions.lastOrNull()?.let { version ->
+                    TextButton(enabled=!busy,onClick={preview=ThemeRef(entry.id,version.revision)}) { Text("预览主题") }
+                }
+                if(entry.authorRole=="ai") TextButton(enabled=!busy,onClick={task {store.delete(entry.id,entry.revision)}}) { Text("删除所选") }
             }
         }
         Button(onClick = {
-            val prompt = "请用 orbis_theme 为我们设计一套新的聊天主题，包含气泡形状、角标、背景与底栏配色。先读取工具授权；允许自动装扮时，发布后直接 apply。"
+            val prompt = "请先用 orbis_theme list/read 查看当前主题。微调请 patch 原主题 ID，不要新建；可用 drawing 自己绘制轮廓、渐变和动画关键帧，分别设计两边气泡与字体。明确需要另一套才新建。按现有授权 publish→apply。"
             (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                 .setPrimaryClip(android.content.ClipData.newPlainText("主题设计请求", prompt))
             copied = true
         }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(if(copied) "设计请求已复制，回聊天粘贴" else "✦  让 AI 设计") }
         importImage { read -> task { importThemeImage(store, read()) } }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("猫耳 / 兔耳气泡", "角标与贴图", "纹样与背景", "底栏配色").forEach { label ->
+            listOf("自由绘制", "动态气泡", "独立字体", "原主题微调").forEach { label ->
                 Surface(color = colors.accent.copy(alpha = .06f), shape = RoundedCornerShape(12.dp)) { Text(label, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.labelSmall, color = colors.mutedInk) }
             }
         }
@@ -183,7 +210,7 @@ internal fun themeFont(name: String) = when (name) {
     preview?.let { ref -> state.resolve(ref)?.let { body ->
         AlertDialog(onDismissRequest = { preview = null }, title = { Text(body.name) },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThemeChatPreview(body, body.background.asset?.let { store.asset(it).absolutePath }, assets = body.assets.associateWith { store.asset(it).absolutePath })
+                ThemeChatPreview(body, body.background.asset?.let { store.asset(it).absolutePath }, assets = body.assets.associateWith { store.asset(it).absolutePath }, animate = true)
                 Text("这只是示例对话。确认后用于当前助手，随时可回退。", style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = { Button(enabled = !busy, onClick = { task { store.confirm(ref) }; preview = null }) { Text("应用这个主题") } },
             dismissButton = { TextButton(onClick = { preview = null }) { Text("先不更换") } })
@@ -191,19 +218,38 @@ internal fun themeFont(name: String) = when (name) {
 }
 
 /** Uses the same background and bubble renderer as the real conversation, never an HTML mock. */
-@Composable internal fun ThemeChatPreview(body: ThemePackage, image: String? = null, compact: Boolean = false, assets: Map<String, String> = emptyMap()) {
+@Composable internal fun ThemeChatPreview(body: ThemePackage, image: String? = null, compact: Boolean = false, assets: Map<String, String> = emptyMap(), animate: Boolean = false) {
     val family = themeFont(body.typography.fontFamily)
     CompositionLocalProvider(LocalChatTheme provides ChatTheme(body, image, assets = assets), LocalChatFontFamily provides family) {
+      ThemeMotionProvider(animate) {
         Box(Modifier.fillMaxWidth().heightIn(min = if(compact) 155.dp else 220.dp).clip(RoundedCornerShape(20.dp)).background(Color(themeArgb(body.colors.background)), RoundedCornerShape(20.dp))) {
             OrbisChatBackdrop(OrbisAppearance(backgroundEnabled = true, floatingStars = false), Modifier.matchParentSize(), isVisible = false)
             Column(Modifier.fillMaxWidth().padding(if(compact) 10.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(if(compact) 10.dp else 18.dp)) {
                 if(!compact) Text("我们的小小宇宙", color = Color(themeArgb(body.colors.text)), fontFamily = family)
                 OrbisMessageBubble(false, OrbisAppearance(), Modifier.fillMaxWidth()) {
-                    Text("风和星光都在这里。", fontFamily = family, fontSize = (14 * body.typography.fontSizeScale).sp,
-                        lineHeight = (14 * body.typography.fontSizeScale * body.typography.lineHeight).sp)
+                    Text("风和星光都在这里。", style=themePreviewTextStyle(body.bubbles.assistant.typography ?: body.typography))
                 }
                 OrbisMessageBubble(true, OrbisAppearance(), Modifier.fillMaxWidth()) {
-                    Text("嗯，慢慢说。", fontFamily = family, fontSize = (14 * body.typography.fontSizeScale).sp)
+                    Text("嗯，慢慢说。", style=themePreviewTextStyle(body.bubbles.user.typography ?: body.typography))
+                }
+            }
+        }
+    }
+  }
+}
+
+internal fun themePreviewTextStyle(type: ThemeTypography) = androidx.compose.ui.text.TextStyle(
+    fontFamily=themeFont(type.fontFamily),fontSize=(14*type.fontSizeScale).sp,
+    lineHeight=(14*type.fontSizeScale*type.lineHeight).sp,fontWeight=FontWeight(type.weight),
+    fontStyle=if(type.italic) FontStyle.Italic else FontStyle.Normal,letterSpacing=type.letterSpacing.em)
+
+@Composable private fun ThemeMiniSwatch(body: ThemePackage) {
+    CompositionLocalProvider(LocalChatTheme provides ChatTheme(body,null)) {
+        ThemeMotionProvider(false) {
+            Box(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(10.dp))
+                .background(Color(themeArgb(body.colors.background))).padding(4.dp),contentAlignment=Alignment.Center) {
+                OrbisMessageBubble(false,OrbisAppearance(),Modifier.fillMaxWidth()) {
+                    Text("Aa",maxLines=1,style=themePreviewTextStyle(body.bubbles.assistant.typography ?: body.typography).copy(fontSize=12.sp,lineHeight=14.sp))
                 }
             }
         }

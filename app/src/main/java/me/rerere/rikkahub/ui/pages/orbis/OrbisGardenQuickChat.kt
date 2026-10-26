@@ -384,7 +384,7 @@ internal fun GardenQuickChatMessage(
     val message = message.privateRoomSafePresentation()
     val appearance = LocalSettings.current.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val segmented = BuildConfig.ORBIS_ENABLED && message.role == MessageRole.ASSISTANT && appearance.chatFlow.enabled
-    val textStyle = rememberChatMessageTextStyle()
+    val textStyle = rememberChatMessageTextStyle(user = message.role == MessageRole.USER)
     // Use provenance, never keywords in ordinary prose. Folding is a durable display edit;
     // it must not rewrite the payload, replay a sentinel or save a paged conversation snapshot.
     message.orbisEvent?.let { event ->

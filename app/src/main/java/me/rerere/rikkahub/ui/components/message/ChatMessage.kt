@@ -173,7 +173,7 @@ fun ChatMessage(
         MessageRole.ASSISTANT -> settings.showModelIcon && (model != null || assistant?.useAssistantAvatar == true)
         else -> false
     }
-    val textStyle = rememberChatMessageTextStyle()
+    val textStyle = rememberChatMessageTextStyle(user = message.role == MessageRole.USER)
     val externalEvent = message.orbisEvent
     if (externalEvent != null) {
         val settingsStore = koinInject<SettingsStore>()

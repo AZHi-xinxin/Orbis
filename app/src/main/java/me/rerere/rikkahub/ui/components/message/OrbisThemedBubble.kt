@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,6 +9,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,21 +28,27 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import me.rerere.rikkahub.data.orbis.theme.ThemeBubble
 import me.rerere.rikkahub.data.orbis.theme.themeArgb
+import me.rerere.rikkahub.data.orbis.theme.parseThemePath
 import me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme
 import me.rerere.rikkahub.ui.context.LocalOrbisChatTextColor
 
 @Composable internal fun OrbisThemedBubble(user: Boolean, custom: ThemeBubble, modifier: Modifier,
     content: @Composable ColumnScope.() -> Unit) {
     val theme = LocalChatTheme.current
-    val top = when(custom.shape) { "cat" -> 12.dp; "rabbit" -> 20.dp; else -> 0.dp }
+    val drawing = custom.drawing
+    val outline = remember(drawing?.outline) { drawing?.outline?.let(::parseThemePath) }
+    val layers = remember(drawing?.layers) { drawing?.layers.orEmpty().map { parseThemePath(it.path).asThemePath() } }
+    val clock = LocalThemeMotionClock.current
+    val top = if(outline!=null) 0.dp else when(custom.shape) { "cat" -> 12.dp; "rabbit" -> 20.dp; else -> 0.dp }
     // Reserve the tail inside this message's measured bounds, away from text and
     // adjacent messages. It is part of the same fill, never a second alpha layer.
-    val tailHeight = if (custom.tail == "none") 0.dp else 18.dp
+    val tailHeight = if (custom.tail == "none" || outline!=null) 0.dp else 18.dp
     val density = LocalDensity.current
     val rise = with(density) { top.toPx() }
     val tailDrop = with(density) { tailHeight.toPx() }
     val radius = with(density) { custom.radius.dp.toPx() }
-    val shape = if(custom.shape == "round" && custom.tail == "none") RoundedCornerShape(custom.radius.dp) else GenericShape { size, direction ->
+    val shape = if(outline!=null) GenericShape { size,_ -> addPath(outline.asThemePath(size.width/100,size.height/100)) }
+        else if(custom.shape == "round" && custom.tail == "none") RoundedCornerShape(custom.radius.dp) else GenericShape { size, direction ->
         val bottom = size.height - tailDrop
         val r = radius.coerceAtMost(size.width / 4).coerceAtMost((bottom - rise) / 2)
         var body = Path().apply {
@@ -100,7 +108,9 @@ import me.rerere.rikkahub.ui.context.LocalOrbisChatTextColor
     val foreground = Color(themeArgb(custom.text))
     BoxWithConstraints(modifier, contentAlignment = if(user) Alignment.TopEnd else Alignment.TopStart) {
         Box(Modifier.widthIn(max = maxWidth * custom.maxWidthRatio)) {
-            Box(Modifier.clip(shape).background(Color(themeArgb(custom.bg)).copy(alpha = custom.opacity)).drawBehind {
+            Box(Modifier.clip(shape).drawBehind {
+                if(drawing?.gradient!=null) drawRect(drawing.gradient.brush(custom.opacity,size.width/100,size.height/100))
+                else drawRect(Color(themeArgb(custom.bg)).copy(alpha=custom.opacity))
                 val tint = foreground.copy(alpha = .075f * custom.opacity)
                 val step = 22.dp.toPx()
                 if(custom.pattern != "none") {
@@ -121,7 +131,9 @@ import me.rerere.rikkahub.ui.context.LocalOrbisChatTextColor
                         y += step
                     }
                 }
-            }) {
+                if(drawing!=null) drawThemeLayers(drawing,layers,clock?.value ?: 0,custom.opacity)
+            }.then(if(drawing?.stroke!=null && drawing.strokeWidth>0) Modifier.border(drawing.strokeWidth.dp,
+                Color(themeArgb(drawing.stroke)).copy(alpha=custom.opacity),shape) else Modifier)) {
                 CompositionLocalProvider(LocalContentColor provides foreground, LocalOrbisChatTextColor provides foreground) {
                     Column(Modifier.padding(start = custom.padding.dp, end = custom.padding.dp,
                         top = custom.padding.dp + top, bottom = custom.padding.dp + tailHeight + if(custom.decoration != "none" || custom.decorationAsset != null) 8.dp else 0.dp),

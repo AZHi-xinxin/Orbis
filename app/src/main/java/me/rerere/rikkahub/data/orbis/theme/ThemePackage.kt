@@ -13,12 +13,20 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
 )
 @Serializable internal data class ThemeTypography(
     val fontFamily: String = "serif", val fontSizeScale: Float = 1f, val lineHeight: Float = 1.6f,
-)
+    val weight: Int = 400, val italic: Boolean = false, val letterSpacing: Float = 0f,
+) {
+    fun validate() {
+        require(fontFamily in setOf("default", "sans", "serif", "monospace", "NotoSerifSC") &&
+            fontSizeScale.isFinite() && fontSizeScale in .85f..1.4f && lineHeight.isFinite() && lineHeight in 1.2f..2f &&
+            weight in 100..900 && letterSpacing.isFinite() && letterSpacing in -.05f.. .2f) { "theme_typography_invalid" }
+    }
+}
 @Serializable internal data class ThemeBubble(
     val bg: String = "#FFFFFF", val text: String = "#263342", val radius: Int = 20,
     val padding: Int = 12, val maxWidthRatio: Float = .92f, val tail: String = "none",
     val shape: String = "round", val pattern: String = "none", val decoration: String = "none",
     val decorationAsset: String? = null, val opacity: Float = 1f,
+    val typography: ThemeTypography? = null, val drawing: ThemeDrawing? = null,
 )
 @Serializable internal data class ThemeChrome(
     val dock: String? = null, val onDock: String? = null, val star: String? = null,
@@ -55,10 +63,9 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
                 it.pattern in setOf("none", "dots", "stars", "gingham") &&
                 it.decoration in setOf("none", "paw", "heart", "star")) { "theme_bubble_invalid" }
             require(it.decorationAsset == null || it.decorationAsset in assets) { "theme_asset_missing" }
+            it.typography?.validate(); it.drawing?.validate()
         }
-        require(typography.fontFamily in setOf("default", "sans", "serif", "monospace", "NotoSerifSC") &&
-            typography.fontSizeScale.isFinite() && typography.fontSizeScale in .85f..1.4f &&
-            typography.lineHeight.isFinite() && typography.lineHeight in 1.2f..2f) { "theme_typography_invalid" }
+        typography.validate()
         require(background.type in setOf("solid", "image") && background.scroll == "fixed" &&
             background.dim.isFinite() && background.dim in 0f.. .8f) { "theme_background_invalid" }
         require(assets.size <= 8 && assets.distinct().size == assets.size && assets.all { it.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)")) }) { "theme_asset_invalid" }

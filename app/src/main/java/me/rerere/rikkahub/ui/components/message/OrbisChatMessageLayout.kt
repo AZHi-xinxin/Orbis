@@ -12,6 +12,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.datetime.toJavaLocalDateTime
@@ -31,14 +34,19 @@ import me.rerere.rikkahub.utils.toMessageTimeString
 
 /** Shared by the main conversation and garden drawer; presentation only, never a ChatVM. */
 @Composable
-internal fun rememberChatMessageTextStyle(): TextStyle {
+internal fun rememberChatMessageTextStyle(user: Boolean = false): TextStyle {
     val display = LocalSettings.current.displaySetting
-    val themeType = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body?.typography
-    val family = LocalChatFontFamily.current ?: rememberChatFontFamily(display)
+    val theme = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body
+    val themeType = (if(user) theme?.bubbles?.user else theme?.bubbles?.assistant)?.typography ?: theme?.typography
+    val family = themeType?.fontFamily?.let { me.rerere.rikkahub.ui.pages.orbis.themeFont(it) }
+        ?: LocalChatFontFamily.current ?: rememberChatFontFamily(display)
     return LocalTextStyle.current.copy(
         fontSize = (if (BuildConfig.ORBIS_ENABLED) 14.sp else LocalTextStyle.current.fontSize) * display.fontSizeRatio * (themeType?.fontSizeScale ?: 1f),
         lineHeight = (if (BuildConfig.ORBIS_ENABLED) (14 * (themeType?.lineHeight ?: 1.6f)).sp else LocalTextStyle.current.lineHeight) * display.fontSizeRatio * (themeType?.fontSizeScale ?: 1f),
         fontFamily = family,
+        fontWeight = themeType?.let { FontWeight(it.weight) } ?: LocalTextStyle.current.fontWeight,
+        fontStyle = themeType?.let { if(it.italic) FontStyle.Italic else FontStyle.Normal } ?: LocalTextStyle.current.fontStyle,
+        letterSpacing = themeType?.letterSpacing?.em ?: LocalTextStyle.current.letterSpacing,
     )
 }
 

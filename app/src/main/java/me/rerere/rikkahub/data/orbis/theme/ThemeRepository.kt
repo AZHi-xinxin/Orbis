@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.orbis.theme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -53,16 +54,39 @@ internal class ThemeRepository(private val root: File) {
         check(old != null || state.entries.size < 30) { "theme_store_full" }
         // Draft revision is also guarded, so two writers cannot silently replace each other.
         val entry = (old ?: ThemeEntry(UUID.randomUUID().toString())).copy(revision = expected + 1, draft = body)
-        save(state.copy(entries = state.entries.filterNot { it.id == entry.id } + entry))
+        save(state.copy(entries = if(old == null) state.entries + entry else state.entries.map { if(it.id == entry.id) entry else it }))
         entry
+    }
+    /** Merge only the supplied fields into this theme; absent fields remain exactly as authored. */
+    fun patch(text: String, id: String, expected: Int): ThemeEntry = synchronized(lock) {
+        require(text.toByteArray().size <= 32 * 1024) { "theme_package_too_large" }
+        val old = editable(snapshot(),id,expected)
+        val base = old.draft ?: old.versions.lastOrNull()?.body ?: error("theme_draft_missing")
+        val delta = themeJson.parseToJsonElement(text) as? JsonObject ?: error("theme_patch_invalid")
+        fun merge(base: JsonObject, patch: JsonObject, depth: Int): JsonObject {
+            require(depth <= 12) { "theme_patch_invalid" }
+            val result=base.toMutableMap()
+            patch.forEach { (k,v) ->
+                if(v==JsonNull) result.remove(k)
+                else result[k]=if(v is JsonObject) merge(result[k] as? JsonObject ?: JsonObject(emptyMap()),v,depth+1) else v
+            }
+            return JsonObject(result)
+        }
+        write(merge(themeJson.encodeToJsonElement(base).jsonObject,delta,0).toString(),id,expected)
     }
     fun publish(id: String, expected: Int): ThemeEntry = synchronized(lock) {
         val state = snapshot(); val old = editable(state, id, expected)
         val body = old.draft ?: error("theme_draft_missing"); body.validate()
         body.assets.forEach { check(asset(it).isFile) { "theme_asset_missing" } }
-        check(old.versions.size < 20) { "theme_versions_full" }
-        val next = old.copy(revision = old.revision + 1, draft = null, versions = old.versions + ThemeVersion(old.revision + 1, body))
-        save(state.copy(entries = state.entries.map { if (it.id == id) next else it }))
+        // A small edit must not force a new theme after twenty publications. Keep the
+        // active and pending versions plus recent revisions; prune only old undo refs.
+        val newVersion = ThemeVersion(old.revision + 1, body)
+        val protected = listOfNotNull(state.active,state.pending).filter { it.id==id }.map { it.revision }.toSet()
+        val keep = (listOf(newVersion) + old.versions.filter { it.revision in protected } + old.versions.reversed())
+            .distinctBy { it.revision }.take(20).sortedBy { it.revision }
+        val next = old.copy(revision = old.revision + 1, draft = null, versions = keep)
+        save(state.copy(entries = state.entries.map { if (it.id == id) next else it },
+            previous=state.previous.filter { it==null || it.id!=id || keep.any { v -> v.revision==it.revision } }))
         next
     }
     private fun editable(state: ThemeState, id: String, expected: Int): ThemeEntry {
