@@ -42,13 +42,15 @@ internal class AndroidHealthStorage(context:Context):HealthStorage {
 internal fun openHealth(context:Context)=HealthRepository(AndroidHealthStorage(context.applicationContext))
 
 /** Explicit picker input, bounded decode, bundled on-device model. No model-provider/API call. */
-internal suspend fun recognizeHealthScreenshot(context:Context,uri:Uri):String=withContext(Dispatchers.IO){
+internal suspend fun recognizeHealthScreenshot(context:Context,uri:Uri):String = recognizeHealthScreenshotLayout(context,uri).text
+
+internal suspend fun recognizeHealthScreenshotLayout(context:Context,uri:Uri):HealthScreenshotRecognition=withContext(Dispatchers.IO){
     val bytes=context.contentResolver.openInputStream(uri)?.use{it.bounded(12*1024*1024)}?:error("health_image_unreadable")
     val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true}
     BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
     require(bounds.outWidth in 1..16000 && bounds.outHeight in 1..16000 && bounds.outWidth.toLong()*bounds.outHeight<=64_000_000){"health_image_invalid"}
     var sample=1
-    while(maxOf(bounds.outWidth,bounds.outHeight)/sample>2400)sample*=2
+    while(maxOf(bounds.outWidth,bounds.outHeight)/sample>4096)sample*=2
     val bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply{inSampleSize=sample})?:error("health_image_invalid")
     val recognizer=TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     withTimeout(20_000) { suspendCancellableCoroutine { continuation ->
@@ -56,7 +58,23 @@ internal suspend fun recognizeHealthScreenshot(context:Context,uri:Uri):String=w
             recognizer.process(InputImage.fromBitmap(bitmap,0)).addOnCompleteListener { task ->
                 try {
                     if(continuation.isActive) {
-                        if(task.isSuccessful) continuation.resume(task.result.text.take(100_000))
+                        if(task.isSuccessful) continuation.resume(HealthScreenshotRecognition(task.result.text.take(100_000),
+                            task.result.textBlocks.flatMap { it.lines }.flatMap { line ->
+                                // ML Kit may merge adjacent dashboard columns into one line.
+                                val groups=mutableListOf<MutableList<com.google.mlkit.vision.text.Text.Element>>()
+                                line.elements.forEach { element ->
+                                    val previous=groups.lastOrNull()?.lastOrNull()?.boundingBox
+                                    val box=element.boundingBox
+                                    if(groups.isEmpty() || previous!=null && box!=null && box.left-previous.right>maxOf(previous.height(),box.height())*2)
+                                        groups.add(mutableListOf())
+                                    groups.last().add(element)
+                                }
+                                groups.mapNotNull { group ->
+                                    val boxes=group.mapNotNull { it.boundingBox }
+                                    if(boxes.isEmpty()) null else HealthOcrLine(group.joinToString(" "){it.text},
+                                        boxes.minOf{it.left},boxes.minOf{it.top},boxes.maxOf{it.right},boxes.maxOf{it.bottom})
+                                }
+                            }.take(5000)))
                         else continuation.resumeWithException(IllegalStateException("health_ocr_failed"))
                     }
                 } finally {recognizer.close();bitmap.recycle()}

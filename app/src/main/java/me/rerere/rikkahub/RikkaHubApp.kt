@@ -138,6 +138,9 @@ class RikkaHubApp : Application() {
             runCatching { me.rerere.rikkahub.data.orbis.sentinel.OrbisSentinels.open(this@RikkaHubApp).reschedule() }
                 .onFailure { Log.w(TAG, "Native sentinel unavailable; configuration retained") }
             if (BuildConfig.ORBIS_ENABLED) runCatching {
+                me.rerere.rikkahub.data.orbis.health.AndroidHealthSync.schedule(this@RikkaHubApp)
+            }.onFailure { Log.w(TAG, "Health sync configuration retained") }
+            if (BuildConfig.ORBIS_ENABLED) runCatching {
                 withContext(Dispatchers.IO) { me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(this@RikkaHubApp).recoverQueue() }
             }.onFailure { Log.w(TAG, "Image workshop recovery unavailable; jobs retained") }
         }

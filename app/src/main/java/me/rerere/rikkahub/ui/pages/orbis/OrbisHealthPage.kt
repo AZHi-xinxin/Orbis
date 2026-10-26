@@ -31,7 +31,7 @@ import java.time.LocalDate
     val context=LocalContext.current
     val repo=remember(context){openHealth(context)}
     Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false,decorFitsSystemWindows=false)) {
-        OrbisPageSurface { HealthPageContent(repo,onClose,importScreenshot={date,done->
+        OrbisPageSurface { HealthPageContent(repo,onClose,deviceSync={HealthSyncEntry()},importScreenshot={date,done->
             val scope=rememberCoroutineScope()
             var busy by remember{mutableStateOf(false)}
             var error by remember{mutableStateOf<String?>(null)}
@@ -39,8 +39,8 @@ import java.time.LocalDate
                 if(uri!=null)scope.launch{
                     busy=true;error=null
                     try{
-                        val text=recognizeHealthScreenshot(context,uri)
-                        done(parseHealthScreenshot(text),text)
+                        val recognized=recognizeHealthScreenshotLayout(context,uri)
+                        done(parseHealthScreenshot(recognized),recognized.text)
                     }catch(e:CancellationException){throw e}catch(_:Exception){error="图片未识别成功，可以换一张清晰截图或手动填写。"}finally{busy=false}
                 }
             }
@@ -53,6 +53,7 @@ import java.time.LocalDate
 private data class HealthEditing(val day:HealthDay,val proposal:HealthProposal?=null,val imported:Map<String,JsonPrimitive>?=null,val ocr:String?=null)
 
 @Composable internal fun HealthPageContent(repo:HealthRepository,onClose:()->Unit,
+    deviceSync:@Composable ()->Unit={},
     importScreenshot:@Composable (String,(Map<String,JsonPrimitive>,String)->Unit)->Unit={_,_->}) {
     var state by remember(repo){mutableStateOf(HealthState())}
     var date by remember{mutableStateOf(LocalDate.now().toString())}
@@ -76,6 +77,7 @@ private data class HealthEditing(val day:HealthDay,val proposal:HealthProposal?=
     HealthDashboard(state, selected, date, month, busy, error, summary, start, end,
         onClose = onClose, onRefresh = { task {} }, onDate = { date = it }, onMonth = { month = it },
         onEdit = { editor = HealthEditing(selected) }, onHistory = { historyDate = date },
+        deviceSync = deviceSync,
         importScreenshot = { importScreenshot(date) { fields, text -> editor = HealthEditing(selected, imported = fields, ocr = text) } },
         onReview = { proposal -> editor = HealthEditing(state.days.firstOrNull { it.date == proposal.date } ?: HealthDay(proposal.date), proposal = proposal) },
         onDismissProposal = { proposal -> task { repo.dismiss(proposal.id) } })

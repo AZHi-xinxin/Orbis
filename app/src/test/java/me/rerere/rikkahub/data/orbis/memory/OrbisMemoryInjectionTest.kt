@@ -9,6 +9,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisMemoryInjectionTest {
+    @Test fun pinnedPrefixDoesNotFollowThisTurnsKeywordRanking() {
+        val first = note("a", "pinned", "always A").copy(matchedTerms = 0)
+        val second = note("b", "pinned", "always B").copy(matchedTerms = 3)
+        for (mode in listOf(OrbisMemoryMode.STANDARD, OrbisMemoryMode.INDEPENDENT)) {
+            val before = selectOrbisMemory(mode, "tea", listOf(second, first))
+            val after = selectOrbisMemory(mode, "coffee", listOf(first, second))
+            assertEquals(before, after)
+            val history = listOf(UIMessage.system("stable instructions"), UIMessage.user("old human text"))
+            assertEquals(projectOrbisMemory(history, before).first(), projectOrbisMemory(history, after).first())
+        }
+    }
+    @Test fun oldFrozenSelectionsAlsoRenderPinsInCanonicalOrderWithoutChangingHits() {
+        val a = OrbisMemorySelected("a", "pinned A", 1, "pinned")
+        val b = OrbisMemorySelected("b", "pinned B", 2, "pinned")
+        val hit = OrbisMemorySelected("hit", "dynamic recall", 1, "summary")
+        val history = listOf(UIMessage.system("base"), UIMessage.user("human"))
+        val old = projectOrbisMemory(history, OrbisMemorySelection(listOf(b, a, hit)))
+        val new = projectOrbisMemory(history, OrbisMemorySelection(listOf(a, b, hit)))
+        assertEquals(old, new)
+        assertTrue(new.last().toText().contains("dynamic recall"))
+        assertFalse(new.first().toText().contains("dynamic recall"))
+    }
     private fun note(id: String = "one", state: String = "conditional", summary: String = "note summary",
         body: String? = "original", important: Boolean = false, interval: Int = 0,
         tags: List<String> = listOf("tea"), keywords: List<String> = emptyList()) =

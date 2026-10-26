@@ -28,7 +28,7 @@ import java.time.temporal.ChronoUnit
 @Composable internal fun HealthDashboard(state: HealthState, selected: HealthDay, date: String, month: Boolean,
     busy: Boolean, error: String?, summary: JsonObject, start: LocalDate, end: LocalDate,
     onClose: () -> Unit, onRefresh: () -> Unit, onDate: (String) -> Unit, onMonth: (Boolean) -> Unit,
-    onEdit: () -> Unit, onHistory: () -> Unit, importScreenshot: @Composable () -> Unit,
+    onEdit: () -> Unit, onHistory: () -> Unit, deviceSync: @Composable () -> Unit = {}, importScreenshot: @Composable () -> Unit,
     onReview: (HealthProposal) -> Unit, onDismissProposal: (HealthProposal) -> Unit) {
     val colors = OrbisTheme.colors
     var details by rememberSaveable(date) { mutableStateOf(false) }
@@ -36,7 +36,7 @@ import java.time.temporal.ChronoUnit
     var dateInput by remember(date) { mutableStateOf(date) }
     fun value(key: String) = selected.fields[key]?.value?.takeUnless { it == JsonNull }
     val sleep = value("sleepMinutes")?.intOrNull
-    val heart = value("averageHeart") ?: value("restingHeart")
+    val heart = value("averageHeart") ?: value("restingHeart") ?: value("heartRate")
     Surface(Modifier.fillMaxSize(), color = colors.page, contentColor = colors.ink) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -82,7 +82,7 @@ import java.time.temporal.ChronoUnit
                         value("activeMinutes")?.let { Text("活动 ${it.content} 分钟", style = MaterialTheme.typography.bodySmall, color = colors.mutedInk) }
                     }
                     HealthCard(Modifier.weight(1f)) {
-                        HealthSectionHeading("♡", if(value("averageHeart") != null) "平均心率" else "静息心率", Color(0xFFC8867C))
+                        HealthSectionHeading("♡", if(value("averageHeart") != null) "平均心率" else if(value("restingHeart") != null) "静息心率" else "当次心率", Color(0xFFC8867C))
                         Text(heart?.content ?: "—", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Medium)
                         Text("次 / 分钟", color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
                     }
@@ -94,6 +94,7 @@ import java.time.temporal.ChronoUnit
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(enabled = !busy, onClick = onEdit, shape = RoundedCornerShape(14.dp), modifier = Modifier.heightIn(min = 48.dp)) { Text("填写或修改当天") }
                         importScreenshot()
+                        deviceSync()
                     }
                 } }
                 if(state.proposals.isNotEmpty()) item { Text("待你确认 · ${state.proposals.size}", style = MaterialTheme.typography.titleMedium) }
@@ -126,7 +127,7 @@ import java.time.temporal.ChronoUnit
                                 Text(field.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                                 Text("${healthDisplay(field.id, cell.value)} ${if(field.min != null) field.unit else ""}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                             }
-                            Text("${healthSource(cell.source)} · ${if(cell.actor == "human") "本人确认" else "助手记录"}", style = MaterialTheme.typography.labelSmall, color = colors.mutedInk)
+                            Text("${healthSource(cell.source)} · ${if(cell.actor == "human") "本人确认" else if(cell.actor=="device:hcmcp") "自动同步" else "助手记录"}", style = MaterialTheme.typography.labelSmall, color = colors.mutedInk)
                         }
                         if(selected.fields.values.none { it.value != JsonNull }) Text("还没有数据，不按 0 计算。", color = colors.mutedInk)
                         if(selected.revision > 0) TextButton(onClick = onHistory) { Text("查看修改记录") }

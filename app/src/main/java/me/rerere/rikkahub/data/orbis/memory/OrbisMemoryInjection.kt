@@ -35,7 +35,9 @@ internal fun selectOrbisMemory(
     if (mode == OrbisMemoryMode.LIGHT) return OrbisMemorySelection()
     val unique = candidates.sortedBy { if (it.state == "pinned") 0 else 1 }.distinctBy { it.id }
     val selected = mutableListOf<OrbisMemorySelected>()
-    unique.filter { it.state == "pinned" }.forEach { note ->
+    // Runtime candidates are ranked by the latest query, including pinned notes. Pins are
+    // always included: their prefix order must not follow that changing lexical score.
+    unique.filter { it.state == "pinned" }.sortedBy { it.id }.forEach { note ->
         note.pinText?.takeIf(String::isNotBlank)?.let { text ->
             selected += OrbisMemorySelected(note.id, text, note.revision, "pinned")
         }
@@ -88,8 +90,9 @@ private fun renderMemoryEntry(entry: OrbisMemorySelected): String = buildJsonObj
     }
 }.toString()
 
+// Canonicalize at rendering too, so saved selections from earlier versions remain stable.
 internal fun renderOrbisMemory(entries: List<OrbisMemorySelected>): String =
-    listOf(OrbisMemoryBudget.renderPinned(entries.filter { it.kind == "pinned" }.map { it.text }),
+    listOf(OrbisMemoryBudget.renderPinned(entries.filter { it.kind == "pinned" }.sortedBy { it.id }.map { it.text }),
         renderMemoryHits(entries.filter { it.kind != "pinned" })).filter(String::isNotEmpty).joinToString("\n")
 
 private fun renderMemoryHits(entries: List<OrbisMemorySelected>): String = if (entries.isEmpty()) "" else

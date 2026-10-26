@@ -25,6 +25,7 @@ internal val healthFields=listOf(
     HealthField("steps","步数","步",0.0,200000.0),HealthField("activeMinutes","活动时长","分钟",0.0,1440.0),
     HealthField("calories","活动热量","千卡",0.0,20000.0,false),
     HealthField("restingHeart","静息心率","次/分钟",1.0,300.0),HealthField("averageHeart","平均心率","次/分钟",1.0,300.0),
+    HealthField("heartRate","当次心率","次/分钟",1.0,300.0),
     HealthField("systolic","收缩压","mmHg",1.0,400.0),HealthField("diastolic","舒张压","mmHg",1.0,300.0),
     HealthField("spo2","血氧","%",0.0,100.0,false),HealthField("note","当天备注"),
 )
@@ -100,7 +101,7 @@ internal class HealthRepository(private val storage:HealthStorage, private val n
     private fun save(state:HealthState){validate(state);storage.write(healthJson.encodeToString(state))}
     private fun validateWrite(date:String,fields:Map<String,JsonPrimitive>,source:String,actor:String,evidence:String) {
         require(validHealthDate(date)){"health_date_invalid"};validateHealthFields(fields)
-        require(source in setOf("manual","ai","mcp","screenshot") && (actor=="human"||actor.matches(Regex("ai:[A-Za-z0-9_-]{1,80}"))) && evidence.isNotBlank() && evidence.length<=500){"health_provenance_required"}
+        require(source in setOf("manual","ai","mcp","screenshot") && (actor=="human"||actor=="device:hcmcp"&&source=="mcp"||actor.matches(Regex("ai:[A-Za-z0-9_-]{1,80}"))) && evidence.isNotBlank() && evidence.length<=500){"health_provenance_required"}
         require(source!="manual"||actor=="human"){"health_actor_invalid"}
     }
     companion object {
@@ -110,7 +111,7 @@ internal class HealthRepository(private val storage:HealthStorage, private val n
                 require(validHealthDate(day.date) && day.revision>0 && day.updatedAt>=0){"health_storage_invalid"}
                 validateHealthFields(day.fields.mapValues{it.value.value})
                 day.fields.values.forEach {
-                    require((it.actor=="human"||it.actor.matches(Regex("ai:[A-Za-z0-9_-]{1,80}"))) &&
+                    require((it.actor=="human"||it.actor=="device:hcmcp"&&it.source=="mcp"||it.actor.matches(Regex("ai:[A-Za-z0-9_-]{1,80}"))) &&
                         it.source in setOf("manual","ai","mcp","screenshot") && (it.source!="manual"||it.actor=="human") &&
                         it.updatedAt>=0 && it.evidence.isNotBlank() && it.evidence.length<=500 &&
                         (it.confidence==null||it.confidence in 0..100)){"health_storage_invalid"}
