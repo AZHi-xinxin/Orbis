@@ -6,14 +6,19 @@ import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.ai.mcp.*
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
+import me.rerere.workspace.validWorkspaceComponent
 
 /** Only public setup fields live here. Credentials are native settings, never tool receipts. */
 @Serializable
 data class ConnectionDraft(val kind: String, val name: String, val endpoint: String,
-    val model: String = "", val voice: String = "", val auth: String = "bearer") {
+    val model: String = "", val voice: String = "", val auth: String = "bearer",
+    val supportsTools: Boolean? = null, val supportsImages: Boolean? = null,
+    val credentialFile: String = "") {
     fun normalized(): ConnectionDraft {
         require(kind in setOf("tts_openai", "model_openai", "mcp_http", "mcp_sse")) { "unsupported_kind" }
         require(auth in setOf("none", "bearer")) { "auth: none or bearer" }
@@ -25,6 +30,8 @@ data class ConnectionDraft(val kind: String, val name: String, val endpoint: Str
             !uri.rawPath.orEmpty().contains("\\") && uri.normalize().rawPath == uri.rawPath) {
             "endpoint must be a complete HTTP(S) URL without credentials, query, fragment or dot paths"
         }
+        require(credentialFile.isEmpty() || (credentialFile.startsWith("/workspace/") && credentialFile.length <= 512 &&
+            credentialFile.removePrefix("/workspace/").split('/').all(::validWorkspaceComponent))) { "invalid_credential_file" }
         require(listOf(model, voice).all { it.length <= 160 && it.none(Char::isISOControl) }) { "invalid model or voice" }
         if (kind == "tts_openai") require(model.isNotBlank() && voice.isNotBlank()) { "tts_openai requires model and voice" }
         if (kind == "model_openai") require(model.isNotBlank()) { "model_openai requires model" }
@@ -93,7 +100,7 @@ internal object ConnectionProposalRules {
             require(draft.auth == "none" || credential.isNotBlank()) { "waiting_for_native_key" }
             val modelId = connectionModelId(id)
             val value = ProviderSetting.OpenAI(id = uuid, name = draft.name, apiKey = credential,
-                baseUrl = draft.endpoint, models = listOf(Model(id = modelId, modelId = draft.model, displayName = draft.model)))
+                baseUrl = draft.endpoint, models = listOf(connectionModel(draft, modelId, old?.models?.singleOrNull())))
             settings.copy(providers = settings.providers.filterNot { it.id == uuid } + value)
         } else {
             val old = settings.mcpServers.firstOrNull { it.id == uuid }
@@ -122,7 +129,13 @@ internal object ConnectionProposalRules {
         } else if (expected.kind == "model_openai") {
             val native = settings.providers.filterIsInstance<ProviderSetting.OpenAI>().firstOrNull { it.id == id } ?: return false
             native.name == expected.name && native.baseUrl == expected.endpoint && native.enabled &&
-                native.models == listOf(Model(id = connectionModelId(p.id), modelId = expected.model, displayName = expected.model)) &&
+                native.models.singleOrNull()?.let { model ->
+                    model.id == connectionModelId(p.id) && model.modelId == expected.model && model.displayName == expected.model &&
+                        model.copy(abilities = emptyList(), inputModalities = listOf(Modality.TEXT)) ==
+                        Model(id = connectionModelId(p.id), modelId = expected.model, displayName = expected.model) &&
+                        (expected.supportsTools == null || (ModelAbility.TOOL in model.abilities) == expected.supportsTools) &&
+                        (expected.supportsImages == null || (Modality.IMAGE in model.inputModalities) == expected.supportsImages)
+                } == true &&
                 native.chatCompletionsPath == "/chat/completions" && !native.useResponseApi &&
                 native.chatGptAccountId == null && !native.balanceOption.enabled
         } else {
@@ -145,6 +158,15 @@ internal object ConnectionProposalRules {
         return settings.copy(mcpServers = settings.mcpServers.map {
             if (it.id.toString() == id) it.clone(commonOptions = it.commonOptions.copy(enable = enabled)) else it
         })
+    }
+    /** New chat connections can call tools. Existing human choices survive unrelated edits. */
+    internal fun connectionModel(draft: ConnectionDraft, id: Uuid, previous: Model? = null): Model {
+        val base = previous ?: Model(id = id, abilities = listOf(ModelAbility.TOOL))
+        val tools = draft.supportsTools ?: (ModelAbility.TOOL in base.abilities)
+        val images = draft.supportsImages ?: (Modality.IMAGE in base.inputModalities)
+        return base.copy(id = id, modelId = draft.model, displayName = draft.model,
+            abilities = (base.abilities.filterNot { it == ModelAbility.TOOL } + if (tools) listOf(ModelAbility.TOOL) else emptyList()).distinct(),
+            inputModalities = listOf(Modality.TEXT) + if (images) listOf(Modality.IMAGE) else emptyList())
     }
     fun connectionModelId(proposalId: String): Uuid = Uuid.parse(
         UUID.nameUUIDFromBytes("orbis-connection-model-v1\n$proposalId".toByteArray(Charsets.UTF_8)).toString())

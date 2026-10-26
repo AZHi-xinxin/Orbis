@@ -27,6 +27,26 @@ class OrbisFeedbackDesignDeviceTest {
             File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }
         }
     }
+    @Test fun connectionCanMinimizeAndReopenWithoutLosingProposalOrSubmittingKey() {
+        val shown=mutableStateOf(true)
+        val proposal=ConnectionProposal("synthetic-owner",ConnectionDraft("mcp_http","ST MCP","https://example.invalid/mcp"))
+        var saves=0;var guides=0
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme=false) {
+            Column(Modifier.fillMaxSize()) { Text("原来的聊天"); TextButton(onClick={shown.value=true}){Text("连接设置")} }
+            if(shown.value) ConnectionProposalSheet(listOf(proposal),proposal,false,null,{shown.value=false},{},false,
+                {_,_,_,_->saves++},{_,_->},{},onGuide={guides++})
+        } } }
+        compose.onNodeWithTag("connection-key").performTextInput("synthetic-secret-not-real")
+        compose.onNodeWithTag("connection-minimize").performClick()
+        compose.onNodeWithTag("connection-proposals").assertDoesNotExist()
+        compose.onNodeWithText("原来的聊天").assertIsDisplayed()
+        compose.onNodeWithText("连接设置").performClick()
+        compose.onNodeWithTag("connection-proposals").assertIsDisplayed()
+        assertEquals("", compose.onNodeWithTag("connection-key").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+        compose.onNodeWithText("密钥在哪里？查看保存指引").performScrollTo().performClick()
+        assertEquals(1,guides);assertEquals(0,saves)
+        screenshot("connection-reopen-dev127.png")
+    }
     @Test fun connectionStaysInChatSheetAndClosesWithoutSavingOrLosingChat() {
         val shown=mutableStateOf(true)
         val proposal=ConnectionProposal("synthetic-owner",ConnectionDraft("mcp_http","文档助手","https://example.invalid/mcp"))

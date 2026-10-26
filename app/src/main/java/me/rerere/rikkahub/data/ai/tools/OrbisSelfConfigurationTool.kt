@@ -22,6 +22,9 @@ internal fun orbisSelfConfigurationTool(store: SettingsStore, owner: String, con
     createOrbisSelfConfigurationTool(owner, { store.settingsFlow.value }, { transform -> store.update(transform) },
         network = { action, kind, id ->
             AiConfigurationChecks.request(context.applicationContext, store, mcp, owner, action, kind, id)
+        }, workspaceStatus = {
+            val assistant = AiConfigurationRules.requireOwner(store.settingsFlow.value, owner)
+            workspaceRepository.readiness(assistant.workspaceId?.toString())
         }, prepareWorkspace = {
             AiWorkspacePreparation.prepare(owner, { store.settingsFlow.value }, workspaceRepository::getById,
                 workspaceRepository::createNative, workspaceRepository::prepareNative) { transform -> store.update(transform) }
@@ -33,6 +36,7 @@ internal fun createOrbisSelfConfigurationTool(
     update: suspend ((Settings) -> Settings) -> Boolean,
     network: suspend (action: String, kind: String, id: String) -> JsonObject,
     prepareWorkspace: suspend () -> JsonObject = { error("workspace_preparation_unavailable") },
+    workspaceStatus: suspend () -> JsonObject = { error("workspace_preparation_unavailable") },
 ) = Tool(
     name = "orbis_configure",
     description = """管理自己的原生配置，无需人类替你填非秘密字段。inspect列提供方/模型/TTS/MCP的ID、当前选择及记忆模式，不返回密钥。
@@ -41,17 +45,18 @@ select_model(role=chat/fast/translation/ocr/compression/image/voice_archive/voic
 memory(mode=light/standard/independent,auto_inject=true/false,semantic_recall可选)：当前助手本地记忆；semantic_recall省略保留原值，不删除或唤醒暂停记忆。
 check(kind=model/tts/mcp,id)：后台发极短真实合成测试，可能产生少量费用；没有私人聊天、播放或通话操作。check_status读本助手测试回执。queued仅排队，继续回复，无需轮询等候。失败回执可据此修正配置再试；检测不等于完整功能验收。
 st_atlas_connect(provider_id)：用已配置ST的API向同服务器申请只读星图，要求该ST支持星图接入协议。已有同源待确认授权原样重试，不重新登记。st_atlas_status读结果。ST作为聊天API可用model_openai；ST MCP用连接建议。仅本地记忆无需ST。
+workspace_status：只读检查本助手工作区、Rootfs实际存在和Shell状态，返回人类逐步按钮路径；安装ST前先查，不需要审批。指南按需查询orbis_help(topic=guide,chapter=st_install)及workspace_setup，不自动注入全文。
 workspace_prepare：创建并绑定当前助手的默认本机文件工作区；已有绑定则复用，重建缺失目录不会恢复旧文件，不下载Linux。成功后可在本轮用workspace_write_file写/workspace/内的配置，并用orbis_backup(inspect/bind/check/save_now/status/restore_latest)备份或恢复；先inspect获得哈希，不要读取并复述凭据文件。配置修改/付费检查首次可选以后允许；不提交密钥，不修改别的助手的对话模型。""",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf(
             "inspect", "register_model", "select_model", "select_tts", "update_tts", "tts_from_provider",
-            "memory", "check", "check_status", "st_atlas_connect", "st_atlas_status", "workspace_prepare").map(::JsonPrimitive))) })
+            "memory", "check", "check_status", "st_atlas_connect", "st_atlas_status", "workspace_prepare", "workspace_status").map(::JsonPrimitive))) })
         listOf("id", "provider_id", "model", "name", "model_type", "role", "voice", "mode", "kind").forEach {
             put(it, buildJsonObject { put("type", "string") })
         }
         listOf("supports_tools", "auto_inject", "semantic_recall").forEach { put(it, buildJsonObject { put("type", "boolean") }) }
     }, required = listOf("action")) },
-    needsApproval = { it.jsonObject["action"]?.jsonPrimitive?.content !in setOf("inspect", "check_status", "st_atlas_status") },
+    needsApproval = { it.jsonObject["action"]?.jsonPrimitive?.content !in setOf("inspect", "check_status", "st_atlas_status", "workspace_status") },
     hostApproval = HostToolApproval("orbis:configure:$owner", "native-configuration-v2",
         "允许此助手管理原生模型/语音/记忆配置、准备自己的本机工作区及发起短连接测试（可记住；工具模型和TTS为应用共享）"),
     isApprovalCurrent = { runCatching { AiConfigurationRules.requireOwner(snapshot(), owner) }.isSuccess },
@@ -68,6 +73,10 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
             AiConfigurationRules.requireOwner(snapshot(), owner)
             val action = text("action")
             if (action == "inspect") AiConfigurationRules.inspect(snapshot(), owner)
+            else if (action == "workspace_status") {
+                require(a.keys == setOf("action")) { "unknown_field" }
+                workspaceStatus()
+            }
             else if (action == "workspace_prepare") {
                 require(a.keys == setOf("action")) { "unknown_field" }
                 prepareWorkspace()
@@ -79,7 +88,7 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
                 check(update { latest ->
                     val next = when (action) {
                         "register_model" -> AiConfigurationRules.registerModel(latest, owner, text("provider_id"), text("model"),
-                            text("name", ""), text("model_type", "chat"), boolean("supports_tools", false))
+                            text("name", ""), text("model_type", "chat"), boolean("supports_tools", true))
                         "select_model" -> AiConfigurationRules.selectModel(latest, owner, text("role"), text("id"))
                         "select_tts" -> AiConfigurationRules.selectTts(latest, owner, text("id"))
                         "update_tts" -> AiConfigurationRules.updateTts(latest, owner, text("id"),

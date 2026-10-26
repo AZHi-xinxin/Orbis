@@ -22,10 +22,10 @@ internal fun OrbisConnectionSetupPrompt(owner: String, conversation: String, set
             visible = connectionSetupQueue.take(owner, conversation, current.connectionProposals)
         }
     }
-    visible?.let { request -> key(owner, conversation, request.proposal.id) {
+    visible?.let { request -> key(owner, conversation, request.proposal?.id ?: "guide") {
         OrbisConnectionProposals(owner, onClose = {
             connectionSetupQueue.dismiss(owner, conversation)
             visible = null
-        }, initialRequest = request.proposal)
+        }, initialRequest = request.proposal, initialGuide = request.guide)
     } }
 }

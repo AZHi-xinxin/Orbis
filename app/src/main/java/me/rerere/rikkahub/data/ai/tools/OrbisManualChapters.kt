@@ -165,7 +165,7 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("公开版本边界", "咨询室显示‘正在开发，暂未开放’。不要指导公开版用户配对、开启待命、重试旧场或调用内部咨询工具，也不要用哨兵或普通私聊替代内部协议。已保留的历史数据不代表功能已验收；其它本地功能不依赖咨询室。"),
         OrbisManualSection("如看到旧记录", "保留记录供后续明确授权的排查，不自动恢复生成、不清除失败现场、不公开内部正文。此说明不检查线上咨询状态，也不宣称已修好或已完成双机验收。"),
     )),
-)
+) + orbisDeploymentChapters
 
 internal fun orbisManualChapterMatches(chapter: OrbisManualChapter, query: String): Boolean = query.isBlank() ||
     (listOf(chapter.id, chapter.title, chapter.uiPath) + chapter.tools + chapter.sections.flatMap { listOf(it.title, it.text) })

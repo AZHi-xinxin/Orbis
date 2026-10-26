@@ -349,6 +349,7 @@ private fun workspaceShellUnavailable(message: String, performed: Boolean): Stri
     put("status", "failed"); put("reason_code", "workspace_shell_unavailable")
     put("execution_performed", performed)
     put("message", "$message. Use native file tools; no host shell fallback.")
+    put("next_step", "先调用 orbis_configure(action=workspace_status) 核对当前助手的工作区；缺Rootfs时请人类点右下角北斗导航 → 工具娱乐 → 工作区 → 对应工作区 → 安装 Rootfs。等待Shell状态为就绪。按需查orbis_help guide/workspace_setup，不要尝试宿主shell。")
 }.toString()
 
 private suspend fun WorkspaceRepository.readImageInRootfs(

@@ -33,6 +33,20 @@ internal object AiConfigurationRules {
                 selectedModels(settings, owner).forEach { (role, id) -> put(role, id?.let { JsonPrimitive(it.toString()) } ?: JsonNull) }
             })
             put("tool_model_scope", "application")
+            val currentId = assistant.chatModelId ?: settings.chatModelId
+            val provider = settings.providers.firstOrNull { p -> p.models.any { it.id == currentId } }
+            val model = provider?.models?.firstOrNull { it.id == currentId }
+            val effective = model?.providerOverwrite ?: provider
+            if (effective is ProviderSetting.OpenAI && model != null) {
+                val publicUrl = runCatching { ConnectionDraft("model_openai", "Current", effective.baseUrl, model.modelId).normalized().endpoint }.getOrNull()
+                put("current_model_connection", buildJsonObject {
+                    put("model", model.modelId); put("provider_id", checkNotNull(provider).id.toString())
+                    put("base_url", publicUrl?.let(::JsonPrimitive) ?: JsonNull)
+                    put("supports_tools", ModelAbility.TOOL in model.abilities)
+                    put("supports_images", Modality.IMAGE in model.inputModalities)
+                    put("credential_returned", false)
+                })
+            }
             put("selected_tts_id", settings.selectedTTSProviderId.toString())
             put("providers", JsonArray(settings.providers.map { provider -> buildJsonObject {
                 put("id", provider.id.toString()); put("name", provider.name.take(160)); put("enabled", provider.enabled)
@@ -40,6 +54,8 @@ internal object AiConfigurationRules {
                 put("models", JsonArray(provider.models.map { model -> buildJsonObject {
                     put("id", model.id.toString()); put("model", model.modelId.take(240)); put("name", model.displayName.take(160))
                     put("type", model.type.name.lowercase())
+                    put("supports_tools", ModelAbility.TOOL in model.abilities)
+                    put("supports_images", Modality.IMAGE in model.inputModalities)
                 } }))
             } }))
             put("tts", JsonArray(settings.ttsProviders.map(::ttsSummary)))
@@ -78,7 +94,7 @@ internal object AiConfigurationRules {
     }
 
     fun registerModel(settings: Settings, owner: String, providerId: String, model: String, name: String,
-        type: String = "chat", supportsTools: Boolean = false): Settings {
+        type: String = "chat", supportsTools: Boolean = true): Settings {
         requireOwner(settings, owner)
         require(model.isNotBlank() && model.length <= 240 && model.none(Char::isISOControl)) { "invalid_model" }
         require(name.length <= 160 && name.none(Char::isISOControl)) { "invalid_name" }

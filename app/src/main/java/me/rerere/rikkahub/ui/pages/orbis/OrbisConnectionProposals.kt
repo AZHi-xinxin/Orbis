@@ -27,9 +27,10 @@ import org.koin.compose.koinInject
 
 @Composable
 internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store: SettingsStore = koinInject(),
-    initialRequest: ConnectionProposal? = null) {
+    initialRequest: ConnectionProposal? = null, initialGuide: Boolean = false) {
     val settings by store.settingsFlow.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    var showGuide by remember(owner) { mutableStateOf(initialGuide) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var selectedId by remember(owner) { mutableStateOf(initialRequest?.id) }
@@ -47,6 +48,12 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
             finally { busy = false }
         }
     }
+    if (showGuide) {
+        val credentialFile = selected?.draft?.credentialFile?.takeIf(String::isNotBlank)
+        ConnectionCredentialGuide(owner, entries.filter { credentialFile != null && it.draft.credentialFile == credentialFile && it.status != "rejected" },
+            onClose = onClose, onContinue = { showGuide = false })
+        return
+    }
     ConnectionProposalSheet(entries, selected, busy || settings.init, notice, onClose,
         onSelect = { selectedId = it.id; notice = null },
         enabled = selected?.let { p -> settings.mcpServers.any { it.id.toString() == p.id && it.commonOptions.enable } } == true,
@@ -56,6 +63,7 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
             if (p.draft.kind.startsWith("mcp_")) ConnectionProposalRules.setMcpEnabled(next, owner, p.id, enable) else next
         } },
         onToggle = { p, enabled -> apply { ConnectionProposalRules.setMcpEnabled(it, owner, p.id, enabled) } },
+        onGuide = { showGuide = true },
         onRevoke = { p -> apply { latest ->
             val current = latest.connectionProposals.single { it.owner == owner && it.id == p.id }
             ConnectionProposalRules.replace(latest, current.copy(alwaysAllow = false,
@@ -68,7 +76,8 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
 @Composable internal fun ConnectionProposalSheet(entries: List<ConnectionProposal>, selected: ConnectionProposal?,
     busy: Boolean, notice: String?, onClose: () -> Unit, onSelect: (ConnectionProposal) -> Unit,
     enabled: Boolean, onSave: (ConnectionProposal, String?, Boolean, Boolean) -> Unit,
-    onToggle: (ConnectionProposal, Boolean) -> Unit, onRevoke: (ConnectionProposal) -> Unit) {
+    onToggle: (ConnectionProposal, Boolean) -> Unit, onRevoke: (ConnectionProposal) -> Unit,
+    onGuide: () -> Unit = {}) {
     val colors = OrbisTheme.colors
     val height = LocalConfiguration.current.screenHeightDp.dp * .74f
     var key by remember(selected?.id, selected?.draft, selected?.status, notice) { mutableStateOf("") }
@@ -87,6 +96,7 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
                     Text("完成连接", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     Text("AI 已填好配置，只需最后一步。", color = colors.mutedInk, modifier = Modifier.padding(top = 5.dp))
                 }
+                TextButton(onClick = onClose, modifier = Modifier.testTag("connection-minimize")) { Text("收起") }
                 IconButton(onClick = onClose, modifier = Modifier.testTag("connection-close")) { Text("×", style = MaterialTheme.typography.headlineMedium) }
             }
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 12.dp),
@@ -95,6 +105,7 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
                     entries.forEach { p -> FilterChip(p.id == selected?.id, onClick = { onSelect(p) }, label = { Text(p.draft.name, maxLines = 1) }) }
                 }
                 if (selected == null) Text("还没有连接建议。回到聊天，让 AI 帮你填好模型、语音或 MCP 的配置。", Modifier.padding(16.dp))
+                TextButton(onClick = onGuide) { Text("密钥在哪里？查看保存指引") }
                 selected?.let { p ->
                     val mcp = p.draft.kind.startsWith("mcp_")
                     val editable = p.status != "changed_in_settings"
@@ -150,7 +161,7 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
                 notice?.let { Text(it, color = colors.accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-notice")) }
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("密钥不回传给 AI", Modifier.weight(1f), color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
+                Text("密钥不回传给 AI · 收起后点输入框上方「连接设置」继续", Modifier.weight(1f), color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
                 OutlinedButton(onClick = onClose, shape = RoundedCornerShape(12.dp)) { Text("回到聊天") }
             }
         }

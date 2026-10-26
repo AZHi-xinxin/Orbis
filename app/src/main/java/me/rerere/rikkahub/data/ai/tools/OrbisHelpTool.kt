@@ -17,7 +17,7 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.orbis.soup.createSoupTools
 
 internal const val ORBIS_HELP_TOOL_NAME = "orbis_help"
-internal const val ORBIS_MANUAL_VERSION = "orbis-help/24"
+internal const val ORBIS_MANUAL_VERSION = "orbis-help/25"
 private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide")
 private const val manualHostUi = "同一 App 内的原 Orbis 本地主页、原生聊天、同一 AI 的会话历史/搜索/重命名/分组、外观 DIY、本地动态星图演示与独立 ST 元信息连接设置、TechHub 和多 AI 群聊独立入口，以及模型/MCP/语音/文件/工作区/技能配置入口。"
 private const val manualStarMapDemoScope = "星点为本地合成数据，仅展示示例时间、类型与无标签关联，不读取真实 ST 记忆。"
@@ -259,7 +259,7 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
     }
     return Tool(
         name = ORBIS_HELP_TOOL_NAME,
-        description = "Read Orbis host features, registered tool categories and limits on demand. Read-only; no network. Not needed every turn.",
+        description = "按需查询Orbis操作指南、工具目录和限制；只读离线，无需每轮查。用户说给我装ST/连接ST，先查topic=guide,chapter=st_install；人类点击路径查human_operations，Rootfs查workspace_setup。全文只在查询时返回。",
         parameters = { InputSchema.Obj(properties = buildJsonObject {
             put("topic", buildJsonObject {
                 put("type", "string")

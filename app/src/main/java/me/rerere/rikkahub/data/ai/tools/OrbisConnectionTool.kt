@@ -6,44 +6,64 @@ import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.orbis.integration.*
 
 internal fun connectionProposalTool(store: SettingsStore, owner: String,
-    onSetupNeeded: (ConnectionProposal) -> Unit = {}) = Tool(
+    onSetupNeeded: (ConnectionProposal?, Boolean) -> Unit = { _, _ -> }) =
+    createConnectionProposalTool(owner, { store.settingsFlow.value }, { transform -> store.update(transform) }, onSetupNeeded)
+
+internal fun createConnectionProposalTool(owner: String, snapshot: () -> Settings,
+    update: suspend ((Settings) -> Settings) -> Boolean,
+    onSetupNeeded: (ConnectionProposal?, Boolean) -> Unit = { _, _ -> }) = Tool(
     name = "orbis_propose_connection",
-    description = "填写自己的原生连接。action=propose：kind=tts_openai/model_openai/mcp_http/mcp_sse，name、endpoint(完整HTTP(S)，无密钥/查询参数)、auth=none/bearer；model_openai需model，tts_openai需model/voice。没有密钥的配置直接保存，MCP默认关闭，只需人类在AI连接建议页开启；需要密钥时人类只在该页填key，可选择以后允许；需要补填或开启时，宿主会在发起请求的聊天打开对应配置页。已授权同地址可继续调整。不要传密钥或脚本。action=status返回当前助手配置状态、原生ID及MCP是否开启。saved不是连接成功。用orbis_configure选择模型/音色或测试连接；备份使用orbis_backup。pending无需等待，继续正常回复。",
+    description = "填写自己的原生连接。action=propose：kind=tts_openai/model_openai/mcp_http/mcp_sse，name、endpoint(完整HTTP(S)，无密钥/查询参数)、auth=none/bearer；model_openai需model，tts_openai需model/voice。没有密钥的配置直接保存，MCP默认关闭，只需人类在AI连接建议页开启；需要密钥时人类只在该页填key，可选择以后允许；需要补填或开启时，宿主会在发起请求的聊天打开对应配置页。已授权同地址可继续调整。不要传密钥或脚本。action=open_setup(id可选)重新打开填写框，关闭后可反复显式打开；action=show_guide(id可选)先打开保存部署密钥的指引。credential_file可填当前工作区/workspace/内的部署凭据文件路径，原生页仅供人类查看和保存，工具不读取或返回密钥。新模型默认支持工具；supports_tools可明确关闭，supports_images依据真实上游能力填写。action=status返回当前助手配置状态、原生ID及MCP是否开启。saved不是连接成功。用orbis_configure选择模型/音色或测试连接；备份使用orbis_backup。pending无需等待，继续正常回复。",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
-        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("propose", "status").map(::JsonPrimitive))) })
-        listOf("kind", "name", "endpoint", "model", "voice", "auth").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
+        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("propose", "status", "open_setup", "show_guide").map(::JsonPrimitive))) })
+        listOf("id", "kind", "name", "endpoint", "model", "voice", "auth", "credential_file").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
+        listOf("supports_tools", "supports_images").forEach { key -> put(key, buildJsonObject { put("type", "boolean") }) }
     }, required = listOf("action")) }, needsApproval = { false }, execute = { args ->
         val result = try { withTimeout(3000) { withContext(Dispatchers.IO) {
             val a = args.jsonObject
-            require(a.keys.all { it in setOf("action", "kind", "name", "endpoint", "model", "voice", "auth") })
+            require(a.keys.all { it in setOf("action", "id", "kind", "name", "endpoint", "model", "voice", "auth", "supports_tools", "supports_images", "credential_file") })
             fun string(key: String, default: String = "") = a[key]?.let { value ->
                 (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("invalid_field")
             } ?: default
+            fun flag(key: String): Boolean? = a[key]?.let { value ->
+                (value as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: error("invalid_field")
+            }
             val action = string("action")
-            require(action in setOf("propose", "status"))
-            check(!store.settingsFlow.value.init && store.settingsFlow.value.assistants.any { it.id.toString() == owner })
-            var receipt = store.settingsFlow.value.connectionProposals
+            require(action in setOf("propose", "status", "open_setup", "show_guide"))
+            check(!snapshot().init && snapshot().assistants.any { it.id.toString() == owner })
+            var receipt = snapshot().connectionProposals
             if(action == "propose") {
-                val draft = ConnectionDraft(string("kind"), string("name"), string("endpoint"), string("model"), string("voice"), string("auth", "bearer")).normalized()
+                val draft = ConnectionDraft(string("kind"), string("name"), string("endpoint"), string("model"), string("voice"), string("auth", "bearer"), flag("supports_tools"), flag("supports_images"), string("credential_file")).normalized()
                 val before = receipt.firstOrNull { it.id == draft.id(owner) }
-                check(store.update { ConnectionProposalRules.stageKeyless(it, owner, draft).also { updated -> receipt = updated.connectionProposals } })
+                check(update { ConnectionProposalRules.stageKeyless(it, owner, draft).also { updated -> receipt = updated.connectionProposals } })
                 val proposal = receipt.single { it.owner == owner && it.id == draft.id(owner) }
                 val needsAttention = proposal.status == "pending" || proposal.status == "changed_in_settings" ||
-                    (proposal.draft.kind.startsWith("mcp_") && store.settingsFlow.value.mcpServers
+                    (proposal.draft.kind.startsWith("mcp_") && snapshot().mcpServers
                         .any { it.id.toString() == proposal.id && !it.commonOptions.enable })
                 if (needsAttention && (before == null || before.draft != proposal.draft || before.status != proposal.status))
-                    onSetupNeeded(proposal)
+                    onSetupNeeded(proposal, action == "show_guide" || (action == "propose" && proposal.draft.credentialFile.isNotBlank()))
+            }
+            if (action in setOf("open_setup", "show_guide")) {
+                require(a.keys.all { it in setOf("action", "id") })
+                val scoped = receipt.filter { it.owner == owner && it.status != "rejected" }
+                val proposal = if (string("id").isNotBlank()) scoped.single { it.id == string("id") }
+                    else scoped.firstOrNull { it.status == "pending" } ?: scoped.lastOrNull()
+                check(proposal != null || action == "show_guide") { "proposal_missing" }
+                onSetupNeeded(proposal, action == "show_guide")
             }
             buildJsonObject {
                 put("ok", true)
+                put("ui_requested", action in setOf("open_setup", "show_guide"))
+                put("human_entry", "当前聊天输入框上方 → 连接设置；也可从右下角北斗导航 → 工具娱乐 → AI 连接建议打开")
                 put("proposals", JsonArray(receipt.filter { it.owner == owner }.map { p -> buildJsonObject {
                     put("id", p.id); put("name", p.draft.name); put("kind", p.draft.kind); put("status", p.status)
                     put("always_allowed", p.alwaysAllow); put("verified", false)
                     if (p.draft.kind == "model_openai") put("model_id", ConnectionProposalRules.connectionModelId(p.id).toString())
-                    if (p.draft.kind.startsWith("mcp_")) put("enabled", store.settingsFlow.value.mcpServers
+                    if (p.draft.kind.startsWith("mcp_")) put("enabled", snapshot().mcpServers
                         .firstOrNull { it.id.toString() == p.id }?.commonOptions?.enable == true)
                 } }))
                 put("note", "配置建议已处理；pending仅在设置页待确认，不用等候。已保存也不代表连接测试成功。可以继续当前回复。")

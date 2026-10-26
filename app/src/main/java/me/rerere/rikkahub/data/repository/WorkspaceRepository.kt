@@ -61,6 +61,12 @@ class WorkspaceRepository(
 
     suspend fun getById(id: String): WorkspaceEntity? = dao.getById(id)
 
+    internal suspend fun readiness(id: String?) = withContext(Dispatchers.IO) {
+        val workspace = id?.let { dao.getById(it) }
+        me.rerere.rikkahub.data.orbis.integration.workspaceReadiness(workspace,
+            workspace?.let { manager.hasRootfs(it.root) } == true)
+    }
+
     /** Native configuration workspace. The caller supplies a host-derived UUID, never a model path. */
     internal suspend fun createNative(id: String, name: String): WorkspaceEntity = withContext(Dispatchers.IO) {
         Uuid.parse(id)
