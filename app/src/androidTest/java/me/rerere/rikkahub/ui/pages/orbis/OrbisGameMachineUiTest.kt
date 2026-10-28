@@ -106,15 +106,59 @@ class OrbisGameMachineUiTest {
                 GameContent(OrbisGameRepository(MemoryStorage()), mini, null, "未选择 AI", { error("No model") }, { shown.value = false })
             }
         } } }
-        compose.onNodeWithTag("orbis-game-list").performScrollToNode(hasText("旧模板"))
-        compose.onNodeWithText("旧模板").performClick()
-        compose.onNodeWithText("保留旧局，返回").assertIsDisplayed().performTouchInput { click(center) }
+        compose.onNodeWithTag("html-resume-${old.id}").assertIsDisplayed().performClick()
+        compose.onNodeWithText("保留记录，回游戏库").assertIsDisplayed().performTouchInput { click(center) }
         compose.onNodeWithText("旧局尚不能恢复").assertDoesNotExist()
-        compose.onNodeWithText("保留旧局，返回").assertDoesNotExist()
-        compose.onNodeWithText("旧模板").assertDoesNotExist()
-        compose.runOnIdle { assertFalse(shown.value) }
+        compose.onNodeWithText("保留记录，回游戏库").assertDoesNotExist()
+        compose.onNodeWithTag("html-resume-${old.id}").assertIsDisplayed().performClick()
+        compose.onNodeWithText("旧局尚不能恢复").assertIsDisplayed()
+        compose.onNodeWithText("复制给 AI 的修复说明").performClick()
+        compose.onNodeWithText("已复制，回聊天粘贴给 AI").assertExists()
+        compose.onNodeWithText("保留记录，回游戏库").performClick()
+        compose.runOnIdle { assertTrue(shown.value) }
         compose.runOnIdle { assertEquals(listOf(old), mini.readSnapshot().sessions) }
         compose.onNodeWithTag("orbis-html-game").assertDoesNotExist()
+    }
+
+    @Test fun savedMatchCanResumeFromTopAndHistoryAfterLeavingAndReopeningTheGameMachine() {
+        val storage = MemoryStorage()
+        val mini = OrbisMiniGameRepository(storage)
+        val game = mini.install("synthetic", "AI", "可续局合成游戏", "", """
+            <!doctype html><html><body><script>
+            const r = JSON.parse(OrbisGame.loadState());
+            if (r.ok && r.state) {
+              OrbisGame.saveState(JSON.stringify({revision:r.revision,
+                state:{turn:r.state.turn,visits:(r.state.visits||0)+1}}));
+              document.body.appendChild(document.createTextNode('turn '+r.state.turn));
+            }
+            </script></body></html>
+        """.trimIndent())
+        val first = mini.start(game.id); mini.saveCheckpoint(first.id, 0, "{\"turn\":3}")
+        val newer = mini.start(game.id); mini.saveCheckpoint(newer.id, 0, "{\"turn\":7}")
+        val current = mutableStateOf(mini)
+        val native = OrbisGameRepository(MemoryStorage())
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
+            androidx.compose.runtime.key(current.value) {
+                GameContent(native, current.value, null, "AI", { error("No model") }, {})
+            }
+        } } }
+        compose.onNodeWithTag("html-resume-${first.id}").performScrollTo().performClick()
+        compose.waitUntil(15000) { mini.state.value.sessions.first().checkpointRevision == 2L }
+        compose.onNodeWithText("回游戏库").performClick()
+        compose.onNodeWithTag("orbis-game-list").performScrollToNode(hasTestTag("html-records-toggle"))
+        compose.onNodeWithTag("html-records-toggle").performClick()
+        compose.onNodeWithTag("html-history-resume-${first.id}").performScrollTo().performClick()
+        compose.waitUntil(15000) { mini.state.value.sessions.first().checkpointRevision == 3L }
+        compose.runOnIdle { current.value = OrbisMiniGameRepository(storage) }
+        compose.onNodeWithTag("html-resume-${first.id}").performScrollTo().performClick()
+        compose.waitUntil(15000) { current.value.state.value.sessions.first().checkpointRevision == 4L }
+        compose.runOnIdle {
+            val sessions = current.value.readSnapshot().sessions
+            assertEquals(listOf(first.id, newer.id), sessions.map { it.id })
+            assertEquals("{\"turn\":3,\"visits\":3}", sessions.first().checkpoint)
+            assertEquals("{\"turn\":7}", sessions.last().checkpoint)
+            assertTrue(sessions.all { it.finishedAt == null })
+        }
     }
 
     private class MemoryStorage : OrbisGameStorage {

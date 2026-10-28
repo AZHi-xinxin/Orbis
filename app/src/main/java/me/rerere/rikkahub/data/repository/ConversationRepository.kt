@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.repository
 
+import me.rerere.rikkahub.data.model.withMessageRecall
+
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
@@ -502,6 +504,21 @@ class ConversationRepository(
                 "event_message_missing_or_changed"
             }
         }
+    }
+
+    suspend fun saveMessageRecall(expected: Conversation, messageId: Uuid, role: me.rerere.ai.core.MessageRole): UIMessage = database.withTransaction {
+        val stored = conversationDAO.getConversationById(expected.id.toString())
+        check(stored != null && stored.assistantId == expected.assistantId.toString()) { "recall_owner_changed" }
+        me.rerere.rikkahub.data.model.requireCompactionEpoch(expected.compactionEpoch, stored.compactionEpoch)
+        val current = conversationEntityToConversation(stored, loadMessageNodes(stored.id))
+        val before = current.currentMessages.singleOrNull { it.id == messageId } ?: error("recall_message_missing")
+        check(before.role == role && expected.currentMessages.any { it.id == messageId && it.parts == before.parts }) { "recall_message_changed" }
+        val recalled = current.withMessageRecall(messageId, role)
+        recalled.messageNodes.zip(current.messageNodes).forEach { (next, old) ->
+            if (next != old) check(messageNodeDAO.updateMessages(stored.id, old.id.toString(), encodeMessageNodeMessages(next.messages)) == 1)
+        }
+        messageFtsManager.indexConversationInTransaction(recalled)
+        recalled.currentMessages.single { it.id == messageId }
     }
 
     /** Existing chats get a single-column update; their message tree and attachments are untouched. */

@@ -64,7 +64,7 @@ internal object AiConfigurationRules {
                 put("semantic_recall", assistant.orbisSemanticRecall)
             })
             put("mcp", JsonArray(settings.mcpServers.filter { it.id in assistant.mcpServers }.map { server -> buildJsonObject {
-                put("id", server.id.toString()); put("name", server.commonOptions.name.take(160))
+                put("id", server.id.toString()); put("name", server.commonOptions.displayTitle.take(160))
                 put("enabled", server.commonOptions.enable); put("tool_count", server.commonOptions.tools.count { it.enable })
             } }))
             put("backup_tool", "orbis_backup")

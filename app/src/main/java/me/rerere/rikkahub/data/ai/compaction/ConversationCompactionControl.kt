@@ -350,6 +350,7 @@ fun compactionReminder(estimatedTokens: Long, thresholdTokens: Int): UIMessage? 
             "这是宿主中性状态，不是用户发言或压缩命令；估算并非服务商精确计数，提醒阈值也不是模型硬上限。你可先自行记忆存档，再写自己的摘要并调用compact，也可直接写摘要并调用compact，或继续对话；是否及何时整理由你决定。记忆存档不是整理前置条件，也不要求先查询状态或由人类确认。宿主不会自动压缩，也不会代写摘要。",
         buildJsonObject {
             put(COMPACTION_REMINDER_MARKER, true)
+            put("request_only", true)
             put("source", "orbis_host")
             put("human_authored", false)
             put("instruction_authority", "none")

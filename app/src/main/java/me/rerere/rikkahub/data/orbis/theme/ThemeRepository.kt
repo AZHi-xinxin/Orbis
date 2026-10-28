@@ -110,6 +110,7 @@ internal class ThemeRepository(private val root: File) {
     }
     fun dismissPending() = synchronized(lock) { save(snapshot().copy(pending = null)) }
     /** Native human control only; never exposed as a tool action or accepted theme property. */
+    fun followHumanFont(enabled: Boolean) = synchronized(lock) { save(snapshot().copy(followHumanFont = enabled)) }
     fun allowAiApply(allowed: Boolean) = synchronized(lock) {
         save(snapshot().copy(allowAiApply = allowed, autoApply = if(allowed) snapshot().autoApply else emptySet()))
     }

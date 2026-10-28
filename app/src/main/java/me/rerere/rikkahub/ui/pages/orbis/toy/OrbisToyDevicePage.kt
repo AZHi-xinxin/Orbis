@@ -44,6 +44,8 @@ import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 /** Single device-management entry. Opening the page never requests a permission or scans. */
 @Composable
 fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit = {}) {
+    var showLab by remember { mutableStateOf(false) }
+    if (showLab) { OrbisToyLabPage(onBack = { showLab = false }); return }
     val context = LocalContext.current
     val controller = remember(context) { OrbisToyController.get(context) }
     val state by controller.state.collectAsState()
@@ -64,6 +66,15 @@ fun OrbisToyDevicePage(onBack: () -> Unit, toolSettings: @Composable () -> Unit 
         }) { insets ->
             LazyColumn(Modifier.fillMaxSize().padding(insets), contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("自定义设备调试台", style = MaterialTheme.typography.titleMedium)
+                            Text("为自己的设备检查连接、试调、记录，也可交给 AI 一起配置。原直连保留在下方。")
+                            OutlinedButton(onClick = { showLab = true }) { Text("进入独立调试台") }
+                        }
+                    }
+                }
                 item { toolSettings() }
                 item {
                     Card(Modifier.fillMaxWidth()) {

@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.orbis.body
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import me.rerere.ai.ui.*
+import me.rerere.rikkahub.data.model.orbisVoiceNoteMetadata
 import me.rerere.rikkahub.data.orbis.activities.ActivityStorage
 import org.junit.Assert.*
 import org.junit.Test
@@ -45,6 +46,78 @@ class BodyStatusRuntimeTest {
         assertEquals("休息", h.toText())
     }
 
+    private fun voiceNote(text: String, original: String = text) = UIMessagePart.Audio(
+        "file:///not-opened-by-body/voice.wav", orbisVoiceNoteMetadata(text, original))
+
+    @Test fun humanVoiceNoteMatchesTypedAndLiveCallInputInTheSameTurn() = runBlocking {
+        for (parts in listOf(listOf(UIMessagePart.Text("休息")), listOf(voiceNote("休息")))) {
+            val f = Fixture(this)
+            val h = f.human().copy(parts = parts)
+            f.record(h)
+            assertTrue(f.turn(h)!!.report.contains("\"心情\"：58"))
+            assertEquals(parts, h.parts)
+        }
+        val call = Fixture(this)
+        val turn = call.human().copy(orbisVoiceCallKind = "turn")
+        call.record(turn)
+        assertTrue(call.turn(turn)!!.report.contains("\"心情\"：58"))
+    }
+
+    @Test fun mixedTextAndVoiceNotesUseFinalTranscriptsAndExistingConcentrationRules() = runBlocking {
+        val f = Fixture(this)
+        val h = f.human().copy(parts = listOf(UIMessagePart.Text("先休息"),
+            voiceNote("再休息", original = "不要使用的识别原稿"), voiceNote("然后休息休息休息休息")))
+        val text = Fixture(this)
+        val equivalent = text.human("先休息\n再休息\n然后休息休息休息休息")
+        f.record(h); text.record(equivalent)
+        assertEquals(text.turn(equivalent)!!.report, f.turn(h)!!.report)
+        assertEquals(3, f.repo.snapshot().auto.marks.size)
+    }
+
+    @Test fun voiceNoteMetadataAndUntranscribedAudioCannotInventTriggerWords() = runBlocking {
+        for (part in listOf(
+            voiceNote("没有触发词", original = "休息"),
+            voiceNote("", original = "休息"),
+            voiceNote("普通内容").copy(metadata = JsonObject(orbisVoiceNoteMetadata("普通内容") +
+                buildJsonObject { put("acoustic_v1", "休息"); put("private_hint", "休息") })),
+            UIMessagePart.Audio("file:///休息.wav", buildJsonObject { put("transcript", "休息") }),
+        )) {
+            val f = Fixture(this)
+            val h = f.human().copy(parts = listOf(part))
+            f.record(h)
+            assertTrue(f.turn(h)!!.report.contains("\"心情\"：50"))
+            assertTrue(f.repo.snapshot().auto.marks.isEmpty())
+        }
+    }
+
+    @Test fun voiceNoteRetryAndProcessRecoveryDoNotReplayOrReadAnEditedTranscript() = runBlocking {
+        val f = Fixture(this)
+        val h = f.human().copy(parts = listOf(voiceNote("休息")))
+        f.record(h)
+        val first = f.turn(h)!!.report
+        assertTrue(first.contains("\"心情\"：58"))
+        val revision = f.repo.snapshot().revision
+        f.clock = f.clock.copy(activeMs = 60_000, wallMs = 1_060_000)
+        val edited = h.copy(parts = listOf(voiceNote("休息休息休息")))
+        f.record(edited)
+        assertEquals(first, f.turn(edited)!!.report)
+        assertEquals(first, f.newRuntime(this).begin("owner", "chat", listOf(edited))!!.report)
+        assertEquals(revision, f.repo.snapshot().revision)
+    }
+
+    @Test fun assistantVoiceNotesToolResultsAndSyntheticNotesCannotTriggerHumanRules() = runBlocking {
+        val f = Fixture(this)
+        val h = f.human().copy(parts = listOf(voiceNote("休息")))
+        val before = f.storage.text
+        for (invalid in listOf(h.copy(role = me.rerere.ai.core.MessageRole.ASSISTANT),
+            h.copy(isSynthetic = true), h.copy(orbisVoiceCallKind = "opening"),
+            h.copy(parts = listOf(UIMessagePart.Tool("id", "orbis_voice_note", "{}", output = h.parts))))) {
+            f.record(invalid)
+            assertNull(f.turn(invalid))
+        }
+        assertEquals(before, f.storage.text)
+    }
+
     @Test fun retryAndRestartRecoverExactReceiptWithoutReplayingOrRefreshingDecay() = runBlocking {
         val f = Fixture(this); val h = f.human(); f.record(h)
         val first = f.turn(h)!!.report; val revision = f.repo.snapshot().revision
@@ -53,6 +126,41 @@ class BodyStatusRuntimeTest {
         assertEquals(first, f.turn(h)!!.report)
         assertEquals(first, f.newRuntime(this).begin("owner", "chat", listOf(h))!!.report)
         assertEquals(revision, f.repo.snapshot().revision)
+    }
+
+    @Test fun timestampPreferenceOffStillComputesAndRecoversOnlyThisAcceptedHuman() = runBlocking {
+        val f = Fixture(this)
+        val h = f.human().copy(orbisUserMessageTime = null)
+        val untouched = f.storage.text
+        // An old or otherwise unaccepted input must not be scanned by begin.
+        assertNull(f.newRuntime(this).begin("owner", "chat", listOf(h)))
+        assertEquals(untouched, f.storage.text)
+        f.record(h)
+        val first = f.turn(h)!!.report
+        assertTrue(first.contains("\"心情\"：58"))
+        val revision = f.repo.snapshot().revision
+        f.clock = f.clock.copy(activeMs = 60_000)
+        f.record(h)
+        assertEquals(first, f.turn(h)!!.report)
+        assertEquals(first, f.newRuntime(this).begin("owner", "chat", listOf(h))!!.report)
+        assertEquals(revision, f.repo.snapshot().revision)
+        assertNull(h.orbisUserMessageTime)
+    }
+
+    @Test fun timestampFreeSyntheticEventsAndAssistantMessagesNeverTriggerBodyRules() = runBlocking {
+        val f = Fixture(this)
+        val h = f.human().copy(orbisUserMessageTime = null)
+        val invalid = listOf(
+            h.copy(isSynthetic = true),
+            h.copy(orbisEvent = OrbisEventMetadata("record", "external", "event", 1)),
+            h.copy(role = me.rerere.ai.core.MessageRole.ASSISTANT),
+            h.copy(role = me.rerere.ai.core.MessageRole.SYSTEM),
+            h.copy(orbisVoiceCallKind = "opening"),
+            h.copy(parts = h.parts + UIMessagePart.Tool("id", "synthetic", "{}")),
+        )
+        val before = f.storage.text
+        invalid.forEach { f.record(it); assertNull(f.turn(it)) }
+        assertEquals(before, f.storage.text)
     }
 
     @Test fun subsequentNewHumanGetsFreshValuesWhilePreviousTurnRemainsFrozen() = runBlocking {

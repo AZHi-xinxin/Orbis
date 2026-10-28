@@ -265,7 +265,7 @@ private fun McpServerItem(
         val fullText = error.detail ?: error.message
         AlertDialog(
             onDismissRequest = { errorDetail = null },
-            title = { Text(item.commonOptions.name.ifBlank { "MCP" }) },
+            title = { Text(item.commonOptions.displayTitle.ifBlank { "MCP" }) },
             text = {
                 SelectionContainer {
                     Text(
@@ -362,7 +362,7 @@ private fun McpServerItem(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = item.commonOptions.name,
+                            text = item.commonOptions.displayTitle,
                             style = MaterialTheme.typography.titleLarge,
                         )
                         val dotColor =
@@ -574,6 +574,13 @@ private fun McpCommonOptionsConfigure(
         }
 
         HorizontalDivider()
+
+        FormItem(label = { Text("显示名称") }, description = { Text("可用中文，不改变已有工具标识。") }) {
+            OutlinedTextField(value = config.commonOptions.displayName,
+                onValueChange = { title -> if (title.length <= 60 && title.none(Char::isISOControl))
+                    update(config.clone(commonOptions = config.commonOptions.copy(displayName = title))) },
+                placeholder = { Text(config.commonOptions.name) }, modifier = Modifier.fillMaxWidth())
+        }
 
         // 名称输入框
         FormItem(

@@ -215,7 +215,7 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         val committed = storedTail.associateBy { it.id }
         val restoredWithFavorites = restoredTail.map { node ->
             val restored = favorites[node.id]?.let { node.copy(isFavorite = it) } ?: node
-            committed[node.id]?.let { preserveEventPresentation(restored, it) } ?: restored
+            committed[node.id]?.let { me.rerere.rikkahub.data.model.preserveMessageRecalls(preserveEventPresentation(restored, it), it) } ?: restored
         }
         GenerationCheckpointRecovery(record.handle(),
             if (changed) persisted.copy(messageNodes = persisted.messageNodes.take(record.prefixCount) +
@@ -549,7 +549,10 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         legacyModelReceipt: Boolean = false): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val out = DigestOutputStream(NullOutput, digest)
-        nodes.forEach { node ->
+        nodes.forEach { original ->
+            // Recall changes visibility only. Payload, tool receipts and branch identity remain protected.
+            val node = if (original.messages.none { it.orbisRecalled || it.orbisQuoteRecalled }) original
+                else original.copy(messages = original.messages.map { it.copy(orbisRecalled = false, orbisQuoteRecalled = false) })
             val protectedNode = if (!normalizeEventPresentation || node.messages.none { it.orbisEvent != null }) node
             else node.copy(messages = node.messages.map { message ->
                 message.orbisEvent?.let { event -> message.copy(orbisEvent = event.copy(read = false, collapsed = true)) }

@@ -36,9 +36,10 @@ import me.rerere.rikkahub.utils.toMessageTimeString
 @Composable
 internal fun rememberChatMessageTextStyle(user: Boolean = false): TextStyle {
     val display = LocalSettings.current.displaySetting
-    val theme = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body
+    val selectedTheme = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current
+    val theme = selectedTheme?.body
     val themeType = (if(user) theme?.bubbles?.user else theme?.bubbles?.assistant)?.typography ?: theme?.typography
-    val family = themeType?.fontFamily?.let { me.rerere.rikkahub.ui.pages.orbis.themeFont(it) }
+    val family = themeType?.fontFamily?.takeUnless { selectedTheme?.followHumanFont != false || it == "default" }?.let { me.rerere.rikkahub.ui.pages.orbis.themeFont(it) }
         ?: LocalChatFontFamily.current ?: rememberChatFontFamily(display)
     return LocalTextStyle.current.copy(
         fontSize = (if (BuildConfig.ORBIS_ENABLED) 14.sp else LocalTextStyle.current.fontSize) * display.fontSizeRatio * (themeType?.fontSizeScale ?: 1f),

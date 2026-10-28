@@ -24,6 +24,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisHelpToolTest {
+    @Test fun `recall human click path is query only and no tool enablement is implied`() {
+        val chapter = orbisManualChapters.single { it.id == "message_recall" }
+        val text = chapter.sections.joinToString { it.text }
+        assertTrue(text.contains("当前会话配置")); assertTrue(text.contains("本地工具"))
+        assertTrue(text.contains("默认关闭")); assertTrue(text.contains("20"))
+        assertTrue(text.contains("success:true/false")); assertTrue(text.contains("不计人类消息"))
+        val help = createOrbisHelpTool(emptyList(), build)
+        assertFalse(run(help).toString().contains("RECALL-AI-SECRET"))
+    }
+
     @Test fun retiredMemoryCapabilityIsNotAdvertised() {
         val help = createOrbisHelpTool(emptyList(), build)
         val reference = content(help, "tools").toString()
@@ -148,7 +158,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/25", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/26", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)

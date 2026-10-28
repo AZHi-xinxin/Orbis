@@ -22,6 +22,7 @@ fun presentMessageUsage(usage: TokenUsage?, durationMillis: Long?): MessageUsage
         else "${NumberFormat.getIntegerInstance(Locale.CHINA).format(value)} token"
     val cached = when {
         usage.cachedTokens < 0 -> "记录异常，暂不能确认"
+        usage.cachedTokens == 0 && usage.cachedTokensReported -> "0 token（服务明确报告未命中）"
         usage.cachedTokens == 0 -> "尚不能确认（记录值为 0，也可能未提供）"
         else -> units(usage.cachedTokens)
     }

@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.service
 
+import me.rerere.rikkahub.data.model.withMessageRecall
+import me.rerere.rikkahub.data.model.recallableAiReplies
+
 import android.app.Application
 import android.util.Log
 import android.util.AtomicFile
@@ -3189,6 +3192,7 @@ class ChatService(
                         snapshot.id.toString(), voiceCallId = voiceRecord?.id, allowAmbientCallBinding = false,
                         imageSourceMessageIds = sourceIds,
                         readActiveConversation = { requireOwner(); lane.state.value },
+                        recallOwnMessage = { requireOwner(); recallAiMessage(snapshot.id, assistant.id, it) },
                         onWorkshopAccepted = { accepted -> lane.registerWorkshopReturn(owner, accepted) })
                 }
             }.map { definition -> definition.copy(execute = { arguments ->
@@ -3226,6 +3230,9 @@ class ChatService(
             var current = snapshot
             var completed = false
             var stopped: OrbisGatewayTerminalReason? = null
+            val notifyChat = voiceRecord == null && !snapshot.isConsultation
+            val senderName = assistant.name.ifBlank { model.displayName }
+            var notificationEnded = false
             val generationId = Uuid.random()
             val foregroundStarted = runCatching { ChatGenerationForegroundService.acquire(context,
                 generationId, session.id) }.getOrDefault(false)
@@ -3268,6 +3275,12 @@ class ChatService(
                                 generationVoiceOwnership(message, baselineIds, voiceRecord?.id, "turn")
                             })
                             publish(current)
+                            if (notifyChat) current.currentMessages.lastOrNull()?.let { message ->
+                                if (message.role == MessageRole.ASSISTANT && message.privateRoomPublicReplyText() != null) {
+                                    appEventBus.tryEmit(AppEvent.ChatGenerationUpdate(
+                                        snapshot.id, message.privateRoomSafePresentation(), senderName))
+                                }
+                            }
                         }
                         is GenerationChunk.DurableBoundary -> chunk.result.completeExceptionally(
                             IllegalStateException("独立续聊不接管旧轮的保存确认"))
@@ -3290,7 +3303,21 @@ class ChatService(
                         else -> Unit
                     }
                 }
+                requireOwner()
+                if (notifyChat) {
+                    // Independent continuations bypass handleMessageComplete. They must still
+                    // reach the same foreground/permission-aware system notification subscriber.
+                    val reply = completedSpeechReply(current, completed && stopped == null)
+                    appEventBus.emit(AppEvent.ChatGenerationEnded(snapshot.id, senderName,
+                        reply?.text?.take(50)?.trim()))
+                    notificationEnded = true
+                }
             } finally {
+                // Cancellation/error only clears progress. A superseded owner must not clear
+                // the next turn's progress or announce its partial reply as completed.
+                if (notifyChat && !notificationEnded && lane.isCurrent(owner)) {
+                    appEventBus.tryEmit(AppEvent.ChatGenerationEnded(snapshot.id, senderName, null))
+                }
                 if (foregroundStarted) ChatGenerationForegroundService.release(context, generationId)
             }
             requireOwner()
@@ -4219,7 +4246,8 @@ class ChatService(
                             snapshot.id.toString(), voiceCallId = voiceRecord?.id, allowAmbientCallBinding = false,
                             imageSourceMessageIds = me.rerere.rikkahub.data.ai.tools.toolApprovalSourceMessageIds(
                                 snapshot.currentMessages, target.message.id),
-                            readActiveConversation = { lane.state.value })
+                            readActiveConversation = { lane.state.value },
+                            recallOwnMessage = { recallAiMessage(snapshot.id, assistant.id, it) })
                     }
                     definition = tools.firstOrNull { it.name == pending.toolName }
                 }
@@ -4459,6 +4487,7 @@ class ChatService(
                     voiceCallId = voiceCallId,
                     allowAmbientCallBinding = allowAmbientCallBinding,
                     imageSourceMessageIds = sourceIds,
+                    recallOwnMessage = { recallAiMessage(conversationId, assistant.id, it) },
                 )
                 }
             } catch (error: InvalidMcpServerNamesException) {
@@ -6010,6 +6039,38 @@ class ChatService(
         }
         if (changed) dispatchNextQueuedMessage(conversationId)
     }
+
+    suspend fun recallHumanMessage(conversationId: Uuid, messageId: Uuid) {
+        withContext(Dispatchers.Main.immediate) {
+            initializeConversation(conversationId, selectAssistant = false)
+            val session = getOrCreateSession(conversationId)
+            session.orbisPromptEditMutex.withLock {
+                check(!session.manualContextWriteInProgress) { "正在整理上下文，请稍后撤回。" }
+                val lane = session.humanContinuation.value
+                val current = lane?.state?.value ?: session.state.value
+                conversationRepo.saveMessageRecall(current, messageId, MessageRole.USER)
+                if (lane != null) lane.acceptRecall(messageId, MessageRole.USER)
+                else updateConversation(conversationId, current.withMessageRecall(messageId, MessageRole.USER))
+            }
+        }
+    }
+
+    private suspend fun recallAiMessage(conversationId: Uuid, assistantId: Uuid, messageId: Uuid): Boolean =
+        withContext(Dispatchers.Main.immediate) {
+            val session = getOrCreateSession(conversationId)
+            session.orbisPromptEditMutex.withLock {
+                val lane = session.humanContinuation.value
+                val current = lane?.state?.value ?: session.state.value
+                check(current.assistantId == assistantId && !current.isConsultation)
+                check(settingsStore.settingsFlow.value.getAssistantById(assistantId)?.localTools?.contains(
+                    me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.MessageRecall) == true)
+                check(current.recallableAiReplies().any { it.id == messageId })
+                conversationRepo.saveMessageRecall(current, messageId, MessageRole.ASSISTANT)
+                if (lane != null) lane.acceptRecall(messageId, MessageRole.ASSISTANT)
+                else updateConversation(conversationId, current.withMessageRecall(messageId, MessageRole.ASSISTANT))
+                true
+            }
+        }
 
     suspend fun deleteToolRecord(conversationId: Uuid, messageId: Uuid, toolCallId: String) =
         editToolRecord(conversationId, me.rerere.rikkahub.data.model.OrbisToolRecordEdit(messageId, toolCallId, restore = false))

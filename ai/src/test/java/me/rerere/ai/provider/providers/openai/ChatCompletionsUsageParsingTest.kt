@@ -5,6 +5,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.merge
+import me.rerere.ai.provider.stream.SseEvent
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.util.KeyRoulette
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -17,6 +19,15 @@ import org.junit.Test
  * Unit tests for ChatCompletionsAPI token usage parsing.
  */
 class ChatCompletionsUsageParsingTest {
+
+    @Test fun `stream cache explicit zero overrides previous usage but omission does not`() {
+        val decoder = ChatCompletionsStreamDecoder()
+        fun parse(raw: String) = (decoder.accept(SseEvent(data = """{"usage":$raw,"choices":[]}"""))
+            .chunks.single() as StreamChunk.Usage).usage
+        val previous = TokenUsage(promptTokens = 100, cachedTokens = 90)
+        assertEquals(0, previous.merge(parse("""{"prompt_cache_hit_tokens":0}""")).cachedTokens)
+        assertEquals(90, previous.merge(parse("""{"completion_tokens":1}""")).cachedTokens)
+    }
 
     private lateinit var api: ChatCompletionsAPI
 

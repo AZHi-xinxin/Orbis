@@ -37,7 +37,7 @@ import me.rerere.rikkahub.data.orbis.theme.*
 import me.rerere.rikkahub.ui.components.message.OrbisMessageBubble
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 
-internal data class ChatTheme(val body: ThemePackage, val image: String?, val onImageError: (() -> Unit)? = null, val assets: Map<String, String> = emptyMap())
+internal data class ChatTheme(val body: ThemePackage, val image: String?, val onImageError: (() -> Unit)? = null, val assets: Map<String, String> = emptyMap(), val followHumanFont: Boolean = true)
 internal val LocalChatTheme = staticCompositionLocalOf<ChatTheme?> { null }
 internal fun themeFont(name: String) = when (name) {
     "serif", "NotoSerifSC" -> FontFamily.Serif
@@ -60,14 +60,14 @@ internal fun themeFont(name: String) = when (name) {
                 val state = store.snapshot()
                 val body = state.resolve() ?: return@runCatching null
                 body.assets.forEach { check(store.asset(it).isFile) }
-                ChatTheme(body, body.background.asset?.let { store.asset(it).absolutePath }, assets = body.assets.associateWith { store.asset(it).absolutePath }, onImageError = {
+                ChatTheme(body, body.background.asset?.let { store.asset(it).absolutePath }, followHumanFont = state.followHumanFont, assets = body.assets.associateWith { store.asset(it).absolutePath }, onImageError = {
                     scope.launch(Dispatchers.IO) { runCatching { state.active?.let(store::renderFailed) } }
                 })
             }.getOrNull()
         }
     }
     CompositionLocalProvider(LocalChatTheme provides theme,
-        LocalChatFontFamily provides (theme?.body?.typography?.fontFamily?.let(::themeFont) ?: LocalChatFontFamily.current)) {
+        LocalChatFontFamily provides (theme?.takeUnless { it.followHumanFont }?.body?.typography?.fontFamily?.takeUnless { it == "default" }?.let(::themeFont) ?: LocalChatFontFamily.current)) {
         ThemeMotionProvider(theme?.body?.let { listOf(it.bubbles.assistant,it.bubbles.user).any { b -> b.drawing?.layers.orEmpty().any { layer -> layer.motion != null } } } == true, content)
     }
 }
@@ -140,6 +140,15 @@ internal fun themeFont(name: String) = when (name) {
                     Text("允许它创建并切换新主题，随时可关闭。", color = colors.mutedInk, style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(state.allowAiApply, enabled = !busy, onCheckedChange = { allowed -> task { store.allowAiApply(allowed) } }, modifier = Modifier.testTag("theme-ai-auto-apply"))
+            }
+        }
+        Surface(color = colors.accent.copy(alpha = .05f), shape = RoundedCornerShape(22.dp)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("字体跟随我的设置", style = MaterialTheme.typography.titleMedium)
+                    Text("开启后，AI 气泡也使用你选择的聊天字体；选择系统默认即可恢复手机字体。关闭才使用 AI 主题指定的字体。", style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(state.followHumanFont, enabled = !busy, onCheckedChange = { task { store.followHumanFont(it) } }, modifier = Modifier.testTag("theme-follow-human-font"))
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

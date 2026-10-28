@@ -46,6 +46,7 @@ fun SettingAboutPage() {
         LazyColumn(Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item("community") { OrbisCommunityCard() }
+            item("support") { OrbisSupportCard() }
             item("identity") {
                 Column(Modifier.fillMaxWidth().padding(vertical = 18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

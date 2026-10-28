@@ -53,8 +53,11 @@ class WorkspaceVM(
 
     fun delete(workspace: WorkspaceEntity) {
         viewModelScope.launch {
-            terminalSessionManager.closeWorkspace(workspace.root)
-            repository.delete(workspace.id)
+            try {
+                terminalSessionManager.closeWorkspace(workspace.root)
+                repository.delete(workspace.id)
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) { error.value = e.message ?: "工作区未删除" }
         }
     }
 }

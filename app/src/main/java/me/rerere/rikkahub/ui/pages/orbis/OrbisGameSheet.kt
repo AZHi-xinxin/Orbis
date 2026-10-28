@@ -56,12 +56,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -163,6 +165,7 @@ internal fun GameContent(
     var htmlGame by remember { mutableStateOf<OpenHtmlGame?>(null) }
     var htmlCrashed by remember { mutableStateOf(false) }
     var htmlRestartChoice by remember { mutableStateOf<OrbisMiniGameSession?>(null) }
+    var repairGuideCopied by remember { mutableStateOf(false) }
     var htmlRecordsExpanded by rememberSaveable { mutableStateOf(false) }
     var nativeRecordsExpanded by rememberSaveable { mutableStateOf(false) }
     var htmlRecordsPage by rememberSaveable { mutableStateOf(0) }
@@ -179,6 +182,7 @@ internal fun GameContent(
     val gameListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val colors = OrbisTheme.colors
+    val clipboard = LocalClipboardManager.current
     val lifecycleOwner = LocalLifecycleOwner.current
     fun stopModel() {
         modelAttempt++
@@ -208,7 +212,10 @@ internal fun GameContent(
             finally { if (attempt == modelAttempt) { modelBusy = false; modelJob = null } }
         }
     }
-    fun leaveBoard() { stopModel(); viewedId = null; htmlGame = null; htmlRestartChoice = null; modelError = null; detailsExpanded = false }
+    fun leaveBoard() {
+        stopModel(); viewedId = null; htmlGame = null; htmlRestartChoice = null; modelError = null; detailsExpanded = false
+        scope.launch { gameListState.scrollToItem(0) }
+    }
     fun perform(action: () -> Unit, onSuccess: () -> Unit = {}) {
         if (busy) return
         busy = true
@@ -233,7 +240,7 @@ internal fun GameContent(
             modelCallLimit = callLimit,
         ) }, { viewedId = repository.state.value.active?.id; modelError = null; detailsExpanded = false })
     }
-    fun startHtml(gameId: String) {
+    fun startHtml(gameId: String, sessionId: String? = null) {
         if (busy) return
         busy = true
         saveFailed = false
@@ -242,11 +249,12 @@ internal fun GameContent(
                 // Same monitor as the repository mutations: source and session revision are atomic.
                 val opened = withContext(Dispatchers.IO) { synchronized(miniRepository) {
                     val before = miniRepository.readSnapshot()
-                    val pending = before.sessions.lastOrNull { it.gameId == gameId && it.finishedAt == null }
+                    val pending = if (sessionId == null) before.sessions.lastOrNull { it.gameId == gameId && it.finishedAt == null }
+                        else before.sessions.single { it.id == sessionId && it.gameId == gameId && it.finishedAt == null }
                     val currentSource = before.games.single { it.id == gameId }
                     if (pending != null && (pending.checkpoint == null || pending.gameSha256 != currentSource.sha256))
                         return@synchronized pending to null
-                    val session = miniRepository.openSession(gameId)
+                    val session = miniRepository.openSession(gameId, sessionId)
                     val source = miniRepository.readSnapshot().games.single {
                         it.id == session.gameId && it.sha256 == session.gameSha256
                     }
@@ -255,6 +263,7 @@ internal fun GameContent(
                 htmlCrashed = false
                 detailsExpanded = false
                 htmlRestartChoice = opened.first
+                repairGuideCopied = false
                 htmlGame = opened.second
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) { saveFailed = true }
@@ -263,17 +272,26 @@ internal fun GameContent(
     }
     htmlRestartChoice?.let { previous ->
         AlertDialog(onDismissRequest = { htmlRestartChoice = null }, title = { Text("旧局尚不能恢复") },
-            text = { Text(if (previous.checkpoint == null)
-                "这份游戏没有保存可恢复的局面。旧局仍保留，你可以先返回，或明确结束旧局后重新开始。新游戏可使用本地进度保存接口。"
-                else "这份游戏的源码已更新，旧进度保留，但不能直接放进新版游戏。你可以先返回，或结束旧局后重新开始。") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (previous.checkpoint == null)
+                    "这份游戏只留下了未结束记录，没有保存盘面，因此无法恢复上次进度。返回后，这局仍会列在游戏库顶部的「待继续」。请让写游戏的 AI 补上保存和恢复能力，之后的新局才能续玩。"
+                    else "游戏已经更新，旧存档不能直接用于新版。返回后仍可在游戏库顶部的「待继续」找到这局；请让写游戏的 AI 检查版本兼容，或明确结束旧局再开始。")
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString("请检查你写的小游戏「${previous.gameTitle}」（game_id=${previous.gameId}）的续局功能。" +
+                        "先查询 orbis_games_library，使用该 game_id、include_html=true、include_template=true 读取实际源码和进度接口说明。" +
+                        "每次打开先读取 OrbisGame.loadState()；只有 state=null 才初始化新局，初始化及每次有效操作后调用 saveState 并检查 ok/revision。" +
+                        "保存完整可恢复状态，失败时显示提示并暂停推进；更新前使用当前 sha256，保留原玩法与外观。" +
+                        "这局${if (previous.checkpoint == null) "从未保存盘面，不能宣称找回旧进度" else "存档与当前源码版本不一致，请先检查兼容性"}。"))
+                    repairGuideCopied = true
+                }) { Text(if (repairGuideCopied) "已复制，回聊天粘贴给 AI" else "复制给 AI 的修复说明") }
+            } },
             confirmButton = { TextButton(onClick = {
                 perform({ miniRepository.abandon(previous.id) }, { htmlRestartChoice = null; scope.launch { kotlinx.coroutines.yield(); startHtml(previous.gameId) } })
             }, enabled = !busy) { Text("结束旧局并重开") } },
             dismissButton = { TextButton(onClick = {
-                // This is a navigation action, not merely dismissal of a warning over the same page.
-                // Never abandon or recreate the stored session when the user chooses to leave.
-                leaveBoard(); onDismiss()
-            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("保留旧局，返回") } })
+                // Keep the user beside the persistent entry, not outside the entire game machine.
+                leaveBoard()
+            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("保留记录，回游戏库") } })
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) stopModel() }
@@ -429,6 +447,32 @@ internal fun GameContent(
                     }
                 }
             } else {
+                val pendingHtml = miniState.sessions.filter { it.finishedAt == null }.asReversed()
+                if (pendingHtml.isNotEmpty()) {
+                    item("pending-heading") {
+                        Text("待继续", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
+                        Text("未完成的游戏都在这里，不用到历史记录里找。", fontSize = 11.sp, color = colors.mutedInk)
+                    }
+                    items(pendingHtml, key = { "pending-${it.id}" }) { session ->
+                        val source = miniState.games.single { it.id == session.gameId }
+                        val resumable = session.checkpoint != null && session.gameSha256 == source.sha256
+                        Surface(shape = RoundedCornerShape(18.dp), color = colors.tintedPanel,
+                            modifier = Modifier.fillMaxWidth().testTag("html-pending-${session.id}")) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(session.gameTitle, fontWeight = FontWeight.SemiBold, color = colors.ink)
+                                Text(when {
+                                    resumable -> "进度已保存 · 可以接着玩"
+                                    session.checkpoint == null -> "只保留了记录 · 此游戏未保存盘面"
+                                    else -> "旧存档仍保留 · 游戏版本已更新"
+                                }, fontSize = 12.sp, color = colors.mutedInk)
+                                Button(onClick = { startHtml(session.gameId, session.id) }, enabled = !busy && !writeBlocked,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("html-resume-${session.id}")) {
+                                    Text(if (resumable) "继续这一局" else "查看旧局与处理办法")
+                                }
+                            }
+                        }
+                    }
+                }
                 item("built-in-game") {
                     Surface(shape = RoundedCornerShape(20.dp), color = colors.panel,
                         border = BorderStroke(1.dp, colors.border)) {
@@ -496,7 +540,16 @@ internal fun GameContent(
                                     (session.score?.let { " · $it 分" } ?: "") + (session.maxTile?.let { " · 最大方块 $it" } ?: "") +
                                     " · ${if (session.result == "abandoned") "主动结束" else "游戏上报 / 宿主计时"}",
                                 fontSize = 10.sp, color = colors.mutedInk)
-                            if (session.finishedAt == null) TextButton(onClick = { perform({ miniRepository.abandon(session.id) }) }, enabled = !busy) { Text("结束这局") }
+                            if (session.finishedAt == null) {
+                                val source = miniState.games.single { it.id == session.gameId }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { startHtml(session.gameId, session.id) }, enabled = !busy && !writeBlocked,
+                                        modifier = Modifier.testTag("html-history-resume-${session.id}")) {
+                                        Text(if (session.checkpoint != null && session.gameSha256 == source.sha256) "继续这一局" else "查看旧局与处理办法")
+                                    }
+                                    TextButton(onClick = { perform({ miniRepository.abandon(session.id) }) }, enabled = !busy && !writeBlocked) { Text("结束这局") }
+                                }
+                            }
                         }
                     }
                     GameHistoryPager(htmlHistory.index, htmlHistory.pages, "html-records") { htmlRecordsPage = it }

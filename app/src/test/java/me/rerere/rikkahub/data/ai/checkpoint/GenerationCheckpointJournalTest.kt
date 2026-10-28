@@ -24,6 +24,19 @@ import kotlin.uuid.Uuid
 
 /** Synthetic conversations and private temporary files only; no app, Room, model, or tools. */
 class GenerationCheckpointJournalTest {
+    @Test fun `recall flags survive crash recovery without changing protected payload`() {
+        val store = MemoryStore(); val j = journal(store); val original = base(); val h = j.begin(original)
+        val recalled = original.copy(messageNodes = original.messageNodes.map { node -> node.copy(
+            messages = node.messages.map { it.copy(orbisRecalled = true) }) })
+        val recovered = j.recover(recalled)!!
+        assertTrue(recovered.conversation.messageNodes.all { it.currentMessage.orbisRecalled })
+        val tampered = recalled.copy(messageNodes = recalled.messageNodes.mapIndexed { index, node ->
+            if (index == 0) node.copy(messages = node.messages.map { it.copy(parts = listOf(UIMessagePart.Text("tampered"))) }) else node
+        })
+        reject { j.recover(tampered) }
+        assertTrue(j.hasCheckpoint(original.id))
+    }
+
     @Test fun `contained baseline is acknowledged without replacing appended human turns`() {
         val store = MemoryStore(); val j = journal(store); val original = base(); j.begin(original)
         val current = original.copy(messageNodes = original.messageNodes + UIMessage.user("new independent input").toMessageNode() +

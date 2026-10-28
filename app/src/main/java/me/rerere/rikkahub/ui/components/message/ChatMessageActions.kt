@@ -292,6 +292,7 @@ fun ChatMessageActionsSheet(
     message: UIMessage,
     model: Model?,
     onDelete: () -> Unit,
+    onRecall: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onShare: () -> Unit,
     onFork: () -> Unit,
@@ -493,6 +494,11 @@ fun ChatMessageActionsSheet(
                 }
             }
 
+            if (onRecall != null && message.role == MessageRole.USER && !message.orbisRecalled) {
+                Card(onClick = { onDismissRequest(); onRecall() }, shape = MaterialTheme.shapes.medium) {
+                    Text("撤回", modifier = Modifier.fillMaxWidth().padding(20.dp), style = MaterialTheme.typography.titleMedium)
+                }
+            }
             // Delete
             Card(
                 onClick = {

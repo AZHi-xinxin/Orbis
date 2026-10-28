@@ -91,7 +91,8 @@ internal fun Conversation.applyToolRecordEdit(edit: OrbisToolRecordEdit, now: Lo
  * message metadata (translation, usage, etc.), but reject conflicting prose edits for a refresh.
  * Same-revision saves also cannot smuggle a deleted call back into parts.
  */
-internal fun preserveToolRecordEdits(incoming: MessageNode, committed: MessageNode): MessageNode {
+internal fun preserveToolRecordEdits(rawIncoming: MessageNode, committed: MessageNode): MessageNode {
+    val incoming = preserveMessageRecalls(rawIncoming, committed)
     if (incoming.id != committed.id) return incoming
     if (incoming === committed || incoming.messages === committed.messages ||
         committed.messages.none { it.toolRecordRevision != 0L }) return incoming
@@ -126,7 +127,7 @@ internal fun preserveToolRecordEdits(incoming: MessageNode, committed: MessageNo
 internal fun withCommittedToolRecordEdits(snapshot: Conversation, current: Conversation): Conversation {
     if (snapshot.id != current.id || snapshot.assistantId != current.assistantId) return snapshot
     if (snapshot === current || snapshot.messageNodes === current.messageNodes ||
-        current.messageNodes.none { node -> node.messages.any { it.toolRecordRevision != 0L } }) return snapshot
+        current.messageNodes.none { node -> node.messages.any { it.toolRecordRevision != 0L || it.orbisRecalled || it.orbisQuoteRecalled } }) return snapshot
     val known = current.messageNodes.associateBy { it.id }
     val merged = snapshot.messageNodes.mapPreservingIdentity { node ->
         known[node.id]?.let { preserveToolRecordEdits(node, it) } ?: node

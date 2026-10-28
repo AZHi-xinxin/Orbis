@@ -9,6 +9,7 @@ fun Conversation.quoteMessage(nodeId: kotlin.uuid.Uuid, messageId: kotlin.uuid.U
     check(!isConsultation) { "咨询室消息不能在普通聊天中引用。" }
     val message = messageNodes.singleOrNull { it.id == nodeId }?.currentMessage
         ?: error("原消息已不存在，请重新选择引用。")
+    check(!message.orbisRecalled) { "原消息已撤回，请取消这条引用。" }
     check(message.id == messageId) { "原消息的选中回答已改变，请重新选择引用。" }
     check(message.role in setOf(MessageRole.USER, MessageRole.ASSISTANT) &&
         message.orbisEvent == null && message.orbisVoiceCallKind !in setOf("begin", "opening", "archive", "summary", "ended_notice")) {

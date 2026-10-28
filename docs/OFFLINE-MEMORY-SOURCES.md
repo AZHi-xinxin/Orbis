@@ -12,18 +12,18 @@
 
 ## ONNX Runtime
 
-运行时由 Gradle 依赖 `com.microsoft.onnxruntime:onnxruntime-android:1.23.2` 提供，来源为 Microsoft 的 [ONNX Runtime v1.23.2](https://github.com/microsoft/onnxruntime/tree/v1.23.2)。依赖 POM 和该版本[许可证](https://github.com/microsoft/onnxruntime/blob/v1.23.2/LICENSE)声明 MIT；其[第三方声明](https://github.com/microsoft/onnxruntime/blob/v1.23.2/ThirdPartyNotices.txt)另外保留所涉及组件的声明，不能只写一个 MIT 标签替代它们。
+运行时由 Gradle 依赖 `com.microsoft.onnxruntime:onnxruntime-android:1.24.3` 提供，来源为 Microsoft 的 [ONNX Runtime v1.24.3](https://github.com/microsoft/onnxruntime/tree/v1.24.3)。依赖 POM 和该版本[许可证](https://github.com/microsoft/onnxruntime/blob/v1.24.3/LICENSE)声明 MIT；其[第三方声明](https://github.com/microsoft/onnxruntime/blob/v1.24.3/ThirdPartyNotices.txt)另外保留所涉及组件的声明，不能只写一个 MIT 标签替代它们。
 
-核对的原始 AAR 大小为 `30,241,654` 字节，SHA-256 为 `82048d1f462218adae4ba76477089ab0ba76093d84f733540066db1a8ba6b827`。已将固定版本的[原始许可与声明](../app/src/main/assets/licenses/onnxruntime/NOTICE.txt)作为 Orbis 资产随附。分发时仍需检查最终 APK，不能以 Maven POM 中的链接代替实际文件。
+核对的原始 AAR 大小为 `40,948,335` 字节，SHA-256 为 `67397e4a970e75617f765d2015ceaf911917e1d822276cfb5792744e8085cbce`。已将固定版本的[原始许可与声明](../app/src/main/assets/licenses/onnxruntime/NOTICE.txt)作为 Orbis 资产随附。分发时仍需检查最终 APK，不能以 Maven POM 中的链接代替实际文件。
 
 在 Orbis 支持的 ABI 中，本依赖新增以下原生库（AAR 使用 `jni/` 前缀，APK 使用 `lib/` 前缀）：
 
 | AAR 路径 | 原始字节数 | 原始 SHA-256 |
 | --- | ---: | --- |
-| `jni/arm64-v8a/libonnxruntime.so` | 19,347,616 | `e40f09d07dc53726b8bfbf48a7907673b8f86718a057655a62790a39874a7302` |
-| `jni/arm64-v8a/libonnxruntime4j_jni.so` | 100,648 | `2cc3f16ab527959a81b572adebcfb71a25ea4b8547c9b92d705b423e9c822d39` |
-| `jni/x86_64/libonnxruntime.so` | 23,181,616 | `972c17c056eaae946a415d9efdd8018b729639974df075e495f0092441478fb7` |
-| `jni/x86_64/libonnxruntime4j_jni.so` | 90,728 | `b8d1b251b7d5606cf5caa7db9738353c08efc4090ac90ca2aaab449bc263a10b` |
+| `jni/arm64-v8a/libonnxruntime.so` | 25,831,632 | `4d2318b3849abb8862133d3068fc7e807ed8b2671cc6d83657fff2fcb9e1caad` |
+| `jni/arm64-v8a/libonnxruntime4j_jni.so` | 111,976 | `5c032a6547e3c33671c07d885af59f1bddd92eb72c595ae8d80db5bbe3fdd2ef` |
+| `jni/x86_64/libonnxruntime.so` | 31,316,520 | `2328d9481be5869dd8c4be96eb57b38a0105db17f1fe696a903c02a0988f0bd9` |
+| `jni/x86_64/libonnxruntime4j_jni.so` | 100,424 | `c840cb9d07909d1f8cb72ff54307dcb30fb3699bc1a9836f45866a6f6368a6a6` |
 
 Android 构建可能对库做符号剥离，因此 AAR 原文件哈希不能直接当作最终 APK 哈希；应分别保存依赖来源和最终构建产物的校验记录。本项目没有宣称该第三方预编译运行时已由 Orbis 逐字节复现构建。
 

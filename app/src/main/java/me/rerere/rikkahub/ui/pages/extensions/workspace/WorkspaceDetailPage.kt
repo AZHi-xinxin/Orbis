@@ -399,6 +399,10 @@ private fun WorkspaceBasicPage(
         }
 
         item {
+            workspace?.let { StRuntimeCard(it) }
+        }
+
+        item {
             WorkspaceToolApprovalCard(
                 workspace = workspace,
                 onToolApprovalChange = onToolApprovalChange,

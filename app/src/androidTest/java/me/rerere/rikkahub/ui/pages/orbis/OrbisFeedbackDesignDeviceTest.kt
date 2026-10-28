@@ -11,6 +11,15 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import me.rerere.rikkahub.AppScope
+import me.rerere.rikkahub.data.datastore.Settings
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.ai.tools.createConnectionProposalTool
 import me.rerere.rikkahub.data.orbis.integration.*
 import me.rerere.rikkahub.data.orbis.health.*
 import me.rerere.rikkahub.testutil.createShellComposeRule
@@ -26,6 +35,50 @@ class OrbisFeedbackDesignDeviceTest {
         compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
             File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }
         }
+    }
+    @Test fun closePromptIsSeparateFromMinimizeAndDoesNotSubmitTypedCredential() {
+        val shown = mutableStateOf(true)
+        val proposal = ConnectionProposal("synthetic-owner", ConnectionDraft("mcp_http", "旧测试连接", "https://example.invalid/mcp"))
+        var saves = 0; var collapsed = 0; var dismissed = 0
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
+            if (shown.value) ConnectionProposalSheet(listOf(proposal), proposal, false, null,
+                { collapsed++; shown.value = false }, {}, false, { _, _, _, _ -> saves++ }, { _, _ -> }, {},
+                onDismissSetup = { dismissed++; shown.value = false })
+        } } }
+        compose.onNodeWithTag("connection-key").performTextInput("synthetic-unsaved")
+        compose.onNodeWithTag("connection-dismiss-setup").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("connection-proposals").assertDoesNotExist()
+        assertEquals(1, dismissed); assertEquals(0, collapsed); assertEquals(0, saves)
+    }
+    @Test fun aiClosesVisibleSheetWithoutVerificationAndCanReopenItAgain() = runBlocking {
+        val owner = Assistant(); val other = Assistant()
+        val proposal = ConnectionProposal(owner.id.toString(), ConnectionDraft("mcp_http", "旧测试连接", "https://example.invalid/mcp"))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = SettingsStore(context, AppScope().also { it.cancel() }).also {
+            it.settingsFlow.value = Settings(assistants = listOf(owner, other), connectionProposals = listOf(proposal))
+        }
+        val shown = mutableStateOf(true)
+        val tool = createConnectionProposalTool(owner.id.toString(), { store.settingsFlow.value },
+            { f -> store.settingsFlow.value = f(store.settingsFlow.value); true },
+            onSetupDismissed = { connectionSetupQueue.closeSetup(owner.id.toString(), it) },
+            onSetupNeeded = { _, _ -> shown.value = true })
+        compose.setContent { MaterialTheme { OrbisVisualTheme(darkTheme = false) {
+            if (shown.value) OrbisConnectionProposals(owner.id.toString(), { shown.value = false }, store = store)
+        } } }
+        compose.onNodeWithTag("connection-key").performTextInput("synthetic-unsaved")
+        connectionSetupQueue.closeSetup(other.id.toString())
+        compose.waitForIdle()
+        compose.onNodeWithTag("connection-proposals").assertIsDisplayed()
+        tool.execute(buildJsonObject { put("action", "dismiss_setup") })
+        compose.waitUntil(5000) { !shown.value }
+        compose.onNodeWithTag("connection-proposals").assertDoesNotExist()
+        assertTrue(store.settingsFlow.value.connectionProposals.single().setupDismissed)
+        assertFalse(store.settingsFlow.value.connectionProposals.single().setupCompleted)
+        tool.execute(buildJsonObject { put("action", "open_setup"); put("id", proposal.id) })
+        compose.onNodeWithTag("connection-proposals").assertIsDisplayed()
+        assertEquals("", compose.onNodeWithTag("connection-key").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+        assertTrue(store.settingsFlow.value.connectionProposals.single().setupPromptPending)
+        assertEquals(proposal, store.settingsFlow.value.connectionProposals.single())
     }
     @Test fun connectionCanMinimizeAndReopenWithoutLosingProposalOrSubmittingKey() {
         val shown=mutableStateOf(true)

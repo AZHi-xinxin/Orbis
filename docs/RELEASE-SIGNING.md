@@ -4,7 +4,7 @@ Orbis 的公开 Android 安装包使用独立、长期保留的发布签名；�
 
 - 应用包名：`org.orbis.agent`
 - 首次公开版本：`2.6.0`（版本代码 `231`）
-- 当前源码候选：`2.6.13`（版本代码 `276`）；正式下载版本以 GitHub Releases 的签名附件为准，不能从源码版本号推断 APK 已发布。
+- 当前源码版本：`2.6.14`（版本代码 `280`）；正式下载版本以 GitHub Releases 的签名附件为准，不能从源码版本号推断 APK 已发布。
 - 签名证书 SHA-256：`527b1f22ac8baebed936e98d77e3e05881752adc5a88af6aecfd012351f39258`
 
 APK 的文件摘要与证书摘要不是同一个值。每次发布的 APK 文件 SHA-256 见对应 GitHub Release 附带的 `SHA256SUMS.txt`；上面的证书摘要用于核对发布者签名。
@@ -43,7 +43,7 @@ python tools/verify_onnx_jni.py --aar <本次依赖解析所得的onnxruntime-an
 这是一道显式运行的本地验收步骤，不是已经部署的 CI。
 
 ONNX 1.20.0 的 JNI 包装库虽然与 Java 版本一致，仍只有 4 KB ELF 对齐；不能只核对主运行库。
-当前依赖整体固定到官方 `onnxruntime-android:1.23.2`，不混用不同版本的 Java 与 `.so`；包含上游 [JNI 16 KB 修复](https://github.com/microsoft/onnxruntime/pull/24947)。
+当前依赖整体固定到官方 `onnxruntime-android:1.24.3`，不混用不同版本的 Java 与 `.so`；包含上游 [JNI 16 KB 修复](https://github.com/microsoft/onnxruntime/pull/24947)。
 ELF／ZIP 静态检查通过不等于已经在 16 KB 内核真机上运行通过，报告须分别标明。
 
 还须运行优化成品里的真实离线推理（冷加载、重复调用、关闭重开），并回归首次索引、已有／损坏缓存、关闭召回、轻量模式、编辑删除及角色隔离。

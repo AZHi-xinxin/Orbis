@@ -26,6 +26,15 @@ internal object AiConfigurationChecks {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gate = Semaphore(2)
     private val ownerGates = ConcurrentHashMap<String, Mutex>()
+    private data class VerifiedTarget(val identity: Any, val at: Long)
+    private val verifiedTargets = ConcurrentHashMap<String, VerifiedTarget>()
+    fun proposalVerified(settings: Settings, proposal: ConnectionProposal): Boolean {
+        val kind = when(proposal.draft.kind) { "model_openai" -> "model"; "tts_openai" -> "tts"; else -> "mcp" }
+        val id = if (kind == "model") ConnectionProposalRules.connectionModelId(proposal.id).toString() else proposal.id
+        val previous = verifiedTargets["${proposal.owner}/$kind/$id"] ?: return false
+        return System.currentTimeMillis() - previous.at in 0..86_400_000 &&
+            runCatching { validateTarget(settings, proposal.owner, kind, id) == previous.identity }.getOrDefault(false)
+    }
     private val receipts = ConcurrentHashMap<String, JsonObject>()
     private val client by lazy { OkHttpClient.Builder().retryOnConnectionFailure(false)
         .followRedirects(false).followSslRedirects(false).callTimeout(35, TimeUnit.SECONDS).build() }
@@ -62,6 +71,8 @@ internal object AiConfigurationChecks {
             put("at", System.currentTimeMillis()); fields.forEach { (k, v) -> put(k, v) }
         }
         val queued = receipt("queued", true)
+        // A newer check supersedes an older success, including while running or if it fails.
+        verifiedTargets.remove("$owner/$probeKind/$id")
         receipts[owner] = queued
         scope.launch {
             try {
@@ -118,6 +129,8 @@ internal object AiConfigurationChecks {
                     }
                 }
                 check(validateTarget(store.settingsFlow.value, owner, probeKind, id) == identity) { "configuration_changed" }
+                if (verifiedTargets.size >= 100) verifiedTargets.clear()
+                verifiedTargets["$owner/$probeKind/$id"] = VerifiedTarget(identity, System.currentTimeMillis())
                 receipts[owner] = receipt("passed", true, result)
             } catch (e: TimeoutCancellationException) {
                 receipts[owner] = receipt("timeout", false)
@@ -155,7 +168,7 @@ internal object AiConfigurationChecks {
                     ?: error("mcp_not_owned")
                 check(server.commonOptions.enable) { "mcp_disabled" }
                 // Tool discovery updates tool schemas, not connection identity.
-                server.clone(commonOptions = server.commonOptions.copy(tools = emptyList()))
+                server.clone(commonOptions = server.commonOptions.copy(tools = emptyList(), displayName = ""))
             }
             "st_atlas" -> {
                 val provider = settings.providers.singleOrNull { it.id.toString() == id } ?: error("provider_missing")

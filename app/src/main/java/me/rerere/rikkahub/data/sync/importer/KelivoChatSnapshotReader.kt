@@ -83,7 +83,11 @@ internal class KelivoChatSnapshotReader private constructor(private val database
             "(reasoning_segments_json IS NOT NULL AND (typeof(reasoning_segments_json)!='text' OR length(CAST(reasoning_segments_json AS BLOB))>524288)) LIMIT 1")
         noRows("SELECT 1 FROM message_part_rows WHERE typeof(conversation_id)!='text' OR typeof(revision_id)!='text' OR " +
             "typeof(ordinal)!='integer' OR ordinal<0 OR typeof(kind)!='text' OR length(kind) NOT BETWEEN 1 AND 128 OR " +
-            "typeof(payload)!='text' OR length(CAST(payload AS BLOB))>524288 LIMIT 1")
+            "typeof(payload)!='text' LIMIT 1")
+        // Validate bytes before a cursor materializes payloads. The complete encoded node is
+        // checked during preview too, so source size alone can never admit an unpersistable row.
+        if (scalar("SELECT COALESCE(MAX(length(CAST(payload AS BLOB))),0) FROM message_part_rows") >
+            KelivoChatLimits.MAX_PART_BYTES) throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
         noRows("SELECT 1 FROM message_asset_rows WHERE typeof(conversation_id)!='text' OR typeof(revision_id)!='text' OR " +
             "typeof(asset_id)!='text' OR length(asset_id) NOT BETWEEN 1 AND 256 OR typeof(kind)!='text' LIMIT 1")
         noRows("SELECT id FROM conversation_rows GROUP BY id COLLATE BINARY HAVING COUNT(*)>1 LIMIT 1")

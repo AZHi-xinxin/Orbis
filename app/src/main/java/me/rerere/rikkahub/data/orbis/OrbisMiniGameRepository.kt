@@ -130,10 +130,13 @@ class OrbisMiniGameRepository(
     }
 
     /** Reopening is not a new match. Old sources without a checkpoint require an explicit choice. */
-    @Synchronized fun openSession(gameId: String): OrbisMiniGameSession {
+    @Synchronized fun openSession(gameId: String, sessionId: String? = null): OrbisMiniGameSession {
         val before = readSnapshot()
         val game = before.games.single { it.id == gameId }
-        val unfinished = before.sessions.lastOrNull { it.gameId == gameId && it.finishedAt == null } ?: return start(gameId)
+        // A history entry must resume that exact match, not whichever match happens to be latest.
+        val unfinished = if (sessionId == null) {
+            before.sessions.lastOrNull { it.gameId == gameId && it.finishedAt == null } ?: return start(gameId)
+        } else before.sessions.single { it.id == sessionId && it.gameId == gameId && it.finishedAt == null }
         check(unfinished.gameSha256 == game.sha256) { "game_source_changed_cannot_resume" }
         check(unfinished.checkpoint != null) { "game_checkpoint_unavailable" }
         return unfinished

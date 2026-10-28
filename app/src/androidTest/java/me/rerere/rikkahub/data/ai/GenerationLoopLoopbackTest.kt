@@ -1116,6 +1116,44 @@ class GenerationLoopLoopbackTest {
         }
     }
 
+    @Test fun voiceNoteBodyStatusReachesFirstRequestAndStaysFrozenThroughTools() = runBlocking<Unit> {
+        fixture(streaming = false, approval = false, expectedRequests = 2, batchWithEmptyResult = true) { f ->
+            val storage = object : ActivityStorage {
+                var value: String? = null
+                override fun read() = value
+                override fun write(text: String) { value = text }
+            }
+            var clock = BodyClock("synthetic", 0, 1_000_000)
+            val repo = BodyRepository(storage) { clock }
+            repo.define(BodyDefinition(listOf(BodyDimension("mood", "心情", halfLifeMinutes = 1.0)),
+                listOf(BodyRule("rest", mapOf("mood" to 8.0), listOf("synthetic"))), triggerMode = "auto"), 0, "define")
+            repo.activate(1, "activate"); repo.setRunning(true)
+            val runtime = BodyStatusRuntime(this, { BodyStatusOptions(it == f.assistantId.toString(), true) }, { repo })
+            f.bodyStatusRuntime = runtime
+            val conversation = Uuid.random()
+            val audio = UIMessagePart.Audio("file:///not-opened-by-body/voice.wav",
+                me.rerere.rikkahub.data.model.orbisVoiceNoteMetadata("synthetic rest"))
+            val source = f.initial.dropLast(1) + f.initial.last().copy(parts = listOf(audio))
+            runtime.recordHuman(f.assistantId.toString(), conversation.toString(), source.last())
+            f.afterToolExecution = { clock = clock.copy(activeMs = 60_000); repo.refresh() }
+            val final = f.collect(from = source, conversationId = conversation)
+            val requests = f.server.requests.toList()
+            assertEquals(2, requests.size)
+            val firstWire = requests.first().json.getValue("messages").jsonArray
+            val status = firstWire.map { it.jsonObject }.single { it.toString().contains("当前身体状态") }
+            assertEquals(JsonPrimitive("system"), status["role"])
+            assertTrue(status.toString().contains("58"))
+            assertEquals("[语音条转写] synthetic rest", wireText(firstWire.last().jsonObject.getValue("content")))
+            assertFalse(requests.first().encodedMessages.contains("voice.wav"))
+            assertEquals(firstWire, JsonArray(requests.last().json.getValue("messages").jsonArray.take(firstWire.size)))
+            assertEquals(1, Regex("当前身体状态").findAll(requests.last().encodedMessages).count())
+            assertEquals(1, repo.snapshot().auto.marks.size)
+            assertEquals(source, final.take(source.size))
+            assertFalse(final.toString().contains("当前身体状态"))
+            assertEquals(0, f.context.privateStorageAccesses.get())
+        }
+    }
+
     // The fixture has one authored text block. Orbis may append its existing model receipt;
     // assert that separately instead of confusing host metadata with the human's own text.
     private fun wireText(content: JsonElement): String = when (content) {

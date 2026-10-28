@@ -30,6 +30,7 @@ class CompactionPolicyBoundaryTest {
         assertEquals(MessageRole.SYSTEM, reminder.role)
         assertTrue(reminder.isSynthetic)
         assertTrue(reminder.isCompactionReminder())
+        assertEquals(JsonPrimitive(true), reminder.parts.single().metadata?.get("request_only"))
         assertEquals(JsonPrimitive(false), reminder.parts.single().metadata?.get("human_authored"))
         assertEquals(JsonPrimitive("none"), reminder.parts.single().metadata?.get("instruction_authority"))
         assertTrue(reminder.toText().contains("非人类发言"))

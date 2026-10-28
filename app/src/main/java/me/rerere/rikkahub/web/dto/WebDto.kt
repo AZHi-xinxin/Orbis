@@ -221,6 +221,7 @@ data class MessageDto(
     val modelId: String? = null,
     val usage: TokenUsage? = null,
     val translation: String? = null,
+    val recalled: Boolean = false,
     val orbisEvent: me.rerere.ai.ui.OrbisEventMetadata? = null,
 )
 
@@ -362,6 +363,7 @@ fun UIMessage.toDto(): MessageDto = privateRoomSafePresentation().let { safe -> 
     modelId = safe.modelId?.toString(),
     usage = safe.usage,
     translation = safe.translation,
+    recalled = safe.orbisRecalled,
     orbisEvent = safe.orbisEvent,
 ) }
 
@@ -374,7 +376,7 @@ internal fun Conversation.webPresentationError(error: Throwable): String =
 
 /** A text-only presentation must not overwrite the omitted private tool parts when edited. */
 internal fun Conversation.requireWebEditableMessage(messageId: Uuid) {
-    if (messageNodes.any { node -> node.messages.any { it.id == messageId && it.hasPrivateRoomToolContent() } }) {
+    if (messageNodes.any { node -> node.messages.any { it.id == messageId && (it.hasPrivateRoomToolContent() || it.orbisRecalled) } }) {
         throw ConflictException("隐私室操作不支持在普通聊天中编辑；原始记录已保留。")
     }
 }

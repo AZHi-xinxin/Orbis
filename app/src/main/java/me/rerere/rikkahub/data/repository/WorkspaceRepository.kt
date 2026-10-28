@@ -178,29 +178,32 @@ class WorkspaceRepository(
         onProgress: (RootfsInstallProgress) -> Unit = {},
     ): Boolean {
         val workspace = dao.getById(id) ?: return false
-        updateShellState(workspace, WorkspaceShellStatus.INSTALLING.name)
+        val runtimeLease = me.rerere.workspace.WorkspaceRuntimeLease.acquire(workspace.root)
         try {
-            // runInterruptible 让协程取消转成线程中断, 打断 install 内阻塞的下载/解压循环
-            runInterruptible(Dispatchers.IO) {
-                rootfsInstaller.install(workspace.root, url, onProgress)
+            updateShellState(workspace, WorkspaceShellStatus.INSTALLING.name)
+            try {
+                // runInterruptible 让协程取消转成线程中断, 打断 install 内阻塞的下载/解压循环
+                runInterruptible(Dispatchers.IO) {
+                    rootfsInstaller.install(workspace.root, url, onProgress)
+                }
+                updateShellState(workspace, WorkspaceShellStatus.READY.name)
+                return true
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) {
+                    restoreShellState(workspace)
+                }
+                throw e
+            } catch (e: InterruptedException) {
+                withContext(NonCancellable) {
+                    restoreShellState(workspace)
+                }
+                throw CancellationException("Rootfs install cancelled").also { it.initCause(e) }
+            } catch (e: Throwable) {
+                Log.e(TAG, "installRootfs failed: workspace=${workspace.id}, root=${workspace.root}, url=$url", e)
+                updateShellState(workspace, WorkspaceShellStatus.BROKEN.name)
+                throw e
             }
-            updateShellState(workspace, WorkspaceShellStatus.READY.name)
-            return true
-        } catch (e: CancellationException) {
-            withContext(NonCancellable) {
-                restoreShellState(workspace)
-            }
-            throw e
-        } catch (e: InterruptedException) {
-            withContext(NonCancellable) {
-                restoreShellState(workspace)
-            }
-            throw CancellationException("Rootfs install cancelled").also { it.initCause(e) }
-        } catch (e: Throwable) {
-            Log.e(TAG, "installRootfs failed: workspace=${workspace.id}, root=${workspace.root}, url=$url", e)
-            updateShellState(workspace, WorkspaceShellStatus.BROKEN.name)
-            throw e
-        }
+        } finally { runtimeLease.close() }
     }
 
     suspend fun listFiles(
@@ -363,12 +366,13 @@ class WorkspaceRepository(
 
     suspend fun delete(id: String): Boolean {
         val workspace = dao.getById(id) ?: return false
-        dao.deleteById(id)
-        withContext(Dispatchers.IO) {
-            manager.deleteWorkspace(workspace.root)
-        }
-        cleanupAssistantReferences(id)
-        return true
+        val lease = me.rerere.workspace.WorkspaceRuntimeLease.acquire(workspace.root)
+        try {
+            dao.deleteById(id)
+            withContext(Dispatchers.IO) { manager.deleteWorkspace(workspace.root) }
+            cleanupAssistantReferences(id)
+            return true
+        } finally { lease.close() }
     }
 
     private suspend fun cleanupAssistantReferences(workspaceId: String) {

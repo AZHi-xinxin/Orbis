@@ -12,7 +12,7 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
     val text: String = "#263342", val textSecondary: String = "#596879",
 )
 @Serializable internal data class ThemeTypography(
-    val fontFamily: String = "serif", val fontSizeScale: Float = 1f, val lineHeight: Float = 1.6f,
+    val fontFamily: String = "default", val fontSizeScale: Float = 1f, val lineHeight: Float = 1.6f,
     val weight: Int = 400, val italic: Boolean = false, val letterSpacing: Float = 0f,
 ) {
     fun validate() {
@@ -98,6 +98,6 @@ internal fun parseTheme(text: String): ThemePackage {
 @Serializable internal data class ThemeRef(val id: String, val revision: Int)
 @Serializable internal data class ThemeState(val schema: Int = 1, val entries: List<ThemeEntry> = emptyList(),
     val active: ThemeRef? = null, val previous: List<ThemeRef?> = emptyList(), val pending: ThemeRef? = null,
-    val autoApply: Set<String> = emptySet(), val allowAiApply: Boolean = false) {
+    val autoApply: Set<String> = emptySet(), val followHumanFont: Boolean = true, val allowAiApply: Boolean = false) {
     fun resolve(ref: ThemeRef? = active) = entries.firstOrNull { it.id == ref?.id }?.versions?.firstOrNull { it.revision == ref?.revision }?.body
 }

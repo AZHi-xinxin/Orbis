@@ -14,6 +14,15 @@ internal data class OrbisManualChapter(
 )
 
 internal val orbisManualChapters = listOf(
+    OrbisManualChapter("toy_lab", "自定义蓝牙设备调试台", "北斗导航 → 工具娱乐 → 蓝牙Toy → 自定义设备调试台", listOf("toy_lab", "toy_lab_stop"), listOf(
+        OrbisManualSection("人类和AI共同调试", me.rerere.rikkahub.data.orbis.toy.lab.TOY_LAB_GUIDE),
+    )),
+    OrbisManualChapter("message_recall", "消息撤回：人类和 AI 各自撤回", "自己的消息下方 ⋮ → 撤回；侧栏 → 顶部 ⋮ → 当前会话配置 → 本地工具", listOf("orbis_recall_message"), listOf(
+        OrbisManualSection("人类怎么撤回", "在手机或 Orbis Web 找到自己发出的那条消息，点消息下方三个点，再点‘撤回’。不限多少条，只能撤回当前对话自己的消息。成功后双方只看到‘该条消息已撤回’；复制、搜索、引用和后续模型输入不再提供这条原文。撤回不等于清空对话，不会撤回对方的消息。已发到上游的旧请求和另存的长期记忆不会被远程删除。"),
+        OrbisManualSection("开启 AI 撤回", "人类在聊天页打开会话侧栏，点顶部三个点，点‘当前会话配置’，进入‘本地工具’，找到‘允许 AI 撤回自己的消息’并打开，然后回原聊天发一条新消息。默认关闭，关闭时本轮不注册此工具。你先用 orbis_help(topic=tools) 查真实目录，看到 orbis_recall_message 才调用；不要声称能通过工具替人类开启权限。"),
+        OrbisManualSection("AI 调用与结果", "orbis_recall_message(recent_index=1) 撤回上一条 AI 回复；2 是再上一条，最多20。只数 AI 正文回复，不计人类消息及纯工具步骤；同一轮索引固定，重复撤回不会改指向。只返回 success:true/false，不返回原文。成功后人类端原位置显示‘此条消息已被对方撤回’；你仍读到自己的原文，末尾标明已撤回。不要在解释或新回复里复述撤回的原文；失败不要编造成功。"),
+    )),
+
     OrbisManualChapter("screen_share", "屏幕共享：一起看，画面不落盘", "聊天输入框左侧 ＋ → ＋ 能力 → 屏幕共享", listOf("orbis_screen_share_invite", "orbis_screen_peek_now", "orbis_screen_peek_back", "orbis_screen_share_records"), listOf(
         OrbisManualSection("开始与停止", "人类点输入框左侧 ＋ → ＋ 能力 → 屏幕共享 → 开始共享，或接受 AI 邀请；须授权悬浮窗和 Android 系统投影许可。只打开页面不会采集画面或开启麦克风；取消授权则不开始共享。右上小窗可拖动，箭头收进侧边，点标签展开。绿点表示近期采集正常，黄点等待，红点异常；点状态重试，不重放旧工具。正文只回显真实助手回复，麦克风和右下外放独立控制、默认关闭。关画面清空临时图，停止或锁屏结束共享。Orbis 不禁止截图，系统录屏可能结束投影，此时红窗可重新授权。受保护页面不能绕过。"),
         OrbisManualSection("说话与用量", "默认关麦，必须在人类控制页明确开启才使用既有 ASR/TTS；不采集影视内部音频。建议戴耳机。默认 30 秒看一张变化画面，频率可选 5、15、30、60、120 秒。高频会增加耗电和模型用量。浮窗文字始终发往共享发起助手的原窗口，不跟随其他聊天。"),

@@ -211,7 +211,7 @@ fun OrbisSettingsPage(
                                     border = BorderStroke(1.dp, colors.border.copy(alpha = .6f))) {
                                     Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(orbisSettingsLabel(server.commonOptions.name, "未命名服务"),
+                                        Text(orbisSettingsLabel(server.commonOptions.displayTitle, "未命名服务"),
                                             fontSize = 12.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.ink)
                                         Text(summary.configured + " · " + summary.selected, fontSize = 10.sp,
                                             lineHeight = 15.sp, color = colors.mutedInk)

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.orbis.privateroom
 
+import me.rerere.ai.ui.recallPresentation
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
@@ -84,7 +85,9 @@ fun UIMessage.hasPrivateRoomToolContent(): Boolean = privateRoomContentHidden ||
  * Clear flags only on this disposable presentation so downstream renderers do not hide it again.
  * This is a display boundary, not an encryption/secrecy promise; full original records remain stored.
  */
-fun UIMessage.privateRoomSafePresentation(): UIMessage = if (!hasPrivateRoomToolContent()) this else copy(
+fun UIMessage.privateRoomSafePresentation(): UIMessage = if (orbisRecalled) recallPresentation()
+    else if (orbisQuoteRecalled) copy(orbisQuote = null, orbisQuoteRecalled = false).privateRoomSafePresentation().copy(orbisQuoteRecalled = true)
+    else if (!hasPrivateRoomToolContent()) this else copy(
     privateRoomContentHidden = false,
     privateRoomPendingPresentation = false,
     parts = projectPublicParts(parts, includePlaceholder = true,
@@ -177,6 +180,6 @@ private fun publicReplyParts(part: UIMessagePart.Text, source: UIMessage?): List
 
 /** All branches, not just the selected branch; this projection must never be written back. */
 fun MessageNode.privateRoomSafePresentation(): MessageNode {
-    if (messages.none { it.hasPrivateRoomToolContent() }) return this
+    if (messages.none { it.hasPrivateRoomToolContent() || it.orbisRecalled || it.orbisQuoteRecalled }) return this
     return copy(messages = messages.map { it.privateRoomSafePresentation() })
 }

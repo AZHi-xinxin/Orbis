@@ -22,6 +22,12 @@ internal fun OrbisConnectionSetupPrompt(owner: String, conversation: String, set
             visible = connectionSetupQueue.take(owner, conversation, current.connectionProposals)
         }
     }
+    LaunchedEffect(settings.connectionProposals) {
+        val request = visible
+        if (request?.proposal != null && settings.connectionProposals.none { it.owner == owner && it.id == request.proposal.id && it.setupPromptPending }) {
+            connectionSetupQueue.dismiss(owner, conversation); visible = null
+        }
+    }
     visible?.let { request -> key(owner, conversation, request.proposal?.id ?: "guide") {
         OrbisConnectionProposals(owner, onClose = {
             connectionSetupQueue.dismiss(owner, conversation)

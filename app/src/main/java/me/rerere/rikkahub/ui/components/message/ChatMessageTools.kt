@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -311,7 +314,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChainOfThoughtScope.AskUserToolStep(
+internal fun ChainOfThoughtScope.AskUserToolStep(
     tool: UIMessagePart.Tool,
     loading: Boolean,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)?,
@@ -338,9 +341,9 @@ private fun ChainOfThoughtScope.AskUserToolStep(
     }
 
     // Track answers for text/single questions
-    val answers = remember { mutableStateMapOf<String, String>() }
+    var answers by androidx.compose.runtime.saveable.rememberSaveable(tool.toolCallId, tool.input) { mutableStateOf(mapOf<String, String>()) }
     // Track selected options for multi questions
-    val multiAnswers = remember { mutableStateMapOf<String, Set<String>>() }
+    var multiAnswers by androidx.compose.runtime.saveable.rememberSaveable(tool.toolCallId, tool.input) { mutableStateOf(mapOf<String, List<String>>()) }
 
     val firstQuestion = questions.firstOrNull()?.question ?: "..."
 
@@ -400,9 +403,9 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                                             verticalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {
                                             q.options.forEach { option ->
-                                                FilterChip(
+                                                AskUserChoice(
                                                     selected = answers[q.id] == option,
-                                                    onClick = { answers[q.id] = option },
+                                                    onClick = { answers = answers + (q.id to option) },
                                                     label = {
                                                         Text(
                                                             text = option,
@@ -422,14 +425,15 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                                             verticalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {
                                             q.options.forEach { option ->
-                                                val selectedSet = multiAnswers[q.id] ?: emptySet()
-                                                FilterChip(
+                                                val selectedSet = multiAnswers[q.id].orEmpty()
+                                                AskUserChoice(
+                                                    multiple = true,
                                                     selected = selectedSet.contains(option),
                                                     onClick = {
                                                         val current = selectedSet.toMutableSet()
                                                         if (current.contains(option)) current.remove(option)
                                                         else current.add(option)
-                                                        multiAnswers[q.id] = current
+                                                        multiAnswers = multiAnswers + (q.id to current.toList())
                                                     },
                                                     label = {
                                                         Text(
@@ -450,9 +454,9 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                                             verticalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {
                                             q.options.forEach { option ->
-                                                FilterChip(
+                                                AskUserChoice(
                                                     selected = answers[q.id] == option,
-                                                    onClick = { answers[q.id] = option },
+                                                    onClick = { answers = answers + (q.id to option) },
                                                     label = {
                                                         Text(
                                                             text = option,
@@ -467,7 +471,7 @@ private fun ChainOfThoughtScope.AskUserToolStep(
                                     // Free text input
                                     OutlinedTextField(
                                         value = answers[q.id] ?: "",
-                                        onValueChange = { answers[q.id] = it },
+                                        onValueChange = { answers = answers + (q.id to it) },
                                         modifier = Modifier.fillMaxWidth(),
                                         textStyle = MaterialTheme.typography.bodySmall,
                                         singleLine = false,
@@ -575,4 +579,24 @@ private fun ToolDenyReasonDialog(
             }
         }
     )
+}
+
+
+/** Large, full-row native touch targets; the indicator itself never steals the parent's click. */
+@Composable
+private fun AskUserChoice(selected: Boolean, multiple: Boolean = false, onClick: () -> Unit, label: @Composable () -> Unit) {
+    val interaction = if (multiple) Modifier.toggleable(selected, role = androidx.compose.ui.semantics.Role.Checkbox, onValueChange = { onClick() })
+        else Modifier.selectable(selected, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick)
+    androidx.compose.material3.Surface(
+        color = if(selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if(selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(interaction).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if(multiple) androidx.compose.material3.Checkbox(selected, onCheckedChange = null)
+            else androidx.compose.material3.RadioButton(selected, onClick = null)
+            androidx.compose.foundation.layout.Box(Modifier.weight(1f)) { label() }
+        }
+    }
 }

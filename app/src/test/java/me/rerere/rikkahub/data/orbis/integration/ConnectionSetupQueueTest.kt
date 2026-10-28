@@ -19,7 +19,8 @@ class ConnectionSetupQueueTest {
     }
     @Test fun deletedRejectedOrChangedProposalNeverOpensOldCredentialForm() {
         val p = proposal()
-        listOf(emptyList(), listOf(p.copy(status = "rejected")), listOf(p.copy(draft = p.draft.copy(model = "changed")))).forEach {
+        listOf(emptyList(), listOf(p.copy(status = "rejected")), listOf(p.copy(setupCompleted = true)), listOf(p.copy(setupDismissed = true)),
+            listOf(p.copy(draft = p.draft.copy(model = "changed")))).forEach {
             val queue = ConnectionSetupQueue(); queue.offer("chat", p)
             assertNull(queue.take("owner", "chat", it))
             assertTrue(queue.requests.value.isEmpty())
@@ -31,5 +32,25 @@ class ConnectionSetupQueueTest {
         assertEquals(2, queue.requests.value.size)
         queue.dismiss("owner", "chat")
         assertEquals("other-chat", queue.requests.value.single().conversation)
+    }
+    @Test fun closeAssistantDropsOldGuidesAndFormsButAllowsFutureExplicitReopen() {
+        val queue = ConnectionSetupQueue(); val p = proposal(); val other = proposal("other")
+        queue.offer("chat", p); queue.offer("chat2", p); queue.offerGuide("owner", "chat")
+        queue.offer("chat", other)
+        queue.closeSetup("owner")
+        assertEquals(listOf("other"), queue.requests.value.map { it.owner })
+        assertNull(queue.dismissals.value["owner"]!!.id)
+        assertNull(queue.dismissals.value["other"])
+        queue.offer("chat", p.copy(setupDismissed = true))
+        assertNull(queue.take("owner", "chat", listOf(p.copy(setupDismissed = true))))
+        queue.offer("chat", p)
+        assertEquals(p, queue.take("owner", "chat", listOf(p))!!.proposal)
+    }
+    @Test fun closeOneNoticeKeepsOtherConnectionsQueued() {
+        val queue = ConnectionSetupQueue(); val p = proposal(); val second = proposal(kind = "mcp_http")
+        queue.offer("chat", p); queue.offer("chat", second)
+        queue.closeSetup("owner", p.id)
+        assertEquals(second.id, queue.requests.value.single().proposal!!.id)
+        assertEquals(p.id, queue.dismissals.value["owner"]!!.id)
     }
 }

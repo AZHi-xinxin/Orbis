@@ -57,6 +57,12 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -251,6 +257,32 @@ class RouteActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (BuildConfig.ORBIS_ENABLED && !isFinishing && !CrashHandler.hasCrashed(this) &&
+            com.lover.connect.LcExternalRecoveryGate.isAllowed()) {
+            lifecycleScope.launch {
+                try {
+                    settingsStore.settingsFlow.first { !it.init }
+                    val workspaces = withContext(Dispatchers.IO) {
+                        org.koin.java.KoinJavaComponent.get<me.rerere.rikkahub.data.repository.WorkspaceRepository>(
+                            me.rerere.rikkahub.data.repository.WorkspaceRepository::class.java).listFlow().first()
+                    }
+                    if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) ||
+                        CrashHandler.hasCrashed(this@RouteActivity) ||
+                        !com.lover.connect.LcExternalRecoveryGate.isAllowed()) return@launch
+                    val settings = settingsStore.settingsFlow.value
+                    val owners = workspaces.filter { it.shellStatus == "READY" }.associate { workspace ->
+                        workspace.root to settings.assistants.filter { it.workspaceId?.toString() == workspace.id }
+                            .map { it.id.toString() }.toSet()
+                    }
+                    // Foreground-service creation belongs to this visible entry, never a boot
+                    // receiver or a model request (which may itself require the ST gateway).
+                    me.rerere.rikkahub.data.orbis.st.StRuntimeHost.get(this@RouteActivity).restoreOnAppOpen(owners)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+                } catch (_: Exception) {
+                    android.util.Log.w("OrbisStRuntime", "st_foreground_restore_unavailable")
+                }
+            }
+        }
         // Foreground entry can restore a previously enabled companion even after
         // force-stop/process death. Never enable a new service or bypass safe mode.
         if (!isFinishing && !CrashHandler.hasCrashed(this) &&

@@ -6,6 +6,8 @@ import kotlinx.coroutines.*
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.model.isOrbisVoiceNote
+import me.rerere.rikkahub.data.model.voiceNoteTranscript
 
 data class BodyStatusOptions(val enabled: Boolean, val keywordsEnabled: Boolean)
 
@@ -42,9 +44,7 @@ class BodyStatusRuntime(
                 if (current?.enabled != true) return@launch
                 val repo = open(owner)
                 result.complete(synchronized(repo) {
-                    repo.human(conversation, key.message,
-                        message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }.take(32000),
-                        current.keywordsEnabled)
+                    repo.human(conversation, key.message, message.bodyHumanText(), current.keywordsEnabled)
                     // A duplicate from a fork must not borrow the original window's state.
                     if (repo.receiptSeq("human:${key.message}") != null) repo.statusForHuman(conversation, key.message)
                     else repo.viewSnapshot().let { state ->
@@ -102,8 +102,22 @@ class BodyStatusTurn internal constructor(val report: String, private val enable
 }
 
 private fun UIMessage.isBodyHuman(): Boolean = role == MessageRole.USER && !isSynthetic &&
-    orbisEvent == null && orbisUserMessageTime != null && getTools().isEmpty() &&
+    // recordHuman is called only for newly accepted input; begin recovers an exact receipt.
+    // The optional model-facing timestamp is a display preference, not proof of human input.
+    orbisEvent == null && getTools().isEmpty() &&
     (orbisVoiceCallKind == null || orbisVoiceCallKind == "turn")
+
+/** Read accepted content, not provider projections: their labels/acoustics are not human words.
+ * A voice note keeps the confirmed transcript in its audio part. Never re-transcribe the file,
+ * use the discarded original transcript, or scan assistant tool output as human input.
+ */
+private fun UIMessage.bodyHumanText(): String = parts.mapNotNull { part ->
+    when (part) {
+        is UIMessagePart.Text -> part.text
+        is UIMessagePart.Audio -> part.takeIf { it.isOrbisVoiceNote() }?.voiceNoteTranscript()
+        else -> null
+    }
+}.joinToString("\n").take(32000)
 
 /** Exact message receipt, exact conversation and historical rule version. No stale window fallback. */
 internal fun BodyRepository.statusForHuman(conversation: String, message: String): String? = synchronized(this) {

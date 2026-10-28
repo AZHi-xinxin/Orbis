@@ -48,6 +48,22 @@ class OrbisGameLibraryToolsTest {
         val detailed = call(f.tools[1], """{"include_html":true,"game_id":"${game.id}"}""")
         assertEquals(game.html, detailed.getValue("games").jsonArray.single().jsonObject.getValue("html").jsonPrimitive.content)
     }
+    @Test fun `library distinguishes unfinished records from actual resumable progress without exposing state`() {
+        val f = Fixture(); f.install(); val game = f.repo.readSnapshot().games.single()
+        f.repo.start(game.id)
+        val saved = f.repo.start(game.id)
+        f.repo.saveCheckpoint(saved.id, 0, "{\"private_state\":\"not_in_tool_response\"}")
+        fun status() = call(f.tools[1]).getValue("games").jsonArray.single().jsonObject
+        assertEquals(2, status().getValue("unfinished_sessions").jsonPrimitive.int)
+        assertEquals(1, status().getValue("resumable_sessions").jsonPrimitive.int)
+        assertEquals(1, status().getValue("sessions_without_checkpoint").jsonPrimitive.int)
+        assertFalse(call(f.tools[1]).toString().contains("not_in_tool_response"))
+        assertTrue(call(f.tools[1]).getValue("progress_bridge").jsonPrimitive.content.contains("saveState"))
+        f.repo.install("ai", "synthetic", "Updated", "", "changed", game.id, game.sha256)
+        assertEquals(0, status().getValue("resumable_sessions").jsonPrimitive.int)
+        assertEquals(1, status().getValue("sessions_with_changed_source").jsonPrimitive.int)
+        assertEquals("{\"private_state\":\"not_in_tool_response\"}", f.repo.readSnapshot().sessions.last().checkpoint)
+    }
     @Test fun `result flows from host session into same records tool with game filtering`() {
         val f = Fixture(); f.install(); val game = f.repo.readSnapshot().games.single()
         val session = f.repo.start(game.id); f.repo.finish(session.id, "win", 5)

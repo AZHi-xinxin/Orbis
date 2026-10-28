@@ -202,7 +202,36 @@ class KelivoChatImporterDeviceTest {
     }
     @Test fun oversizedPartIsRejectedByAggregateBeforeCursorMaterialization() = runBlocking {
         assertRejected(fixture { it.execSQL("UPDATE message_part_rows SET payload=? WHERE revision_id='a1' AND kind='text'",
-            arrayOf("x".repeat(600 * 1024))) })
+            arrayOf("x".repeat(KelivoChatLimits.MAX_PART_BYTES + 1))) })
+    }
+    @Test fun longToolHistoryPassesPreviewAndImportsWithoutTruncationOrExecution() = runBlocking {
+        val longText = "中🙂".repeat(80 * 1024)
+        val fixture = fixture(formatVersion = 3) {
+            it.execSQL("UPDATE message_part_rows SET payload=? WHERE revision_id='a1' AND kind='tool_call'", arrayOf(longText))
+        }
+        val before = hash(fixture.database)
+        val sink = Sink()
+        val importer = KelivoChatImporter(context, sink)
+        val preview = importer.inspect(fixture.archive)
+        assertEquals(1, importer.importSelected(fixture.archive, assistant, setOf("c"), preview.fingerprint).imported)
+        val answer = sink.saved.values.single().currentMessages.last()
+        assertEquals("[Kelivo 历史工具记录；不会执行或恢复授权]\n$longText", (answer.parts[1] as UIMessagePart.Text).text)
+        assertTrue(answer.getTools().isEmpty())
+        assertEquals(before, hash(fixture.database))
+        assertEquals(1, importer.importSelected(fixture.archive, assistant, setOf("c"), preview.fingerprint).skipped)
+    }
+    @Test fun encodedNodeOverflowIsReportedAsCapacityAndNeverCommits() = runBlocking {
+        val fixture = fixture {
+            it.execSQL("UPDATE message_part_rows SET payload=? WHERE revision_id='a1' AND kind='text'",
+                arrayOf("\"".repeat(400 * 1024)))
+        }
+        val sink = Sink()
+        val importer = KelivoChatImporter(context, sink)
+        try { importer.inspect(fixture.archive); fail("encoded overflow") }
+        catch (failure: ArchiveReadException) { assertEquals(ArchiveFailure.NODE_LIMIT, failure.reason) }
+        try { importer.importSelected(fixture.archive, assistant, setOf("c"), hash(fixture.archive)); fail("encoded overflow") }
+        catch (failure: DeepSeekImportException) { assertEquals(ArchiveFailure.NODE_LIMIT, failure.failureReason) }
+        assertEquals(0, sink.writes)
     }
     @Test fun orphanAndDuplicatePartOrderingAreRejected() = runBlocking {
         assertRejected(fixture { it.execSQL("INSERT INTO message_part_rows VALUES ('c','missing',0,'text','orphan')") })

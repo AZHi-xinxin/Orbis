@@ -21,6 +21,7 @@ fun UIMessage.privateRoomAutomaticSpeechText(): String? =
 
 /** No visual placeholder, Reasoning or nested tool output becomes generated prose or speech. */
 fun UIMessage.privateRoomPublicReplyText(): String? {
+    if (orbisRecalled) return null
     val visibleParts = if (hasPrivateRoomToolContent()) privateRoomPublicParts(parts, includePlaceholder = false) else parts
     return visibleParts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
         .takeIf { it.isNotBlank() }

@@ -692,6 +692,11 @@ private fun ChatPageContent(
                         vm.deleteMessage(it)
                     }
                 },
+                onRecall = { message -> scope.launch {
+                    try { vm.recallMessage(message) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) { toaster.show(error.message ?: "撤回未成功，请稍后重试", type = ToastType.Error) }
+                } },
                 onEventPresentation = { edit -> vm.saveOrbisEventPresentation(conversation.id, edit) },
                 onDeleteToolRecord = { messageId, toolCallId ->
                     scope.launch {

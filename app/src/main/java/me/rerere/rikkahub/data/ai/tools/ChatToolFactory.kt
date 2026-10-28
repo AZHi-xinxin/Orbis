@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import me.rerere.rikkahub.data.model.recallableAiReplies
+
 import android.util.Log
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +84,7 @@ class ChatToolFactory(
         imageSourceMessageIds: Set<kotlin.uuid.Uuid>? = null,
         onWorkshopAccepted: ((me.rerere.rikkahub.data.orbis.workshop.WorkshopJob) -> Unit)? = null,
         readActiveConversation: (suspend () -> me.rerere.rikkahub.data.model.Conversation?)? = null,
+        recallOwnMessage: (suspend (kotlin.uuid.Uuid) -> Boolean)? = null,
     ): List<Tool> = buildList {
         if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null) {
             if (settings.aiGlobalObservation) add(observationWindowsTool(
@@ -95,10 +98,26 @@ class ChatToolFactory(
                     else queue.offer(conversationId, proposal, guide)
                 }
             })
-            add(orbisSelfConfigurationTool(settingsStore, assistant.id.toString(), context, mcpManager, workspaceRepository))
+            var stRuntimeWorkspaceForRun: String? = null
+            add(orbisSelfConfigurationTool(settingsStore, assistant.id.toString(), context, mcpManager, workspaceRepository,
+                stRuntimeWorkspaceForRun = { stRuntimeWorkspaceForRun }))
             hostWorkspaceId(assistant, consultationReferenceOnly)?.let { workspaceId ->
                 val owner = assistant.id.toString()
                 fun currentBinding() = settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.workspaceId?.toString() == workspaceId
+                val stHost = me.rerere.rikkahub.data.orbis.st.StRuntimeHost.get(context)
+                val stWorkspace = workspaceRepository.getById(workspaceId)
+                if (stWorkspace != null && currentBinding() && stHost.enabled(stWorkspace.root)) {
+                    stRuntimeWorkspaceForRun = workspaceId
+                    add(createOrbisStRuntimeTool(
+                        allowed = { currentBinding() && stHost.enabled(stWorkspace.root) &&
+                            workspaceRepository.getById(workspaceId)?.let {
+                                it.root == stWorkspace.root && it.shellStatus == me.rerere.workspace.WorkspaceShellStatus.READY.name
+                            } == true },
+                        start = { stHost.requestStart(stWorkspace.root, owner, it) },
+                        status = { stHost.current(stWorkspace.root) },
+                        stop = { stHost.stop(stWorkspace.root) },
+                    ))
+                }
                 add(createOrbisBackupTool(workspaceId, ::currentBinding,
                     readFile = { path ->
                         check(currentBinding() && workspaceRepository.getById(workspaceId) != null)
@@ -206,6 +225,11 @@ class ChatToolFactory(
                 readRemoved = { current, message -> conversationRepository.readRemovedHistory(current, message) },
                 enabled = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
                 verifyCurrent = { current -> conversationRepository.verifyCurrentHistoryScope(current) }))
+        }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && recallOwnMessage != null &&
+            LocalToolOption.MessageRecall in assistant.localTools) {
+            val targets = readBoundConversation()?.recallableAiReplies()?.map { it.id }.orEmpty()
+            add(createMessageRecallTool(targets, recallOwnMessage))
         }
         val imageScope = if (imageDestinations.isEmpty() || imageConversationId == null) null else
             readBoundConversation()
@@ -446,6 +470,7 @@ class ChatToolFactory(
             val guarded = tool.copy(isApprovalCurrent = {
                 val live = settingsStore?.settingsFlow?.value?.getAssistantById(assistant.id)
                 val selectionCurrent = settingsStore == null || (live != null && when {
+                    tool.name.startsWith("toy_lab") -> true // separate device grant checked by the lab tool
                     tool.name == ORBIS_MEMORY_TOOL -> true // stopping injection must not disable store/query
                     tool.name.startsWith("companion_") || tool.name.startsWith("toy_bluetooth_") ->
                         live.localTools == assistant.localTools
@@ -460,7 +485,7 @@ class ChatToolFactory(
                         live.enableRecentChatsReference == assistant.enableRecentChatsReference
                 })
                 // Emergency stop does not become inaccessible when its family is disabled.
-                (tool.name == "toy_bluetooth_stop" || selectionCurrent) && tool.isApprovalCurrent()
+                (tool.name in setOf("toy_bluetooth_stop", "toy_lab_stop") || selectionCurrent) && tool.isApprovalCurrent()
             })
             bindToolApproval(guarded, assistant.id.toString(), ToolApprovalStore.get(context))
         }

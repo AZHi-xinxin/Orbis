@@ -73,6 +73,7 @@ export interface MessageDto {
   modelId?: string | null;
   usage?: TokenUsage | null;
   translation?: string | null;
+  recalled?: boolean;
   orbisEvent?: OrbisEventMetadata | null;
 }
 

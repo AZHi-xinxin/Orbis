@@ -7,7 +7,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
@@ -16,9 +15,10 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.db.MessageNodeBudget
+import me.rerere.rikkahub.data.db.MessageNodeCapacityException
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.utils.JsonInstant
 import java.io.Closeable
 import java.time.Instant
 import java.util.UUID
@@ -39,7 +39,10 @@ internal interface KelivoChatSource : Closeable {
 }
 
 internal object KelivoChatLimits {
-    const val MAX_PART_BYTES = 512 * 1024
+    // Source text can exceed the old 512 KiB soft threshold and still fit a durable node.
+    // Keep cursor reads bounded, then check the complete encoded message (including escapes).
+    const val MAX_PART_BYTES = MessageNodeBudget.MAX_NODE_BYTES
+    const val MAX_REASONING_BYTES = 512 * 1024
     const val MAX_WINDOW_BYTES = 32L * 1024 * 1024
     const val MAX_WINDOW_MESSAGES = 50000
     const val MAX_PARTS_PER_MESSAGE = 256
@@ -125,7 +128,8 @@ internal fun convertKelivoChat(source: KelivoChatSource, chat: KelivoChat, assis
             require(parts.size <= KelivoChatLimits.MAX_PARTS_PER_MESSAGE) { "kelivo_parts_count" }
             for (part in parts) {
                 checkCancelled()
-                require(part.payload.toByteArray(Charsets.UTF_8).size <= KelivoChatLimits.MAX_PART_BYTES) { "kelivo_part_size" }
+                if (part.payload.toByteArray(Charsets.UTF_8).size > KelivoChatLimits.MAX_PART_BYTES)
+                    throw ArchiveReadException(ArchiveFailure.NODE_LIMIT)
                 when (part.kind) {
                     "text" -> text += inertKelivoText(part.payload)
                     "reasoning", "thinking" -> text += "[Kelivo 历史思考，仅作记录]\n${inertKelivoText(part.payload)}"
@@ -139,7 +143,7 @@ internal fun convertKelivoChat(source: KelivoChatSource, chat: KelivoChat, assis
                 }
             }
             message.reasoning?.takeIf { it.isNotBlank() && it != "[]" && it != "null" }?.let {
-                require(it.toByteArray(Charsets.UTF_8).size <= KelivoChatLimits.MAX_PART_BYTES) { "kelivo_reasoning_size" }
+                require(it.toByteArray(Charsets.UTF_8).size <= KelivoChatLimits.MAX_REASONING_BYTES) { "kelivo_reasoning_size" }
                 text += "[Kelivo 历史思考分段，仅作记录]\n${inertKelivoText(it)}"
             }
         }
@@ -153,8 +157,8 @@ internal fun convertKelivoChat(source: KelivoChatSource, chat: KelivoChat, assis
         val ui = UIMessage(id = kelivoImportId("message", chat.id, message.id),
             role = if (message.role == "user") MessageRole.USER else MessageRole.ASSISTANT,
             parts = text.map { UIMessagePart.Text(it, metadata = metadata) }, createdAt = time, finishedAt = time)
-        val encoded = JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size
-        require(encoded <= DeepSeekChatImporter.MAX_NODE_JSON_BYTES) { "kelivo_node_size" }
+        val encoded = try { MessageNodeBudget.measureNode(listOf(ui)) }
+        catch (_: MessageNodeCapacityException) { throw ArchiveReadException(ArchiveFailure.NODE_LIMIT) }
         bytes += encoded
         require(bytes <= KelivoChatLimits.MAX_WINDOW_BYTES) { "kelivo_window_size" }
         MessageNode(id = kelivoImportId("node", chat.id, message.id), messages = listOf(ui))

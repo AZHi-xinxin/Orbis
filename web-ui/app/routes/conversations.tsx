@@ -613,6 +613,7 @@ const ConversationTimeline = React.memo(
     contentClassName,
     onEdit,
     onDelete,
+    onRecall,
     onFork,
     onRegenerate,
     onSelectBranch,
@@ -629,6 +630,7 @@ const ConversationTimeline = React.memo(
     contentClassName?: string;
     onEdit: (message: MessageDto) => void | Promise<void>;
     onDelete: (messageId: string) => Promise<void>;
+    onRecall: (messageId: string) => Promise<void>;
     onFork: (messageId: string) => Promise<void>;
     onRegenerate: (messageId: string) => Promise<void>;
     onSelectBranch: (nodeId: string, selectIndex: number) => Promise<void>;
@@ -732,6 +734,7 @@ const ConversationTimeline = React.memo(
                     model={model}
                     onEdit={onEdit}
                     onDelete={onDelete}
+                    onRecall={onRecall}
                     onFork={onFork}
                     onRegenerate={onRegenerate}
                     onSelectBranch={onSelectBranch}
@@ -921,6 +924,11 @@ function ConversationsPageInner() {
     },
     [activeId],
   );
+
+  const handleRecallMessage = React.useCallback(async (messageId: string) => {
+    if (!activeId) return;
+    await api.post<{ success: boolean }>(`conversations/${activeId}/messages/${messageId}/recall`, {});
+  }, [activeId]);
 
   const handleDeleteMessage = React.useCallback(
     async (messageId: string) => {
@@ -1145,6 +1153,7 @@ function ConversationsPageInner() {
             conversationAssistantId={detail?.assistantId ?? null}
             onEdit={handleStartEdit}
             onDelete={handleDeleteMessage}
+            onRecall={handleRecallMessage}
             onFork={handleForkMessage}
             onRegenerate={handleRegenerate}
             onSelectBranch={handleSelectBranch}

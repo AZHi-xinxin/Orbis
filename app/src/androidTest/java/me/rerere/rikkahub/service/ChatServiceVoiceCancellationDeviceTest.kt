@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.service
 
+import me.rerere.rikkahub.web.dto.toDto
+
 import android.app.Application
 import android.content.ComponentName
 import android.content.Context
@@ -51,6 +53,7 @@ import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.dao.ConversationDAO
 import me.rerere.rikkahub.data.db.fts.MessageFtsManager
 import me.rerere.rikkahub.data.event.AppEventBus
+import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.files.FilesManager
 import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
@@ -107,6 +110,45 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class ChatServiceVoiceCancellationDeviceTest {
+    @Test fun recallToolWorksInIndependentHumanContinuation() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertRecallRoundTrip(continuation = true) }
+    }
+    @Test fun recallToolSurvivesGenerationAndChangesNextProviderRequestWithoutLeakingResult() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertRecallRoundTrip() }
+    }
+
+    @Test fun ordinaryReplyPublishesOneCompletedNotificationEvent() = runBlocking {
+        fixture(connectCall = false) { f ->
+            f.assertReplyNotification(continuation = false)
+        }
+    }
+
+    @Test fun independentReplyPublishesOneCompletedNotificationEvent() = runBlocking {
+        fixture(connectCall = false) { f ->
+            f.assertReplyNotification(continuation = true)
+        }
+    }
+
+    @Test fun independentReplyAppearsInAndroidNotificationsWithLiveUpdatesOff() = runBlocking {
+        fixture(connectCall = false) { f -> f.assertAndroidNotification(enabled = true) }
+    }
+
+    @Test fun disabledCompletionPreferenceDoesNotPostAndroidNotification() = runBlocking {
+        fixture(connectCall = false) { f -> f.assertAndroidNotification(enabled = false) }
+    }
+
+    @Test fun cancelledIndependentReplyDoesNotPublishCompletedNotification() = runBlocking {
+        fixture(connectCall = false) { f -> f.assertCancelledReplyHasNoNotification() }
+    }
+
+    @Test fun independentVoiceReplyDoesNotPublishChatNotification() = runBlocking {
+        fixture { f ->
+            f.installStaleLocalLatch()
+            assertEquals(ANSWER, withTimeout(15_000) { f.utterance("synthetic voice notification boundary").await() })
+            f.assertNoCompletedNotification()
+        }
+    }
+
     @Test fun explicitNewCallConnectsOverPausedBacklogWithoutReplayingIt() = runBlocking {
         fixture(connectCall = false) { f ->
             f.assertFreshCallOverOldQueue()
@@ -250,15 +292,20 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
     }
 
-    @Test fun incompleteReplyWithHistoryConflictRemainsPreservedAndNeverPretendsToRecover() = runBlocking {
+    @Test fun incompleteReplyWithHistoryConflictIsArchivedWithoutOverwritingHistoryOrReplayingIt() = runBlocking {
         fixture { f ->
             val before = f.installCheckpointConflict(tailCommitted = false)
             val checkpoint = AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId)
             withContext(Dispatchers.Main) { f.service.dismissPauseAndContinueFreshInput(f.conversationId) }.join()
-            assertEquals(QueueRecoveryPhase.FAILURE, f.service.messageQueueRecoveryState(f.conversationId).first().phase)
-            assertTrue(f.paused())
+            // The current recovery contract permits fresh input AFTER a durable conflict copy.
+            // Success releases that admission barrier; it must not merge or replay the old reply.
+            assertEquals(QueueRecoveryPhase.SUCCESS, f.service.messageQueueRecoveryState(f.conversationId).first().phase)
+            assertFalse(f.paused())
             assertEquals(before.messageNodes, checkNotNull(f.repository.getConversationById(f.conversationId)).messageNodes)
-            assertArrayEquals(checkpoint, AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId))
+            assertNull(AndroidGenerationCheckpointStore.create(f.context.noBackupFilesDir).read(f.conversationId))
+            val copies = me.rerere.rikkahub.data.ai.checkpoint.ContinuationConflictCopies
+            assertArrayEquals(checkpoint, File(File(f.context.noBackupFilesDir, copies.GENERATION_DIRECTORY),
+                copies.name(f.conversationId, checkNotNull(checkpoint))).readBytes())
             assertEquals(0, f.peer.requests.get())
         }
     }
@@ -539,11 +586,17 @@ class ChatServiceVoiceCancellationDeviceTest {
         private val workspace = WorkspaceRepository(database.workspaceDao(), workspaceManager, RootfsInstaller(workspaceManager), settings)
         private val mcp = McpManager(settings, dormantScope, files)
         private val bus = AppEventBus()
+        private val notificationEvents = java.util.concurrent.CopyOnWriteArrayList<AppEvent>()
+        private val notificationObserver = activeScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            bus.events.collect { notificationEvents += it }
+        }
         private val tools = ChatToolFactory(JsonInstant, memory, repository,
             LocalTools(context, bus, TTSManager(context), settings), mcp, SkillManager(context, settings), workspace, context,
             settingsStore = settings)
         val service = ChatService(context, activeScope, bus, settings, repository, memory,
-            GenerationLoop(context, manager, JsonInstant), TranslationHandler(manager),
+            GenerationLoop(context, manager, JsonInstant, readRecallState = { owner, id ->
+                repository.getConversationById(id)?.takeIf { it.assistantId == owner }?.currentMessages.orEmpty()
+            }), TranslationHandler(manager),
             TemplateTransformer(PebbleEngine.Builder().loader(AssistantTemplateLoader(settings)).build(), settings),
             manager, tools, mcp, files, workspace, FolderRepository(database.folderDao(), gatedDao),
             OrbisCompactionRepository(database, fts), client)
@@ -673,6 +726,110 @@ class ChatServiceVoiceCancellationDeviceTest {
             service.getDisplayedConversationFlow(conversationId).first { c ->
                 c.currentMessages.any { it.toText() == ANSWER }
             }
+        }
+
+        suspend fun assertRecallRoundTrip(continuation: Boolean = false) {
+            if (continuation) installStaleLocalLatch()
+            val recallOption = me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.MessageRecall
+            val enabledModel = model.copy(abilities = listOf(me.rerere.ai.provider.ModelAbility.TOOL))
+            settings.settingsFlow.value = settings.settingsFlow.value.let { original -> original.copy(
+                assistants = listOf(assistant.copy(localTools = listOf(recallOption))),
+                providers = original.providers.map { (it as ProviderSetting.OpenAI).copy(models = listOf(enabledModel)) }) }
+            val oldHuman = UIMessage.user("RECALL-HUMAN-SECRET")
+            val oldAi = UIMessage.assistant("RECALL-AI-SECRET")
+            val base = repository.getConversationById(conversationId)!!.copy(messageNodes = listOf(oldHuman.toMessageNode(), oldAi.toMessageNode()))
+            withContext(Dispatchers.Main) { service.saveConversation(conversationId, base) }
+            service.recallHumanMessage(conversationId, oldHuman.id)
+            peer.recallNext.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("recall the previous reply"))))
+            }
+            withTimeout(15_000) { service.getDisplayedConversationFlow(conversationId).first { c ->
+                c.currentMessages.any { it.toText().trim() == ANSWER }
+            } }
+            val cleared = kotlinx.coroutines.withTimeoutOrNull(15_000) { while (journal.hasCheckpoint(conversationId)) kotlinx.coroutines.delay(50); true }
+            assertEquals("Recall final journal should clear", true, cleared)
+            // Independent continuation publishes before its asynchronous Room observer completes.
+            val saved = withTimeout(15_000) {
+                while (true) {
+                    val committed = repository.getConversationById(conversationId)!!
+                    if (committed.currentMessages.any { it.toText().trim() == ANSWER }) return@withTimeout committed
+                    kotlinx.coroutines.delay(25)
+                }
+                error("unreachable")
+            }
+            assertTrue(saved.currentMessages.single { it.id == oldAi.id }.orbisRecalled)
+            assertEquals(2, peer.requests.get())
+            assertTrue(peer.requestBodies.none { it.contains("RECALL-HUMAN-SECRET") })
+            assertTrue(peer.requestBodies.last().contains("RECALL-AI-SECRET"))
+            assertTrue(peer.requestBodies.last().contains("本消息已被你撤回"))
+            val tool = saved.currentMessages.flatMap { it.getTools() }.single { it.toolName == "orbis_recall_message" }
+            assertEquals(listOf(UIMessagePart.Text("{\"success\":true}")), tool.output)
+            assertFalse(saved.currentMessages.single { it.id == oldAi.id }.toDto().parts.toString().contains("RECALL-AI-SECRET"))
+        }
+
+        suspend fun assertReplyNotification(continuation: Boolean) {
+            if (continuation) installStaleLocalLatch()
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("synthetic notification request"))))
+            }
+            awaitFreshHumanAnswer()
+            withTimeout(10_000) { service.getGenerationJobStateFlow(conversationId).first { it == null } }
+            // The shared event consumer is asynchronous; this is not a fabricated completion event.
+            kotlinx.coroutines.delay(200)
+            val ended = notificationEvents.filterIsInstance<AppEvent.ChatGenerationEnded>()
+                .filter { it.contentPreview != null }
+            assertEquals("A real completed reply must reach the system-notification subscriber", 1, ended.size)
+            assertEquals(conversationId, ended.single().conversationId)
+            assertEquals(ANSWER.take(50), ended.single().contentPreview)
+            assertTrue(notificationEvents.any { it is AppEvent.ChatGenerationUpdate && it.conversationId == conversationId })
+            assertEquals(1, peer.requests.get())
+        }
+
+        suspend fun assertNoCompletedNotification() {
+            kotlinx.coroutines.delay(200)
+            assertFalse(notificationEvents.any { it is AppEvent.ChatGenerationEnded && it.contentPreview != null })
+        }
+
+        suspend fun assertAndroidNotification(enabled: Boolean) {
+            val manager = context.getSystemService(android.app.NotificationManager::class.java)
+            assertTrue("The isolated emulator must grant notifications for this integration test", manager.areNotificationsEnabled())
+            manager.createNotificationChannel(android.app.NotificationChannel(
+                me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID, "Synthetic completion",
+                android.app.NotificationManager.IMPORTANCE_HIGH))
+            manager.cancel(1)
+            settings.settingsFlow.value = settings.settingsFlow.value.let { value -> value.copy(
+                displaySetting = value.displaySetting.copy(enableNotificationOnMessageGeneration = enabled,
+                    enableLiveUpdateNotification = false)) }
+            withContext(Dispatchers.Main) { ChatNotificationManager(context, activeScope, bus, settings) }
+            kotlinx.coroutines.delay(100) // Start the real subscriber before submitting the model request.
+            try {
+                assertReplyNotification(continuation = true)
+                if (enabled) {
+                    val notice = withTimeout(5_000) {
+                        while (manager.activeNotifications.none { it.id == 1 }) kotlinx.coroutines.delay(20)
+                        manager.activeNotifications.single { it.id == 1 }.notification
+                    }
+                    assertEquals(ANSWER.take(50), notice.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString())
+                    assertEquals(me.rerere.rikkahub.CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID, notice.channelId)
+                } else {
+                    kotlinx.coroutines.delay(200)
+                    assertTrue(manager.activeNotifications.none { it.id == 1 })
+                }
+            } finally { manager.cancel(1) }
+        }
+
+        suspend fun assertCancelledReplyHasNoNotification() {
+            installStaleLocalLatch()
+            peer.holdFirstRequest.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("synthetic cancelled request"))))
+            }
+            withTimeout(10_000) { peer.firstRequestHeld.await() }
+            withContext(Dispatchers.Main) { service.stopGeneration(conversationId) }
+            peer.releaseFirstRequest.countDown()
+            withTimeout(10_000) { service.getGenerationJobStateFlow(conversationId).first { it == null } }
+            assertNoCompletedNotification()
         }
 
         suspend fun assertHumanWakeWhileHistoryLocked() {
@@ -924,6 +1081,8 @@ class ChatServiceVoiceCancellationDeviceTest {
         private val socket = ServerSocket(0, 1, LOOPBACK)
         val port = socket.localPort
         val requests = AtomicInteger()
+        val recallNext = AtomicBoolean(false)
+        val requestBodies = java.util.concurrent.CopyOnWriteArrayList<String>()
         val holdFirstRequest = AtomicBoolean(false)
         val firstRequestHeld = CompletableDeferred<Unit>()
         val releaseFirstRequest = CountDownLatch(1)
@@ -947,9 +1106,9 @@ class ChatServiceVoiceCancellationDeviceTest {
                     val headers = generateSequence { line().takeIf { it.isNotEmpty() } }.toList()
                     val count = headers.single { it.startsWith("Content-Length:", true) }.substringAfter(':').trim().toInt()
                     check(count in 1..262_144)
-                    var left = count
-                    val scratch = ByteArray(4096)
-                    while (left > 0) { val n = input.read(scratch, 0, minOf(left, scratch.size)); check(n > 0); left -= n }
+                    val request = input.readNBytes(count)
+                    check(request.size == count)
+                    requestBodies += request.toString(Charsets.UTF_8)
                     check(requests.incrementAndGet() <= maxRequests) { "Unexpected replay/derived request" }
                     if (holdFirstRequest.compareAndSet(true, false)) {
                         firstRequestHeld.complete(Unit)
@@ -958,7 +1117,12 @@ class ChatServiceVoiceCancellationDeviceTest {
                         // Closing without an answer must not replay that input or block correction.
                         return@use
                     }
-                    val body = """{"id":"synthetic","object":"chat.completion","created":1,"model":"synthetic-service-voice","choices":[{"index":0,"message":{"role":"assistant","content":"$ANSWER"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""".toByteArray()
+                    val doRecall = recallNext.compareAndSet(true, false)
+                    val responseMessage = if (doRecall)
+                        """{"role":"assistant","content":null,"tool_calls":[{"id":"recall-one","type":"function","function":{"name":"orbis_recall_message","arguments":"{\"recent_index\":1}"}}]}"""
+                        else """{"role":"assistant","content":"$ANSWER"}"""
+                    val finishReason = if (doRecall) "tool_calls" else "stop"
+                    val body = """{"id":"synthetic","object":"chat.completion","created":1,"model":"synthetic-service-voice","choices":[{"index":0,"message":$responseMessage,"finish_reason":"$finishReason"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""".toByteArray()
                     connection.getOutputStream().apply {
                         write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
                         write(body); flush()

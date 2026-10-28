@@ -319,7 +319,7 @@ fun McpPicker(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = server.commonOptions.name,
+                            text = server.commonOptions.displayTitle,
                             style = MaterialTheme.typography.titleLarge,
                         )
                         Text(

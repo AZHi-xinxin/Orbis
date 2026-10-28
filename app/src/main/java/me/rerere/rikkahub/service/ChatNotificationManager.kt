@@ -94,8 +94,14 @@ class ChatNotificationManager(
         }
 
         val contentPreview = event.contentPreview ?: return
-        if (isForeground.value) return
-        if (!settingsStore.settingsFlow.value.displaySetting.enableNotificationOnMessageGeneration) return
+        if (isForeground.value) {
+            Log.i("OrbisChatNotifications", "chat_completed_foreground")
+            return
+        }
+        if (!settingsStore.settingsFlow.value.displaySetting.enableNotificationOnMessageGeneration) {
+            Log.i("OrbisChatNotifications", "chat_completed_preference_disabled")
+            return
+        }
         sendGenerationDoneNotification(event.conversationId, event.senderName, contentPreview)
     }
 
@@ -109,7 +115,7 @@ class ChatNotificationManager(
         senderName: String,
         contentPreview: String
     ) {
-        context.sendNotification(
+        val submitted = context.sendNotification(
             channelId = CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID,
             notificationId = 1
         ) {
@@ -120,6 +126,9 @@ class ChatNotificationManager(
             category = NotificationCompat.CATEGORY_MESSAGE
             contentIntent = getPendingIntent(context, conversationId)
         }
+        // Fixed codes only: distinguishes missing events/settings/permission from vendor UI
+        // delivery without recording a private reply or claiming the user saw the notification.
+        Log.i("OrbisChatNotifications", if (submitted) "chat_completed_submitted" else "chat_completed_permission_blocked")
     }
 
     private fun sendLiveUpdateNotification(

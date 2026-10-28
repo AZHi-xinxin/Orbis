@@ -47,10 +47,15 @@ class MessageUsagePresentationTest {
     }
 
     @Test fun `zero cached count does not claim known zero cache hit`() {
-        val result = presentMessageUsage(usage.copy(cachedTokens = 0), 3700)!!
+        val result = presentMessageUsage(usage.copy(cachedTokens = 0, cachedTokensReported = false), 3700)!!
         assertTrue(result.details[2].value.contains("尚不能确认"))
         assertTrue(result.details[2].value.contains("也可能未提供"))
         assertFalse(result.toString().contains("0%"))
+    }
+
+    @Test fun `explicit zero is distinguished from omitted usage`() {
+        val result = presentMessageUsage(TokenUsage(promptTokens = 1000, cachedTokensReported = true), 3700)!!
+        assertEquals("0 token（服务明确报告未命中）", result.details[2].value)
     }
 
     @Test fun `cache larger than input is not divided into an impossible hit rate`() {

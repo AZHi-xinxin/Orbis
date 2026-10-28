@@ -7,11 +7,29 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.data.model.withMessageRecall
 import org.junit.Assert.*
 import org.junit.Test
 import kotlin.uuid.Uuid
 
 class HumanContinuationJournalTest {
+    @Test fun `committed recalls survive independent restart and do not block next checkpoint`() {
+        val source = base()
+        val id = Uuid.random(); val store = Store(); val journal = HumanContinuationJournal(store)
+        val next = source.append()
+        journal.checkpoint(id, source, next)
+        val recalled = source.currentMessages.fold(source) { current, message ->
+            current.withMessageRecall(message.id, message.role)
+        }
+        val recovery = HumanContinuationJournal(store).recover(recalled)!!.snapshot
+        assertTrue(recovery.currentMessages.take(source.currentMessages.size).all { it.orbisRecalled })
+        journal.checkpoint(id, source, recovery)
+        val tampered = recalled.copy(messageNodes = recalled.messageNodes.map { node ->
+            node.copy(messages = node.messages.map { it.copy(parts = listOf(UIMessagePart.Text("tampered"))) })
+        })
+        assertTrue(runCatching { HumanContinuationJournal(store).recover(tampered) }.isFailure)
+        assertTrue(journal.clearCommitted(id, recovery))
+    }
     @Test fun `browsing three existing replies widens recovery tail without changing any version`() {
         val store = Store(); val id = Uuid.random()
         val source = base().let { c -> c.copy(messageNodes = c.messageNodes.dropLast(1) +

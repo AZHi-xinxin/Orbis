@@ -45,8 +45,10 @@ data class ConnectionDraft(val kind: String, val name: String, val endpoint: Str
 
 @Serializable
 data class ConnectionProposal(val owner: String, val draft: ConnectionDraft, val status: String = "pending",
-    val alwaysAllow: Boolean = false, val installed: ConnectionDraft? = null) {
+    val alwaysAllow: Boolean = false, val installed: ConnectionDraft? = null,
+    val setupCompleted: Boolean = false, val setupDismissed: Boolean = false) {
     val id: String get() = draft.id(owner)
+    val setupPromptPending: Boolean get() = !setupCompleted && !setupDismissed && status != "rejected"
 }
 
 /** Pure transaction: an allowed scope can only update its own native record. Selection is separate. */
@@ -110,7 +112,7 @@ internal object ConnectionProposalRules {
             require(draft.auth == "none" || credential.isNotBlank()) { "waiting_for_native_key" }
             // Stable ASCII MCP namespace, independent of the human-friendly proposal title.
             val options = (old?.commonOptions ?: McpCommonOptions()).copy(enable = old?.commonOptions?.enable ?: enableMcp,
-                name = "Orbis" + id.replace("-", "").take(12),
+                name = "Orbis" + id.replace("-", "").take(12), displayName = draft.name,
                 headers = if(credential.isBlank()) emptyList() else listOf("Authorization" to credential), strictEndpoint = true)
             val value: McpServerConfig = if (draft.kind == "mcp_sse")
                 McpServerConfig.SseTransportServer(uuid, options, draft.endpoint)
@@ -145,10 +147,38 @@ internal object ConnectionProposalRules {
             native.serverUrl == expected.endpoint && options.strictEndpoint && options.oauth == null &&
                 settings.assistants.any { it.id.toString() == p.owner && id in it.mcpServers } &&
                 options.name == "Orbis" + p.id.replace("-", "").take(12) &&
+                (options.displayName.isEmpty() || options.displayName == expected.name) &&
                 (if (expected.auth == "none") options.headers.isEmpty() else
                     options.headers.size == 1 && options.headers.single().first.equals("Authorization", true) &&
                         options.headers.single().second.startsWith("Bearer "))
         }
+    }
+    /** Only a proposal-owned MCP title changes; transport, credentials, tool namespace stay intact. */
+    fun renameMcp(settings: Settings, owner: String, id: String, name: String): Settings {
+        AiConfigurationRules.requireOwner(settings, owner)
+        val p = settings.connectionProposals.single { it.owner == owner && it.id == id }
+        check(p.draft.kind.startsWith("mcp_") && p.status == "saved" && matchesInstalled(settings, p)) { "connection_not_owned_or_changed" }
+        val draft = p.draft.copy(name = name).normalized()
+        val changed = settings.copy(mcpServers = settings.mcpServers.map {
+            if (it.id.toString() == id) it.clone(commonOptions = it.commonOptions.copy(displayName = draft.name)) else it
+        })
+        return replace(changed, p.copy(draft = draft, installed = p.installed!!.copy(name = draft.name)))
+    }
+    fun completeSetup(settings: Settings, owner: String, id: String, verified: (ConnectionProposal) -> Boolean): Settings {
+        AiConfigurationRules.requireOwner(settings, owner)
+        val p = settings.connectionProposals.single { it.owner == owner && it.id == id }
+        check(p.status == "saved" && matchesInstalled(settings, p)) { "connection_not_saved" }
+        if (p.draft.kind.startsWith("mcp_")) check(settings.mcpServers.single { it.id.toString() == id }.commonOptions.enable) { "mcp_disabled" }
+        check(verified(p)) { "connection_check_required" }
+        return replace(settings, p.copy(setupCompleted = true))
+    }
+    /** Hide notices only. Offline, cancelled and unfinished setups need no connection check. */
+    fun dismissSetup(settings: Settings, owner: String, id: String? = null): Settings {
+        AiConfigurationRules.requireOwner(settings, owner)
+        if (id != null) require(settings.connectionProposals.any { it.owner == owner && it.id == id }) { "proposal_missing" }
+        return settings.copy(connectionProposals = settings.connectionProposals.map { p ->
+            if (p.owner == owner && (id == null || p.id == id) && p.setupPromptPending) p.copy(setupDismissed = true) else p
+        })
     }
     /** Human UI action; intentionally not exposed by the configuration tools. */
     fun enableMcp(settings: Settings, owner: String, id: String): Settings = setMcpEnabled(settings, owner, id, true)

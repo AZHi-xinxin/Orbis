@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.data.ai.checkpoint
 
+import me.rerere.rikkahub.data.model.withoutRecallFlags
+import me.rerere.rikkahub.data.model.containsRecallFlagsOf
+import me.rerere.rikkahub.data.model.preserveMessageRecalls
+
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -168,7 +172,7 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             .indexOfFirst { (next, base) -> next.selectIndex != base.selectIndex }
         if (changedSelection >= 0) {
             check(snapshot.messageNodes.take(record.prefixCount).zip(baseline.messageNodes).all { (next, base) ->
-                next.copy(selectIndex = base.selectIndex) == base
+                next.copy(selectIndex = base.selectIndex).withoutRecallFlags() == base.withoutRecallFlags()
             })
             record = record.copy(prefixCount = changedSelection,
                 prefixHash = hashNodes(baseline.messageNodes.take(changedSelection)),
@@ -176,7 +180,9 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         }
         // The lane cannot mutate protected history. Reference equality avoids hashing a long
         // immutable prefix on every chunk; restored/equal values still get an exact comparison.
-        check(snapshot.messageNodes.take(record.prefixCount).zip(baseline.messageNodes).all { (a, b) -> a == b })
+        check(snapshot.messageNodes.take(record.prefixCount).zip(baseline.messageNodes).all { (a, b) ->
+            a == b || a.withoutRecallFlags() == b.withoutRecallFlags()
+        })
         val tail = snapshot.messageNodes.drop(record.prefixCount)
         validateNodes(tail)
         check(tail.size >= record.baseTail.size)
@@ -275,9 +281,11 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             proveInFlightBaseline(persisted.copy(messageNodes = prefix + storedBase), baseline)
         } catch (_: Exception) { false }
         val durable = if (proven) persisted else null
+        val committed = persisted.messageNodes.associateBy { it.id }
         Recovery(record.runId, baseline,
             persisted.copy(messageNodes = prefix + tail.map { node ->
-                node.copy(isFavorite = favorites[node.id] ?: false)
+                val restored = node.copy(isFavorite = favorites[node.id] ?: false)
+                committed[node.id]?.let { preserveMessageRecalls(restored, it) } ?: restored
             }), durable)
     }
 
@@ -294,11 +302,14 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
 
     private fun contains(current: Conversation, record: Record, tail: List<MessageNode>): Boolean =
         current.messageNodes.size >= record.prefixCount + tail.size &&
-            current.messageNodes.drop(record.prefixCount).take(tail.size).zip(tail).all { (a, b) -> sameNode(a, b) }
+            current.messageNodes.drop(record.prefixCount).take(tail.size).zip(tail).all { (a, b) ->
+                sameNode(a, b) && a.containsRecallFlagsOf(b)
+            }
 
     // Favorite is derived from a separate table, not serialized chat content.
     private fun sameNode(a: MessageNode, b: MessageNode) =
-        a.id == b.id && a.selectIndex == b.selectIndex && a.messages == b.messages
+        a.id == b.id && a.selectIndex == b.selectIndex &&
+            a.withoutRecallFlags().messages == b.withoutRecallFlags().messages
 
     private fun settled(record: Record) = record.tail.map { node ->
         node.copy(messages = node.messages.map { message ->
@@ -364,7 +375,8 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
             override fun write(value: Int) = Unit
             override fun write(bytes: ByteArray, offset: Int, length: Int) = Unit
         }, digest)
-        nodes.forEach { node ->
+        nodes.forEach { original ->
+            val node = original.withoutRecallFlags()
             if (legacyModelReceipt) json.encodeToStream(
                 CheckpointModelReceiptCompatibility.node(json.encodeToJsonElement(node)), sink)
             else json.encodeToStream(node, sink)

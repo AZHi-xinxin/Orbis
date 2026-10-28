@@ -131,6 +131,7 @@ fun ChatMessage(
     onDelete: () -> Unit,
     onUpdate: (MessageNode) -> Unit,
     onVoiceNotePlayed: ((OrbisVoiceNotePlayedEdit) -> Unit)? = null,
+    onRecall: (() -> Unit)? = null,
     onDeleteToolRecord: ((String) -> Unit)? = null,
     onRestoreToolRecord: ((String) -> Unit)? = null,
     contextPruningState: me.rerere.rikkahub.data.ai.contextpruning.ContextPruningState? = null,
@@ -148,6 +149,16 @@ fun ChatMessage(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
 ) {
     val originalMessage = node.messages[node.selectIndex]
+    if (originalMessage.orbisRecalled) {
+        Box(modifier = modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+            Text(if (originalMessage.role == MessageRole.ASSISTANT) "此条消息已被对方撤回" else "该条消息已撤回",
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 7.dp))
+        }
+        return
+    }
     val privateOperation = originalMessage.hasPrivateRoomToolContent()
     // Render public prose, but keep mutations/branch selection attached to the ORIGINAL node.
     // Saving a presentation copy would erase the assistant's tool context.
@@ -370,6 +381,7 @@ fun ChatMessage(
             message = originalMessage,
             onEdit = onEdit,
             onDelete = onDelete,
+            onRecall = if (originalMessage.role == MessageRole.USER && originalMessage.orbisEvent == null) onRecall else null,
             onShare = onShare,
             onFork = onFork,
             model = model,

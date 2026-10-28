@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import me.rerere.ai.ui.recallPresentation
+
 import kotlinx.serialization.json.*
 import me.rerere.ai.core.HostToolApproval
 import me.rerere.ai.core.InputSchema
@@ -96,7 +98,7 @@ internal fun createOrbisConversationHistoryTool(
                     check(message.id.toString() == id) { "history_message_changed" }
                     val quoted = buildJsonObject {
                         put("role", message.role.name); put("created_at", message.createdAt.toString())
-                        put("parts", JsonInstant.encodeToJsonElement(message.parts))
+                        put("parts", JsonInstant.encodeToJsonElement(message.recallPresentation().parts))
                     }.toString()
                     val end = (offset.toLong() + length).coerceAtMost(quoted.length.toLong()).toInt()
                     require(offset <= quoted.length) { "history_offset_out_of_range" }

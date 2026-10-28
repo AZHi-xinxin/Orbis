@@ -30,6 +30,23 @@ class OrbisMiniGameCheckpointTest {
         repo.abandon(original.id)
         assertNotEquals(original.id, repo.openSession(game.id).id)
     }
+    @Test fun explicitHistoryEntryResumesThatSessionWithoutSelectingLatestOrCreatingAnother() {
+        val storage = Storage(); val repo = OrbisMiniGameRepository(storage)
+        val game = repo.install("owner", "AI", "G", "", "html")
+        val first = repo.start(game.id); repo.saveCheckpoint(first.id, 0, "{\"turn\":3}")
+        val later = repo.start(game.id); repo.saveCheckpoint(later.id, 0, "{\"turn\":7}")
+        val reopened = OrbisMiniGameRepository(storage)
+        assertEquals(first.id, reopened.openSession(game.id, first.id).id)
+        assertEquals("{\"turn\":3}", reopened.openSession(game.id, first.id).checkpoint)
+        assertEquals(later.id, reopened.openSession(game.id).id)
+        val other = reopened.install("owner", "AI", "Other", "", "html")
+        assertThrows(NoSuchElementException::class.java) { reopened.openSession(other.id, first.id) }
+        assertThrows(NoSuchElementException::class.java) { reopened.openSession(game.id, "missing") }
+        reopened.abandon(first.id)
+        assertThrows(NoSuchElementException::class.java) { reopened.openSession(game.id, first.id) }
+        assertEquals(2, reopened.readSnapshot().sessions.size)
+        assertEquals("{\"turn\":7}", reopened.checkpoint(later.id).checkpoint)
+    }
     @Test fun staleFrameCannotOverwriteNewerCheckpointAndDuplicateDoesNotIncrement() {
         val repo = OrbisMiniGameRepository(Storage()); val game = repo.install("owner", "AI", "G", "", "x")
         val session = repo.start(game.id)

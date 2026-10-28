@@ -10,6 +10,12 @@ import java.nio.file.StandardCopyOption
 
 /** Debug-candidate evidence: no texts, keys, URLs, identifiers, or content hashes. No network. */
 internal object LocalPrefixDiagnostics {
+    @Synchronized fun export(context: Context): String =
+        File(context.noBackupFilesDir, "prefix-diagnostics/counts.jsonl").takeIf { it.isFile && it.length() < 256 * 1024 }
+            ?.readText() ?: "尚无诊断记录。请开启后，在同一对话中保持设置不变连续聊几轮。"
+    @Synchronized fun clear(context: Context) {
+        File(context.noBackupFilesDir, "prefix-diagnostics/counts.jsonl").delete()
+    }
     @Synchronized fun record(context:Context,value:PrefixObservation) {
         val folder=File(context.noBackupFilesDir,"prefix-diagnostics");folder.mkdirs()
         val file=File(folder,"counts.jsonl");val tmp=File(folder,"counts.tmp")

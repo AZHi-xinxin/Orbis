@@ -129,7 +129,7 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 }
 
-internal fun UIMessage.extractFtsText(): String =
+internal fun UIMessage.extractFtsText(): String = if (orbisRecalled) "" else
     // Public Text remains searchable even in a private-tool turn. Never index the empty-tool
     // placeholder, Reasoning, tool input/output, translation, or other derived attachments.
     (if (hasPrivateRoomToolContent()) privateRoomPublicParts(parts, includePlaceholder = false) else parts)

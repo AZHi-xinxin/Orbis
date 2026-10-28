@@ -107,4 +107,32 @@ class AiConfigurationChecksDeviceTest {
             assertEquals(before, store.settingsFlow.value)
         }
     }
+
+    @Test fun realCheckCompletesProposalAndFailedRecheckRevokesItsSuccess() = runBlocking {
+        PrivateRoomLoopbackServer().use { server ->
+            val owner = Assistant()
+            val draft = ConnectionDraft("model_openai", "Fixture ST", server.url("/v1"), model = "synthetic-model")
+            val store = store(owner)
+            val pending = ConnectionProposalRules.propose(store.settingsFlow.value, owner.id.toString(), draft)
+            store.settingsFlow.value = ConnectionProposalRules.approve(pending, draft.id(owner.id.toString()), "fixture-key", true)
+            val proposal = store.settingsFlow.value.connectionProposals.single()
+            val id = ConnectionProposalRules.connectionModelId(proposal.id).toString()
+            assertFalse(AiConfigurationChecks.proposalVerified(store.settingsFlow.value, proposal))
+            server.enqueue(PrivateRoomLoopbackResponse().setBody(
+                """{"id":"fixture","object":"chat.completion","model":"synthetic-model","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"""))
+            AiConfigurationChecks.request(context, store, null, owner.id.toString(), "check", "model", id)
+            server.takeRequest(); assertEquals("passed", finish(store, owner)["status"]!!.jsonPrimitive.content)
+            assertTrue(AiConfigurationChecks.proposalVerified(store.settingsFlow.value, proposal))
+            val completed = ConnectionProposalRules.completeSetup(store.settingsFlow.value, owner.id.toString(), proposal.id) {
+                AiConfigurationChecks.proposalVerified(store.settingsFlow.value, it)
+            }
+            assertTrue(completed.connectionProposals.single().setupCompleted)
+            assertEquals(store.settingsFlow.value.providers, completed.providers)
+            server.enqueue(PrivateRoomLoopbackResponse().setResponseCode(401).setBody("{}"))
+            AiConfigurationChecks.request(context, store, null, owner.id.toString(), "check", "model", id)
+            assertFalse(AiConfigurationChecks.proposalVerified(store.settingsFlow.value, proposal))
+            server.takeRequest(); assertEquals("failed", finish(store, owner)["status"]!!.jsonPrimitive.content)
+            assertFalse(AiConfigurationChecks.proposalVerified(store.settingsFlow.value, proposal))
+        }
+    }
 }

@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.ai.ui.recallModelInput
+
 import me.rerere.rikkahub.data.model.withVoiceNoteTranscripts
 
 import android.content.Context
@@ -147,6 +149,7 @@ class GenerationLoop(
     private val localMemory: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRuntime? = null,
     private val observation: me.rerere.rikkahub.data.orbis.observation.AiObservationRuntime? = null,
     private val bodyStatus: me.rerere.rikkahub.data.orbis.body.BodyStatusRuntime? = null,
+    private val readRecallState: (suspend (Uuid, Uuid) -> List<UIMessage>)? = null,
 ) {
     fun generateText(
         settings: Settings,
@@ -719,12 +722,19 @@ class GenerationLoop(
         onPreparedUsage: (Long) -> Unit = {},
         readOnlyPreflight: Boolean = false,
     ): UIMessage {
+        val recalled = if (conversationId != null) readRecallState?.invoke(assistant.id, conversationId).orEmpty()
+            .associateBy { it.id } else emptyMap()
+        fun recallProjection(message: UIMessage): UIMessage {
+            val saved = recalled[message.id]
+            return message.copy(orbisRecalled = message.orbisRecalled || saved?.orbisRecalled == true,
+                orbisQuoteRecalled = message.orbisQuoteRecalled || saved?.orbisQuoteRecalled == true).recallModelInput()
+        }
         var initialEstimate: Long? = null
         var initialSelection: GenerationContextSelection? = null
         inputSnapshot.initializeInput {
             // Human display redaction must never erase the owning assistant's tool history.
             // Keep the ordinary context-selection policy; no privacy placeholder is model input.
-            val selection = GenerationContextSelection(messages, assistant.contextMessageLimit)
+            val selection = GenerationContextSelection(messages.map(::recallProjection), assistant.contextMessageLimit)
             initialSelection = selection
             // A changed message-count projection cannot inherit the previous full request's usage.
             if (selection.includesWholeBranch) {
@@ -784,7 +794,12 @@ class GenerationLoop(
         compactionControl?.observeRequestEstimate(prepared.estimatedTokens)
         onPreparedUsage(prepared.estimatedTokens)
         // Reversible tool deletions are private local bookkeeping, never provider input.
-        val internalMessages = prepared.messages.map { it.withoutDeletedToolRecordData().withVoiceNoteTranscripts() }
+        val internalMessages = prepared.messages.map { message ->
+            val current = recalled[message.id]
+            val projected = if (current?.orbisRecalled == true && !message.orbisRecalled ||
+                current?.orbisQuoteRecalled == true && !message.orbisQuoteRecalled) recallProjection(message) else message
+            projected.withoutDeletedToolRecordData().withVoiceNoteTranscripts()
+        }
         // Resolve expiring frame handles anew for each HTTP attempt; never freeze image bytes
         // into history, the continuation snapshot, or a retry that may outlive their TTL.
         suspend fun providerMessages(): List<UIMessage> {
@@ -827,7 +842,8 @@ class GenerationLoop(
             orbisConversationId = conversationId?.toString(),
             maxAutomaticContinuations = maxAutomaticContinuations,
             onGatewayRequest = onGatewayRequest,
-            onPrefixObservation = if (me.rerere.rikkahub.BuildConfig.DEBUG && !readOnlyPreflight) ({ evidence ->
+            onPrefixObservation = if ((me.rerere.rikkahub.BuildConfig.DEBUG ||
+                (provider as? ProviderSetting.OpenAI)?.cacheDiagnostics == true) && !readOnlyPreflight) ({ evidence ->
                 LocalPrefixDiagnostics.record(context, evidence)
             }) else null,
         )

@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.service
 
+import me.rerere.rikkahub.data.model.withMessageRecall
+
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -399,10 +401,16 @@ internal class HumanContinuationLane(
         return true
     }
 
+    @Synchronized fun acceptRecall(messageId: kotlin.uuid.Uuid, role: me.rerere.ai.core.MessageRole) {
+        state.value = state.value.withMessageRecall(messageId, role)
+        revision++
+        requestCheckpoint()
+    }
+
     @Synchronized fun publish(owner: Long, conversation: Conversation) {
         if (!isCurrent(owner)) return
         require(conversation.id == baseline.id && conversation.assistantId == baseline.assistantId)
-        state.value = projectContext(conversation) ?: return
+        state.value = me.rerere.rikkahub.data.model.withCommittedMessageRecalls(projectContext(conversation) ?: return, state.value)
         revision++
         requestCheckpoint()
     }

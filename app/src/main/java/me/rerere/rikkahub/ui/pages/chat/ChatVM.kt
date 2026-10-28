@@ -560,6 +560,10 @@ class ChatVM(
             title = context.getString(R.string.error_title_operation)) },
     )
 
+    suspend fun recallMessage(message: UIMessage) {
+        chatService.recallHumanMessage(_conversationId, message.id)
+    }
+
     fun deleteMessage(message: UIMessage) {
         viewModelScope.launch {
             try {

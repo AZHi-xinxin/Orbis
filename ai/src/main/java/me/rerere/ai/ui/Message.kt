@@ -32,6 +32,13 @@ data class UIMessage(
     @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
     val orbisPreparedContextUsage: OrbisPreparedContextUsage? = null,
     val translation: String? = null,
+    /** Monotonic recall flags; original payload stays immutable for journal integrity. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val orbisRecalled: Boolean = false,
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val orbisQuoteRecalled: Boolean = false,
     /** Hide private tool details and subsequent reasoning, not earlier reasoning, public Text or model input. */
     val privateRoomContentHidden: Boolean = false,
     /** Provisional masking of an actual incomplete private tool, never normal streaming reasoning. */

@@ -145,6 +145,7 @@ fun ChatList(
     onEdit: (UIMessage) -> Unit = {},
     onForkMessage: (UIMessage) -> Unit = {},
     onDelete: (UIMessage) -> Unit = {},
+    onRecall: ((UIMessage) -> Unit)? = null,
     onUpdateMessage: (MessageNode) -> Unit = {},
     onVoiceNotePlayed: ((me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit) -> Unit)? = null,
     onDeleteToolRecord: ((Uuid, String) -> Unit)? = null,
@@ -200,6 +201,7 @@ fun ChatList(
                 onEdit = onEdit,
                 onForkMessage = onForkMessage,
                 onDelete = onDelete,
+                onRecall = onRecall,
                 onUpdateMessage = onUpdateMessage,
                 onVoiceNotePlayed = onVoiceNotePlayed,
                 onDeleteToolRecord = onDeleteToolRecord,
@@ -263,6 +265,7 @@ private fun ChatListNormal(
     onEdit: (UIMessage) -> Unit,
     onForkMessage: (UIMessage) -> Unit,
     onDelete: (UIMessage) -> Unit,
+    onRecall: ((UIMessage) -> Unit)?,
     onUpdateMessage: (MessageNode) -> Unit,
     onVoiceNotePlayed: ((me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit) -> Unit)?,
     onDeleteToolRecord: ((Uuid, String) -> Unit)?,
@@ -382,6 +385,7 @@ private fun ChatListNormal(
                     onEdit = { onEdit(node.currentMessage) },
                     onFork = { onForkMessage(node.currentMessage) },
                     onDelete = { onDelete(node.currentMessage) },
+                    onRecall = onRecall?.let { action -> { action(node.currentMessage) } },
                     onShare = {
                         selecting = true
                         selectedItems.clear()

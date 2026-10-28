@@ -81,10 +81,16 @@ internal fun createOrbisGameLibraryTools(
                 put("games", buildJsonArray { games.forEach { game -> add(buildJsonObject {
                     game.publicMetadata().forEach { (key, value) -> put(key, value) }
                     put("finished_sessions", snapshot.sessions.count { it.gameId == game.id && it.finishedAt != null })
+                    val unfinished = snapshot.sessions.filter { it.gameId == game.id && it.finishedAt == null }
+                    put("unfinished_sessions", unfinished.size)
+                    put("resumable_sessions", unfinished.count { it.checkpoint != null && it.gameSha256 == game.sha256 })
+                    put("sessions_without_checkpoint", unfinished.count { it.checkpoint == null })
+                    put("sessions_with_changed_source", unfinished.count { it.checkpoint != null && it.gameSha256 != game.sha256 })
                     if (includeHtml) put("html", game.html)
                 }) } })
                 put("result_bridge", "window.OrbisGame.finish(JSON.stringify({result:'win',move_count:5,score:1500,max_tile:256,scoring_version:'2048-v1'})); score/max_tile/scoring_version均可省略，未提供不是0；score为0到JS安全整数上限，max_tile为1到1073741824。返回JSON字符串，ok=true才已保存。同局同结果幂等，不覆盖不同结果；同游戏同计分版本比较纪录，缺少版本则按源码版本分别比较。旧HTML不必改动。")
                 put("sandbox", "self-contained HTML/JS only; no network/file/native capabilities; data/blob assets allowed")
+                put("progress_bridge", "可续局必须由游戏接入存档：启动先读取 JSON.parse(OrbisGame.loadState()) 的 ok/revision/state；仅 state=null 时初始化，初始化和每次有效操作后 saveState(JSON.stringify({revision,state:完整可恢复状态})) 并检查 ok、更新 revision。保存失败须提示并暂停推进，不能只在离开时保存。未结束记录不等于存档；没有checkpoint的旧盘面无法凭空恢复。人类入口：工具与娱乐→游戏机→顶部待继续；历史记录也可进入对应局。源码版本变化的存档不自动套用。include_template=true 可按需读完整示例。")
                 if (includeTemplate) put("starter_template", buildJsonObject {
                     put("id", OrbisMiniGameTemplates.ID)
                     put("usage", OrbisMiniGameTemplates.usage)

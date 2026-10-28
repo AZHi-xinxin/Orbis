@@ -202,6 +202,8 @@ fun ChatInput(
     var composerPanel by remember { mutableStateOf<OrbisComposerPanel?>(null) }
     var voiceNoteOpen by remember { mutableStateOf(false) }
     var connectionsOpen by remember(assistant.id) { mutableStateOf(false) }
+    val unfinishedConnections = settings.connectionProposals.any { it.owner == assistant.id.toString() && it.setupPromptPending }
+    LaunchedEffect(unfinishedConnections) { if (!unfinishedConnections) connectionsOpen = false }
     if (orbis && connectionsOpen) me.rerere.rikkahub.ui.pages.orbis.OrbisConnectionProposals(
         owner = assistant.id.toString(), onClose = { connectionsOpen = false })
     var composerExpanded by rememberSharedPreferenceBoolean("orbis_composer_expanded", false)
@@ -340,10 +342,10 @@ fun ChatInput(
                 dismissed = asrCorrectionNotice.dismissed,
                 onDismiss = { asr.dismissCorrectionNotice(asrCorrectionNotice.eventId) },
             )
-            if (orbis && voiceState.phase == VoicePhase.Off && (composerExpanded || settings.connectionProposals.any { it.owner == assistant.id.toString() })) {
+            if (orbis && voiceState.phase == VoicePhase.Off && unfinishedConnections) {
                 androidx.compose.material3.TextButton(onClick = { connectionsOpen = true },
                     modifier = Modifier.testTag("orbis-connection-setup-launcher")) {
-                    val pending = settings.connectionProposals.count { it.owner == assistant.id.toString() && it.status == "pending" }
+                    val pending = settings.connectionProposals.count { it.owner == assistant.id.toString() && it.setupPromptPending && it.status == "pending" }
                     Text(if (pending > 0) "连接设置 · $pending 项待完成" else "连接设置")
                 }
             }

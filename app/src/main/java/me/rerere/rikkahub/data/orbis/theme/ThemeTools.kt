@@ -73,15 +73,18 @@ internal fun executeThemeTool(store: ThemeRepository, raw: JsonElement): JsonObj
         put("ok", true)
         when (action) {
             "guide" -> {
+                put("bubble_shape", "每侧bubbles.assistant/user独立：shape=round/cat/rabbit/ticket/speech；tail=none/cat/curl，none无尾、cat猫尾、curl卷尾。tail直接放气泡字段内；已有drawing.outline时它覆盖shape/tail，要用预设尾巴先patch该侧drawing.outline=null（保留其余绘图字段），或把尾巴画进完整outline。")
+                put("tail_patch_example", "{\"bubbles\":{\"assistant\":{\"tail\":\"cat\",\"drawing\":{\"outline\":null}},\"user\":{\"tail\":\"curl\",\"drawing\":{\"outline\":null}}}}")
                 put("coordinates", "drawing使用0..100的气泡局部坐标，随气泡尺寸缩放；outline是闭合SVG路径，自由绘制完整轮廓，存在时优先于shape和tail。支持M/L/H/V/Q/C/Z及对应小写、重复坐标，暂不支持SVG的A/S/T命令或XML。每路径最多4096字符/160段。")
                 put("drawing", "drawing:{outline?:路径,gradient?:{colors:[2到6个#RRGGBB],x1:0,y1:0,x2:100,y2:100},stroke?:#RRGGBB,strokeWidth:0到8,layers:[最多12层]}。layers每项{path,fill?:#RRGGBB,gradient?:同上,stroke?:#RRGGBB,strokeWidth:0到8,opacity:0到1,motion?:{durationMs:1000到60000,alternate:true,frames:[{at:0,x:0,y:0,scale:1,rotation:0,opacity:1},...,{at:1,...}]}}。关键帧2到12个，at严格递增且起止0/1；x/y=-100到100，scale=0.1到3，rotation=-720到720。系统在关键帧间插值，动画只画在气泡轮廓内，不改变正文；聊天退后台或关闭系统动画时静止，列表缩略图静止。")
-                put("typography", "顶层typography为共同字体样式；bubbles.assistant.typography、bubbles.user.typography可分别覆盖。fontFamily为设备字体default/sans/serif/monospace/NotoSerifSC，fontSizeScale=0.85..1.4，lineHeight=1.2..2，weight=100..900，italic=true/false，letterSpacing=-0.05..0.2(em)。本版不导入外部字体文件。")
+                put("typography", "fontFamily默认default，跟随人类聊天字体。人类‘字体跟随我的设置’默认开启时优先于主题字体，AI不能修改该开关。顶层typography为共同字体样式；bubbles.assistant.typography、bubbles.user.typography可分别覆盖。fontFamily为设备字体default/sans/serif/monospace/NotoSerifSC，fontSizeScale=0.85..1.4，lineHeight=1.2..2，weight=100..900，italic=true/false，letterSpacing=-0.05..0.2(em)。本版不导入外部字体文件。")
                 put("edit", "list→read原id→patch(id,expected_revision,body仅变更字段)→publish(id,新的expected_revision)→apply(id,revision)。未传字段原样保留；null移除可选字段，数组整组替换。改名字仍是同一套，不要write无id创建副本。保持近20个版本用于回退，当前使用/待确认版本保留。")
                 put("example_body", themeJson.encodeToJsonElement(themeDrawingExample()))
             }
             "list" -> {
                 val state = store.snapshot()
                 put("ai_may_apply_new_themes", state.allowAiApply)
+                put("font_follows_human", state.followHumanFont)
                 put("design_guide", "action=guide 获取自由路径、动态图层、独立字体和局部修改示例")
                 put("edit_existing", "小改动先read原id，再patch同一id和expected_revision，只写要改的字段；publish→apply。不要为每次调整新建主题。")
                 put("next_step", if(state.allowAiApply) "write → publish → apply，可直接更换新主题" else "可设计并请求预览；人类在主题工作室打开交给AI自由装扮后可直接切换")

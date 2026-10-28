@@ -1,19 +1,19 @@
-ONNX Runtime Android 1.23.2
-Dependency: com.microsoft.onnxruntime:onnxruntime-android:1.23.2
+ONNX Runtime Android 1.24.3
+Dependency: com.microsoft.onnxruntime:onnxruntime-android:1.24.3
 Publisher: Microsoft Corporation
-Source: https://github.com/microsoft/onnxruntime/tree/v1.23.2
+Source: https://github.com/microsoft/onnxruntime/tree/v1.24.3
 
 LICENSE.txt and ThirdPartyNotices.txt are the unmodified text files retrieved
-from the upstream v1.23.2 source tag:
-https://raw.githubusercontent.com/microsoft/onnxruntime/v1.23.2/LICENSE
-https://raw.githubusercontent.com/microsoft/onnxruntime/v1.23.2/ThirdPartyNotices.txt
+from the upstream v1.24.3 source tag:
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.24.3/LICENSE
+https://raw.githubusercontent.com/microsoft/onnxruntime/v1.24.3/ThirdPartyNotices.txt
 
 UTF-8 SHA-256:
 LICENSE.txt: 2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c
-ThirdPartyNotices.txt: e9e90971a8e75a9a8ac0c6412e29c1202d079998389915aa485f46c816c3b4cc
+ThirdPartyNotices.txt: 0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2
 
 Pinned input AAR SHA-256:
-82048d1f462218adae4ba76477089ab0ba76093d84f733540066db1a8ba6b827
+67397e4a970e75617f765d2015ceaf911917e1d822276cfb5792744e8085cbce
 
 Orbis uses the arm64-v8a and x86_64 native binaries through this dependency.
 The Android build strips symbols from packaged copies; it does not modify the

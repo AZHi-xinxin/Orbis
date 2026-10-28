@@ -144,6 +144,10 @@ private fun AssistantLocalToolContent(
                 trailingContent = { Switch(assistant.orbisModelContinuityEnabled, { onUpdate(assistant.copy(orbisModelContinuityEnabled = it)) }) })
         }
         CardGroup {
+            item(headlineContent = { Text("允许 AI 撤回自己的消息") },
+                supportingContent = { Text("限最近 20 条 AI 回复，不计人类消息。撤回后你只看到提示，AI 仍记得原文；不能撤回你的消息。") },
+                trailingContent = { Switch(LocalToolOption.MessageRecall in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.MessageRecall, it) }) })
             item(
                 headlineContent = { Text("允许 AI 清理旧思考与工具记录") },
                 supportingContent = { Text("仅本对话已完成旧轮，先预览再经批准清理；原文可恢复，正文、附件和当前工具链不删除。下一轮请求生效，不依赖网关。清理回执只显示简短状态，不反复套娃。") },

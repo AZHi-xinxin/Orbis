@@ -327,6 +327,14 @@ fun Route.conversationRoutes(
             call.respond(HttpStatusCode.Created, ForkConversationResponse(conversationId = fork.id.toString()))
         }
 
+        post("/{id}/messages/{messageId}/recall") {
+            val uuid = call.parameters["id"].toUuid("conversation id")
+            val messageId = call.parameters["messageId"].toUuid("message id")
+            chatService.initializeConversation(uuid)
+            chatService.recallHumanMessage(uuid, messageId)
+            call.respond(HttpStatusCode.OK, mapOf("success" to true))
+        }
+
         // DELETE /api/conversations/{id}/messages/{messageId} - Delete a message
         delete("/{id}/messages/{messageId}") {
             val uuid = call.parameters["id"].toUuid("conversation id")

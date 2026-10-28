@@ -11,18 +11,21 @@ import me.rerere.rikkahub.data.orbis.integration.*
 
 internal fun connectionProposalTool(store: SettingsStore, owner: String,
     onSetupNeeded: (ConnectionProposal?, Boolean) -> Unit = { _, _ -> }) =
-    createConnectionProposalTool(owner, { store.settingsFlow.value }, { transform -> store.update(transform) }, onSetupNeeded)
+    createConnectionProposalTool(owner, { store.settingsFlow.value }, { transform -> store.update(transform) }, verified = { p -> AiConfigurationChecks.proposalVerified(store.settingsFlow.value, p) },
+        onSetupDismissed = { id -> connectionSetupQueue.closeSetup(owner, id) }, onSetupNeeded = onSetupNeeded)
 
 internal fun createConnectionProposalTool(owner: String, snapshot: () -> Settings,
     update: suspend ((Settings) -> Settings) -> Boolean,
+    verified: (ConnectionProposal) -> Boolean = { false },
+    onSetupDismissed: (String?) -> Unit = {},
     onSetupNeeded: (ConnectionProposal?, Boolean) -> Unit = { _, _ -> }) = Tool(
     name = "orbis_propose_connection",
-    description = "填写自己的原生连接。action=propose：kind=tts_openai/model_openai/mcp_http/mcp_sse，name、endpoint(完整HTTP(S)，无密钥/查询参数)、auth=none/bearer；model_openai需model，tts_openai需model/voice。没有密钥的配置直接保存，MCP默认关闭，只需人类在AI连接建议页开启；需要密钥时人类只在该页填key，可选择以后允许；需要补填或开启时，宿主会在发起请求的聊天打开对应配置页。已授权同地址可继续调整。不要传密钥或脚本。action=open_setup(id可选)重新打开填写框，关闭后可反复显式打开；action=show_guide(id可选)先打开保存部署密钥的指引。credential_file可填当前工作区/workspace/内的部署凭据文件路径，原生页仅供人类查看和保存，工具不读取或返回密钥。新模型默认支持工具；supports_tools可明确关闭，supports_images依据真实上游能力填写。action=status返回当前助手配置状态、原生ID及MCP是否开启。saved不是连接成功。用orbis_configure选择模型/音色或测试连接；备份使用orbis_backup。pending无需等待，继续正常回复。",
+    description = "填写自己的原生连接。action=propose：kind=tts_openai/model_openai/mcp_http/mcp_sse，name、endpoint(完整HTTP(S)，无密钥/查询参数)、auth=none/bearer；model_openai需model，tts_openai需model/voice。没有密钥的配置直接保存，MCP默认关闭，只需人类在AI连接建议页开启；需要密钥时人类只在该页填key，可选择以后允许；需要补填或开启时，宿主会在发起请求的聊天打开对应配置页。已授权同地址可继续调整。不要传密钥或脚本。action=open_setup(id可选)重新打开填写框，关闭后可反复显式打开；action=show_guide(id可选)先打开保存部署密钥的指引。credential_file可填当前工作区/workspace/内的部署凭据文件路径，原生页仅供人类查看和保存，工具不读取或返回密钥。新模型默认支持工具；supports_tools可明确关闭，supports_images依据真实上游能力填写。action=rename(id,name)修改自己创建的MCP显示名，不改工具标识、地址或密钥。action=dismiss_setup(id可选)只关闭连接设置弹窗和前台提示；省略id关闭本助手全部提示。离线、未验证、取消或已删除测试服务都能用，不删除/停用连接、不改密钥、不切模型、不冒充成功；open_setup可重开。action=status返回保存、启用、verified、setup_completed及setup_dismissed；saved不是连通。orbis_configure check通过后，逐条action=complete(id)结束已验证连接的前台提示，连接保留；open_setup仍可重开。用orbis_configure选择模型/音色或测试连接；备份使用orbis_backup。pending无需等待，继续正常回复。",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
-        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("propose", "status", "open_setup", "show_guide").map(::JsonPrimitive))) })
+        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("propose", "status", "open_setup", "show_guide", "rename", "complete", "dismiss_setup").map(::JsonPrimitive))) })
         listOf("id", "kind", "name", "endpoint", "model", "voice", "auth", "credential_file").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
         listOf("supports_tools", "supports_images").forEach { key -> put(key, buildJsonObject { put("type", "boolean") }) }
-    }, required = listOf("action")) }, needsApproval = { false }, execute = { args ->
+    }, required = listOf("action")) }, needsApproval = { it.jsonObject["action"]?.jsonPrimitive?.content == "rename" }, execute = { args ->
         val result = try { withTimeout(3000) { withContext(Dispatchers.IO) {
             val a = args.jsonObject
             require(a.keys.all { it in setOf("action", "id", "kind", "name", "endpoint", "model", "voice", "auth", "supports_tools", "supports_images", "credential_file") })
@@ -33,9 +36,23 @@ internal fun createConnectionProposalTool(owner: String, snapshot: () -> Setting
                 (value as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: error("invalid_field")
             }
             val action = string("action")
-            require(action in setOf("propose", "status", "open_setup", "show_guide"))
+            require(action in setOf("propose", "status", "open_setup", "show_guide", "rename", "complete", "dismiss_setup"))
             check(!snapshot().init && snapshot().assistants.any { it.id.toString() == owner })
             var receipt = snapshot().connectionProposals
+            if (action == "dismiss_setup") {
+                require(a.keys.all { it in setOf("action", "id") })
+                val id = if ("id" in a) string("id").also { require(it.isNotBlank()) } else null
+                check(update { ConnectionProposalRules.dismissSetup(it, owner, id).also { next -> receipt = next.connectionProposals } })
+                onSetupDismissed(id)
+            }
+            if (action == "rename") {
+                require(a.keys == setOf("action", "id", "name"))
+                check(update { ConnectionProposalRules.renameMcp(it, owner, string("id"), string("name")).also { next -> receipt = next.connectionProposals } })
+            }
+            if (action == "complete") {
+                require(a.keys == setOf("action", "id"))
+                check(update { ConnectionProposalRules.completeSetup(it, owner, string("id"), verified).also { next -> receipt = next.connectionProposals } })
+            }
             if(action == "propose") {
                 val draft = ConnectionDraft(string("kind"), string("name"), string("endpoint"), string("model"), string("voice"), string("auth", "bearer"), flag("supports_tools"), flag("supports_images"), string("credential_file")).normalized()
                 val before = receipt.firstOrNull { it.id == draft.id(owner) }
@@ -53,26 +70,33 @@ internal fun createConnectionProposalTool(owner: String, snapshot: () -> Setting
                 val proposal = if (string("id").isNotBlank()) scoped.single { it.id == string("id") }
                     else scoped.firstOrNull { it.status == "pending" } ?: scoped.lastOrNull()
                 check(proposal != null || action == "show_guide") { "proposal_missing" }
-                onSetupNeeded(proposal, action == "show_guide")
+                if (proposal != null && (proposal.setupCompleted || proposal.setupDismissed)) check(update { current ->
+                    val now = current.connectionProposals.single { it.id == proposal.id && it.owner == owner }
+                    ConnectionProposalRules.replace(current, now.copy(setupCompleted = false, setupDismissed = false)).also { next -> receipt = next.connectionProposals }
+                })
+                onSetupNeeded(proposal?.copy(setupCompleted = false, setupDismissed = false), action == "show_guide")
             }
             buildJsonObject {
                 put("ok", true)
                 put("ui_requested", action in setOf("open_setup", "show_guide"))
-                put("human_entry", "当前聊天输入框上方 → 连接设置；也可从右下角北斗导航 → 工具娱乐 → AI 连接建议打开")
+                put("ui_dismiss_requested", action == "dismiss_setup")
+                put("human_entry", "有待办时：当前聊天输入框上方 → 连接设置；关闭提示后：右下角北斗导航 → 工具娱乐 → AI 连接建议，或用 open_setup 重开")
                 put("proposals", JsonArray(receipt.filter { it.owner == owner }.map { p -> buildJsonObject {
                     put("id", p.id); put("name", p.draft.name); put("kind", p.draft.kind); put("status", p.status)
-                    put("always_allowed", p.alwaysAllow); put("verified", false)
+                    put("always_allowed", p.alwaysAllow); put("verified", verified(p)); put("setup_completed", p.setupCompleted)
+                    put("setup_dismissed", p.setupDismissed); put("setup_prompt_pending", p.setupPromptPending)
                     if (p.draft.kind == "model_openai") put("model_id", ConnectionProposalRules.connectionModelId(p.id).toString())
                     if (p.draft.kind.startsWith("mcp_")) put("enabled", snapshot().mcpServers
                         .firstOrNull { it.id.toString() == p.id }?.commonOptions?.enable == true)
                 } }))
+                put("completion_help", "确认连通：check/check_status 后 verified=true 才能 complete(id)。只关闭提示（包括已删测试服务、离线或未验证）：dismiss_setup(id)；省略 id 关闭本助手全部连接提示，不影响其他助手。它不删除/停用连接、不切模型、不保存输入密钥，也不表示验证成功。后台设置保留，open_setup 可再打开。")
                 put("note", "配置建议已处理；pending仅在设置页待确认，不用等候。已保存也不代表连接测试成功。可以继续当前回复。")
             }
         } } } catch(e: TimeoutCancellationException) { buildJsonObject { put("ok", false); put("status", "save_unconfirmed"); put("note", "本次保存未及时确认；不要重复创建，稍后在原生配置页查看，继续正常对话。") } }
         catch(e: CancellationException) { throw e }
         catch(_: Exception) { buildJsonObject {
             put("ok", false); put("status", "not_saved")
-            put("help", "propose需kind(tts_openai/model_openai/mcp_http/mcp_sse)、name、endpoint、auth(none/bearer)；模型连接需model，TTS另需voice。不要传密钥、脚本或带查询参数的地址。原配置保留，可继续回复。")
+            put("help", "只关弹窗请用dismiss_setup，可省略id关闭本助手全部提示，不需要验证；id若提供必须属于本助手。complete需本助手已保存、启用且通过当前配置检查的id；rename需本助手创建的MCP的id/name。propose需kind(tts_openai/model_openai/mcp_http/mcp_sse)、name、endpoint、auth(none/bearer)；模型连接需model，TTS另需voice。不要传密钥、脚本或带查询参数的地址。原配置保留，可继续回复。")
         } }
         listOf(UIMessagePart.Text(result.toString()))
     },

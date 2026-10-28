@@ -13,7 +13,11 @@ data class McpCommonOptions(
     val tools: List<McpTool> = emptyList(),
     val oauth: McpOAuthState? = null,
     val strictEndpoint: Boolean = false,
-)
+    /** Human-facing title, independent of the stable ASCII tool namespace in name. */
+    val displayName: String = "",
+) {
+    val displayTitle: String get() = displayName.ifBlank { name }
+}
 
 /**
  * OAuth 2.1 授权状态，遵循 MCP 授权规范 (2025-11-25)。

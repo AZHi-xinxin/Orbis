@@ -48,7 +48,7 @@ import org.koin.compose.koinInject
                 val selected=server.id.toString()==state.serverId&&state.enabled
                 OutlinedCard(Modifier.fillMaxWidth()){
                     Row(Modifier.fillMaxWidth().padding(12.dp),horizontalArrangement=Arrangement.SpaceBetween){
-                        Column(Modifier.weight(1f)){Text(server.commonOptions.name);Text(if(selected)"自动同步已开启"else"现有 MCP 连接",style=MaterialTheme.typography.bodySmall)}
+                        Column(Modifier.weight(1f)){Text(server.commonOptions.displayTitle);Text(if(selected)"自动同步已开启"else"现有 MCP 连接",style=MaterialTheme.typography.bodySmall)}
                         Switch(selected,{onConfigure(server,it)},enabled=!busy)
                     }
                 }

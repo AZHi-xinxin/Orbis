@@ -9,6 +9,18 @@ import org.junit.Test
 import kotlin.uuid.Uuid
 
 class LocalGenerationRecoveryPolicyTest {
+    @Test fun `committed recall can advance but never excuse unsaved flags or changed text`() {
+        val old = saved()
+        val recalled = old.copy(messageNodes = old.messageNodes.map { node ->
+            node.copy(messages = node.messages.map { it.copy(orbisRecalled = true) })
+        })
+        assertTrue(sameDurableGenerationSnapshot(old, recalled))
+        assertFalse(sameDurableGenerationSnapshot(recalled, old))
+        val changed = recalled.copy(messageNodes = recalled.messageNodes.map { node ->
+            node.copy(messages = node.messages.map { it.copy(parts = listOf(UIMessagePart.Text("tampered"))) })
+        })
+        assertFalse(sameDurableGenerationSnapshot(old, changed))
+    }
     private fun saved() = Conversation(assistantId = Uuid.random(), messageNodes = listOf(
         UIMessage.user("question").toMessageNode(), UIMessage.assistant("answer").toMessageNode()))
     @Test fun `exact saved page including favorite-only UI change may release stale local latch`() {

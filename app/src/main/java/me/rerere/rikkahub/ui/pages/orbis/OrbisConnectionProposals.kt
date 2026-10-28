@@ -36,13 +36,24 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
     var selectedId by remember(owner) { mutableStateOf(initialRequest?.id) }
     val entries = settings.connectionProposals.filter { it.owner == owner }.asReversed()
     val selected = entries.firstOrNull { it.id == selectedId } ?: entries.firstOrNull { it.status == "pending" } ?: entries.firstOrNull()
-    fun apply(transform: (Settings) -> Settings) {
+    val dismissals by connectionSetupQueue.dismissals.collectAsStateWithLifecycle()
+    var seenDismissal by remember(owner) { mutableLongStateOf(connectionSetupQueue.dismissals.value[owner]?.sequence ?: 0L) }
+    LaunchedEffect(dismissals[owner]) {
+        dismissals[owner]?.let { event ->
+            if (event.sequence > seenDismissal) {
+                seenDismissal = event.sequence
+                if (event.id == null || event.id == selected?.id) onClose()
+            }
+        }
+    }
+    fun apply(afterSave: () -> Unit = {}, transform: (Settings) -> Settings) {
         if (busy) return
         busy = true
         scope.launch {
             try {
                 val ok = withContext(Dispatchers.IO) { store.update(transform) }
                 notice = if (ok) "已保存。连接状态可由 AI 继续检查；聊天随时可以继续。" else "这次没有保存，原配置保留。"
+                if (ok) afterSave()
             } catch(c: CancellationException) { throw c }
             catch(_: Exception) { notice = "未保存：请检查密钥或建议版本。原有设置和聊天仍保留。" }
             finally { busy = false }
@@ -64,6 +75,9 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
         } },
         onToggle = { p, enabled -> apply { ConnectionProposalRules.setMcpEnabled(it, owner, p.id, enabled) } },
         onGuide = { showGuide = true },
+        onDismissSetup = { apply(afterSave = { connectionSetupQueue.closeSetup(owner); onClose() }) {
+            ConnectionProposalRules.dismissSetup(it, owner)
+        } },
         onRevoke = { p -> apply { latest ->
             val current = latest.connectionProposals.single { it.owner == owner && it.id == p.id }
             ConnectionProposalRules.replace(latest, current.copy(alwaysAllow = false,
@@ -77,7 +91,7 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
     busy: Boolean, notice: String?, onClose: () -> Unit, onSelect: (ConnectionProposal) -> Unit,
     enabled: Boolean, onSave: (ConnectionProposal, String?, Boolean, Boolean) -> Unit,
     onToggle: (ConnectionProposal, Boolean) -> Unit, onRevoke: (ConnectionProposal) -> Unit,
-    onGuide: () -> Unit = {}) {
+    onGuide: () -> Unit = {}, onDismissSetup: () -> Unit = {}) {
     val colors = OrbisTheme.colors
     val height = LocalConfiguration.current.screenHeightDp.dp * .74f
     var key by remember(selected?.id, selected?.draft, selected?.status, notice) { mutableStateOf("") }
@@ -160,8 +174,12 @@ internal fun OrbisConnectionProposals(owner: String, onClose: () -> Unit, store:
                 }
                 notice?.let { Text(it, color = colors.accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-notice")) }
             }
+            TextButton(onClick = onDismissSetup, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("connection-dismiss-setup")) {
+                Text("关闭本助手的连接提示")
+            }
             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("密钥不回传给 AI · 收起后点输入框上方「连接设置」继续", Modifier.weight(1f), color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
+                Text("收起可继续填写；关闭提示后，可从工具娱乐 → AI 连接建议重开。连接会保留。", Modifier.weight(1f), color = colors.mutedInk, style = MaterialTheme.typography.labelMedium)
                 OutlinedButton(onClick = onClose, shape = RoundedCornerShape(12.dp)) { Text("回到聊天") }
             }
         }

@@ -30,7 +30,7 @@ import org.junit.runners.Parameterized
 class MemoryProviderWireTest(private val protocol: String) {
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun protocols() = listOf("chat", "responses", "claude", "google")
+        fun protocols() = listOf("chat", "chat-pro", "responses", "claude", "google")
     }
     private val client = OkHttpClient.Builder().addInterceptor { error("No network in memory wire tests") }.build()
     private val params = TextGenerationParams(model = Model(modelId = "synthetic-text-model"))
@@ -201,12 +201,16 @@ class MemoryProviderWireTest(private val protocol: String) {
     }
 
     private fun request(messages: List<UIMessage>): JsonObject = when (protocol) {
-        "chat" -> {
-            val method = ChatCompletionsAPI::class.java.getDeclaredMethod("buildMessages", List::class.java,
-                Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, List::class.java).apply { isAccessible = true }
-            val wire = method.invoke(ChatCompletionsAPI(client, KeyRoulette.default()), messages, true, false,
-                listOf(Modality.TEXT, Modality.IMAGE)) as JsonArray
-            buildJsonObject { put("messages", wire) }
+        "chat", "chat-pro" -> {
+            // Exercise the real endpoint-aware request builder, not its raw message encoder.
+            val method = ChatCompletionsAPI::class.java.getDeclaredMethod("buildChatCompletionRequest", List::class.java,
+                TextGenerationParams::class.java, ProviderSetting.OpenAI::class.java,
+                Boolean::class.javaPrimitiveType).apply { isAccessible = true }
+            val officialPro = protocol == "chat-pro"
+            method.invoke(ChatCompletionsAPI(client, KeyRoulette.default()), messages,
+                if (officialPro) params.copy(model = Model(modelId = "deepseek-v4-pro")) else params,
+                ProviderSetting.OpenAI(baseUrl = if (officialPro) "https://api.deepseek.com/v1" else "https://st.example.invalid/v1"),
+                false) as JsonObject
         }
         "responses" -> ResponseAPI::class.java.declaredMethods.single { method ->
             // Internal JVM methods may include a module suffix; app tests do not bypass Kotlin visibility.
@@ -226,7 +230,7 @@ class MemoryProviderWireTest(private val protocol: String) {
         "responses" -> "input"; "google" -> "contents"; else -> "messages"
     }]!!.jsonArray
     private fun system(body: JsonObject): String = when(protocol) {
-        "chat" -> wireMessages(body).firstOrNull { it.jsonObject["role"]?.jsonPrimitive?.content == "system" }.toString()
+        "chat", "chat-pro" -> wireMessages(body).firstOrNull { it.jsonObject["role"]?.jsonPrimitive?.content == "system" }.toString()
         "responses" -> body["instructions"].toString()
         "claude" -> body["system"].toString()
         "google" -> body["systemInstruction"].toString()

@@ -127,9 +127,31 @@ class KelivoChatModelTest {
         assertFalse(converted.conversation.currentMessages.single().toText().contains("https://"))
         assertTrue(converted.conversation.currentMessages.single().parts.all { it is UIMessagePart.Text })
     }
-    @Test fun allChosenContentIsPreflightedAndOversizeFailsWithoutTruncation() {
-        val source = Source(listOf(chat()), listOf(message()), mapOf("m" to listOf(KelivoPart("text", "x".repeat(600 * 1024)))))
-        assertThrows(IllegalArgumentException::class.java) { inspectKelivoSource(source, "f") }
+    @Test fun longUtf8TextAndHistoricalToolContentThatFitStorageAreNotRejectedAtSoftThreshold() = runBlocking {
+        val longText = "中文🙂".repeat(60 * 1024)
+        assertEquals(600 * 1024, longText.toByteArray(Charsets.UTF_8).size)
+        for (kind in listOf("text", "tool_call")) {
+            val source = Source(listOf(chat()), listOf(message()), mapOf("m" to listOf(KelivoPart(kind, longText))))
+            val preview = inspectKelivoSource(source, "f")
+            val sink = Sink()
+            assertEquals(1, importSelectedKelivoChats(source, preview, setOf("chat"), assistant, sink).messages)
+            val stored = sink.saved.values.single().currentMessages.single()
+            assertEquals(if (kind == "text") longText else "[Kelivo 历史工具记录；不会执行或恢复授权]\n$longText", stored.toText())
+            assertTrue(stored.getTools().isEmpty())
+            assertEquals(1, importSelectedKelivoChats(source, preview, setOf("chat"), assistant, sink).skipped)
+        }
+    }
+    @Test fun rawBytesEscapingAndCombinedPartsAreAllBoundedBeforeCommit() {
+        val tooLarge = listOf(
+            listOf(KelivoPart("text", "x".repeat(KelivoChatLimits.MAX_PART_BYTES + 1))),
+            listOf(KelivoPart("text", "\"".repeat(400 * 1024))),
+            listOf(KelivoPart("text", "x".repeat(400 * 1024)), KelivoPart("text", "y".repeat(400 * 1024))),
+        )
+        for (parts in tooLarge) {
+            val source = Source(listOf(chat()), listOf(message()), mapOf("m" to parts))
+            val failure = assertThrows(ArchiveReadException::class.java) { inspectKelivoSource(source, "f") }
+            assertEquals(ArchiveFailure.NODE_LIMIT, failure.reason)
+        }
     }
     @Test fun selectionAppendIsIdempotentAndDoesNotReplaceExistingAssistant() = runBlocking {
         val source = Source(listOf(chat("one"), chat("two")), listOf(message()))

@@ -18,13 +18,24 @@ import me.rerere.rikkahub.data.orbis.integration.AiWorkspacePreparation
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 
 internal fun orbisSelfConfigurationTool(store: SettingsStore, owner: String, context: Context, mcp: McpManager,
-    workspaceRepository: WorkspaceRepository) =
+    workspaceRepository: WorkspaceRepository, stRuntimeWorkspaceForRun: () -> String? = { null }) =
     createOrbisSelfConfigurationTool(owner, { store.settingsFlow.value }, { transform -> store.update(transform) },
         network = { action, kind, id ->
             AiConfigurationChecks.request(context.applicationContext, store, mcp, owner, action, kind, id)
         }, workspaceStatus = {
             val assistant = AiConfigurationRules.requireOwner(store.settingsFlow.value, owner)
-            workspaceRepository.readiness(assistant.workspaceId?.toString())
+            val id = assistant.workspaceId?.toString()
+            val readiness = workspaceRepository.readiness(id)
+            val workspace = id?.let { workspaceRepository.getById(it) }
+            val host = me.rerere.rikkahub.data.orbis.st.StRuntimeHost.get(context)
+            JsonObject(readiness + ("st_host" to me.rerere.rikkahub.data.orbis.st.stRuntimeReadiness(
+                bound = workspace != null,
+                enabled = workspace?.let { host.enabled(it.root) } == true,
+                shellReady = readiness["shell_ready"]?.jsonPrimitive?.booleanOrNull == true,
+                registeredForRun = workspace != null && id == stRuntimeWorkspaceForRun(),
+                configured = workspace?.let { host.saved(it.root).spec != null } == true,
+                phase = workspace?.let { host.current(it.root).phase } ?: "stopped",
+            )))
         }, prepareWorkspace = {
             AiWorkspacePreparation.prepare(owner, { store.settingsFlow.value }, workspaceRepository::getById,
                 workspaceRepository::createNative, workspaceRepository::prepareNative) { transform -> store.update(transform) }

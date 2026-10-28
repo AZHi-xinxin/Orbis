@@ -1,4 +1,5 @@
 import * as React from "react";
+import { RecallNotice } from "./recall-notice";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
@@ -57,6 +58,7 @@ interface ChatMessageProps {
   onRegenerate?: (messageId: string) => void | Promise<void>;
   onSelectBranch?: (nodeId: string, selectIndex: number) => void | Promise<void>;
   onDelete?: (messageId: string) => void | Promise<void>;
+  onRecall?: (messageId: string) => void | Promise<void>;
   onFork?: (messageId: string) => void | Promise<void>;
   onToolApproval?: (toolCallId: string, approved: boolean, reason: string, answer?: string) => void | Promise<void>;
 }
@@ -240,6 +242,7 @@ const ChatMessageActionsRow = React.memo(({
   onRegenerate,
   onSelectBranch,
   onDelete,
+  onRecall,
   onFork,
 }: {
   node: MessageNodeDto;
@@ -250,6 +253,7 @@ const ChatMessageActionsRow = React.memo(({
   onRegenerate?: (messageId: string) => void | Promise<void>;
   onSelectBranch?: (nodeId: string, selectIndex: number) => void | Promise<void>;
   onDelete?: (messageId: string) => void | Promise<void>;
+  onRecall?: (messageId: string) => void | Promise<void>;
   onFork?: (messageId: string) => void | Promise<void>;
 }) => {
   const { t } = useTranslation("message");
@@ -463,6 +467,13 @@ const ChatMessageActionsRow = React.memo(({
               {t("chat_message.create_fork")}
             </DropdownMenuItem>
           )}
+          {onRecall && message.role === "USER" && !message.orbisEvent && (
+            <DropdownMenuItem disabled={actionDisabled} onSelect={() => {
+              setDeleting(true);
+              void Promise.resolve(onRecall(message.id)).catch((error: unknown) => window.alert(error instanceof Error ? error.message : "撤回失败"))
+                .finally(() => setDeleting(false));
+            }}>撤回</DropdownMenuItem>
+          )}
           {onDelete && (
             <DropdownMenuItem
               variant="destructive"
@@ -526,6 +537,7 @@ export const ChatMessage = React.memo(({
   onRegenerate,
   onSelectBranch,
   onDelete,
+  onRecall,
   onFork,
   onToolApproval,
 }: ChatMessageProps) => {
@@ -544,6 +556,7 @@ export const ChatMessage = React.memo(({
 
   // Same host-provenance field used by the phone. Never infer an event from text
   // or change its stored role/content; this is only a neutral timestamp display.
+  if (message.recalled) return <RecallNotice role={message.role} />;
   const externalEvent = getOrbisEvent(message);
   if (externalEvent) {
     const attachments = message.parts.filter((part) =>
@@ -604,6 +617,7 @@ export const ChatMessage = React.memo(({
             onRegenerate={onRegenerate}
             onSelectBranch={onSelectBranch}
             onDelete={onDelete}
+            onRecall={onRecall}
             onFork={onFork}
           />
         </div>

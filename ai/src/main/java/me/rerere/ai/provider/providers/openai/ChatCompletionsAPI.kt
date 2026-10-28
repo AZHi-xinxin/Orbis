@@ -2,6 +2,8 @@ package me.rerere.ai.provider.providers.openai
 
 import me.rerere.ai.util.orbisSourceHeaders
 import me.rerere.ai.util.chatCompletionsHostMemoryLayout
+import me.rerere.ai.util.isRequestHostDataMessage
+import me.rerere.ai.util.proHostNoticeDataLayout
 import me.rerere.ai.util.observeOrbisGatewayRequest
 import me.rerere.ai.util.observeOrbisGatewayResponse
 
@@ -188,7 +190,7 @@ class ChatCompletionsAPI(
     private fun observePrefix(provider: ProviderSetting.OpenAI, params: TextGenerationParams, body: JsonObject) {
         val callback=params.onPrefixObservation ?: return
         val session=params.orbisConversationId ?: return
-        if(provider.baseUrl.toHttpUrl().host!="api.deepseek.com") return
+        if(provider.baseUrl.toHttpUrl().host!="api.deepseek.com" && !provider.cacheDiagnostics) return
         try {
             callback(DeepSeekPrefixProbe.shared.observe("${provider.id}|$session|${body["model"]}",body))
         } catch(_: Exception) { /* Diagnostics must not change or prevent a model request. */ }
@@ -202,6 +204,13 @@ class ChatCompletionsAPI(
     ): JsonObject {
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
+        // Live V4 Pro probes lose the prefix cache with changing tail SYSTEM blocks.
+        // Keep request-only host data on its human carrier for the official endpoint only.
+        // Gateways (including ST) still need a separate SYSTEM block for source attribution.
+        val effectiveModel = params.customBody.lastOrNull { it.key == "model" }?.value
+            ?.let { (it as? JsonPrimitive)?.contentOrNull } ?: params.model.modelId
+        val wireMessages = if (host == "api.deepseek.com" && effectiveModel == "deepseek-v4-pro")
+            proHostNoticeDataLayout(messages) else chatCompletionsHostMemoryLayout(messages)
         val supportsGoogleSignatures = host == "generativelanguage.googleapis.com" ||
             host == "aiplatform.googleapis.com" || host.endsWith(".aiplatform.googleapis.com") ||
             params.model.modelId.contains("gemini", ignoreCase = true)
@@ -211,8 +220,8 @@ class ChatCompletionsAPI(
                 "messages",
                 buildMessages(
                     // Keep saved metadata, but do not send a Gemini-only extension after a model switch.
-                    messages = if (supportsGoogleSignatures) messages else
-                        messages.map { it.withoutGoogleChatCompletionsToolSignatures() },
+                    messages = if (supportsGoogleSignatures) wireMessages else
+                        wireMessages.map { it.withoutGoogleChatCompletionsToolSignatures() },
                     includeHistoryReasoning = providerSetting.includeHistoryReasoning,
                     includeOpenRouterReasoningDetails = isOpenRouter,
                     supportInputModalities = params.model.inputModalities,
@@ -473,7 +482,7 @@ class ChatCompletionsAPI(
         includeOpenRouterReasoningDetails: Boolean = false,
         supportInputModalities: List<Modality> = listOf(Modality.TEXT, Modality.IMAGE),
     ) = buildJsonArray {
-        val filteredMessages = chatCompletionsHostMemoryLayout(messages).filter { it.isValidToUpload() }
+        val filteredMessages = messages.filter { it.isValidToUpload() }
 
         filteredMessages.forEach { message ->
             if (message.role == MessageRole.ASSISTANT) {
@@ -653,6 +662,7 @@ class ChatCompletionsAPI(
 
     private fun JsonArrayBuilder.addNonAssistantMessage(message: UIMessage) {
         add(buildJsonObject {
+            if (message.isRequestHostDataMessage()) put("name", "orbis_host_data_v1")
             put("role", JsonPrimitive(message.role.name.lowercase()))
 
             if (message.parts.isOnlyTextPart()) {

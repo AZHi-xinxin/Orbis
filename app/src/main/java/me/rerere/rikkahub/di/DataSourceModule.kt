@@ -142,6 +142,11 @@ val dataSourceModule = module {
             json = get(),
             localMemory = get(),
             bodyStatus = get(),
+            readRecallState = { owner, conversation ->
+                get<me.rerere.rikkahub.data.repository.ConversationRepository>().getConversationById(conversation)
+                    ?.takeIf { it.assistantId == owner }?.currentMessages
+                    ?.filter { it.orbisRecalled || it.orbisQuoteRecalled }.orEmpty()
+            },
             observation = me.rerere.rikkahub.data.orbis.observation.AiObservationRuntime(get(), get(), get()),
         )
     }

@@ -65,6 +65,8 @@ sealed class ProviderSetting {
         var chatCompletionsPath: String = "/chat/completions",
         var useResponseApi: Boolean = false,
         var includeHistoryReasoning: Boolean = true,
+        // Optional count-only local diagnostics; never changes the request layout.
+        var cacheDiagnostics: Boolean = false,
         var responsesPath: String = "/responses",
         // Opaque local registration reference only; OAuth credentials stay in Keystore-protected storage.
         val chatGptAccountId: String? = null,
