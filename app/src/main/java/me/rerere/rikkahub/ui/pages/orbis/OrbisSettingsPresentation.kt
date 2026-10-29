@@ -26,6 +26,8 @@ internal fun orbisMcpOverview(
     globallyEnabled: Boolean,
     assistantSelected: Boolean?,
     status: McpStatus?,
+    aiPermitted: Boolean = true,
+    aiHidden: Boolean = false,
 ): OrbisMcpOverview = OrbisMcpOverview(
     configured = if (globallyEnabled) "配置：已开启" else "配置：已关闭",
     connection = when (status) {
@@ -38,10 +40,11 @@ internal fun orbisMcpOverview(
         McpStatus.NeedsAuthorization -> "连接：需要授权"
         McpStatus.Authorizing -> "连接：授权中"
     },
-    selected = when (assistantSelected) {
-        null -> "当前AI：未确定"
-        true -> "当前AI：已选用"
-        false -> "当前AI：未选用"
+    selected = when {
+        assistantSelected != null && !aiPermitted -> if (aiHidden) "当前AI：已停用并收起" else "当前AI：已停用"
+        assistantSelected == null -> "当前AI：未确定"
+        assistantSelected -> "当前AI：已选用"
+        else -> "当前AI：未选用"
     },
 )
 

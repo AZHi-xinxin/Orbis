@@ -68,7 +68,7 @@ class StRuntimeHost private constructor(private val context: Context) {
         }
         val base = File(File(context.filesDir, "workspaces"), root)
         check(File(base, "linux/bin/sh").isFile) { "st_rootfs_missing" }
-        val run = Run(owner, spec, WorkspaceRuntimeLease.acquire(root))
+        val run = Run(owner, spec, WorkspaceRuntimeLease.acquireRuntime(root, "st"))
         runs[root] = run
         try {
             save(root, StRuntimeSaved(true, owner, spec, resumeOnAppOpen = true))

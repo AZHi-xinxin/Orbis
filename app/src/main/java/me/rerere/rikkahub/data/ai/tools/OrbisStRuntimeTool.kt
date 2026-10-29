@@ -15,7 +15,7 @@ internal fun createOrbisStRuntimeTool(
     stop: () -> Unit,
 ) = Tool(
     name = "orbis_st_runtime",
-    description = "管理用户已选定且启用托管的本手机ST：start/status/stop。先确认部署位置；指南按需查orbis_help guide/st_phone。只托管已安装实例，不安装、不修改Termux。starting不是连通；ready只说明本地健康与MCP目录通过，模型/记忆仍需测试。",
+    description = "管理用户已选定且启用托管的本手机ST（StillerBrain记忆系统）：start/status/stop。先确认部署位置；指南按需查orbis_help guide/st_phone。只托管已安装实例，不安装、不修改Termux。starting不是连通；ready只说明本地健康与MCP目录通过，模型/记忆仍需测试。",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("start", "status", "stop").map(::JsonPrimitive))) })
         put("target", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf(JsonPrimitive("this_phone_orbis")))) })

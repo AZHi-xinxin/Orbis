@@ -85,6 +85,7 @@ class ChatCompletionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val requestBody =
             buildChatCompletionRequest(
                 messages = messages,
@@ -142,6 +143,7 @@ class ChatCompletionsAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val requestBody = buildChatCompletionRequest(
             messages = messages,
             params = params,

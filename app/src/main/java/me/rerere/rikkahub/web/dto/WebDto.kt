@@ -187,6 +187,8 @@ data class UploadFilesResponseDto(
 
 @Serializable
 data class ConversationDto(
+    val boundaryRevision: Long = 0,
+    val boundary: me.rerere.rikkahub.data.orbis.boundary.ConversationBoundary? = null,
     val id: String,
     val assistantId: String,
     val title: String,
@@ -329,7 +331,9 @@ fun me.rerere.rikkahub.data.model.Folder.toDto() = FolderDto(
     createAt = createAt.toEpochMilli(),
 )
 
-fun Conversation.toDto(isGenerating: Boolean = false) = ConversationDto(
+fun Conversation.toDto(isGenerating: Boolean = false, boundary: me.rerere.rikkahub.data.orbis.boundary.ConversationBoundary? = null, boundaryRevision: Long = 0) = ConversationDto(
+    boundaryRevision = boundaryRevision,
+    boundary = boundary,
     id = id.toString(),
     assistantId = assistantId.toString(),
     title = title,

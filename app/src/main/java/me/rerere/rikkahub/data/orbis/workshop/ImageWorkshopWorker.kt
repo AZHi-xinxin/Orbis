@@ -66,7 +66,7 @@ class ImageWorkshopWorker(context: Context, parameters: WorkerParameters) : Coro
             val imageClient = koin.get<okhttp3.OkHttpClient>().newBuilder()
                 .retryOnConnectionFailure(false)
                 .build()
-            val provider = ProviderManager(imageClient, applicationContext).getProviderByType(config)
+            val provider = ProviderManager(imageClient, applicationContext).getProviderByType(config, me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(applicationContext).requestContext(job.assistantId, job.conversationId).check)
             val variants = if (job.widgetKit) WIDGET_KIT_VARIANTS else listOf("image" to job.prompt)
             for ((label, variant) in variants) {
                 // Every image is a new billable call. Re-check changes made while earlier

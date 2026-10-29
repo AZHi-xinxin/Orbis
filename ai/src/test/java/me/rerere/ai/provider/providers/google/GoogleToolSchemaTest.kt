@@ -13,6 +13,80 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GoogleToolSchemaTest {
+    @Test fun `reported ST union keeps array items in actual Google request`() {
+        val props = json.parseToJsonElement("""{"keywords":{"anyOf":[{"type":"array","items":{"type":"string"}},{"type":"string"},{"type":"null"}]}}""").jsonObject
+        val actual = requestSchema(props)["properties"]!!.jsonObject["keywords"]!!.jsonObject
+        assertEquals(props["keywords"], actual)
+        assertEquals("string", actual["anyOf"]!!.jsonArray[0].jsonObject["items"]!!.jsonObject["type"]!!.jsonPrimitive.content)
+        assertTrue(googleToolSchemaIssueCodes(actual).isEmpty())
+        assertEquals(setOf("array_items_missing"), googleToolSchemaIssueCodes(json.parseToJsonElement("""{"type":"array"}""")))
+    }
+    @Test fun `on demand schema diagnostics are bounded and ignore data shaped examples`() {
+        val value = json.parseToJsonElement("""{"type":"string","example":{"type":"array"},"default":{"type":"array"}}""")
+        assertTrue(googleToolSchemaIssueCodes(value).isEmpty())
+        var nested: JsonElement = buildJsonObject { put("type", "array") }
+        repeat(40) { nested = buildJsonObject { put("type", "array"); put("items", nested) } }
+        assertTrue("schema_complexity_unchecked" in googleToolSchemaIssueCodes(nested))
+    }
+
+    @Test
+    fun `nullable type list is sent as a scalar with nullable and source remains unchanged`() {
+        val source = json.parseToJsonElement("""{"emotion":{"type":["string","null"],"description":"optional label"}}""").jsonObject
+        val before = source.toString()
+        val value = requestSchema(source)["properties"]!!.jsonObject["emotion"]!!.jsonObject
+        assertEquals(JsonPrimitive("string"), value["type"])
+        assertEquals(JsonPrimitive(true), value["nullable"])
+        assertEquals(JsonPrimitive("optional label"), value["description"])
+        assertEquals(before, source.toString())
+    }
+
+    @Test
+    fun `type unions in nested objects array items and anyOf retain all alternatives`() {
+        val source = json.parseToJsonElement("""{
+          "entry":{"type":"object","properties":{"values":{"type":"array","items":{
+            "anyOf":[{"type":["integer","number","null"],"minimum":1},{"type":["string"],"minLength":2}]
+          }}}}
+        }""").jsonObject
+        val variants = requestSchema(source)["properties"]!!.jsonObject["entry"]!!.jsonObject
+            .get("properties")!!.jsonObject["values"]!!.jsonObject["items"]!!.jsonObject["anyOf"]!!.jsonArray
+        val numbers = variants[0].jsonObject["anyOf"]!!.jsonArray
+        assertEquals(listOf("integer", "number"), numbers.map { it.jsonObject["type"]!!.jsonPrimitive.content })
+        numbers.forEach { assertEquals(JsonPrimitive(1), it.jsonObject["minimum"]) }
+        assertEquals(JsonPrimitive(true), variants[0].jsonObject["nullable"])
+        assertEquals(JsonPrimitive("string"), variants[1].jsonObject["type"])
+        assertEquals(JsonPrimitive(2), variants[1].jsonObject["minLength"])
+    }
+
+    @Test
+    fun `union preserves an existing anyOf restriction within each type alternative`() {
+        val source = json.parseToJsonElement("""{"value":{"type":["number","string"],
+          "anyOf":[{"type":"number","minimum":3},{"type":"string","minLength":4}]}}
+        """).jsonObject
+        val branches = requestSchema(source)["properties"]!!.jsonObject["value"]!!.jsonObject["anyOf"]!!.jsonArray
+        assertEquals(2, branches.size)
+        branches.forEach { assertEquals(source["value"]!!.jsonObject["anyOf"], it.jsonObject["anyOf"]) }
+    }
+
+    @Test
+    fun `upstream propertyNames omission does not strip a parameter named propertyNames`() {
+        val source = json.parseToJsonElement("""{"value":{"type":"object","propertyNames":{"pattern":"^[a-z]+$"},
+          "properties":{"propertyNames":{"type":"string"}}}}""").jsonObject
+        val value = requestSchema(source)["properties"]!!.jsonObject["value"]!!.jsonObject
+        assertFalse(value.containsKey("propertyNames"))
+        assertTrue(value["properties"]!!.jsonObject.containsKey("propertyNames"))
+    }
+
+    @Test
+    fun `type-shaped argument names and default values remain data`() {
+        val source = json.parseToJsonElement("""{
+          "type":{"type":"string"},"value":{"type":["null"],"default":{"type":["string","null"]}}
+        }""").jsonObject
+        val properties = requestSchema(source)["properties"]!!.jsonObject
+        assertEquals(source["type"], properties["type"])
+        assertEquals(JsonPrimitive("null"), properties["value"]!!.jsonObject["type"])
+        assertEquals(source["value"]!!.jsonObject["default"], properties["value"]!!.jsonObject["default"])
+    }
+
     private fun requestSchema(properties: JsonObject, required: List<String>? = null): JsonObject {
         val provider = GoogleProvider(OkHttpClient())
         val method = GoogleProvider::class.java.getDeclaredMethod(

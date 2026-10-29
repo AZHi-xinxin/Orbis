@@ -13,6 +13,7 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "~/components/extended/conversation";
+import { BoundaryPauseCard } from "~/components/boundary-pause-card";
 import { ChatInput } from "~/components/input/chat-input";
 import { ChatMessage } from "~/components/message/chat-message";
 import { Button } from "~/components/ui/button";
@@ -286,6 +287,12 @@ function buildEditedParts(session: EditingSession, draftParts: UIMessagePart[]):
 function useConversationDetail(activeId: string | null, updateSummary: ConversationSummaryUpdater) {
   const { t } = useTranslation("page");
   const [detail, setDetail] = React.useState<ConversationDto | null>(null);
+  React.useEffect(() => {
+    if (!detail?.boundaryRevision) return;
+    let active = true;
+    api.get<Settings>("settings").then(settings => { if (active) useAppStore.getState().setSettings(settings); }).catch(() => {});
+    return () => { active = false; };
+  }, [detail?.id, detail?.boundaryRevision]);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState<string | null>(null);
   const [revision, setRevision] = React.useState(0);
@@ -1173,7 +1180,7 @@ function ConversationsPageInner() {
             <p className="orbis-welcome text-lg text-muted-foreground break-words px-4">{t("conversations.welcome_prompt", { name: welcomeName(settings?.displaySetting.userNickname) })}</p>
           </div>
         )}
-        <ChatInput
+        {detail?.boundary?.paused ? <BoundaryPauseCard conversation={detail} /> : <ChatInput
           value={inputText}
           attachments={inputAttachments}
           conversation={detail}
@@ -1200,7 +1207,7 @@ function ConversationsPageInner() {
                 }
               : undefined
           }
-        />
+        />}
       </div>
     </div>
   );

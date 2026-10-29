@@ -10,6 +10,7 @@ import io.ktor.server.routing.route
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.ModelType
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.web.BadRequestException
 import me.rerere.rikkahub.web.NotFoundException
@@ -26,12 +27,13 @@ import me.rerere.rikkahub.web.dto.toWebSettingsDto
 import java.util.Locale
 
 fun Route.settingsRoutes(
-    settingsStore: SettingsStore
+    settingsStore: SettingsStore,
+    boundary: me.rerere.rikkahub.data.orbis.boundary.BoundaryHost? = null
 ) {
     route("/settings") {
         get {
             call.response.headers.append("Cache-Control", "no-store")
-            call.respond(settingsStore.settingsFlow.value.toWebSettingsDto())
+            call.respond(settingsStore.settingsFlow.value.toWebSettingsDto(boundary?.states?.value.orEmpty()))
         }
         post("/assistant") {
             val request = call.receive<UpdateAssistantRequest>()
@@ -89,7 +91,12 @@ fun Route.settingsRoutes(
                 throw BadRequestException("mcpServerIds contains unknown server id")
             }
 
-            settingsStore.updateAssistantMcpServers(assistantId, requestedServerIds)
+            if (requestedServerIds.any { boundary?.permits(assistantId.toString(), "mcp", it.toString()) == false &&
+                    it !in settings.getAssistantById(assistantId)!!.mcpServers }) throw BadRequestException("当前 AI 已停用这个 MCP")
+            val retainedChoices = settings.getAssistantById(assistantId)!!.mcpServers.filter {
+                it in validServerIds && boundary?.permits(assistantId.toString(), "mcp", it.toString()) == false
+            }
+            settingsStore.updateAssistantMcpServers(assistantId, requestedServerIds + retainedChoices)
             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
         }
 

@@ -10,6 +10,10 @@ import me.rerere.ai.provider.Model
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.mcp.McpCommonOptions
+import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
+import me.rerere.rikkahub.data.ai.mcp.McpTool
+import me.rerere.rikkahub.data.orbis.boundary.*
 import me.rerere.rikkahub.data.ai.tools.local.LocalTools
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
@@ -45,10 +49,12 @@ class StRuntimeRegistrationDeviceTest {
         val workspaceId = Uuid.random()
         val root = "st-catalogue-fixture-$workspaceId"
         val otherRoot = "st-other-fixture-$workspaceId"
-        val assistant = Assistant(workspaceId = workspaceId, localTools = emptyList(), enableMemory = false,
+        val garden = McpServerConfig.StreamableHTTPServer(commonOptions = McpCommonOptions(name = "Garden", tools = listOf(McpTool(name = "read"))), url = "https://example.invalid/one")
+        val otherGarden = McpServerConfig.StreamableHTTPServer(commonOptions = McpCommonOptions(name = "GardenOther", tools = listOf(McpTool(name = "read"))), url = "https://example.invalid/two")
+        val assistant = Assistant(workspaceId = workspaceId, mcpServers = setOf(garden.id, otherGarden.id), localTools = emptyList(), enableMemory = false,
             enableWebSearch = false, enableRecentChatsReference = false)
         val store = SettingsStore(context, dormant).also { it.settingsFlow.value = Settings(
-            assistants = listOf(assistant), assistantId = assistant.id, mcpServers = emptyList()) }
+            assistants = listOf(assistant), assistantId = assistant.id, mcpServers = listOf(garden, otherGarden)) }
         val host = StRuntimeHost.get(context)
         try {
             val files = FilesManager(context, FilesRepository(db.managedFileDao()), dormant)
@@ -63,6 +69,28 @@ class StRuntimeRegistrationDeviceTest {
                 LocalTools(context, AppEventBus(), TTSManager(context), store), McpManager(store, dormant, files),
                 SkillManager(context, store), repository, context, settingsStore = store)
             suspend fun catalogue() = factory.createTools(store.settingsFlow.value, assistant, Model())
+            val boundary = BoundaryHost.get(context)
+            boundary.grant(assistant.id.toString(), BOUNDARY_CATEGORIES)
+            val original = catalogue()
+            val gardenTool = original.single { it.name == "mcp__Garden__read" }
+            val otherTool = original.single { it.name == "mcp__GardenOther__read" }
+            assertTrue(gardenTool.isSelected()); assertTrue(otherTool.isSelected())
+            boundary.update(assistant.id.toString()) { changeBoundary(it, it.revision, null, "disable", "mcp", otherGarden.id.toString(), now = 1) }
+            assertTrue(gardenTool.isSelected()); assertFalse(otherTool.isSelected())
+            assertFalse(otherTool.isApprovalCurrent())
+            store.settingsFlow.value = store.settingsFlow.value.copy(mcpServers = listOf(garden,
+                otherGarden.copy(commonOptions = otherGarden.commonOptions.copy(name = "RenamedGarden"))))
+            assertFalse(otherTool.isSelected()) // Frozen wire name still follows the original server ID.
+            store.settingsFlow.value = store.settingsFlow.value.copy(mcpServers = listOf(garden, otherGarden))
+            boundary.update(assistant.id.toString()) { changeBoundary(it, it.revision, null, "enable", "mcp", otherGarden.id.toString(), now = 2) }
+            assertTrue(otherTool.isSelected())
+            boundary.update(assistant.id.toString()) { changeBoundary(it, it.revision, null, "disable", "tool", gardenTool.name, now = 3) }
+            assertFalse(gardenTool.isSelected()); assertTrue(otherTool.isSelected())
+            val ombre = me.rerere.rikkahub.data.orbis.ombre.OmbreRuntimeHost.get(context)
+            ombre.setEnabled(root, true)
+            assertFalse(catalogue().any { it.name == "orbis_ombre_runtime" })
+            assertTrue(ombre.enabled(root)) // Visibility does not erase the user's configuration.
+            ombre.setEnabled(root, false)
             host.setEnabled(root, false)
             host.setEnabled(otherRoot, true)
             val before = catalogue()

@@ -163,6 +163,11 @@
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="User-started local StillerBrain server in a private Linux workspace, with visible stop control" />
     </service>
+    <service android:name=".service.OrbisOmbreRuntimeService" android:exported="false"
+      android:stopWithTask="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="User-started local StillerBrain server in a private Linux workspace, with visible stop control" />
+    </service>
     <service
       android:name=".service.OrbisSentinelService"
       android:exported="false"

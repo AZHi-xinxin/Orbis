@@ -140,6 +140,7 @@ export interface SearchServiceOption {
  * @see app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt - Settings
  */
 export interface Settings {
+  boundaryChoices?: Record<string, { disabledModels: string[]; disabledMcp: string[]; hiddenModels?: string[]; hiddenMcp?: string[] }>;
   webServerJwtEnabled: boolean;
   webImportEnabled: boolean;
   dynamicColor: boolean;

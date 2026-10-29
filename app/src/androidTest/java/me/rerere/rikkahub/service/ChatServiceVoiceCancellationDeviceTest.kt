@@ -21,6 +21,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.serialization.json.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
@@ -59,6 +62,7 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.toMessageNode
+import me.rerere.rikkahub.data.orbis.isConversationNotification
 import me.rerere.rikkahub.data.orbis.FreshHumanInputRecoveryStore
 import me.rerere.rikkahub.data.orbis.FreshHumanRecoveryStatus
 import me.rerere.rikkahub.data.orbis.OrbisQueuePauseStore
@@ -110,6 +114,44 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class ChatServiceVoiceCancellationDeviceTest {
+    @Test fun pausedApplicationsKeepToolsAndStopAfterThree() = runBlocking {
+        fixture(maxRequests = 4, connectCall = false) { it.assertPausedTurn(wake = false) }
+    }
+    @Test fun pausedSentinelCompletesToolsAndReplyThenExpiresWithoutQueueCard() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertPausedTurn(wake = true) }
+    }
+
+    @Test fun globalPauseAllowsOneOriginalContextRequestAcrossAllWindows() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertBoundaryRequest("resume", scope = "assistant") }
+    }
+    @Test fun globalRequestCanExplicitlyKeepAllWindowsPaused() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertBoundaryRequest("pause", stream = true, scope = "assistant") }
+    }
+
+    @Test fun streamedBoundaryRequestKeepsContextAndFinishesTheReply() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertBoundaryRequest("resume", stream = true) }
+    }
+    @Test fun boundaryRequestUsesOriginalContextAndExplicitPause() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertBoundaryRequest("pause") }
+    }
+    @Test fun boundaryRequestUsesOriginalContextAndExplicitResume() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertBoundaryRequest("resume") }
+    }
+    @Test fun stateOnlyRequestCanBeSubmittedAgain() = runBlocking {
+        fixture(maxRequests = 4, connectCall = false) { it.assertBoundaryRequest("state_only") }
+    }
+    @Test fun rejectedPauseToolDoesNotSpendTheApplication() = runBlocking {
+        fixture(maxRequests = 4, connectCall = false) { it.assertBoundaryRequest("invalid_pause", stream = true, scope = "assistant") }
+    }
+
+    @Test fun boundaryRequestWithoutDecisionKeepsActualReplyNotAnInventedRefusal() = runBlocking {
+        fixture(maxRequests = 3, connectCall = false) { it.assertBoundaryRequest(null) }
+    }
+
+    @Test fun globalPlainReplyKeepsTheSharedRequestAvailable() = runBlocking {
+        fixture(maxRequests = 3, connectCall = false) { it.assertBoundaryRequest(null, stream = true, scope = "assistant") }
+    }
+
     @Test fun recallToolWorksInIndependentHumanContinuation() = runBlocking {
         fixture(maxRequests = 2, connectCall = false) { it.assertRecallRoundTrip(continuation = true) }
     }
@@ -502,6 +544,10 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
     }
 
+    @Test fun selfCheckReadsActualOwnerSettingsThroughTheGenerationToolPipeline() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertSelfCheckRoundTrip() }
+    }
+
     private suspend fun fixture(maxRequests: Int = 1, connectCall: Boolean = true,
         initialCompactionEpoch: Long = 0, block: suspend (Fixture) -> Unit) {
         val f = Fixture(maxRequests)
@@ -516,7 +562,7 @@ class ChatServiceVoiceCancellationDeviceTest {
             check(it.targetContext.packageName == "org.orbis.agent.dev")
             check(!LcExternalRecoveryGate.isAllowed())
             check(GlobalContext.getOrNull() == null) { "App Koin must not be initialized" }
-            listOf(OrbisVoiceCallRuntime::class.java, OrbisVideoCallRuntime::class.java).forEach { type ->
+            listOf(OrbisVoiceCallRuntime::class.java, OrbisVideoCallRuntime::class.java, me.rerere.rikkahub.data.orbis.sentinel.OrbisSentinels::class.java).forEach { type ->
                 check(type.getDeclaredField("instance").apply { isAccessible = true }.get(null) == null) {
                     "Run this class alone; never replace another fixture's process runtime"
                 }
@@ -726,6 +772,188 @@ class ChatServiceVoiceCancellationDeviceTest {
             service.getDisplayedConversationFlow(conversationId).first { c ->
                 c.currentMessages.any { it.toText() == ANSWER }
             }
+        }
+
+        suspend fun assertPausedTurn(wake: Boolean) {
+            settings.settingsFlow.value = settings.settingsFlow.value.let { it.copy(
+                assistants = listOf(assistant.copy(localTools=listOf(me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.TimeInfo))),
+                providers = it.providers.map { p -> (p as ProviderSetting.OpenAI).copy(models=listOf(model.copy(
+                    abilities=listOf(me.rerere.ai.provider.ModelAbility.TOOL)))) }) }
+            val host = service.boundaryHost
+            val owner = assistant.id.toString()
+            host.grant(owner, setOf("conversation"))
+            session().messageQueue.enqueue(listOf(UIMessagePart.Text("OLD-BACKLOG")))
+            host.update(owner) { me.rerere.rikkahub.data.orbis.boundary.changeBoundary(it,it.revision,conversationId.toString(),
+                "pause","conversation","",allowRequest=true,until=System.currentTimeMillis()+120_000,now=System.currentTimeMillis(),scope="assistant") }
+            val revision = host.pause(owner,conversationId.toString())!!.revision
+            withTimeout(5_000) { service.getMessageQueueFlow(conversationId).first {
+                it.messages.single().recoveryHeldReason != null } }
+            assertFalse("Boundary pause must not leave a generic failure card", paused())
+            peer.customMessages.add("""{"role":"assistant","content":"Checking the time","tool_calls":[{"id":"time-in-pause","type":"function","function":{"name":"get_time_info","arguments":"{}"}}]}""")
+            if (wake) {
+                service.bindOrbisEvents(setOf("self_reminder"), me.rerere.rikkahub.data.orbis.OrbisEventBinding(owner,conversationId.toString()))
+                val event = service.acceptOrbisEvent(me.rerere.rikkahub.data.orbis.OrbisIncomingEvent(
+                    event_id="synthetic-boundary-wake",source="self_reminder",text="SYNTHETIC-WAKE",wake=true)).first
+                withTimeout(20_000) { service.orbisEvents.inbox.state.first { state ->
+                    state.events.any { it.id==event.id && it.state=="replied" } } }
+                assertTrue(service.orbisEvents.inbox.get(event.id)!!.historyCommitted)
+                assertFalse(service.orbisEvents.inbox.get(event.id)!!.isConversationNotification(owner,conversationId.toString()))
+            } else {
+                withTimeout(20_000) { service.requestBoundaryResume(conversationId,revision,"APPLICATION-0") }
+                repeat(2) { withTimeout(20_000) { service.requestBoundaryResume(conversationId,revision,"APPLICATION-${it+1}") } }
+                val before = repository.getConversationById(conversationId)!!
+                assertTrue(runCatching { service.requestBoundaryResume(conversationId,revision,"FOURTH-MUST-NOT-SEND") }.isFailure)
+                assertEquals(before,repository.getConversationById(conversationId))
+                assertEquals(0,host.pause(owner,conversationId.toString())!!.requestsRemaining)
+            }
+            withTimeout(10_000) { service.getGenerationJobStateFlow(conversationId).first { it==null } }
+            val saved = repository.getConversationById(conversationId)!!
+            val actual = saved.currentMessages.flatMap { it.getTools() }.single { it.toolName=="get_time_info" }
+            assertTrue(actual.isExecuted)
+            assertTrue(actual.toString().contains("timestamp_ms"))
+            assertTrue(saved.currentMessages.any { it.toText().contains(ANSWER) })
+            val bodies = peer.requestBodies.toList().map { Json.parseToJsonElement(it).jsonObject }
+            assertTrue(bodies.first().getValue("tools").toString().contains("get_time_info"))
+            assertEquals("Frozen catalogue across tool continuation",bodies[0]["tools"],bodies[1]["tools"])
+            File(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),
+                "boundary149-wire-$wake.json").writeText(kotlinx.serialization.json.JsonArray(bodies).toString())
+            assertNotNull(host.pause(owner,conversationId.toString()))
+            assertTrue(runCatching { host.requireInput(owner,"another-window") }.isFailure)
+            assertEquals(if(wake) 2 else 4,peer.requests.get())
+            host.update(owner) { it.copy(assistantPause=it.assistantPause!!.copy(until=System.currentTimeMillis()-1)) }
+            withTimeout(5_000) { host.states.first { it[owner]?.assistantPause?.paused==false } }
+            assertFalse(paused())
+            assertTrue(session().messageQueue.state.value.messages.single().recoveryHeldReason != null)
+            assertTrue(saved.currentMessages.none { it.toText()=="OLD-BACKLOG" })
+            host.requireInput(owner,conversationId.toString())
+            assertFreshInputCanDrain()
+            assertTrue(repository.getConversationById(conversationId)!!.currentMessages.none { it.toText()=="OLD-BACKLOG" })
+        }
+
+        suspend fun assertBoundaryRequest(decision: String?, stream: Boolean = false, scope: String = "conversation") = coroutineScope {
+            val mode = me.rerere.rikkahub.data.model.PromptInjection.ModeInjection(content = "ORIGINAL-MODE")
+            val lore = me.rerere.rikkahub.data.model.Lorebook(entries = listOf(
+                me.rerere.rikkahub.data.model.PromptInjection.RegexInjection(
+                    content = "ORIGINAL-LORE", keywords = listOf("ORIGINAL-REQUEST"))))
+            val other = assistant.copy(id = Uuid.random(), systemPrompt = "OTHER-OWNER-MUST-NOT-LEAK")
+            val enabled = model.copy(abilities = listOf(me.rerere.ai.provider.ModelAbility.TOOL))
+            settings.settingsFlow.value = settings.settingsFlow.value.let { it.copy(
+                assistantId = other.id, assistants = listOf(assistant.copy(allowConversationSystemPrompt = true, allowConversationPromptInjection = true, streamOutput = stream), other),
+                providers = it.providers.map { p -> (p as ProviderSetting.OpenAI).copy(models = listOf(enabled)) },
+                modeInjections = listOf(mode), lorebooks = listOf(lore)) }
+            val history = (1..14).flatMap { listOf(UIMessage.user("ORIGINAL-USER-$it"), UIMessage.assistant("ORIGINAL-AI-$it")) }
+                .map { it.toMessageNode() }
+            val base = repository.getConversationById(conversationId)!!.copy(messageNodes = history,
+                customSystemPrompt = "ORIGINAL-CONVERSATION-SYSTEM", modeInjectionIds = setOf(mode.id), lorebookIds = setOf(lore.id))
+            withContext(Dispatchers.Main) {
+                service.saveConversation(conversationId, base)
+                service.saveConversationInjections(me.rerere.rikkahub.data.model.ConversationInjectionEdit(
+                    conversationId, assistant.id, setOf(mode.id), emptySet(), setOf(lore.id), emptySet()))
+            }
+            val configured = repository.getConversationById(conversationId)!!
+            assertEquals("ORIGINAL-CONVERSATION-SYSTEM", configured.customSystemPrompt)
+            assertEquals(setOf(mode.id), configured.modeInjectionIds)
+            assertEquals(setOf(lore.id), configured.lorebookIds)
+            val host = service.boundaryHost
+            val owner = assistant.id.toString()
+            host.grant(owner, setOf("conversation"))
+            val state = host.update(owner) {
+                me.rerere.rikkahub.data.orbis.boundary.changeBoundary(it, it.revision, conversationId.toString(),
+                    "pause", "conversation", "", reason = "Original agreement", allowRequest = true, until = System.currentTimeMillis()+120_000, now = System.currentTimeMillis(), scope = scope)
+            }
+            val revision = host.pause(owner, conversationId.toString())!!.revision
+            if (scope == "assistant") {
+                assertTrue(runCatching { host.requireInput(owner, "future-window") }.isFailure)
+                assertTrue(runCatching { host.requestContext(owner, null).check(model.id.toString()) }.isFailure)
+                host.requireInput(other.id.toString(), "future-window")
+                host.requestContext(other.id.toString(), null).check(model.id.toString())
+            }
+            session().messageQueue.pause()
+            session().messageQueue.enqueue(listOf(UIMessagePart.Text("OLD-QUEUED-MUST-NOT-RUN")))
+            fun control(action: String) = """{"role":"assistant","content":"$ANSWER","reasoning_content":"synthetic boundary reasoning","tool_calls":[{"id":"boundary-$action","type":"function","function":{"name":"orbis_boundary","arguments":"{\"action\":\"$action\",\"revision\":${host.state(owner).revision + 1},\"allow_request\":true,\"until_epoch_ms\":${System.currentTimeMillis()+120_000}}"}}]}"""
+            when (decision) {
+                "state_only" -> peer.customMessages.add(control("state"))
+                "invalid_pause" -> peer.customMessages.add(control("pause").replace("allow_request", "ignored_field"))
+                null -> Unit
+                else -> { peer.customMessages.add(control("state")); peer.customMessages.add(control(decision)) }
+            }
+            peer.holdBoundaryRequest.set(true)
+            val request = async { service.requestBoundaryResume(conversationId, revision, "ORIGINAL-REQUEST") }
+            withTimeout(10_000) { peer.boundaryRequestHeld.await() }
+            assertNotNull("The request must not unlock ordinary input", host.pause(owner, conversationId.toString()))
+            assertTrue(host.pause(owner, conversationId.toString())!!.requestUsed)
+            val ordinary = runCatching { service.sendMessage(conversationId, listOf(UIMessagePart.Text("BLOCKED-NORMAL-INPUT"))) }
+            assertTrue(ordinary.isFailure || ordinary.getOrNull() == false)
+            assertTrue(runCatching { service.requestBoundaryResume(conversationId, revision, "DUPLICATE-REQUEST") }.isFailure)
+            if (scope == "assistant") {
+                assertTrue(runCatching { host.claimRecovery(owner, "different-window", revision) }.isFailure)
+                assertNotNull(host.pause(owner, "new-window"))
+            }
+            peer.releaseBoundaryRequest.countDown()
+            val result = withTimeout(15_000) { request.await() }
+            withTimeout(10_000) { service.getGenerationJobStateFlow(conversationId).first { it == null } }
+            val saved = repository.getConversationById(conversationId)!!
+            assertEquals("Existing messages must remain byte-for-byte represented", history, saved.messageNodes.take(history.size))
+            assertEquals(1, saved.currentMessages.count { it.toText() == "【申请继续】\nORIGINAL-REQUEST" })
+            assertTrue(saved.currentMessages.drop(history.size + 1).any { it.toText().contains(ANSWER) })
+            assertTrue(saved.currentMessages.drop(history.size + 1).all { it.finishedAt != null })
+            assertTrue(saved.currentMessages.drop(history.size + 1).flatMap { it.parts }
+                .filterIsInstance<UIMessagePart.Reasoning>().all { it.finishedAt != null })
+            assertFalse(journal.hasCheckpoint(conversationId))
+            assertEquals(if (decision == null) 1 else 2, peer.requests.get())
+            peer.requestBodies.forEach { body ->
+                listOf("ORIGINAL-USER-1", "ORIGINAL-AI-1", "ORIGINAL-USER-14", "ORIGINAL-AI-14",
+                    "ORIGINAL-CONVERSATION-SYSTEM", "ORIGINAL-MODE", "ORIGINAL-LORE", "ORIGINAL-REQUEST")
+                    .forEach { assertTrue("Original context missing: $it", body.contains(it)) }
+                listOf("OTHER-OWNER-MUST-NOT-LEAK", "BLOCKED-NORMAL-INPUT", "DUPLICATE-REQUEST", "OLD-QUEUED-MUST-NOT-RUN")
+                    .forEach { assertFalse("Unrelated or blocked input leaked: $it", body.contains(it)) }
+                assertTrue(body.contains("orbis_boundary"))
+            }
+            assertTrue(session().messageQueue.state.value.messages.any { it.parts.any { p -> p is UIMessagePart.Text && p.text == "OLD-QUEUED-MUST-NOT-RUN" } })
+            when (decision) {
+                "resume" -> { assertNull(host.pause(owner, conversationId.toString())); assertTrue(result.contains("主动恢复")) }
+                "pause" -> { assertNotNull(host.pause(owner, conversationId.toString())); assertTrue(result.contains("明确继续暂停")) }
+                else -> {
+                    assertNotNull(host.pause(owner, conversationId.toString()))
+                    assertTrue(result.contains("尚未通过工具")); assertFalse(result.contains("选择继续暂停"))
+                    assertFalse("No decision must release this request slot", host.pause(owner, conversationId.toString())!!.requestUsed)
+                    peer.customMessages.add(control("state")); peer.customMessages.add(control("resume"))
+                    val next = withTimeout(15_000) { service.requestBoundaryResume(conversationId, revision, "ORIGINAL-REQUEST-AGAIN") }
+                    assertTrue(next.contains("主动恢复")); assertNull(host.pause(owner, conversationId.toString()))
+                    assertEquals(if (decision == null) 3 else 4, peer.requests.get())
+                }
+            }
+        }
+
+        suspend fun assertSelfCheckRoundTrip() {
+            settings.settingsFlow.value = settings.settingsFlow.value.let { original -> original.copy(
+                init = false,
+                assistants = listOf(assistant.copy(localTools = listOf(me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.SelfCheck))),
+                providers = original.providers.map { (it as ProviderSetting.OpenAI).copy(models = listOf(model.copy(
+                    abilities = listOf(me.rerere.ai.provider.ModelAbility.TOOL)))) }) }
+            peer.customMessages.add("""{"role":"assistant","content":"Checking local theme configuration","tool_calls":[{"id":"self-check-1","type":"function","function":{"name":"orbis_self_check","arguments":"{\"focus\":\"theme\"}"}}]}""")
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("check the theme setup"))))
+            }
+            // This turn has text before the tool and the final answer in the same message.
+            withTimeout(15_000) { service.getDisplayedConversationFlow(conversationId).first { c ->
+                c.currentMessages.any { it.toText().trim().endsWith(ANSWER) }
+            } }
+            withTimeout(10_000) { service.getGenerationJobStateFlow(conversationId).first { it == null } }
+            val saved = repository.getConversationById(conversationId)!!
+            assertTrue(saved.currentMessages.any { it.toText().contains("Checking local theme configuration") && it.toText().trim().endsWith(ANSWER) })
+            val tool = saved.currentMessages.flatMap { it.getTools() }.single { it.toolName == "orbis_self_check" }
+            assertTrue(tool.isExecuted)
+            val report = tool.output.filterIsInstance<UIMessagePart.Text>().joinToString { it.text }
+            assertTrue(report, report.contains("tool_orbis_theme"))
+            assertTrue(report, report.contains("人类尚未"))
+            assertTrue(report, report.contains("theme"))
+            assertEquals(2, peer.requests.get())
+            val bodies = peer.requestBodies.toList().map { Json.parseToJsonElement(it).jsonObject }
+            assertTrue(bodies.first().getValue("tools").toString().contains("orbis_self_check"))
+            assertTrue(bodies.last().getValue("messages").toString().contains("tool_orbis_theme"))
+            assertEquals("Checking must not enable the missing theme tool", listOf(me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.SelfCheck),
+                settings.settingsFlow.value.assistants.single().localTools)
         }
 
         suspend fun assertRecallRoundTrip(continuation: Boolean = false) {
@@ -1034,7 +1262,7 @@ class ChatServiceVoiceCancellationDeviceTest {
             // Tool registration initializes idle runtime singletons. Stop only our exact
             // context-owned scopes so their maintenance jobs cannot outlive this cache tree.
             val runtimeJobs = withContext(Dispatchers.Main) {
-                listOf(OrbisVideoCallRuntime::class.java, OrbisVoiceCallRuntime::class.java).mapNotNull { type ->
+                listOf(OrbisVideoCallRuntime::class.java, OrbisVoiceCallRuntime::class.java, me.rerere.rikkahub.data.orbis.sentinel.OrbisSentinels::class.java).mapNotNull { type ->
                     val instanceField = type.getDeclaredField("instance").apply { isAccessible = true }
                     val instance = instanceField.get(null) ?: return@mapNotNull null
                     val owner = type.getDeclaredField("context").apply { isAccessible = true }.get(instance)
@@ -1047,6 +1275,14 @@ class ChatServiceVoiceCancellationDeviceTest {
                 }
             }
             withTimeout(15_000) { runtimeJobs.forEach { it.join() } }
+            val boundaryType = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost::class.java
+            val boundaryField = boundaryType.getDeclaredField("instance").apply { isAccessible = true }
+            boundaryField.get(null)?.let { host ->
+                val ledger = boundaryType.getDeclaredField("file").apply { isAccessible = true }.get(host) as AtomicFile
+                check(ledger.baseFile.canonicalPath.startsWith(context.filesDir.canonicalPath + File.separator))
+                (boundaryType.getDeclaredField("timer").apply { isAccessible = true }.get(host) as java.util.concurrent.ScheduledExecutorService).shutdownNow()
+                boundaryField.set(null, null)
+            }
             check(GlobalContext.getOrNull() === isolatedKoin.koin)
             stopKoin()
             client.dispatcher.cancelAll()
@@ -1060,6 +1296,19 @@ class ChatServiceVoiceCancellationDeviceTest {
         }
     }
 
+    private class EmptySentinelPreferences : SharedPreferences {
+        override fun getAll(): MutableMap<String, *> = mutableMapOf<String, Any>()
+        override fun getString(key: String?, defValue: String?) = defValue
+        override fun getStringSet(key: String?, defValues: MutableSet<String>?) = defValues?.toMutableSet()
+        override fun getInt(key: String?, defValue: Int) = defValue
+        override fun getLong(key: String?, defValue: Long) = defValue
+        override fun getFloat(key: String?, defValue: Float) = defValue
+        override fun getBoolean(key: String?, defValue: Boolean) = defValue
+        override fun contains(key: String?) = false
+        override fun edit(): SharedPreferences.Editor = error("Fixture must not configure sentinel ownership")
+        override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
+        override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
+    }
     private class StorageOnlyApplication(base: Context, private val owned: File) : Application() {
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
@@ -1068,7 +1317,10 @@ class ChatServiceVoiceCancellationDeviceTest {
         override fun getCacheDir(): File = File(owned, "cache").apply { mkdirs() }
         override fun getNoBackupFilesDir(): File = File(owned, "no_backup").apply { mkdirs() }
         override fun getDatabasePath(name: String): File = error("Persistent database forbidden")
-        override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = error("Real preferences forbidden")
+        override fun getSharedPreferences(name: String, mode: Int): SharedPreferences {
+            check(name == "orbis_sentinel_transport") { "Real preferences forbidden" }
+            return EmptySentinelPreferences()
+        }
         override fun startService(service: Intent): ComponentName? = error("Fixture does not start services")
         override fun startForegroundService(service: Intent): ComponentName? = error("Fixture does not start foreground services")
         override fun bindService(service: Intent, conn: ServiceConnection, flags: Int): Boolean = error("Fixture does not bind services")
@@ -1082,6 +1334,10 @@ class ChatServiceVoiceCancellationDeviceTest {
         val port = socket.localPort
         val requests = AtomicInteger()
         val recallNext = AtomicBoolean(false)
+        val customMessages = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val holdBoundaryRequest = AtomicBoolean(false)
+        val boundaryRequestHeld = CompletableDeferred<Unit>()
+        val releaseBoundaryRequest = CountDownLatch(1)
         val requestBodies = java.util.concurrent.CopyOnWriteArrayList<String>()
         val holdFirstRequest = AtomicBoolean(false)
         val firstRequestHeld = CompletableDeferred<Unit>()
@@ -1117,15 +1373,28 @@ class ChatServiceVoiceCancellationDeviceTest {
                         // Closing without an answer must not replay that input or block correction.
                         return@use
                     }
+                    if (holdBoundaryRequest.compareAndSet(true, false)) {
+                        boundaryRequestHeld.complete(Unit)
+                        check(releaseBoundaryRequest.await(15, TimeUnit.SECONDS))
+                    }
+                    val customMessage = customMessages.poll()
                     val doRecall = recallNext.compareAndSet(true, false)
-                    val responseMessage = if (doRecall)
+                    val responseMessage = customMessage ?: if (doRecall)
                         """{"role":"assistant","content":null,"tool_calls":[{"id":"recall-one","type":"function","function":{"name":"orbis_recall_message","arguments":"{\"recent_index\":1}"}}]}"""
                         else """{"role":"assistant","content":"$ANSWER"}"""
-                    val finishReason = if (doRecall) "tool_calls" else "stop"
+                    val finishReason = if (doRecall || customMessage?.contains("tool_calls") == true) "tool_calls" else "stop"
                     val body = """{"id":"synthetic","object":"chat.completion","created":1,"model":"synthetic-service-voice","choices":[{"index":0,"message":$responseMessage,"finish_reason":"$finishReason"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}""".toByteArray()
+                    val streaming = (Json.parseToJsonElement(requestBodies.last()).jsonObject["stream"] as? JsonPrimitive)?.booleanOrNull == true
+                    val payload = if (streaming) {
+                        val delta = Json.parseToJsonElement(responseMessage).jsonObject.let { m -> JsonObject(m.mapValues { (k, v) ->
+                            if (k == "tool_calls") JsonArray(v.jsonArray.mapIndexed { index, call ->
+                                JsonObject(call.jsonObject + ("index" to JsonPrimitive(index))) }) else v
+                        }) }
+                        ("data: " + """{"id":"synthetic","object":"chat.completion.chunk","choices":[{"index":0,"delta":$delta,"finish_reason":"$finishReason"}]}""" + "\n\ndata: [DONE]\n\n").toByteArray()
+                    } else body
                     connection.getOutputStream().apply {
-                        write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
-                        write(body); flush()
+                        write("HTTP/1.1 200 OK\r\nContent-Type: ${if (streaming) "text/event-stream" else "application/json"}\r\nContent-Length: ${payload.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        write(payload); flush()
                     }
                 }
             } catch (error: Throwable) {
@@ -1133,7 +1402,7 @@ class ChatServiceVoiceCancellationDeviceTest {
             }
         }
         fun assertHealthy() { failure.get()?.let { throw AssertionError("Synthetic loopback failed", it) } }
-        override fun close() { stopped.set(true); releaseFirstRequest.countDown(); socket.close(); worker.join(9_000); check(!worker.isAlive); assertHealthy() }
+        override fun close() { stopped.set(true); releaseBoundaryRequest.countDown(); releaseFirstRequest.countDown(); socket.close(); worker.join(9_000); check(!worker.isAlive); assertHealthy() }
     }
 
     private companion object {

@@ -225,8 +225,10 @@ internal fun copyGenerationMessage(message: UIMessage): UIMessage = generationSn
     generationSnapshotJson.encodeToString(UIMessage.serializer(), message),
 ).copy(isSynthetic = message.isSynthetic)
 
-/** Retain the original executors/approval checks, but evaluate schema suppliers only once per run. */
-internal fun snapshotGenerationTools(tools: List<Tool>): List<Tool> = tools.map { tool ->
+/** Freeze advertised membership and schemas for a continuation chain, retaining live dispatch checks.
+ * Removing a schema midway invalidates ST's tool lineage; a retained schema is not permission to run.
+ */
+internal fun snapshotGenerationTools(tools: List<Tool>): List<Tool> = tools.filter { it.isSelected() }.map { tool ->
     val schema = tool.parameters()?.let { generationSnapshotJson.encodeToString(InputSchema.serializer(), it) }
     tool.copy(parameters = {
         schema?.let { generationSnapshotJson.decodeFromString(InputSchema.serializer(), it) }

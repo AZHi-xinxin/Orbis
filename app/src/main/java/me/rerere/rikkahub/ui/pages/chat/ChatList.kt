@@ -548,6 +548,7 @@ private fun ChatListNormal(
             // 错误消息卡片
             ErrorCardsDisplay(
                 errors = errors,
+                assistantId = conversation.assistantId.toString(),
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 modifier = Modifier

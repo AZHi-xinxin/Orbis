@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -98,7 +99,10 @@ class ModelListState internal constructor(
     modelId: Uuid?,
     providers: List<ProviderSetting>,
     type: ModelType,
+    disabledModels: Set<Uuid> = emptySet(),
 ) {
+    var disabledModels by mutableStateOf(disabledModels)
+        private set
     var modelId by mutableStateOf(modelId)
         private set
 
@@ -131,7 +135,9 @@ class ModelListState internal constructor(
         modelId: Uuid?,
         providers: List<ProviderSetting>,
         type: ModelType,
+        disabledModels: Set<Uuid> = emptySet(),
     ) {
+        this.disabledModels = disabledModels
         this.modelId = modelId
         this.providers = providers
         this.type = type
@@ -143,18 +149,21 @@ fun rememberModelListState(
     modelId: Uuid?,
     providers: List<ProviderSetting>,
     type: ModelType,
+    disabledModels: Set<Uuid> = emptySet(),
 ): ModelListState {
     return remember {
         ModelListState(
             modelId = modelId,
             providers = providers,
             type = type,
+            disabledModels = disabledModels,
         )
     }.also {
         it.update(
             modelId = modelId,
             providers = providers,
             type = type,
+            disabledModels = disabledModels,
         )
     }
 }
@@ -330,6 +339,7 @@ fun ModelListSheet(
                 currentModel = state.modelId,
                 providers = state.filteredProviders,
                 modelType = state.type,
+                disabledModels = state.disabledModels,
                 onSelect = {
                     onSelect(it)
                     dismiss()
@@ -347,6 +357,7 @@ private fun ColumnScope.ModelList(
     currentModel: Uuid? = null,
     providers: List<ProviderSetting>,
     modelType: ModelType,
+    disabledModels: Set<Uuid> = emptySet(),
     onSelect: (Model) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -543,6 +554,7 @@ private fun ColumnScope.ModelList(
                     key = "favorite:" + model.id.toString()
                 ) { isDragging ->
                     ModelItem(
+                        enabled = model.id !in disabledModels,
                         model = model,
                         onSelect = onSelect,
                         modifier = Modifier
@@ -622,6 +634,7 @@ private fun ColumnScope.ModelList(
             ) { model ->
                 val favorite = settings.value.favoriteModels.contains(model.id)
                 ModelItem(
+                    enabled = model.id !in disabledModels,
                     model = model,
                     onSelect = onSelect,
                     modifier = Modifier.animateItem(),
@@ -722,6 +735,7 @@ private fun ColumnScope.ModelList(
 
 @Composable
 private fun ModelItem(
+    enabled: Boolean = true,
     model: Model,
     providerSetting: ProviderSetting,
     select: Boolean,
@@ -734,7 +748,7 @@ private fun ModelItem(
     val navController = LocalNavController.current
     val interactionSource = remember { MutableInteractionSource() }
     Card(
-        modifier = modifier,
+        modifier = modifier.alpha(if (enabled) 1f else 0.5f),
         colors = CardDefaults.cardColors(
             containerColor = if (select) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
             contentColor = if (select) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
@@ -751,7 +765,7 @@ private fun ModelItem(
                 modifier = Modifier
                     .weight(1f)
                     .combinedClickable(
-                        enabled = true,
+                        enabled = enabled,
                         onLongClick = {
                             onDismiss()
                             navController.navigate(

@@ -11,6 +11,7 @@ import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -65,7 +66,7 @@ class OrbisUpdateService(context: Context) {
             BuildConfig.ORBIS_EMERGENCY_RESCUE_ENABLED)
 
     suspend fun downloadAndVerify(release: OrbisPublishedRelease,
-        progress: (downloaded: Long, total: Long) -> Unit = { _, _ -> }): OrbisPreparedUpdate = withContext(Dispatchers.IO) {
+        progress: (OrbisDownloadProgress) -> Unit = {}): OrbisPreparedUpdate = withContext(Dispatchers.IO) {
         require(canReplaceCurrentApp) { "Dev 版不能用正式 APK 覆盖；请使用正式发布页并分别保留数据" }
         validateOrbisRelease(release)
         val asset = matchingAsset(release) ?: error("该版本没有适配本机的唯一安装包，请到发布页查看")
@@ -78,37 +79,25 @@ class OrbisUpdateService(context: Context) {
         }
         val expected = orbisExpectedSha(asset, sums)
         val directory = File(app.cacheDir, "orbis-updates")
-        check(directory.isDirectory || directory.mkdirs()) { "无法创建更新缓存" }
-        require(directory.usableSpace >= asset.size + RESERVED_SPACE) { "手机空间不足，请先备份并腾出空间" }
-        val file = File.createTempFile("orbis-", ".apk", directory)
-        var keep = false
+        val file = OrbisUpdateDownloader(directory, client).download(expected, asset.size, orbisDownloadSources(asset)) {
+            progress(if (it.phase == OrbisDownloadPhase.READY) it.copy(phase = OrbisDownloadPhase.VERIFYING,
+                detail = "文件完整，正在核对安装包签名") else it)
+        }
         try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            var copied = 0L
-            var lastProgress = 0L
-            assetResponse(asset.downloadUrl).use { response ->
-                response.body.byteStream().use { input -> file.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        copied += count
-                        require(copied <= asset.size && copied <= ORBIS_MAX_APK_BYTES) { "下载文件超出发布大小" }
-                        require(directory.usableSpace >= RESERVED_SPACE + count) { "手机剩余空间不足，已停止下载" }
-                        output.write(buffer, 0, count); digest.update(buffer, 0, count)
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        if (copied == asset.size || now - lastProgress >= 200) {
-                            progress(copied, asset.size); lastProgress = now
-                        }
-                    }
-                } }
-            }
-            require(copied == asset.size && hex(digest.digest()) == expected) { "APK 大小或 SHA-256 不匹配，已阻止安装" }
             val identity = verifyApkIdentity(file)
-            keep = true
+            progress(OrbisDownloadProgress(asset.size, asset.size, phase = OrbisDownloadPhase.READY, detail = "校验完成"))
             OrbisPreparedUpdate(file, expected, identity.versionCode)
-        } finally { if (!keep) file.delete() } // The exact new cache file only, never application/user data.
+        } catch (failure: Exception) {
+            if (failure !is CancellationException) file.delete()
+            throw failure
+        }
+    }
+
+    suspend fun discardDownload(release: OrbisPublishedRelease) {
+        val asset = matchingAsset(release) ?: return
+        // GitHub supplies the same digest used by the download. Never derive a cache path from a filename.
+        val sha = orbisShaFromDigest(asset.digest) ?: error("该发布未提供下载摘要，请在应用存储设置清理缓存")
+        OrbisUpdateDownloader(File(app.cacheDir, "orbis-updates"), client).discard(sha, asset.size)
     }
 
     fun installationPermissionGranted(): Boolean = app.packageManager.canRequestPackageInstalls()
@@ -156,24 +145,32 @@ class OrbisUpdateService(context: Context) {
         }
     }
 
-    private suspend fun assetBytes(asset: OrbisReleaseAsset, limit: Int): ByteArray = assetResponse(asset.downloadUrl).use {
-        readBounded(it, limit).also { bytes -> require(bytes.size.toLong() == asset.size) { "发布文件大小不一致" } }
+    private suspend fun assetBytes(asset: OrbisReleaseAsset, limit: Int): ByteArray {
+        var lastFailure: java.io.IOException? = null
+        for (source in orbisDownloadSources(asset)) {
+            try {
+                return assetResponse(source).use {
+                    readBounded(it, limit).also { bytes -> require(bytes.size.toLong() == asset.size) { "发布文件大小不一致" } }
+                }
+            } catch (failure: java.io.IOException) { lastFailure = failure }
+        }
+        throw lastFailure ?: java.io.IOException("无法下载校验清单")
     }
 
-    private suspend fun assetResponse(initial: String): Response {
-        require(initial.startsWith("$ORBIS_RELEASES_PAGE/download/") && orbisTrustedDownloadRedirect(initial))
-        var url = initial
+    private suspend fun assetResponse(source: OrbisDownloadSource): Response {
+        var url = source.url
         repeat(5) {
-            val response = client.newCall(request(url)).await()
+            require(source.allows(url)) { "下载地址不属于所选来源" }
+            val response = client.newCall(request(url).newBuilder().header("Accept", "application/octet-stream").build()).await()
             if (response.code in setOf(301, 302, 303, 307, 308)) {
                 val location = response.header("Location")
                 response.close()
-                require(location != null && orbisTrustedDownloadRedirect(location)) { "下载被重定向到非可信来源，已停止" }
+                require(location != null && source.allows(location)) { "下载被重定向到非可信来源，已停止" }
                 url = location
             } else {
                 if (!response.isSuccessful) {
                     val code = response.code; response.close()
-                    error("GitHub 下载暂时不可用（HTTP $code）")
+                    throw java.io.IOException("GitHub 下载暂时不可用（HTTP $code）")
                 }
                 return response
             }
@@ -218,7 +215,6 @@ class OrbisUpdateService(context: Context) {
 
     companion object {
         private const val API = "https://api.github.com/repos/AZHi-xinxin/Orbis"
-        private const val RESERVED_SPACE = 64L * 1024 * 1024
         private val checkMutex = Mutex()
         // Intentionally not the model HTTP client: no provider headers, credentials or custom interceptors.
         private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)

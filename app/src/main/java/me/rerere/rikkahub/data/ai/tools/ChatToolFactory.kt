@@ -80,6 +80,7 @@ class ChatToolFactory(
         conversationId: String? = null,
         voiceCallId: String? = null,
         allowAmbientCallBinding: Boolean = true,
+        boundaryPauseAllowed: () -> Boolean = { false },
         consultationReferenceOnly: Boolean = false,
         imageSourceMessageIds: Set<kotlin.uuid.Uuid>? = null,
         onWorkshopAccepted: ((me.rerere.rikkahub.data.orbis.workshop.WorkshopJob) -> Unit)? = null,
@@ -98,6 +99,13 @@ class ChatToolFactory(
                     else queue.offer(conversationId, proposal, guide)
                 }
             })
+            if (LocalToolOption.SelfCheck in assistant.localTools) {
+                val selfCheck = me.rerere.rikkahub.data.orbis.diagnostics.SelfCheckHost(context, settingsStore, mcpManager, workspaceRepository)
+                add(createOrbisSelfCheckTool(
+                    enabled = { settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.SelfCheck) == true },
+                    check = { selfCheck.check(assistant.id.toString(), it, conversationId) },
+                ))
+            }
             var stRuntimeWorkspaceForRun: String? = null
             add(orbisSelfConfigurationTool(settingsStore, assistant.id.toString(), context, mcpManager, workspaceRepository,
                 stRuntimeWorkspaceForRun = { stRuntimeWorkspaceForRun }))
@@ -116,6 +124,16 @@ class ChatToolFactory(
                         start = { stHost.requestStart(stWorkspace.root, owner, it) },
                         status = { stHost.current(stWorkspace.root) },
                         stop = { stHost.stop(stWorkspace.root) },
+                    ))
+                }
+                val ombreHost = me.rerere.rikkahub.data.orbis.ombre.OmbreRuntimeHost.get(context)
+                if (me.rerere.rikkahub.data.orbis.ombre.OMBRE_RUNTIME_ENTRY_ENABLED &&
+                    stWorkspace != null && currentBinding() && ombreHost.enabled(stWorkspace.root)) {
+                    add(createOrbisOmbreRuntimeTool(
+                        allowed = { currentBinding() && ombreHost.enabled(stWorkspace.root) &&
+                            workspaceRepository.getById(workspaceId)?.shellStatus == me.rerere.workspace.WorkspaceShellStatus.READY.name },
+                        start = { ombreHost.requestStart(stWorkspace.root, owner, it) },
+                        status = { ombreHost.current(stWorkspace.root) }, stop = { ombreHost.stop(stWorkspace.root) },
                     ))
                 }
                 add(createOrbisBackupTool(workspaceId, ::currentBinding,
@@ -204,7 +222,8 @@ class ChatToolFactory(
         }
         val imageDestinations = if (conversationId == null || imageSourceMessageIds == null) emptyList() else mcpTools
             .filter { it.third.name in setOf("store_memory_image", "stbrain_manage") &&
-                mcpManager.supportsMemoryImageUploads(it.first) }
+                mcpManager.supportsMemoryImageUploads(it.first) &&
+                me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context).permits(assistant.id.toString(), "mcp", it.first.toString()) }
             .groupBy { it.first }.map { (serverId, entries) ->
                 val server = settings.mcpServers.first { it.id == serverId }
                 val store = entries.firstOrNull { it.third.name == "store_memory_image" } ?: entries.first()
@@ -249,7 +268,8 @@ class ChatToolFactory(
             return imageDestinations.all { destination ->
                 val current = live.mcpServers.firstOrNull { it.id == destination.serverId }
                 current != null && approvalFingerprint(json.encodeToString(current)) == destination.revision &&
-                    destination.serverId in owner.mcpServers && mcpManager.supportsMemoryImageUploads(destination.serverId)
+                    destination.serverId in owner.mcpServers && mcpManager.supportsMemoryImageUploads(destination.serverId) &&
+                    me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context).permits(assistant.id.toString(), "mcp", destination.serverId.toString())
             }
         }
         if (imageScope != null) add(createStImageListTool(imageScope, imageDestinations, stImageAttachments,
@@ -257,6 +277,14 @@ class ChatToolFactory(
         // This authenticated staging primitive is for the host bridge only, never model tool discovery.
         mcpTools.filterNot { me.rerere.rikkahub.data.ai.mcp.StMemoryImageProtocol.isHostUploadTool(it.third) }.forEach { (serverId, serverName, tool) ->
             val server = settings.mcpServers.firstOrNull { it.id == serverId }
+            // Bind to the executing server ID; names may be changed or share a prefix.
+            fun mcpSelected(): Boolean {
+                val live = settingsStore?.settingsFlow?.value ?: settings
+                val owner = live.getAssistantById(assistant.id) ?: return false
+                return me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context)
+                    .permits(assistant.id.toString(), "mcp", serverId.toString()) &&
+                    mcpToolsForAssistant(live, owner).any { it.first == serverId && it.third.name == tool.name }
+            }
             val imageDestination = imageDestinations.firstOrNull { it.serverId == serverId }
             val bridgeImageTool = imageScope != null && imageDestination != null &&
                 tool.name in setOf("store_memory_image", "stbrain_manage")
@@ -270,11 +298,12 @@ class ChatToolFactory(
                         "\nOrbis 当前聊天图片请先调用 orbis_list_current_images 获取 upload_ref 和 mime_type，再原样提交。宿主验证并暂存原图；不要生成 data_base64。" else "",
                     parameters = { schema },
                     needsApproval = { tool.needsApproval },
+                    isSelected = { mcpSelected() },
                     hostApproval = HostToolApproval("mcp:$serverId:${tool.name}", revision, "MCP $serverName · ${tool.name}"),
                     isApprovalCurrent = {
                         val live = settingsStore?.settingsFlow?.value ?: settings
                         val current = live.mcpServers.firstOrNull { it.id == serverId }
-                        current == server && current?.commonOptions?.enable == true &&
+                        mcpSelected() && current == server && current?.commonOptions?.enable == true &&
                             live.getAssistantById(assistant.id)?.let { owner ->
                                 mcpToolsForAssistant(live, owner).any { it.first == serverId && it.third == tool }
                             } == true
@@ -456,7 +485,39 @@ class ChatToolFactory(
                 withContext(Dispatchers.IO) { OrbisStickers.open(context.applicationContext).readSnapshot() }
             })
         }
-    }.let { tools ->
+    }.let { builtTools ->
+        val boundary = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context)
+        val ownerId = assistant.id.toString()
+        val tools = if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && boundary.state(ownerId).grants.isNotEmpty()) builtTools +
+            createBoundaryTool(boundary, ownerId, conversationId, catalog = {
+                val live = settingsStore?.settingsFlow?.value ?: settings
+                mapOf("model" to live.providers.flatMap { it.models }.associate { it.id.toString() to "${it.displayName} · ${it.type}" },
+                    "mcp" to live.mcpServers.associate { it.id.toString() to it.commonOptions.name },
+                    "tool" to (builtTools.associate { it.name to it.description.take(100) } + ("orbis_help" to "按需查询 Orbis 操作指南") +
+                        model.tools.associate { me.rerere.rikkahub.data.orbis.boundary.builtinBoundaryId(it) to "模型内置 $it" }))
+            }, toolSources = {
+                mcpToolsForAssistant(settings, assistant).associate { (id, name, tool) ->
+                    "mcp__${name}__${tool.name}" to id.toString()
+                }
+            }, bindingCurrent = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
+                verifyConversation = {
+                    conversationId == null || (readActiveConversation?.invoke()
+                        ?: conversationRepository.getConversationById(kotlin.uuid.Uuid.parse(conversationId)))?.let {
+                            it.id.toString() == conversationId && it.assistantId == assistant.id
+                        } == true
+                }, alternateModelAvailable = { id ->
+                    (settingsStore?.settingsFlow?.value ?: settings).providers.any { provider ->
+                        provider.enabled && provider.models.any { it.id.toString() == id && it.type == me.rerere.ai.provider.ModelType.CHAT }
+                    }
+                }) else builtTools
+        fun selected(tool: Tool): Boolean {
+            if (tool.name == me.rerere.rikkahub.data.orbis.boundary.BOUNDARY_TOOL) return boundary.state(ownerId).grants.isNotEmpty()
+            if (tool.name in setOf("toy_bluetooth_stop", "toy_lab_stop", "end_voice_call")) return true
+            if (boundary.pause(ownerId, conversationId) != null && !boundaryPauseAllowed()) return false
+            if (!boundary.permits(ownerId, "tool", tool.name)) return false
+            return true // MCP-specific selection is bound to the server ID in the tool itself.
+        }
+        val compactDescriptions = BuildConfig.ORBIS_ENABLED && boundary.permits(ownerId, "tool", ORBIS_HELP_TOOL_NAME)
         appendOrbisHelpTool(
             tools = tools,
             build = OrbisHelpBuild(
@@ -466,10 +527,12 @@ class ChatToolFactory(
                 buildType = BuildConfig.BUILD_TYPE,
             ),
             enabled = BuildConfig.ORBIS_ENABLED,
-        ).map { tool ->
-            val guarded = tool.copy(isApprovalCurrent = {
+        ).map { originalTool ->
+            val tool = originalTool
+            val guarded = tool.copy(isSelected = { selected(tool) && tool.isSelected() }, isApprovalCurrent = {
                 val live = settingsStore?.settingsFlow?.value?.getAssistantById(assistant.id)
                 val selectionCurrent = settingsStore == null || (live != null && when {
+                    tool.name == me.rerere.rikkahub.data.orbis.boundary.BOUNDARY_TOOL -> true
                     tool.name.startsWith("toy_lab") -> true // separate device grant checked by the lab tool
                     tool.name == ORBIS_MEMORY_TOOL -> true // stopping injection must not disable store/query
                     tool.name.startsWith("companion_") || tool.name.startsWith("toy_bluetooth_") ->
@@ -485,9 +548,25 @@ class ChatToolFactory(
                         live.enableRecentChatsReference == assistant.enableRecentChatsReference
                 })
                 // Emergency stop does not become inaccessible when its family is disabled.
-                (tool.name in setOf("toy_bluetooth_stop", "toy_lab_stop") || selectionCurrent) && tool.isApprovalCurrent()
+                (tool.name in setOf("toy_bluetooth_stop", "toy_lab_stop", "end_voice_call") || selectionCurrent) && selected(tool) && tool.isApprovalCurrent()
             })
-            bindToolApproval(guarded, assistant.id.toString(), ToolApprovalStore.get(context))
+            // Derive approval identity from the original definition, before shortening its wire description.
+            val bound = bindToolApproval(guarded, assistant.id.toString(), ToolApprovalStore.get(context))
+            val approved = if (compactDescriptions) compactOrbisToolDescription(bound) else bound
+            if (!BuildConfig.ORBIS_ENABLED || consultationReferenceOnly || tool.name == "orbis_self_check") approved else approved.copy(execute = { args ->
+                val result = approved.execute(args)
+                runCatching {
+                    result.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().asSequence().mapNotNull { part ->
+                        if (part.text.length > 32 * 1024) null else runCatching { json.parseToJsonElement(part.text) as? kotlinx.serialization.json.JsonObject }.getOrNull()
+                    }.firstOrNull { it["ok"] == kotlinx.serialization.json.JsonPrimitive(false) }?.let { failure ->
+                        val code = listOf("code", "error", "reason").mapNotNull { failure[it] as? kotlinx.serialization.json.JsonPrimitive }
+                            .map { it.content }.firstOrNull { it in me.rerere.rikkahub.data.orbis.diagnostics.diagnosticCodes } ?: "unclassified_failure"
+                        me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, ownerId,
+                            if (tool.name == "orbis_theme") "theme" else "tool", code)
+                    }
+                }
+                result
+            })
         }
     }
 

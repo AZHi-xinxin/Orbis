@@ -52,6 +52,7 @@ internal class ThemeRepository(private val root: File) {
         val old = id?.let { key -> state.entries.firstOrNull { it.id == key } ?: error("theme_not_found") }
         check(old == null && expected == 0 || old?.authorRole == "ai" && old.revision == expected) { "theme_revision_or_owner_conflict" }
         check(old != null || state.entries.size < 30) { "theme_store_full" }
+        requireAssets(body)
         // Draft revision is also guarded, so two writers cannot silently replace each other.
         val entry = (old ?: ThemeEntry(UUID.randomUUID().toString())).copy(revision = expected + 1, draft = body)
         save(state.copy(entries = if(old == null) state.entries + entry else state.entries.map { if(it.id == entry.id) entry else it }))
@@ -72,12 +73,22 @@ internal class ThemeRepository(private val root: File) {
             }
             return JsonObject(result)
         }
-        write(merge(themeJson.encodeToJsonElement(base).jsonObject,delta,0).toString(),id,expected)
+        var merged = merge(themeJson.encodeToJsonElement(base).jsonObject,delta,0)
+        // Replacing/removing an image in a draft updates its manifest too. Published
+        // versions and actual files stay intact for active themes and undo.
+        if ("assets" !in delta) {
+            val next = themeJson.decodeFromJsonElement<ThemePackage>(merged)
+            val refs = next.assetReferences().values.toSet()
+            val removed = base.assetReferences().values.toSet() - refs
+            val assets = (next.assets.filterNot { it in removed } + refs).distinct()
+            merged = JsonObject(merged + ("assets" to JsonArray(assets.map(::JsonPrimitive))))
+        }
+        write(merged.toString(),id,expected)
     }
     fun publish(id: String, expected: Int): ThemeEntry = synchronized(lock) {
         val state = snapshot(); val old = editable(state, id, expected)
         val body = old.draft ?: error("theme_draft_missing"); body.validate()
-        body.assets.forEach { check(asset(it).isFile) { "theme_asset_missing" } }
+        requireAssets(body)
         // A small edit must not force a new theme after twenty publications. Keep the
         // active and pending versions plus recent revisions; prune only old undo refs.
         val newVersion = ThemeVersion(old.revision + 1, body)
@@ -105,7 +116,7 @@ internal class ThemeRepository(private val root: File) {
     }
     private fun applyLocked(state: ThemeState, ref: ThemeRef) {
         val body = state.resolve(ref) ?: error("theme_version_missing")
-        body.assets.forEach { check(asset(it).isFile) { "theme_asset_missing" } }
+        requireAssets(body)
         save(state.copy(active = ref, pending = null, previous = if (ref == state.active) state.previous else (state.previous + state.active).takeLast(20)))
     }
     fun dismissPending() = synchronized(lock) { save(snapshot().copy(pending = null)) }
@@ -135,6 +146,14 @@ internal class ThemeRepository(private val root: File) {
             pending = state.pending?.takeUnless { it.id == id }, previous = state.previous.filter { it?.id != id }, autoApply = state.autoApply - id))
     }
     fun asset(name: String): File { require(name.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)"))) { "theme_asset_invalid" }; return file(name) }
+    fun missingAssetFields(body: ThemePackage): List<String> = synchronized(lock) {
+        body.assets.filterNot { asset(it).isFile }.flatMap { missing ->
+            body.assetReferences().filterValues { it == missing }.keys.toList().ifEmpty { listOf("assets[${body.assets.indexOf(missing)}]") }
+        }
+    }
+    private fun requireAssets(body: ThemePackage) {
+        missingAssetFields(body).firstOrNull()?.let { throw ThemeAssetException(it) }
+    }
     fun assets(): List<String> = synchronized(lock) { file("themes.json"); root.listFiles().orEmpty().filter { it.isFile && it.name.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)")) }.map { it.name }.sorted() }
     /** Host-validated raster only, with a content-addressed name. No tool accepts paths or URLs. */
     fun importAsset(bytes: ByteArray, extension: String): String = synchronized(lock) {

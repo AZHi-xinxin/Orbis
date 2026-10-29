@@ -28,6 +28,7 @@ import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.approval.awaitHostApproval
 import me.rerere.rikkahub.data.ai.approval.matchesHostApproval
 import me.rerere.ai.provider.Model
+import me.rerere.rikkahub.data.orbis.boundary.selectModelTools
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
@@ -164,6 +165,8 @@ class GenerationLoop(
         processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
         conversationSystemPrompt: String? = null,
         conversationId: Uuid? = null,
+        boundaryRecoveryRevision: Long? = null,
+        boundaryWakePermit: me.rerere.rikkahub.data.orbis.boundary.BoundaryWakePermit? = null,
         conversationModeInjectionIds: Set<Uuid> = emptySet(),
         conversationLorebookIds: Set<Uuid> = emptySet(),
         workspaceCwd: String? = null,
@@ -221,7 +224,9 @@ class GenerationLoop(
         try {
         val localMemoryTurn = if (allowLocalMemory && me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
             localMemory?.begin(assistant, conversationId, messages, readOnly = readOnlyLocalMemory) else null
-        val tools = snapshotGenerationTools(tools)
+        val tools = me.rerere.rikkahub.data.ai.tools.refreshOrbisHelpForTools(snapshotGenerationTools(tools))
+        val requestModel = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()
+            ?.state(assistant.id.toString())?.selectModelTools(model) ?: model
         val privatePresentation = PrivateRoomGenerationPresentation(
             enabled = tools.any { it.name == "orbis_private_room_write" },
         )
@@ -270,6 +275,18 @@ class GenerationLoop(
 
         for (stepIndex in 0 until maxSteps) {
             requireActiveTurn()
+            val boundary = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()
+            val owner = assistant.id.toString()
+            val target = conversationId?.toString()
+            if (boundaryRecoveryRevision != null) {
+                // This is the original chat turn, admitted once while ordinary input remains paused.
+                // Either explicit decision ends this turn, including a renewed pause with a new revision.
+                if (boundary?.recoveryPending(owner, target, boundaryRecoveryRevision) != true) break
+            } else if (boundary?.pause(owner, target) != null && !boundary.permitsWake(boundaryWakePermit, owner, target)) break
+            if (boundary?.permits(owner, "model", model.id.toString()) == false) break
+            // Provider-hosted capabilities cannot be intercepted as local function calls. A changed
+            // selection ends this chain before another HTTP request; the next invocation refreshes it.
+            if ((boundary?.state(assistant.id.toString())?.selectModelTools(model) ?: model).tools != requestModel.tools) break
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
 
             val protectedResume = privatePresentation.protectOutstandingTools(messages)
@@ -333,7 +350,7 @@ class GenerationLoop(
                         messages = candidate
                     },
                     transformers = inputTransformers,
-                    model = model,
+                    model = requestModel,
                     providerImpl = providerImpl,
                     provider = provider,
                     tools = tools,
@@ -413,7 +430,7 @@ class GenerationLoop(
                     when {
                         protected !== tool -> protected
                         tool.isExecuted -> tool
-                        toolDef != null && !toolDef.isApprovalCurrent() -> tool.unavailableApprovalFailure()
+                        toolDef != null && (!toolDef.isSelected() || !toolDef.isApprovalCurrent()) -> tool.unavailableApprovalFailure()
                         // Tool needs approval and state is Auto -> set to Pending
                         toolDef?.needsApproval(tool.inputAsJson()) == true &&
                             tool.approvalState is ToolApprovalState.Auto -> {
@@ -527,7 +544,7 @@ class GenerationLoop(
                         // Auto or Approved - execute the tool
                         runCatching {
                             executedTools += tool.dispatchProvidedTool(tools) { toolDef ->
-                                if (!toolDef.isApprovalCurrent()) return@dispatchProvidedTool tool.unavailableApprovalFailure()
+                                if (!toolDef.isSelected() || !toolDef.isApprovalCurrent()) return@dispatchProvidedTool tool.unavailableApprovalFailure()
                                 if (tool.approvalState is ToolApprovalState.Approved) {
                                     if (!tool.matchesHostApproval(toolDef)) return@dispatchProvidedTool tool.unavailableApprovalFailure()
                                 } else if (toolDef.needsApproval(tool.inputAsJson())) {
@@ -687,7 +704,8 @@ class GenerationLoop(
         }
 
         } finally { if (screenLease != null) screenRuntime?.releaseTurn(screenLease) }
-    }.orderedGenerationFlow(Dispatchers.IO)
+    }.orderedGenerationFlow(Dispatchers.IO + (me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()
+        ?.requestContext(assistant.id.toString(), conversationId?.toString(), boundaryRecoveryRevision, boundaryWakePermit) ?: kotlin.coroutines.EmptyCoroutineContext))
 
     private suspend fun generateInternal(
         inputSnapshot: GenerationInputSnapshot,

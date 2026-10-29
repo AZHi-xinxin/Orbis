@@ -423,7 +423,7 @@ export function ModelList({ disabled = false, className, onChanged }: ModelListP
                         selected={model.id === currentModelId}
                         updating={model.id === updatingModelId}
                         favorite={favoriteModelIdSet.has(model.id)}
-                        disabled={disabled || updatingModelId !== null}
+                        disabled={disabled || updatingModelId !== null || Boolean(settings?.boundaryChoices?.[currentAssistant?.id ?? ""]?.disabledModels.includes(model.id))}
                         onSelect={handleSelectModel}
                         onToggleFavorite={handleToggleFavorite}
                       />

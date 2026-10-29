@@ -14,6 +14,7 @@ internal fun ConversationDto.singleNodeDiffOrNull(current: ConversationDto): Nod
     }
 
     if (
+        boundaryRevision != current.boundaryRevision || boundary != current.boundary ||
         title != current.title ||
         chatSuggestions != current.chatSuggestions ||
         isPinned != current.isPinned ||

@@ -38,6 +38,7 @@ internal class ChatGptPlanAPI(private val accounts: ChatGptPlanAccounts) {
     suspend fun stream(setting: ProviderSetting.OpenAI, messages: List<UIMessage>, params: TextGenerationParams): Flow<StreamChunk> = flow {
         val account = setting.chatGptAccountId ?: error("siwc_not_signed_in")
         val token = accounts.accessToken(account)
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val body = buildChatGptPlanRequestBody(encoder, setting, messages, params)
         emitAll(callbackFlow {
             val source = AtomicReference<EventSource?>()

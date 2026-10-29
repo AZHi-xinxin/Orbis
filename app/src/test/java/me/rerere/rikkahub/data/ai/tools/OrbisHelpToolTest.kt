@@ -24,6 +24,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisHelpToolTest {
+    @Test fun deploymentNamesAreUnambiguousAndHiddenRuntimeIsNotDiscoverable() {
+        val help = createOrbisHelpTool(emptyList(), build)
+        assertTrue(help.description.contains("ST指StillerBrain"))
+        assertTrue(help.systemPrompt(Model(), emptyList()).isBlank())
+        val chapter = orbisManualChapters.single { it.id == "st_install" }
+        assertTrue(chapter.sections.first().text.contains("StillerBrain"))
+        assertTrue(chapter.sections.first().text.contains("SillyTavern"))
+        assertFalse(orbisManualChapters.any { it.id == "ombre_phone" })
+        assertFalse(help.parameters().toString().contains("ombre_phone"))
+        assertTrue(runCatching { orbisManualReadChapter("ombre_phone", emptySet(), 0, 3) }.isFailure)
+    }
+
     @Test fun `recall human click path is query only and no tool enablement is implied`() {
         val chapter = orbisManualChapters.single { it.id == "message_recall" }
         val text = chapter.sections.joinToString { it.text }
@@ -158,7 +170,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/26", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/38", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)
@@ -198,8 +210,8 @@ class OrbisHelpToolTest {
         assertEquals(first.parameters(), second.parameters())
         assertTrue(first.description.length < 180)
         val schema = first.parameters() as InputSchema.Obj
-        assertEquals(setOf("topic", "query", "chapter", "offset", "limit"), schema.properties.keys)
-        assertEquals(listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide"),
+        assertEquals(setOf("topic", "query", "chapter", "offset", "limit", "tool_name"), schema.properties.keys)
+        assertEquals(listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide", "tool"),
             schema.properties.getValue("topic").jsonObject.getValue("enum").jsonArray.map { it.jsonPrimitive.content })
     }
 

@@ -281,12 +281,16 @@ fun McpPicker(
     onUpdateAssistant: (Assistant) -> Unit
 ) {
     val mcpManager = koinInject<McpManager>()
+    val choiceContext = androidx.compose.ui.platform.LocalContext.current
+    val choiceHost = remember(choiceContext) { me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(choiceContext) }
+    val choices by choiceHost.states.collectAsStateWithLifecycle()
+    val own = choices[assistant.id.toString()] ?: me.rerere.rikkahub.data.orbis.boundary.AssistantBoundary()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(servers.fastFilter { it.commonOptions.enable }) { server ->
+        items(servers.fastFilter { it.commonOptions.enable && !own.hidden("mcp", it.id.toString()) }) { server ->
             val status by mcpManager.getStatus(server).collectAsStateWithLifecycle(McpStatus.Idle)
             Card {
                 Row(
@@ -319,7 +323,7 @@ fun McpPicker(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = server.commonOptions.displayTitle,
+                            text = server.commonOptions.displayTitle + if (own.permits("mcp", server.id.toString())) "" else " · AI 已停用",
                             style = MaterialTheme.typography.titleLarge,
                         )
                         Text(
@@ -347,7 +351,8 @@ fun McpPicker(
                         }
                     }
                     Switch(
-                        checked = server.id in assistant.mcpServers,
+                        checked = server.id in assistant.mcpServers && own.permits("mcp", server.id.toString()),
+                        enabled = own.permits("mcp", server.id.toString()),
                         onCheckedChange = {
                             if (it) {
                                 val newServers = assistant.mcpServers.toMutableSet()

@@ -346,6 +346,17 @@ class GenerationInputSnapshotTest {
         assertEquals(2, schemaReads)
     }
 
+    @Test fun `selection changes retain original wire directory but live execution decisions and refresh next invocation`() {
+        var selected = true
+        val selectedTool = Tool(name = "chosen", description = "fixed", isSelected = { selected }, execute = { emptyList() })
+        val unselectedTool = Tool(name = "later", description = "fixed", isSelected = { !selected }, execute = { emptyList() })
+        val frozen = snapshotGenerationTools(listOf(selectedTool, unselectedTool))
+        selected = false
+        assertEquals(listOf("chosen"), frozen.map { it.name })
+        assertFalse(frozen.single().isSelected())
+        assertEquals(listOf("later"), snapshotGenerationTools(listOf(selectedTool, unselectedTool)).map { it.name })
+    }
+
     @Test fun `null tool schemas retain their existing null semantics`() {
         val original = Tool(name = "no-schema", description = "fixed", execute = { emptyList() })
         assertEquals(null, snapshotGenerationTools(listOf(original)).single().parameters())

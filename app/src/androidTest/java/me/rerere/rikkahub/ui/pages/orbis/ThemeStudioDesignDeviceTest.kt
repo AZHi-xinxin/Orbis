@@ -38,6 +38,25 @@ import java.util.UUID
 class ThemeStudioDesignDeviceTest {
     @get:Rule val compose=createShellComposeRule()
 
+    @Test fun clickingADraftPreviewsThenPublishesWithoutChangingTheCurrentTheme() {
+        val root=File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,"theme-draft-${UUID.randomUUID()}").canonicalFile
+        try {
+            val store=ThemeRepository(root.resolve("orbis-themes/owner"))
+            val draft=store.write("""{"name":"待发布草稿"}""")
+            compose.setContent { MaterialTheme { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { ThemePackageManagerContent(store) } } }
+            compose.waitUntil(5000) { compose.onAllNodes(hasTestTag("theme-tile-${draft.id}")).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("theme-tile-${draft.id}").performScrollTo().performClick()
+            compose.onNodeWithText("草稿 · 待发布草稿").assertExists()
+            assertTrue(store.snapshot().entries.single().versions.isEmpty())
+            compose.onNodeWithText("发布并预览").performClick()
+            compose.waitUntil(5000) { store.snapshot().entries.single().versions.size==1 }
+            compose.onNodeWithText("应用这个主题").assertExists()
+            assertNull(store.snapshot().active)
+            compose.onNodeWithText("应用这个主题").performClick()
+            compose.waitUntil(5000) { store.snapshot().active?.id==draft.id }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun sixCompactTilesPaginateAndDeletionClampsTheLastPage() {
         val root=File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,"theme-pages-${UUID.randomUUID()}").canonicalFile
         try {

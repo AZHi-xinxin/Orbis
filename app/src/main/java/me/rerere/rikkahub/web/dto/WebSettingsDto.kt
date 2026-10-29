@@ -29,7 +29,10 @@ data class WebSettingsDto(
     val searchServiceSelected: Int,
     val webServerJwtEnabled: Boolean,
     val webImportEnabled: Boolean,
+    val boundaryChoices: Map<String, WebBoundaryChoicesDto> = emptyMap(),
 )
+
+@Serializable data class WebBoundaryChoicesDto(val disabledModels: List<String>, val disabledMcp: List<String>, val hiddenModels: List<String> = emptyList(), val hiddenMcp: List<String> = emptyList())
 
 @Serializable
 data class WebDisplayDto(
@@ -78,7 +81,10 @@ private fun Avatar.toWebAvatar(): WebAvatarDto = when (this) {
     is Avatar.Image -> WebAvatarDto("me.rerere.rikkahub.data.model.Avatar.Image", url = url)
 }
 
-fun Settings.toWebSettingsDto(): WebSettingsDto = WebSettingsDto(
+fun Settings.toWebSettingsDto(boundaries: Map<String, me.rerere.rikkahub.data.orbis.boundary.AssistantBoundary> = emptyMap()): WebSettingsDto = WebSettingsDto(
+    boundaryChoices = boundaries.mapValues { (_, b) -> WebBoundaryChoicesDto(
+        b.models.keys.filter { !b.permits("model", it) }, b.mcps.keys.filter { !b.permits("mcp", it) },
+        b.models.keys.filter { b.hidden("model", it) }, b.mcps.keys.filter { b.hidden("mcp", it) }) },
     dynamicColor = dynamicColor,
     themeId = themeId,
     developerMode = developerMode,
@@ -103,7 +109,7 @@ fun Settings.toWebSettingsDto(): WebSettingsDto = WebSettingsDto(
     ) },
     assistants = assistants.map { a -> WebAssistantDto(
         a.id.toString(), a.name, a.avatar.toWebAvatar(), a.useAssistantAvatar,
-        a.chatModelId?.toString(), a.reasoningLevel.name.lowercase(java.util.Locale.ROOT), a.enableWebSearch,
+        (boundaries[a.id.toString()]?.takeIf { "model" in it.grants }?.modelOverride ?: a.chatModelId?.toString()), a.reasoningLevel.name.lowercase(java.util.Locale.ROOT), a.enableWebSearch,
         a.mcpServers.map { it.toString() }, a.modeInjectionIds.map { it.toString() }, a.lorebookIds.map { it.toString() },
         a.allowConversationPromptInjection, a.allowConversationSystemPrompt,
         a.tags.map { it.toString() }, a.quickMessageIds.map { it.toString() },

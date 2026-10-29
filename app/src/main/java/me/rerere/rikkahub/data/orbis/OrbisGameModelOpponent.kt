@@ -26,6 +26,7 @@ internal data class GomokuModelRequest(
     val provider: ProviderSetting,
     val messages: List<UIMessage>,
     val params: TextGenerationParams,
+    val owner: String = "",
 )
 
 /** One isolated text request per durable repository ticket; no chat service, tools or retries. */
@@ -36,7 +37,7 @@ class OrbisGameModelOpponent internal constructor(
     constructor(settingsStore: SettingsStore, providerManager: ProviderManager) : this(
         settings = { settingsStore.settingsFlow.value },
         generate = { request ->
-            providerManager.getProviderByType(request.provider).generateText(
+            providerManager.getProviderByType(request.provider, me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()?.requestContext(request.owner)?.check).generateText(
                 providerSetting = request.provider,
                 messages = request.messages,
                 params = request.params,
@@ -120,6 +121,7 @@ internal fun prepareGomokuModelRequest(turn: OrbisGameMatch, settings: Settings)
         仅输出 JSON 对象，例如 {"cell":40}，其中 cell 必须是整数，不要输出分析或 Markdown。
     """.trimIndent()
     return GomokuModelRequest(
+        owner = assistant.id.toString(),
         provider = provider,
         messages = listOf(UIMessage.system(listOf(assistant.systemPrompt, prompt).filter { it.isNotBlank() }.joinToString("\n\n")),
             UIMessage.user(board.toString())),

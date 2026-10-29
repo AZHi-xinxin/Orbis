@@ -399,7 +399,7 @@ private fun WorkspaceBasicPage(
         }
 
         item {
-            workspace?.let { StRuntimeCard(it) }
+            workspace?.let { StRuntimeCard(it); OmbreRuntimeCard(it) }
         }
 
         item {

@@ -20,7 +20,7 @@ internal fun createConnectionProposalTool(owner: String, snapshot: () -> Setting
     onSetupDismissed: (String?) -> Unit = {},
     onSetupNeeded: (ConnectionProposal?, Boolean) -> Unit = { _, _ -> }) = Tool(
     name = "orbis_propose_connection",
-    description = "填写自己的原生连接。action=propose：kind=tts_openai/model_openai/mcp_http/mcp_sse，name、endpoint(完整HTTP(S)，无密钥/查询参数)、auth=none/bearer；model_openai需model，tts_openai需model/voice。没有密钥的配置直接保存，MCP默认关闭，只需人类在AI连接建议页开启；需要密钥时人类只在该页填key，可选择以后允许；需要补填或开启时，宿主会在发起请求的聊天打开对应配置页。已授权同地址可继续调整。不要传密钥或脚本。action=open_setup(id可选)重新打开填写框，关闭后可反复显式打开；action=show_guide(id可选)先打开保存部署密钥的指引。credential_file可填当前工作区/workspace/内的部署凭据文件路径，原生页仅供人类查看和保存，工具不读取或返回密钥。新模型默认支持工具；supports_tools可明确关闭，supports_images依据真实上游能力填写。action=rename(id,name)修改自己创建的MCP显示名，不改工具标识、地址或密钥。action=dismiss_setup(id可选)只关闭连接设置弹窗和前台提示；省略id关闭本助手全部提示。离线、未验证、取消或已删除测试服务都能用，不删除/停用连接、不改密钥、不切模型、不冒充成功；open_setup可重开。action=status返回保存、启用、verified、setup_completed及setup_dismissed；saved不是连通。orbis_configure check通过后，逐条action=complete(id)结束已验证连接的前台提示，连接保留；open_setup仍可重开。用orbis_configure选择模型/音色或测试连接；备份使用orbis_backup。pending无需等待，继续正常回复。",
+    description = me.rerere.rikkahub.data.ai.tools.orbisToolFullDescription("orbis_propose_connection"),
     parameters = { InputSchema.Obj(properties = buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("propose", "status", "open_setup", "show_guide", "rename", "complete", "dismiss_setup").map(::JsonPrimitive))) })
         listOf("id", "kind", "name", "endpoint", "model", "voice", "auth", "credential_file").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }

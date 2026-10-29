@@ -162,7 +162,7 @@ fun Route.conversationRoutes(
             val conversation = chatService.getDisplayedConversationSnapshot(uuid)
 
             val isGenerating = chatService.getGenerationJobStateFlow(uuid).first() != null
-            call.respond(conversation.toDto(isGenerating))
+            call.respond(conversation.toDto(isGenerating, chatService.boundaryHost.pause(conversation.assistantId.toString(), conversation.id.toString()), chatService.boundaryHost.state(conversation.assistantId.toString()).revision))
         }
 
         // DELETE /api/conversations/{id} - Delete conversation
@@ -240,7 +240,7 @@ fun Route.conversationRoutes(
             chatService.saveConversation(uuid, updatedConversation)
 
             val isGenerating = chatService.getGenerationJobStateFlow(uuid).first() != null
-            call.respond(HttpStatusCode.OK, updatedConversation.toDto(isGenerating))
+            call.respond(HttpStatusCode.OK, updatedConversation.toDto(isGenerating, chatService.boundaryHost.pause(updatedConversation.assistantId.toString(), updatedConversation.id.toString()), chatService.boundaryHost.state(updatedConversation.assistantId.toString()).revision))
         }
 
         // POST /api/conversations/{id}/move - Move conversation to another assistant
@@ -282,6 +282,13 @@ fun Route.conversationRoutes(
             call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
         }
 
+        post("/{id}/boundary/request") {
+            val uuid = call.parameters["id"].toUuid("conversation id")
+            val request = call.receive<BoundaryResumeRequest>()
+            val result = chatService.requestBoundaryResume(uuid, request.revision, request.text)
+            call.respond(mapOf("message" to result))
+        }
+
         // POST /api/conversations/{id}/messages - Send a message
         post("/{id}/messages") {
             val uuid = call.parameters["id"].toUuid("conversation id")
@@ -296,7 +303,7 @@ fun Route.conversationRoutes(
                 lorebookIds = request.lorebookIds,
             )
             if (!chatService.sendMessage(uuid, request.parts, answer = true)) {
-                throw me.rerere.rikkahub.web.ConflictException("消息尚未接受：内容为空或聊天正在整理，请稍后重试。")
+                throw me.rerere.rikkahub.web.ConflictException("消息尚未接受：请检查对话暂停状态、当前模型和整理状态；草稿保留。")
             }
 
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
@@ -414,9 +421,10 @@ fun Route.conversationRoutes(
                     chatService
                         .getGenerationJobStateFlow(uuid)
                         .map { it != null }
-                        .distinctUntilChanged()
-                ) { conversation, isGenerating ->
-                    ConversationStreamPayload.Conversation(conversation.toDto(isGenerating))
+                        .distinctUntilChanged(),
+                    chatService.boundaryHost.states,
+                ) { conversation, isGenerating, _ ->
+                    ConversationStreamPayload.Conversation(conversation.toDto(isGenerating, chatService.boundaryHost.pause(conversation.assistantId.toString(), conversation.id.toString()), chatService.boundaryHost.state(conversation.assistantId.toString()).revision))
                 }
 
                 val errorEvents = chatService.errors.map { errors ->
@@ -543,3 +551,6 @@ private suspend fun applyInitialConversationInjections(
     chatService.saveConversationInjections(me.rerere.rikkahub.data.model.ConversationInjectionEdit.between(
         conversation, conversation.copy(modeInjectionIds = requestedModeInjectionIds, lorebookIds = requestedLorebookIds)))
 }
+
+@kotlinx.serialization.Serializable
+private data class BoundaryResumeRequest(val revision: Long, val text: String)

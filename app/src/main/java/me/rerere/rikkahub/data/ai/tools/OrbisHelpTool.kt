@@ -17,8 +17,8 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.orbis.soup.createSoupTools
 
 internal const val ORBIS_HELP_TOOL_NAME = "orbis_help"
-internal const val ORBIS_MANUAL_VERSION = "orbis-help/26"
-private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide")
+internal const val ORBIS_MANUAL_VERSION = "orbis-help/38"
+private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide", "tool")
 private const val manualHostUi = "同一 App 内的原 Orbis 本地主页、原生聊天、同一 AI 的会话历史/搜索/重命名/分组、外观 DIY、本地动态星图演示与独立 ST 元信息连接设置、TechHub 和多 AI 群聊独立入口，以及模型/MCP/语音/文件/工作区/技能配置入口。"
 private const val manualStarMapDemoScope = "星点为本地合成数据，仅展示示例时间、类型与无标签关联，不读取真实 ST 记忆。"
 
@@ -47,7 +47,7 @@ private val manualToolCategories = listOf(
     ManualToolCategory("local_garden", listOf("orbis_garden_list", "orbis_garden_read", "orbis_garden_create"), "本机共用花园，需人类为具体AI开启读写；可读人类/其他已授权AI记录，结果进入模型。list取目录、read取正文，create经批准新增、不覆盖删除。无需VPS，仅本地路线；云端工具独立，不自动迁移同步，切换不删数据。专用明文备份不含附件本体，聊天ZIP不能替代。用法/备份边界见guide/garden。"),
     ManualToolCategory("native_sentinels", listOf("orbis_sentinel_guide", "orbis_sentinel_list", "orbis_sentinel_read", "orbis_sentinel_create", "orbis_sentinel_update", "orbis_sentinel_pause", "orbis_sentinel_resume", "orbis_sentinel_delete"), "AI设置本机哨兵，参数查orbis_sentinel_guide，人类操作/排错见guide/automation。目标固定；总开关仅人类控制，恢复不补发。设备事实不得代写；accepted不等于回复/出声，不证明外部检测已接通或旧VPS停用。"),
     ManualToolCategory("voice_calls", listOf("orbis_call_records", "orbis_call_read", "start_voice_call", "end_voice_call", "orbis_incoming_call_records"), "CALL_MODE输入是转写，不是原始声音；可靠回声控制才可插话，否则半双工；本轮真机声学效果未验收。静音接听是关麦、保留扬声器，接听前不开麦；关喇叭时播放时间轴继续。start_voice_call须写来电原因，接通后一次自由开场；拒接/无人接进入冷却，不自动回拨。end_voice_call仅挂本轮通话。原文独存、分页查询，不每轮自动注入全文；补档不恢复旧队列。语音台、声学与后台限制见guide/voice和limits。"),
-    ManualToolCategory("connection_proposals", listOf("orbis_propose_connection", "orbis_configure"), "AI填写模型/TTS/MCP，管理工具型号与记忆并测试；人类填必要key、开启MCP。支持以后允许；inspect读当前配置。"),
+    ManualToolCategory("connection_proposals", listOf("orbis_propose_connection", "orbis_configure", "orbis_self_check"), "AI填写模型/TTS/MCP，管理工具型号与记忆并测试；人类填必要key、开启MCP。支持以后允许；inspect读配置。自检查orbis_self_check；未开时当前助手设置→本地工具→AI自检。详情guide/self_check。"),
     ManualToolCategory("backup", listOf("orbis_backup"), "工作区连接文件经inspect校验后bind；检查/存档/恢复走后台。绑定不等于备份完成，详见guide/rescue。"),
     ManualToolCategory("context_compaction", listOf("compact", "context_compaction_status", "context_compaction_history"), "AI自写摘要并调用compact压缩当前对话，参数见guide/context。默认最多保留32条原文、工具尾段成组；失败留原文。90%只提醒，不自动压缩或逐次人工确认；历史仅元信息，圆环仅可撤销最近一次，不改ST/日记/锚点/工作区。"),
     ManualToolCategory("companion_native", emptyList(), "当前 AI 显式启用的进程内陪伴工具，无需本机 MCP。离线记忆、运行诊断和 companion_get_alarms 闹钟查询在服务关闭时也可用，其它能力按需检查服务和系统权限。查询只读本应用台账及最近触发/停止回执，不列系统时钟全部闹钟；旧记录可能不齐，系统接受调度不保证响铃或人已听到，不会因查询设闹钟或触发铃声。set_alarm是一次性，同HH:mm替换，以完整日期回执核验。send_notification成功后仅按用户开关尝试朗读本次内容；默认关闭，锁屏另授权，使用已有全局TTS与语速，不读第三方通知或旧记录。提交系统不等于已播放或已听到。read_memory/save_memory是本机离线记忆，不是ST；不要自动开启观察。", "companion_"),
@@ -130,7 +130,7 @@ private fun manualPermissions(): JsonObject = buildJsonObject {
     put("approval_revocation", "关闭总开关不删除单项「以后允许」；「撤销当前 AI 的全部授权」可同时取消全开与单项授权，不撤回已开始的操作。MCP/工作区原有免审批配置仍须在原设置关闭。")
     put("workspace", "工作区能力受隔离环境及审批规则约束；不能据此宣称已获整个手机、电脑或任意文件的访问权。")
     put("native_settings_write_tool", "orbis_configure_and_orbis_propose_connection")
-    put("settings_guidance", "orbis_configure可查改模型、工具型号、TTS和本助手记忆；新连接用orbis_propose_connection，必要key在人类原生页填写。可记住授权；头像/背景/气泡/字体仍由人类配置。")
+    put("settings_guidance", "orbis_configure可查改模型、工具型号、TTS和本助手记忆；新连接用orbis_propose_connection，必要key在人类原生页填写。可记住授权；AI主题按人类授权使用orbis_theme；自检查guide/self_check。")
     put("contact_privacy", "主动来电受用户总开关、冷却和系统通知权限约束，未接听不开麦；通知朗读默认关闭，锁屏另行选择且可能被旁人听见。远程TTS会按已有提供商配置发送朗读文本；来电/闹铃音乐由人类选择，不以工具注册代替文件授权。")
     put("privacy", "不输出凭证、MCP 别名或地址、工作区路径、私人提示词、记忆或聊天正文。")
     put("network", "读取说明书不联网；其他工具仍按各自说明工作。")
@@ -174,10 +174,10 @@ internal fun appendOrbisHelpTool(tools: List<Tool>, build: OrbisHelpBuild, enabl
 /** Conversation-scoped tools are attached after the shared factory; describe the final run list. */
 internal fun refreshOrbisHelpForTools(tools: List<Tool>): List<Tool> {
     if (!BuildConfig.ORBIS_ENABLED || tools.none { it.name == ORBIS_HELP_TOOL_NAME }) return tools
-    val refreshed = createOrbisHelpTool(tools.map { it.name }, OrbisHelpBuild(
+    val refreshed = createOrbisHelpTool(tools.filter { it.isSelected() }.map { it.name }, OrbisHelpBuild(
         BuildConfig.APPLICATION_ID, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE, BuildConfig.BUILD_TYPE,
     ))
-    return tools.map { if (it.name == ORBIS_HELP_TOOL_NAME) refreshed else it }
+    return tools.map { if (it.name == ORBIS_HELP_TOOL_NAME) it.copy(execute = refreshed.execute) else it }
 }
 
 internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelpBuild): Tool {
@@ -259,7 +259,7 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
     }
     return Tool(
         name = ORBIS_HELP_TOOL_NAME,
-        description = "按需查询Orbis操作指南、工具目录和限制；只读离线，无需每轮查。用户要求安装/连接ST时查guide/st_install，位置不明先问，不默认手机或工作区。人类点击路径查guide/human_operations。教程仅查询时返回。",
+        description = "按需查Orbis说明书与人类操作路径。topic=tool、tool_name读完整工具说明。ST指StillerBrain记忆系统（不是SillyTavern酒馆）；了解/比较先查guide/st_overview，原文guide/st_readme，部署guide/st_install。位置不明先问。只读离线，教程不常驻。",
         parameters = { InputSchema.Obj(properties = buildJsonObject {
             put("topic", buildJsonObject {
                 put("type", "string")
@@ -267,6 +267,7 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
                 put("description", "Optional section; default overview.")
             })
             put("query", buildJsonObject { put("type", "string"); put("maxLength", 80); put("description", "Only for chapters: public manual search, not private data.") })
+            put("tool_name", buildJsonObject { put("type", "string"); put("maxLength", 80); put("description", "Required for topic=tool; use the exact built-in tool name whose description points here.") })
             put("chapter", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { orbisManualChapters.forEach { add(it.id) } }); put("description", "Required for guide; choose ID from chapters.") })
             put("offset", buildJsonObject { put("type", "integer"); put("minimum", 0); put("maximum", 500); put("description", "Only for chapters/guide; default 0.") })
             put("limit", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 10); put("description", "Only for chapters/guide; default 5 chapters or 3 guide sections.") })
@@ -277,6 +278,14 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
             val text = try {
                 val request = parseManualRequest(arguments)
                 when (request.topic) {
+                    "tool" -> {
+                        val doc = orbisToolDocumentation[request.toolName]
+                        require(request.toolName in names && doc != null) { "orbis_help_unknown_tool" }
+                        buildJsonObject {
+                            put("ok", true); put("manual_version", ORBIS_MANUAL_VERSION); put("topic", "tool")
+                            put("tool_name", request.toolName); put("description", doc.details)
+                        }.toString()
+                    }
                     "chapters", "guide" -> buildJsonObject {
                         put("ok", true); put("manual_version", ORBIS_MANUAL_VERSION); put("topic", request.topic); put("host", host)
                         put("scope", "generation_start_registration_snapshot"); put("read_only", true); put("network_requested", false)
@@ -322,15 +331,15 @@ private fun localToolReference(registeredNames: Set<String>): JsonObject {
     }
 }
 
-private val manualErrorCodes = setOf("orbis_help_invalid_parameters", "orbis_help_unknown_parameter", "orbis_help_unknown_topic", "orbis_help_unknown_chapter")
-private data class ManualRequest(val topic: String, val query: String = "", val chapter: String = "", val offset: Int = 0, val limit: Int = 5)
+private val manualErrorCodes = setOf("orbis_help_invalid_parameters", "orbis_help_unknown_parameter", "orbis_help_unknown_topic", "orbis_help_unknown_chapter", "orbis_help_unknown_tool")
+private data class ManualRequest(val topic: String, val query: String = "", val chapter: String = "", val offset: Int = 0, val limit: Int = 5, val toolName: String = "")
 private fun parseManualRequest(arguments: JsonElement): ManualRequest {
     val obj = arguments as? JsonObject ?: error("orbis_help_invalid_parameters")
     fun string(key: String, default: String): String = if (key !in obj) default else
         (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error(if (key == "topic") "orbis_help_unknown_topic" else "orbis_help_invalid_parameters")
     val topic = string("topic", "overview")
     require(topic in manualTopics) { "orbis_help_unknown_topic" }
-    val allowed = when (topic) { "chapters" -> setOf("topic", "query", "offset", "limit"); "guide" -> setOf("topic", "chapter", "offset", "limit"); else -> setOf("topic") }
+    val allowed = when (topic) { "chapters" -> setOf("topic", "query", "offset", "limit"); "guide" -> setOf("topic", "chapter", "offset", "limit"); "tool" -> setOf("topic", "tool_name"); else -> setOf("topic") }
     require(obj.keys.all { it in allowed }) { "orbis_help_unknown_parameter" }
     fun number(key: String, default: Int): Int = if (key !in obj) default else
         (obj[key] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull
@@ -342,7 +351,9 @@ private fun parseManualRequest(arguments: JsonElement): ManualRequest {
     val offset = number("offset", 0)
     val limit = number("limit", if (topic == "guide") 3 else 5)
     require(offset in 0..500 && limit in 1..10) { "orbis_help_invalid_parameters" }
-    return ManualRequest(topic, query, chapter, offset, limit)
+    val toolName = string("tool_name", "")
+    if (topic == "tool") require(toolName in orbisToolDocumentation) { "orbis_help_unknown_tool" }
+    return ManualRequest(topic, query, chapter, offset, limit, toolName)
 }
 
 private fun manualError(code: String): String = buildJsonObject {

@@ -70,6 +70,7 @@ class OrbisGardenQuickChatAppearanceTest {
     private var dark by mutableStateOf(true)
     private var deepSeek by mutableStateOf(false)
     private var role by mutableStateOf(MessageRole.ASSISTANT)
+    private var selectedTheme by mutableStateOf<ChatTheme?>(null)
 
     private fun show(content: @Composable () -> Unit) {
         compose.setContent {
@@ -77,6 +78,7 @@ class OrbisGardenQuickChatAppearanceTest {
                 LocalDensity provides Density(1f, 1f),
                 LocalSettings provides Settings(displaySetting = display),
                 LocalOrbisDeepSeekStyle provides deepSeek,
+                LocalChatTheme provides selectedTheme,
                 LocalNavController provides Navigator(mutableListOf()),
             ) {
                 MaterialTheme {
@@ -134,6 +136,22 @@ class OrbisGardenQuickChatAppearanceTest {
                 orbisAppearance = display.orbisAppearance.copy(chatTextColor = 0xFFE4CAF8.toInt()))
         }
         verify(Color(0xFFE4CAF8), FontFamily.Monospace, 14f)
+    }
+
+    @Test fun segmentedReasoningKeepsTheSelectedThemeInkWhenSystemThemeChanges() {
+        show {
+            OrbisChatMessageLayout(UIMessage.assistant("synthetic"), null, null, false, true) {
+                MessagePartsBlock(null, MessageRole.ASSISTANT, null, listOf(UIMessagePart.Text("Segmented ink")), emptyList(), false)
+            }
+        }
+        val originalInk = textStyle("Segmented ink").color
+        compose.runOnIdle { selectedTheme = ChatTheme(me.rerere.rikkahub.data.orbis.theme.ThemePackage(name = "Pale theme",
+            colors = me.rerere.rikkahub.data.orbis.theme.ThemeColors(background = "#F6F3EE", text = "#263342")), null) }
+        assertEquals(Color(0xFF263342), textStyle("Segmented ink").color)
+        compose.runOnIdle { dark = false }
+        assertEquals(Color(0xFF263342), textStyle("Segmented ink").color)
+        compose.runOnIdle { dark = true; selectedTheme = null }
+        assertEquals(originalInk, textStyle("Segmented ink").color)
     }
 
     @Test fun drawerFollowsActiveStyleProfileAndThemeColorReset() {
@@ -232,7 +250,7 @@ class OrbisGardenQuickChatAppearanceTest {
         assertEquals(original.toText(), message.toText())
     }
 
-    @Test fun sentinelFailedSaveStaysFoldedAndPlainLookalikeRemainsOrdinaryText() {
+    @Test fun sentinelFailedSaveStillAllowsLocalReadingAndPlainLookalikeRemainsOrdinaryText() {
         val original = UIMessage.user("Private fixture observation").copy(
             orbisEvent = OrbisEventMetadata("fixture", "lc_sentinel", "event", 1_000L))
         show {
@@ -240,10 +258,16 @@ class OrbisGardenQuickChatAppearanceTest {
                 onEventPresentation = { error("synthetic write failure") })
             GardenQuickChatMessage(UIMessage.user("lc_sentinel receivedAt ordinary quoted text"), null, null, false)
         }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("lc_sentinel receivedAt ordinary quoted text", useUnmergedTree = true)
+                .fetchSemanticsNodes().size == 1
+        }
         compose.onNodeWithText("lc_sentinel receivedAt ordinary quoted text", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("orbis-event-collapse").performClick()
-        compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
+        // Dev149 makes expansion local and storage best effort, including in this drawer.
+        compose.onNodeWithTag("orbis-event-original").assertExists()
         assertTrue(original.orbisEvent!!.collapsed)
-        compose.onNodeWithText("未更新显示状态；正在回复时请等回复结束后再试。若有恢复提示，请先处理恢复记录。", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("orbis-event-collapse").performClick()
+        compose.onNodeWithTag("orbis-event-original").assertDoesNotExist()
     }
 }

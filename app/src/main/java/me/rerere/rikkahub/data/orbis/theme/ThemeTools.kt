@@ -25,10 +25,12 @@ internal fun importThemeImage(store: ThemeRepository, bytes: ByteArray): String 
 internal fun themeTool(open: () -> ThemeRepository, enabled: () -> Boolean,
     readWorkspaceImage: (suspend (String) -> ByteArray)? = null) = Tool(
     name = "orbis_theme",
-    description = "为当前助手设计聊天外观，默认关闭。action=list/read/guide/write/patch/publish/apply/revert/delete/import_asset。小改动必须优先patch已有主题id，body仅传更改字段；不传的字段保留，null移除可选字段，数组整组替换。publish和apply继续同一id，不增一套主题。guide返回完整自由绘制规格与可运行示例。先list读取授权；人类打开“交给AI自由装扮”后，新建主题也能通过write→publish→apply立即更换，不再每套确认。import_asset传path=/workspace/内已有图片，返回asset文件名；可做背景或气泡角标。write只写数据草稿，body为JSON字符串，最多32KiB；新建不传id，修改需id和expected_revision，不能修改人类主题或其他助手。publish校验草稿并生成不可变版本；apply带id和revision，只请求人类在侧栏“自定义美化”预览确认，人类全局允许AI装扮或对该主题开启自动应用时直接生效。revert一步回到上次已用外观，不改全局手工设置。list也列出人类导入的图片asset名称。schemaVersion=1,name,basedOn=builtin:default；缺省字段继承内置值。colors含background/surface/primary/onPrimary/text/textSecondary，均#RRGGBB；typography:{fontFamily:default|sans|serif|monospace|NotoSerifSC,fontSizeScale:0.85到1.4,lineHeight:1.2到2,weight:100到900,italic:boolean,letterSpacing:-0.05到0.2em}，NotoSerifSC使用系统衬线后备；bubbles:{assistant:{bg,text,radius:0到32,padding:6到24,maxWidthRatio:0.55到1,opacity:0到1(默认1，只改变底色/花纹/尾巴，文字与角标不透明),tail:none|cat|curl,shape:round|cat|rabbit|ticket|speech,pattern:none|dots|stars|gingham,decoration:none|paw|heart|star,decorationAsset:可选已导入文件名,typography:可选独立字体样式,drawing:自由向量轮廓/渐变/描边/动画图层，详见guide},user:{同上}}；background:{type:solid|image,asset:已导入文件名,dim:0到0.8,scroll:fixed}，assets:[该文件名]，纯色不带asset。chrome:{dock,onDock,star,composer,onComposer}可选#RRGGBB，控制底栏、星星与输入框。颜色仍用#RRGGBB，透明度单独用opacity，不使用8位颜色。透明气泡遇到壁纸时请通过预览检查文字；文字需足够对比度。主题正文禁止脚本、CSS、远程URL、文件路径；只有import_asset接受当前助手工作区路径。不会修改系统栏或输入法，不读取聊天正文。",
+    description = me.rerere.rikkahub.data.ai.tools.orbisToolFullDescription("orbis_theme"),
     parameters = { InputSchema.Obj(properties = buildJsonObject {
-        listOf("action", "id", "body", "path").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
-        listOf("expected_revision", "revision").forEach { key -> put(key, buildJsonObject { put("type", "integer") }) }
+        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("list", "read", "guide", "write", "patch", "publish", "apply", "revert", "delete", "import_asset").map(::JsonPrimitive))) })
+        listOf("id", "body", "path").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
+        put("expected_revision", buildJsonObject { put("type", "integer"); put("description", "publish/patch/delete和修改已有草稿必填；用最新read/write/patch返回的revision值") })
+        put("revision", buildJsonObject { put("type", "integer"); put("description", "仅apply使用：已发布版本号；publish请改用expected_revision") })
     }, required = listOf("action")) },
     needsApproval = { it.jsonObject["action"]?.jsonPrimitive?.content !in setOf("list", "read", "guide") },
     hostApproval = HostToolApproval("orbis:theme", "theme-data-v1", "自定义美化"),
@@ -51,28 +53,46 @@ internal fun themeTool(open: () -> ThemeRepository, enabled: () -> Boolean,
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { listOf(UIMessagePart.Text(buildJsonObject {
             put("ok", false); put("code", e.message?.takeIf { it.matches(Regex("theme_[a-z_]+")) } ?: "theme_invalid_package_or_storage")
-            put("message", "未应用改动，请检查参数、版本或主题内容；现有外观保留。"); put("automatic_retry", false)
+            if (e is ThemeAssetException) {
+                put("field", e.field); put("issue", e.issue); put("phase", "asset_validation"); put("message", e.hint)
+            } else if (e is ThemeParameterException) {
+                put("field", e.field); put("expected_fields", JsonArray(e.expectedFields.map(::JsonPrimitive)))
+                put("phase", "argument_validation"); put("storage_checked", false)
+                put("message", e.hint)
+            } else put("message", when (e.message) {
+                "theme_revision_conflict", "theme_revision_or_owner_conflict" -> "主题版本或作者不匹配。先read同一id，使用返回的revision作为expected_revision；AI只能编辑自己的主题。"
+                "theme_draft_missing" -> "没有待发布草稿。先read核对已有发布版本；需要更改时先patch。"
+                "theme_store_full" -> "主题库容量已满，请在自定义美化里整理后再试。"
+                else -> "本次未完成，请先read核对当前状态，再检查主题内容或存储。"
+            })
+            put("diagnose", "可用orbis_self_check focus=theme；人类也可到当前助手设置→本地工具→AI自检。")
+            put("automatic_retry", false)
         }.toString())) }
     },
 )
 internal fun executeThemeTool(store: ThemeRepository, raw: JsonElement): JsonObject {
-    val args = raw.jsonObject
-    fun text(key: String) = (args[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("theme_invalid_parameters")
-    fun number(key: String) = args[key]?.jsonPrimitive?.takeUnless { it.isString }?.intOrNull ?: error("theme_invalid_parameters")
-    val action = text("action")
+    val args = raw as? JsonObject ?: throw ThemeParameterException("arguments", emptyList(), "参数必须是JSON对象。")
+    val action = (args["action"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?: throw ThemeParameterException("action", listOf("action"), "请填写action。")
     val allowed = when (action) {
         "list", "guide", "revert" -> setOf("action")
         "read" -> setOf("action", "id")
         "write", "patch" -> setOf("action", "body", "id", "expected_revision")
         "publish", "delete" -> setOf("action", "id", "expected_revision")
         "apply" -> setOf("action", "id", "revision")
-        else -> error("theme_invalid_parameters")
+        else -> throw ThemeParameterException("action", listOf("action"), "未知action；用guide查看支持的操作。")
     }
-    require(args.keys.all { it in allowed }) { "theme_invalid_parameters" }
+    fun invalid(key: String): Nothing = throw ThemeParameterException(key, allowed.toList(),
+        if (action == "publish") "publish需要id和整数expected_revision；先read取最新revision，填入expected_revision，不能传revision或body。"
+        else "$action 的${key}缺失或类型不匹配；只使用expected_fields列出的参数。")
+    if (args.keys.any { it !in allowed }) invalid("arguments")
+    fun text(key: String) = (args[key] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: invalid(key)
+    fun number(key: String) = (args[key] as? JsonPrimitive)?.takeUnless { it.isString }?.intOrNull ?: invalid(key)
     return buildJsonObject {
         put("ok", true)
         when (action) {
             "guide" -> {
+                put("package_spec", me.rerere.rikkahub.data.ai.tools.orbisToolFullDescription("orbis_theme"))
                 put("bubble_shape", "每侧bubbles.assistant/user独立：shape=round/cat/rabbit/ticket/speech；tail=none/cat/curl，none无尾、cat猫尾、curl卷尾。tail直接放气泡字段内；已有drawing.outline时它覆盖shape/tail，要用预设尾巴先patch该侧drawing.outline=null（保留其余绘图字段），或把尾巴画进完整outline。")
                 put("tail_patch_example", "{\"bubbles\":{\"assistant\":{\"tail\":\"cat\",\"drawing\":{\"outline\":null}},\"user\":{\"tail\":\"curl\",\"drawing\":{\"outline\":null}}}}")
                 put("coordinates", "drawing使用0..100的气泡局部坐标，随气泡尺寸缩放；outline是闭合SVG路径，自由绘制完整轮廓，存在时优先于shape和tail。支持M/L/H/V/Q/C/Z及对应小写、重复坐标，暂不支持SVG的A/S/T命令或XML。每路径最多4096字符/160段。")
@@ -97,20 +117,26 @@ internal fun executeThemeTool(store: ThemeRepository, raw: JsonElement): JsonObj
                 put("assets", JsonArray(store.assets().map(::JsonPrimitive)))
                 put("active", themeJson.encodeToJsonElement(state.active)); put("pending", themeJson.encodeToJsonElement(state.pending))
             }
-            "read" -> { val e = store.snapshot().entries.firstOrNull { it.id == text("id") } ?: error("theme_not_found")
+            "read" -> { val id = text("id"); val e = store.snapshot().entries.firstOrNull { it.id == id } ?: error("theme_not_found")
                 put("id", e.id); put("revision", e.revision); put("draft", themeJson.encodeToJsonElement(e.draft))
-                put("published", themeJson.encodeToJsonElement(e.versions.lastOrNull())) }
+                put("published", themeJson.encodeToJsonElement(e.versions.lastOrNull()))
+                put("missing_asset_fields", JsonArray((e.draft ?: e.versions.lastOrNull()?.body)?.let { store.missingAssetFields(it) }.orEmpty().map(::JsonPrimitive))) }
             "write" -> { val id = if ("id" in args) text("id") else null
                 val e = store.write(text("body"), id, if ("expected_revision" in args) number("expected_revision") else { check(id == null) { "theme_revision_required" }; 0 })
-                put("id", e.id); put("revision", e.revision); put("status", "draft") }
-            "publish" -> { val e = store.publish(text("id"), number("expected_revision")); put("id", e.id); put("revision", e.revision); put("status", "published_not_applied") }
-            "patch" -> { val e=store.patch(text("body"),text("id"),number("expected_revision")); put("id",e.id);put("revision",e.revision);put("status","draft_updated_in_place") }
+                put("id", e.id); put("revision", e.revision); put("status", "draft")
+                put("next_call", buildJsonObject { put("action", "publish"); put("id", e.id); put("expected_revision", e.revision) }) }
+            "publish" -> { val e = store.publish(text("id"), number("expected_revision")); put("id", e.id); put("revision", e.revision); put("status", "published_not_applied")
+                put("next_call", buildJsonObject { put("action", "apply"); put("id", e.id); put("revision", e.revision) }) }
+            "patch" -> { val e=store.patch(text("body"),text("id"),number("expected_revision")); put("id",e.id);put("revision",e.revision);put("status","draft_updated_in_place")
+                put("next_call", buildJsonObject { put("action", "publish"); put("id", e.id); put("expected_revision", e.revision) }) }
             "apply" -> { val applied = store.requestApply(ThemeRef(text("id"), number("revision"))); put("status", if (applied) "applied" else "awaiting_human_preview"); put("message", if (applied) "已按人类的装扮授权更换外观。" else "请在侧栏“自定义美化”查看预览并确认。尚未更换外观。") }
             "revert" -> { store.revert(); put("status", "reverted") }
             "delete" -> { store.delete(text("id"), number("expected_revision")); put("status", "deleted") }
         }
     }
 }
+
+internal class ThemeParameterException(val field: String, val expectedFields: List<String>, val hint: String) : IllegalArgumentException("theme_invalid_parameters")
 
 /** Synthetic authoring example; returned as documentation, never installed by the tool. */
 internal fun themeDrawingExample() = ThemePackage(name="流动的手写信", bubbles=ThemeBubbles(

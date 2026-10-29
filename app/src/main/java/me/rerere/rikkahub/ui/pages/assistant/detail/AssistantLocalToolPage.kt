@@ -131,6 +131,10 @@ private fun AssistantLocalToolContent(
             .imePadding(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.ui.pages.orbis.SelfCheckCard(
+            assistant.id.toString(), LocalToolOption.SelfCheck in assistant.localTools,
+            { toggleLocalTool(LocalToolOption.SelfCheck, it) })
+        if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.ui.pages.orbis.BoundarySettingsCard(assistant.id.toString())
         AssistantMessageTimeCard(assistant = assistant, onUpdate = onUpdate)
         CardGroup {
             item(headlineContent = { Text("宠物区") },

@@ -80,6 +80,9 @@ fun OrbisSettingsPage(
 
     // Never fall back to a different assistant when the selected identity is missing.
     val selected = orbisSettingsAssistant(settings, ownerAssistantId)
+    val boundaryHost = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(androidx.compose.ui.platform.LocalContext.current)
+    val boundaryStates by boundaryHost.states.collectAsStateWithLifecycle()
+    val selectedBoundary = selected?.let { boundaryStates[it.id.toString()] }
     val selectedId = selected?.id?.toString()
     val selectedLabel = selected?.let { orbisSettingsLabel(it.name, "默认 AI") }
     val selectedUnavailable = when {
@@ -199,6 +202,7 @@ fun OrbisSettingsPage(
                             if (ownerAssistantId != null) "当前会话的 AI 配置：$it（影响同配置会话）"
                             else "当前 AI 配置：$it（影响同配置会话）"
                         } ?: selectedUnavailable)
+                        selectedBoundary?.let { OrbisSettingsNote("当前 AI 选择版本：${it.revision}；连接状态是共用服务状态。") }
                         if (settings.init) {
                             OrbisSettingsFact("服务列表", "正在读取")
                         } else if (settings.mcpServers.isEmpty()) {
@@ -206,7 +210,9 @@ fun OrbisSettingsPage(
                         } else {
                             settings.mcpServers.forEach { server ->
                                 val summary = orbisMcpOverview(server.commonOptions.enable,
-                                    selected?.let { server.id in it.mcpServers }, connectionStates[server.id])
+                                    selected?.let { server.id in it.mcpServers }, connectionStates[server.id],
+                                    aiPermitted = selectedBoundary?.permits("mcp", server.id.toString()) != false,
+                                    aiHidden = selectedBoundary?.hidden("mcp", server.id.toString()) == true)
                                 Surface(color = colors.raisedPanel, shape = RoundedCornerShape(14.dp),
                                     border = BorderStroke(1.dp, colors.border.copy(alpha = .6f))) {
                                     Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp),

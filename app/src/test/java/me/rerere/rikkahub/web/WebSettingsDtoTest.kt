@@ -15,6 +15,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WebSettingsDtoTest {
+    @Test fun boundaryProjectionScopesDisabledAndHiddenIdsWithoutExportingPauseReasonOrAudit() {
+        val owner = Assistant(); val other = Assistant()
+        val model = Model(modelId = "synthetic")
+        val choice = me.rerere.rikkahub.data.orbis.boundary.AssistantBoundary(
+            grants = setOf("model", "mcp"),
+            models = mapOf(model.id.toString() to me.rerere.rikkahub.data.orbis.boundary.BoundaryChoice(false, true)),
+            mcps = mapOf("mcp-visible" to me.rerere.rikkahub.data.orbis.boundary.BoundaryChoice(false, false)),
+            modelOverride = model.id.toString(),
+            conversations = mapOf("private-chat" to me.rerere.rikkahub.data.orbis.boundary.ConversationBoundary(reason="private-reason")))
+        val settings = Settings(assistants = listOf(owner, other))
+        val dto = settings.toWebSettingsDto(mapOf(owner.id.toString() to choice))
+        assertEquals(listOf(model.id.toString()),dto.boundaryChoices.getValue(owner.id.toString()).hiddenModels)
+        assertEquals(emptyList<String>(),dto.boundaryChoices.getValue(owner.id.toString()).hiddenMcp)
+        assertEquals(listOf("mcp-visible"),dto.boundaryChoices.getValue(owner.id.toString()).disabledMcp)
+        assertFalse(dto.boundaryChoices.containsKey(other.id.toString()))
+        assertEquals(model.id.toString(),dto.assistants.first().chatModelId)
+        assertFalse(JsonInstant.encodeToString(dto).contains("private-reason"))
+        assertFalse(JsonInstant.encodeToString(dto).contains("private-chat"))
+        assertNull(settings.assistants.first().chatModelId)
+        val off=settings.toWebSettingsDto(mapOf(owner.id.toString() to choice.copy(grants=emptySet())))
+        assertTrue(off.boundaryChoices.getValue(owner.id.toString()).disabledModels.isEmpty())
+        assertNull(off.assistants.first().chatModelId)
+    }
+
     @Test fun credentialsAndPrivatePromptGraphNeverLeaveNativeSettings() {
         val secret = "synthetic-private-canary"
         val settings = Settings(

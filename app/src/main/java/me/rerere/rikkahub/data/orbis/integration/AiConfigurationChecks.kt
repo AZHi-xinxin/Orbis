@@ -82,7 +82,7 @@ internal object AiConfigurationChecks {
                     when (probeKind) {
                         "model" -> {
                             val (model, provider) = modelTarget(settings, id)
-                            val response = ProviderManager(client, context).getProviderByType(provider).generateText(provider,
+                            val response = ProviderManager(client, context).getProviderByType(provider, me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context).requestContext(owner).check).generateText(provider,
                                 listOf(UIMessage.user("Reply with OK.")),
                                 TextGenerationParams(model = model.copy(tools = emptySet(), customHeaders = emptyList(), customBodies = emptyList()),
                                     maxTokens = 16, reasoningLevel = ReasoningLevel.OFF, tools = emptyList(), maxAutomaticContinuations = 0))

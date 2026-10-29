@@ -37,6 +37,7 @@ import me.rerere.rikkahub.data.model.OrbisStickerSendNotice
 import me.rerere.rikkahub.data.orbis.AndroidStickerRepository
 import me.rerere.rikkahub.data.orbis.OrbisSticker
 import me.rerere.rikkahub.data.orbis.OrbisStickerLimits
+import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.orbis.OrbisStickers
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 
@@ -76,6 +77,8 @@ internal fun OrbisStickerPanel(
 private fun StickerLibrary(repository: AndroidStickerRepository,
     onSendImage: (suspend (String) -> Boolean)?, onSendText: ((String) -> Boolean)?, sendEnabled: Boolean,
     onSendTextAsync: (suspend (String) -> Boolean)?, sendUnavailableReason: String?) {
+    val context = LocalContext.current.applicationContext
+    val diagnosticOwner = me.rerere.rikkahub.ui.context.LocalSettings.current.getCurrentAssistant().id.toString()
     val snapshot by repository.state.collectAsStateWithLifecycle()
     val writeBlocked by repository.writeBlocked.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -291,7 +294,12 @@ private fun StickerLibrary(repository: AndroidStickerRepository,
                             selectedId = savedId
                             notice = "已保存在本机表情库，尚未发送。"
                         } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { operationError = "保存失败，请检查图片和标签后重试；未发送任何内容。" }
+                        catch (failure: Exception) {
+                            val code = (failure as? me.rerere.rikkahub.data.orbis.OrbisStickerException)?.code
+                                ?.takeIf { it in me.rerere.rikkahub.data.orbis.diagnostics.diagnosticCodes } ?: "sticker_storage_error"
+                            me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, diagnosticOwner, "stickers", code)
+                            operationError = me.rerere.rikkahub.data.orbis.diagnostics.diagnosticCodes.getValue(code) + "（$code）"
+                        }
                         finally { busy = false }
                     }
                 }) { Text(if (busy) "正在保存…" else "保存到本机表情库") }

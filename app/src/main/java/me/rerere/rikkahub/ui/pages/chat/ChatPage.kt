@@ -539,6 +539,8 @@ private fun ChatPageContent(
                 val voiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
                 Column(if (BuildConfig.ORBIS_ENABLED) Modifier.navigationBarsPadding().imePadding() else Modifier) {
                 TransientContinuationNotice(persistenceWarning)
+                me.rerere.rikkahub.ui.pages.orbis.BoundaryInput(conversation.assistantId.toString(), conversation.id.toString(),
+                    onRequest = vm::requestBoundaryResume) {
                 ChatInput(
                     onStartVoiceMode = onStartVoiceMode,
                     onStartVideoMode = onStartVideoMode,
@@ -646,6 +648,7 @@ private fun ChatPageContent(
                         )
                     },
                 )
+                }
                 if (BuildConfig.ORBIS_ENABLED && !WindowInsets.isImeVisible) OrbisChatDock(
                     ownerAssistantId = conversation.assistantId.toString(), conversationId = conversation.id.toString())
                 }

@@ -168,6 +168,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val requestBody = buildCompletionRequestBody(messages, params)
 
         val url = buildUrl(
@@ -215,6 +216,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val requestBody = buildCompletionRequestBody(messages, params)
 
         val url = buildUrl(

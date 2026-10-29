@@ -277,6 +277,8 @@ class RouteActivity : ComponentActivity() {
                     // Foreground-service creation belongs to this visible entry, never a boot
                     // receiver or a model request (which may itself require the ST gateway).
                     me.rerere.rikkahub.data.orbis.st.StRuntimeHost.get(this@RouteActivity).restoreOnAppOpen(owners)
+                    if (me.rerere.rikkahub.data.orbis.ombre.OMBRE_RUNTIME_ENTRY_ENABLED)
+                        me.rerere.rikkahub.data.orbis.ombre.OmbreRuntimeHost.get(this@RouteActivity).restoreOnAppOpen(owners)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
                 } catch (_: Exception) {
                     android.util.Log.w("OrbisStRuntime", "st_foreground_restore_unavailable")

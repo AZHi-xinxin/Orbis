@@ -12,7 +12,7 @@ import me.rerere.ai.ui.UIMessagePart
 
 internal fun healthTool(context:Context,owner:String,enabled:()->Boolean)=Tool(
     name="orbis_health",
-    description="独立的人类日记录，与AI身体模拟不同。仅人类开启后可用，不自动注入；读取结果会交给当前聊天模型，记录本身保存在本机、不进入云备份。action=read/write/propose/summary。read按date读取，未记录返回空。write传date(YYYY-MM-DD)、expected_revision(新建0)、fields对象、source(ai或mcp)、evidence(事实来源，不编造)。仅改指定字段，null表示明确清除；人类改过的字段拒绝覆盖，可改用propose交人类确认。截图来源必须propose，source=screenshot，不直接入库。propose由工具娱乐“人类记录”内原生预览确认，AI没有confirm动作。fields可用sleepMinutes整数分钟/sleepQuality/bedtime或wakeTime(HH:mm)/periodStatus(none|active|pre|post)/periodDay/steps/activeMinutes/calories/restingHeart/averageHeart/heartRate(当次测量，非平均或静息)/systolic/diastolic/spo2/note。缺失留空，血压血氧需要真实设备来源。summary传start/end(一年以内)及可选sleep_target_minutes(仅统计阈值)，返回有记录日的平均睡眠、步数与经期原始时间序列；缺失不记0，不作诊断预测。",
+    description=me.rerere.rikkahub.data.ai.tools.orbisToolFullDescription("orbis_health"),
     parameters={InputSchema.Obj(properties=buildJsonObject{
         listOf("action","date","source","evidence","start","end").forEach{put(it,buildJsonObject{put("type","string")})}
         listOf("expected_revision","sleep_target_minutes").forEach{put(it,buildJsonObject{put("type","integer")})}

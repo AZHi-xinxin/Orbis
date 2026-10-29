@@ -52,6 +52,7 @@ fun ErrorCardsDisplay(
     errors: List<ChatError>,
     onDismissError: (Uuid) -> Unit,
     onClearAllErrors: () -> Unit,
+    assistantId: String? = null,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -95,6 +96,7 @@ fun ErrorCardsDisplay(
             errors.forEach { error ->
                 ErrorCard(
                     error = error,
+                    assistantId = assistantId,
                     onDismiss = { onDismissError(error.id) },
                 )
             }
@@ -106,6 +108,7 @@ fun ErrorCardsDisplay(
 fun ErrorCard(
     error: ChatError,
     onDismiss: () -> Unit,
+    assistantId: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val clipboard = LocalClipboard.current
@@ -152,6 +155,11 @@ fun ErrorCard(
                     color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && assistantId != null) {
+                    androidx.compose.material3.TextButton(onClick = { navController.navigate(Screen.AssistantLocalTool(assistantId)) }) {
+                        Text("打开自检")
+                    }
+                }
                 if (error.solution == ChatErrorSolution.CheckFastModelSettings) {
                     Text(
                         text = buildAnnotatedString {

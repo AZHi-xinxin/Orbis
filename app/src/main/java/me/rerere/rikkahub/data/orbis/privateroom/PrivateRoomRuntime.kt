@@ -89,7 +89,7 @@ internal object PrivateRoomRuntime {
                     val liveChoice = choiceStore.read()
                     liveFailure = PrivateRoomReason.STORAGE_UNAVAILABLE
                     val local = privateRoomPreflight(live, assistantId, liveChoice, repo.status())
-                    blockedReason = if (!local.canVisit) local.reason else if (liveOwner != owner || liveModel != model ||
+                    blockedReason = if (me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context).permits(assistantId, "model", model.id.toString()).not()) PrivateRoomReason.CONFIGURATION_CHANGED else if (!local.canVisit) local.reason else if (liveOwner != owner || liveModel != model ||
                         liveModel == null || liveProvider == null || liveProvider != provider ||
                         !initialBinding.matches(liveProvider, liveModel) || liveChoice != choice)
                         PrivateRoomReason.CONFIGURATION_CHANGED else null

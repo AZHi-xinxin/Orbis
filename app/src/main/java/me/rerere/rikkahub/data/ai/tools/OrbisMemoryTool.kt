@@ -18,19 +18,7 @@ internal fun buildOrbisMemoryTool(
     executeMemory: suspend (String, JsonObject, String) -> JsonObject,
 ) = Tool(
     name = ORBIS_MEMORY_TOOL,
-    description = """
-        你的本机随身便签，同一助手跨窗口可用，与 ST 和旧记忆库独立。一个工具完成存、改、删、看、设状态；不需要人类审批。
-        存：只传 body 即可；可选 summary、tags、keywords、important、state。正文完整保存，默认 static（仅存），不自动提炼或改写。
-        可选 emotion=暖/软/要/闷/烦/冷/火，仅保存你自标的情绪，不做语义猜测；不填兼容旧记录，传null清除。不改身体计算值、不依赖ST。
-        读：action=read，可用 id 或 query；支持 offset/limit 分页。改：action=update、id 和要修改的字段。删：action=delete、id，为可恢复的软删。
-        状态：action=set_state、id、state=static/conditional/pinned/paused。暂停只停浮现；恢复用 action=restore（可指定 revision），版本查询 action=history、id。
-        你自行决定内容、标签、摘要、关键词、重要性、状态和 minIntervalTurns（条件浮现最小人类轮次间隔）。工具可能返回词面相似候选，由你决定是否合并，不会自动合并。
-        轻档完全不自动带入。标准档：常驻≤350，另有命中≤900估算token（摘要最多3条、原文最多1条）；独立档总≤2000（摘要最多5条、原文最多3条）。常驻最多7条且≤350估算token。
-        手写条件便签按标签/关键词命中；重要或多词命中才可带原文，每条原文≤300字。更长原文仍完整保存，请自行提供摘要供带入。
-        标准/独立档另支持本机离线语义召回：宿主自动保存且尚未改动的压缩摘要可随相关话题自动浮现，无需你主动查询；不调用外部模型、不上传记忆。它们是摘要片段，不是逐字原话。
-        某条压缩摘要不希望浮现时可明确 set_state=static，或暂停/删除；重新允许可设 conditional。手写 static 便签不会自动升级。停止自动带入、轻档和关闭语义召回均有效；索引未就绪或超时则照常回复。
-        停止自动带入不影响你存查。无需例行自检或为了凑配额写入。失败会返回原因，不能把失败说成成功；超限不截断原文。
-    """.trimIndent() + if (readOnly) "\n本次参考会话仅允许 read/history，不允许改写。" else "",
+    description = me.rerere.rikkahub.data.ai.tools.orbisToolFullDescription("orbis_memory") + if (readOnly) "\n本次参考会话仅允许 read/history，不允许改写。" else "",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
         fun field(name: String, type: String, description: String) = put(name, buildJsonObject {
             put("type", type); put("description", description)

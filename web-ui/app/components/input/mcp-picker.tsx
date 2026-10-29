@@ -48,6 +48,7 @@ export function McpPickerButton({ disabled = false, className }: McpPickerButton
   const canUse = Boolean(settings && currentAssistant && !disabled);
   const { error, setError, popoverProps } = usePickerPopover(canUse);
 
+  const disabledIds = settings?.boundaryChoices?.[currentAssistant?.id ?? ""]?.disabledMcp ?? [];
   const allServers = settings?.mcpServers ?? [];
   const knownServerIdSet = React.useMemo(
     () => new Set(allServers.map((server) => server.id)),
@@ -69,8 +70,8 @@ export function McpPickerButton({ disabled = false, className }: McpPickerButton
 
   const selectedServerIdSet = React.useMemo(() => new Set(selectedServerIds), [selectedServerIds]);
   const selectedEnabledCount = React.useMemo(
-    () => selectedServerIds.filter((serverId) => enabledServerIdSet.has(serverId)).length,
-    [enabledServerIdSet, selectedServerIds],
+    () => selectedServerIds.filter((serverId) => enabledServerIdSet.has(serverId) && !disabledIds.includes(serverId)).length,
+    [enabledServerIdSet, selectedServerIds, disabledIds],
   );
 
   React.useEffect(() => {
@@ -188,7 +189,7 @@ export function McpPickerButton({ disabled = false, className }: McpPickerButton
 
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium leading-tight">
-                          {getDisplayName(server.commonOptions?.name, t("mcp.unnamed_server"))}
+                          {getDisplayName(server.commonOptions?.name, t("mcp.unnamed_server"))}{disabledIds.includes(server.id) ? " · AI 已停用" : ""}
                         </div>
                         <div className="text-muted-foreground text-xs leading-tight">
                           {t("mcp.tools_enabled", {
@@ -200,8 +201,8 @@ export function McpPickerButton({ disabled = false, className }: McpPickerButton
 
                       <Switch
                         size="sm"
-                        checked={selected}
-                        disabled={disabled || updateMcpMutation.isPending}
+                        checked={selected && !disabledIds.includes(server.id)}
+                        disabled={disabled || updateMcpMutation.isPending || Boolean(settings?.boundaryChoices?.[currentAssistant?.id ?? ""]?.disabledMcp.includes(server.id))}
                         onCheckedChange={(nextChecked) => {
                           handleToggleServer(server.id, nextChecked);
                         }}

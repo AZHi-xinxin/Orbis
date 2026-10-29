@@ -278,6 +278,131 @@ class GenerationLoopLoopbackTest {
     }
 
     @Test(timeout = 30_000)
+    fun assistantPauseKeepsItsToolReceiptAndStopsBeforeNextActualRequest() = runBlocking<Unit> {
+        val host = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(
+            InstrumentationRegistry.getInstrumentation().targetContext)
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1) { fixture ->
+                val owner = fixture.assistantId.toString()
+                val chat = Uuid.random()
+                host.grant(owner, setOf("conversation"))
+                try {
+                    fixture.afterToolExecution = {
+                        host.update(owner) { state -> me.rerere.rikkahub.data.orbis.boundary.changeBoundary(
+                            state, state.revision, chat.toString(), "pause", "conversation", "", until = System.currentTimeMillis()+120_000, now = System.currentTimeMillis()) }
+                    }
+                    val final = fixture.collect(conversationId = chat, durableCheckpoints = true)
+                    assertEquals(listOf(1), fixture.executions.toList())
+                    assertTrue(final.last().getTools().single().isExecuted)
+                    assertEquals(1, fixture.server.requests.size)
+                    assertTrue(host.pause(owner, chat.toString()) != null)
+                } finally { host.reset(owner); host.grant(owner, emptySet()) }
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun disabledMcpKeepsTheWireCatalogButCannotExecuteAndNextGenerationRefreshes() = runBlocking<Unit> {
+        val host = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(
+            InstrumentationRegistry.getInstrumentation().targetContext)
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 5) { fixture ->
+                val owner = fixture.assistantId.toString()
+                val mcp = "synthetic-mcp-35"
+                host.grant(owner, setOf("mcp"))
+                try {
+                    fixture.toolAdapter = { tool -> tool.copy(isSelected = { host.permits(owner, "mcp", mcp) }) }
+                    fixture.additionalTools = (1..34).map { index -> Tool(
+                        name = "synthetic_mcp_$index", description = "Synthetic MCP member",
+                        parameters = { InputSchema.Obj(JsonObject(emptyMap())) },
+                        isSelected = { host.permits(owner, "mcp", mcp) },
+                        execute = { error("Unrequested synthetic member executed") },
+                    ) }
+                    fixture.afterToolExecution = {
+                        host.update(owner) { state -> me.rerere.rikkahub.data.orbis.boundary.changeBoundary(
+                            state, state.revision, null, "disable", "mcp", mcp, now = System.currentTimeMillis()) }
+                    }
+                    val final = fixture.collect()
+                    assertEquals(listOf(1), fixture.executions.toList())
+                    assertEquals(4, fixture.server.requests.size)
+                    val originalTools = fixture.server.requests.first().json.getValue("tools").jsonArray
+                    assertEquals(35, originalTools.size)
+                    fixture.server.requests.forEach { assertEquals(originalTools, it.json["tools"]) }
+                    assertTrue(final.last().getTools().all { it.isExecuted })
+                    assertFalse(host.permits(owner, "mcp", mcp))
+                    fixture.collect()
+                    assertTrue(fixture.server.requests.last().json["tools"]?.jsonArray.isNullOrEmpty())
+                    assertEquals(listOf(1), fixture.executions.toList())
+                    // Synthetic HTTP bodies only, replayed by the host-side ST contract test.
+                    val output = File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir,
+                        "boundary-wire-$streaming.json")
+                    output.writeText(JsonArray(fixture.server.requests.map { it.json }).toString())
+                } finally { host.reset(owner); host.grant(owner, emptySet()) }
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun disablingToolInBatchPreventsLaterBatchCallWithoutChangingContinuationCatalog() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 2, batchWithEmptyResult = true) { fixture ->
+                var selected = true
+                fixture.toolAdapter = { it.copy(isSelected = { selected }) }
+                fixture.afterToolExecution = { selected = false }
+                val final = fixture.collect(durableCheckpoints = true)
+                assertEquals(listOf(1), fixture.executions.toList())
+                assertEquals(2, final.last().getTools().size)
+                assertTrue(final.last().getTools().all { it.isExecuted })
+                assertEquals(fixture.server.requests.first().json["tools"], fixture.server.requests.last().json["tools"])
+                assertTrue(fixture.server.requests.last().encodedMessages.contains("synthetic tool result 1"))
+                assertFalse(fixture.server.requests.last().encodedMessages.contains("synthetic tool result 2"))
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun enablingToolBecomesAdvertisedInTheNextGenerationOnly() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 5) { fixture ->
+                var enabled = false
+                fixture.additionalTools = listOf(Tool(name = "newly_enabled", description = "Synthetic later tool",
+                    parameters = { InputSchema.Obj(JsonObject(emptyMap())) }, isSelected = { enabled },
+                    execute = { error("Unrequested tool executed") }))
+                fixture.afterToolExecution = { enabled = true }
+                fixture.collect()
+                assertEquals(listOf(1, 2, 3), fixture.executions.toList())
+                val original = fixture.server.requests.first().json["tools"]
+                fixture.server.requests.forEach { assertEquals(original, it.json["tools"]) }
+                fixture.collect()
+                assertEquals(2, fixture.server.requests.last().json.getValue("tools").jsonArray.size)
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun changingProviderHostedToolsEndsTheChainBeforeAnotherRequest() = runBlocking<Unit> {
+        val host = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(
+            InstrumentationRegistry.getInstrumentation().targetContext)
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 1,
+                nativeTools = setOf(me.rerere.ai.provider.BuiltInTools.Search)) { fixture ->
+                val owner = fixture.assistantId.toString()
+                host.grant(owner, setOf("tool"))
+                try {
+                    fixture.afterToolExecution = {
+                        host.update(owner) { state -> me.rerere.rikkahub.data.orbis.boundary.changeBoundary(
+                            state, state.revision, null, "disable", "tool", "model_builtin_search", now = System.currentTimeMillis()) }
+                    }
+                    val final = fixture.collect()
+                    assertEquals(listOf(1), fixture.executions.toList())
+                    assertTrue(final.last().getTools().single().isExecuted)
+                    assertEquals(1, fixture.server.requests.size)
+                } finally { host.reset(owner); host.grant(owner, emptySet()) }
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
     fun historySoftPauseCommitsCompletedToolThenStopsBeforeAnotherProviderRequest() = runBlocking<Unit> {
         for (streaming in listOf(true, false)) {
             fixture(streaming, approval = false, expectedRequests = 1) { fixture ->
@@ -1185,6 +1310,7 @@ class GenerationLoopLoopbackTest {
         finalText: String = "synthetic final answer",
         privateMode: Boolean = false,
         memoryMode: Boolean = false,
+        nativeTools: Set<me.rerere.ai.provider.BuiltInTools> = emptySet(),
         block: suspend (Fixture) -> Unit,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -1218,7 +1344,7 @@ class GenerationLoopLoopbackTest {
             }
             .build()
         try {
-            val model = Model(modelId = "synthetic-cache-probe", displayName = "Synthetic only", abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING))
+            val model = Model(modelId = "synthetic-cache-probe", displayName = "Synthetic only", abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING), tools = nativeTools)
             val lorebook = Lorebook(entries = listOf(PromptInjection.RegexInjection(
                 keywords = listOf("LATE_TRIGGER"),
                 content = "SHOULD_ONLY_ACTIVATE_ON_A_NEW_HUMAN_WAKE",
@@ -1292,6 +1418,7 @@ class GenerationLoopLoopbackTest {
         private val approvalChecks = AtomicInteger()
         var approvalCurrent = true
         var toolAdapter: (Tool) -> Tool = { it }
+        var additionalTools: List<Tool> = emptyList()
         val initial = listOf(UIMessage.user("synthetic earlier human"), UIMessage.assistant("synthetic earlier assistant"), UIMessage.user("synthetic current human"))
         var lastPublished: List<UIMessage> = initial
             private set
@@ -1367,7 +1494,7 @@ class GenerationLoopLoopbackTest {
             loop.generateText(
                 settings = settings, model = model, assistant = assistant.copy(contextMessageLimit = contextLimit), messages = from,
                 memories = listOf(AssistantMemory(1, "synthetic initial memory")),
-                tools = listOf(toolAdapter(tool)) + compaction?.tools().orEmpty(), maxSteps = maxSteps,
+                tools = listOf(toolAdapter(tool)) + additionalTools + compaction?.tools().orEmpty(), maxSteps = maxSteps,
                 inputTransformers = listOf(changingInput, PromptInjectionTransformer),
                 outputTransformers = outputTransformers, conversationId = conversationId,
                 compactionControl = compaction, includeCompactionReminder = compaction != null,

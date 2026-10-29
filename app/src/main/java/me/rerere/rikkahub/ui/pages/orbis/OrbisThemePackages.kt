@@ -89,6 +89,7 @@ internal fun themeFont(name: String) = when (name) {
     var state by remember(store) { mutableStateOf(ThemeState()) }
     var error by remember(store) { mutableStateOf<String?>(null) }
     var preview by remember(store) { mutableStateOf<ThemeRef?>(null) }
+    var draftPreview by remember(store) { mutableStateOf<ThemeEntry?>(null) }
     var busy by remember { mutableStateOf(false) }
     var page by rememberSaveable(store) { mutableIntStateOf(0) }
     var selectedId by rememberSaveable(store) { mutableStateOf<String?>(null) }
@@ -98,13 +99,14 @@ internal fun themeFont(name: String) = when (name) {
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { error = "主题文件暂时无法读取，聊天使用原来的外观；原文件保留。" }
     }
-    fun task(block: () -> Unit) {
+    fun task(after: () -> Unit = {}, block: () -> Unit) {
         if (busy) return
         busy = true
         scope.launch {
-            try { withContext(Dispatchers.IO) { block() }; state = withContext(Dispatchers.IO) { store.snapshot() }; error = null }
+            try { withContext(Dispatchers.IO) { block() }; state = withContext(Dispatchers.IO) { store.snapshot() }; error = null; after() }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { error = "这次更改没有完成，请刷新后检查主题版本或图片。" }
+            catch (e: Exception) { error = if (e is ThemeAssetException) "${e.field} 引用的图片不可用。请重新导入图片，让AI更新这处引用，或改用纯色背景。"
+                else "这次更改没有完成，请刷新后检查主题版本或图片。" }
             finally { busy = false }
         }
     }
@@ -172,7 +174,7 @@ internal fun themeFont(name: String) = when (name) {
                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 row.forEach { entry ->
                     val body=entry.draft ?: entry.versions.lastOrNull()?.body
-                    Surface(Modifier.weight(1f).testTag("theme-tile-${entry.id}").clickable { selectedId=entry.id },
+                    Surface(Modifier.weight(1f).testTag("theme-tile-${entry.id}").clickable { selectedId=entry.id; if (entry.draft != null) draftPreview=entry },
                         color=colors.panel,shape=RoundedCornerShape(14.dp),
                         border=BorderStroke(if(selected?.id==entry.id) 1.5.dp else .5.dp,if(selected?.id==entry.id) colors.accent else colors.border)) {
                         Column(Modifier.padding(6.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
@@ -197,6 +199,7 @@ internal fun themeFont(name: String) = when (name) {
         }
         selected?.let { entry ->
             FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                if (entry.draft != null) TextButton(enabled=!busy,onClick={draftPreview=entry}) { Text("预览草稿") }
                 entry.versions.lastOrNull()?.let { version ->
                     TextButton(enabled=!busy,onClick={preview=ThemeRef(entry.id,version.revision)}) { Text("预览主题") }
                 }
@@ -216,6 +219,20 @@ internal fun themeFont(name: String) = when (name) {
             }
         }
     }
+    draftPreview?.let { entry -> entry.draft?.let { body ->
+        AlertDialog(onDismissRequest = { if (!busy) draftPreview = null }, title = { Text("草稿 · ${body.name}") },
+            text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ThemeChatPreview(body, body.background.asset?.let { store.asset(it).absolutePath }, assets = body.assets.associateWith { store.asset(it).absolutePath }, animate = true)
+                Text("先查看设计。发布后可预览并选择应用。", style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            } }, confirmButton = { Button(enabled = !busy, onClick = {
+                var published: ThemeRef? = null
+                task(after = { draftPreview = null; preview = published }) {
+                    val next = store.publish(entry.id, entry.revision)
+                    published = ThemeRef(next.id, next.revision)
+                }
+            }) { Text("发布并预览") } }, dismissButton = { TextButton(enabled = !busy, onClick = { draftPreview = null }) { Text("返回") } })
+    } }
     preview?.let { ref -> state.resolve(ref)?.let { body ->
         AlertDialog(onDismissRequest = { preview = null }, title = { Text(body.name) },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {

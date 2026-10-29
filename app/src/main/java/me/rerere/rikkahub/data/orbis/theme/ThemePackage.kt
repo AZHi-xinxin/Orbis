@@ -54,6 +54,15 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
             bubbles.assistant.bg, bubbles.assistant.text, bubbles.user.bg, bubbles.user.text).forEach(::themeArgb)
         require(themeContrast(colors.text, colors.background) >= 4.5 && themeContrast(colors.text, colors.surface) >= 4.5 &&
             themeContrast(colors.onPrimary, colors.primary) >= 4.5 && themeContrast(colors.textSecondary, colors.background) >= 3) { "theme_contrast_too_low" }
+        if (assets.size > 8) throw ThemeAssetException("assets", "theme_asset_invalid", "too_many")
+        val seenAssets = mutableSetOf<String>()
+        assets.forEachIndexed { index, name ->
+            if (!seenAssets.add(name)) throw ThemeAssetException("assets[$index]", "theme_asset_invalid", "duplicate")
+            if (!name.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)"))) {
+                val field = assetReferences().entries.firstOrNull { it.value == name }?.key ?: "assets[$index]"
+                throw ThemeAssetException(field, "theme_asset_invalid", "invalid_name")
+            }
+        }
         listOf(bubbles.assistant, bubbles.user).forEach {
             require(it.radius in 0..32 && it.padding in 6..24 && it.maxWidthRatio.isFinite() && it.maxWidthRatio in .55f..1f &&
                 it.tail in setOf("none", "cat", "curl")) { "theme_bubble_invalid" }
@@ -62,18 +71,34 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
             require(it.shape in setOf("round", "cat", "rabbit", "ticket", "speech") &&
                 it.pattern in setOf("none", "dots", "stars", "gingham") &&
                 it.decoration in setOf("none", "paw", "heart", "star")) { "theme_bubble_invalid" }
-            require(it.decorationAsset == null || it.decorationAsset in assets) { "theme_asset_missing" }
+            if (it.decorationAsset != null && it.decorationAsset !in assets) throw ThemeAssetException(
+                if (it === bubbles.assistant) "bubbles.assistant.decorationAsset" else "bubbles.user.decorationAsset", issue = "not_declared")
             it.typography?.validate(); it.drawing?.validate()
         }
         typography.validate()
         require(background.type in setOf("solid", "image") && background.scroll == "fixed" &&
             background.dim.isFinite() && background.dim in 0f.. .8f) { "theme_background_invalid" }
-        require(assets.size <= 8 && assets.distinct().size == assets.size && assets.all { it.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)")) }) { "theme_asset_invalid" }
-        require(if (background.type == "image") background.asset in assets else background.asset == null) { "theme_asset_missing" }
+        if (background.type == "image" && background.asset !in assets) throw ThemeAssetException("background.asset", issue = "not_declared")
+        if (background.type == "solid" && background.asset != null) throw ThemeAssetException("background.asset", "theme_asset_invalid", "solid_has_asset")
         listOfNotNull(chrome.dock, chrome.onDock, chrome.star, chrome.composer, chrome.onComposer).forEach(::themeArgb)
         require(themeContrast(chrome.onDock ?: colors.text, chrome.dock ?: colors.surface) >= 4.5 &&
             themeContrast(chrome.onComposer ?: colors.text, chrome.composer ?: colors.surface) >= 4.5) { "theme_contrast_too_low" }
     }
+}
+internal class ThemeAssetException(val field: String, code: String = "theme_asset_missing", val issue: String = "missing_file") : IllegalArgumentException(code) {
+    val hint: String get() = when (issue) {
+        "invalid_name" -> "${this.field} 需要list或import_asset返回的完整图片文件名（64位小写摘要加.png/.jpg/.webp），不能填原图片名、路径、URL或示意占位符。"
+        "not_declared" -> "${this.field} 需要填写已导入图片文件名，并将同一文件名列入assets数组；用list查看本助手已有图片。"
+        "too_many" -> "assets最多列8张图片；保留本主题实际使用的图片名称。"
+        "duplicate" -> "${this.field} 是重复的图片声明；assets中同一文件名只列一次。"
+        "solid_has_asset" -> "background.type为solid时，background.asset应省略或设为null；需要图片背景时将type设为image。"
+        else -> "${this.field} 引用的图片文件在本机不存在。重新import_asset后将返回文件名填入此字段和assets；改用纯色背景时将background.type设为solid、background.asset设为null。"
+    }
+}
+internal fun ThemePackage.assetReferences(): Map<String, String> = buildMap {
+    background.asset?.let { put("background.asset", it) }
+    bubbles.assistant.decorationAsset?.let { put("bubbles.assistant.decorationAsset", it) }
+    bubbles.user.decorationAsset?.let { put("bubbles.user.decorationAsset", it) }
 }
 internal fun themeArgb(value: String): Int {
     require(value.matches(Regex("#[A-Fa-f0-9]{6}"))) { "theme_color_invalid" }

@@ -20,6 +20,8 @@ data class Tool(
     /** Legacy metadata only. The Orbis host lets users persist any execution approval; never use as a target/OS guard. */
     val requiresFreshApproval: (JsonElement) -> Boolean = { false },
     val isApprovalCurrent: () -> Boolean = { true },
+    /** Host selection, re-evaluated at each provider request; never serialized to the model. */
+    val isSelected: () -> Boolean = { true },
 )
 
 /** Host-only identity. Never supplied by the model or sent as a tool parameter. */

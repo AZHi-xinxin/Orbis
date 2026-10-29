@@ -202,7 +202,7 @@ fun Application.configureWebApi(
                     conversationRoutes(chatService, conversationRepo, folderRepo, settingsStore)
                     folderRoutes(chatService, folderRepo, settingsStore)
                     eventsRoutes(chatService, conversationRepo, folderRepo, settingsStore)
-                    settingsRoutes(settingsStore)
+                    settingsRoutes(settingsStore, chatService.boundaryHost)
                     filesRoutes(filesManager, context)
                     assetsRoutes(context)
                 }
@@ -215,7 +215,7 @@ fun Application.configureWebApi(
                 conversationRoutes(chatService, conversationRepo, folderRepo, settingsStore)
                 folderRoutes(chatService, folderRepo, settingsStore)
                 eventsRoutes(chatService, conversationRepo, folderRepo, settingsStore)
-                settingsRoutes(settingsStore)
+                settingsRoutes(settingsStore, chatService.boundaryHost)
                 filesRoutes(filesManager, context)
                 assetsRoutes(context)
             }

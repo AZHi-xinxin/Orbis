@@ -84,6 +84,8 @@ export interface MessageNodeDto {
 }
 
 export interface ConversationDto {
+  boundaryRevision?: number;
+  boundary?: { scope?: "conversation" | "assistant"; paused: boolean; reason: string; until?: number | null; allowRequest: boolean; requestUsed: boolean; requestCount?: number; revision: number } | null;
   id: string;
   assistantId: string;
   title: string;

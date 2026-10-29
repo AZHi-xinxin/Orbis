@@ -6,6 +6,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed class LocalToolOption {
     @Serializable
+    @SerialName("orbis_self_check")
+    data object SelfCheck : LocalToolOption()
+
+    @Serializable
     @SerialName("orbis_message_recall")
     data object MessageRecall : LocalToolOption()
 

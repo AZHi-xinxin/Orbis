@@ -586,6 +586,11 @@ class SettingsStore(
     }
 
     suspend fun updateAssistantModel(assistantId: Uuid, modelId: Uuid) {
+        val boundary = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context)
+        require(boundary.permits(assistantId.toString(), "model", modelId.toString())) { "当前 AI 已停用这个模型；可在拒绝的权利中查看选择。" }
+        if (boundary.state(assistantId.toString()).modelOverride != null) boundary.update(assistantId.toString()) {
+            it.copy(modelOverride = null).event(System.currentTimeMillis(), "human", "select_model", modelId.toString())
+        }
         update { settings ->
             settings.copy(
                 assistants = settings.assistants.map { assistant ->

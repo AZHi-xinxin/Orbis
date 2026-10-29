@@ -22,7 +22,7 @@ internal object AiConfigurationRules {
         "voice_archive_fallback" to settings.orbisVoiceArchiveFallbackModelId,
     )
 
-    fun inspect(settings: Settings, owner: String): JsonObject {
+    fun inspect(settings: Settings, owner: String, includeCatalog: Boolean = true): JsonObject {
         val assistant = requireOwner(settings, owner)
         return buildJsonObject {
             put("ok", true)
@@ -48,7 +48,7 @@ internal object AiConfigurationRules {
                 })
             }
             put("selected_tts_id", settings.selectedTTSProviderId.toString())
-            put("providers", JsonArray(settings.providers.map { provider -> buildJsonObject {
+            if (includeCatalog) put("providers", JsonArray(settings.providers.map { provider -> buildJsonObject {
                 put("id", provider.id.toString()); put("name", provider.name.take(160)); put("enabled", provider.enabled)
                 put("kind", when (provider) { is ProviderSetting.OpenAI -> "openai"; is ProviderSetting.Google -> "google"; is ProviderSetting.Claude -> "claude" })
                 put("models", JsonArray(provider.models.map { model -> buildJsonObject {
@@ -58,12 +58,12 @@ internal object AiConfigurationRules {
                     put("supports_images", Modality.IMAGE in model.inputModalities)
                 } }))
             } }))
-            put("tts", JsonArray(settings.ttsProviders.map(::ttsSummary)))
+            if (includeCatalog) put("tts", JsonArray(settings.ttsProviders.map(::ttsSummary)))
             put("memory", buildJsonObject {
                 put("mode", assistant.orbisMemoryMode.name.lowercase()); put("auto_inject", assistant.orbisMemoryAutoInject)
                 put("semantic_recall", assistant.orbisSemanticRecall)
             })
-            put("mcp", JsonArray(settings.mcpServers.filter { it.id in assistant.mcpServers }.map { server -> buildJsonObject {
+            if (includeCatalog) put("mcp", JsonArray(settings.mcpServers.filter { it.id in assistant.mcpServers }.map { server -> buildJsonObject {
                 put("id", server.id.toString()); put("name", server.commonOptions.displayTitle.take(160))
                 put("enabled", server.commonOptions.enable); put("tool_count", server.commonOptions.tools.count { it.enable })
             } }))

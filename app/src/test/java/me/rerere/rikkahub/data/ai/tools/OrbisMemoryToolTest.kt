@@ -8,6 +8,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisMemoryToolTest {
+    @Test fun realMemoryToolEmotionCanBeSerializedForGeminiWithoutChangingItsSchema() {
+        val tool = buildOrbisMemoryTool("synthetic-owner", { true }) { _, _, _ -> error("Serialization must not execute") }
+        val original = Json.encodeToJsonElement(tool.parameters()).jsonObject
+        // The fifth property matches the field index in the reported Gemini 400.
+        assertEquals("emotion", original["properties"]!!.jsonObject.keys.elementAt(4))
+        val provider = me.rerere.ai.provider.providers.google.GoogleProvider(okhttp3.OkHttpClient())
+        val method = provider.javaClass.getDeclaredMethod("buildCompletionRequestBody", List::class.java,
+            me.rerere.ai.provider.TextGenerationParams::class.java).apply { isAccessible = true }
+        val request = method.invoke(provider, listOf(me.rerere.ai.ui.UIMessage.user("hello")),
+            me.rerere.ai.provider.TextGenerationParams(
+                model = me.rerere.ai.provider.Model(modelId = "gemini-3.1-pro", abilities = listOf(me.rerere.ai.provider.ModelAbility.TOOL)),
+                tools = listOf(tool),
+            )) as JsonObject
+        val declaration = request["tools"]!!.jsonArray.single().jsonObject["functionDeclarations"]!!.jsonArray.single().jsonObject
+        assertEquals("orbis_memory", declaration["name"]!!.jsonPrimitive.content)
+        val emotion = declaration["parameters"]!!.jsonObject["properties"]!!.jsonObject["emotion"]!!.jsonObject
+        assertEquals(JsonPrimitive("string"), emotion["type"])
+        assertEquals(JsonPrimitive(true), emotion["nullable"])
+        assertEquals(original, Json.encodeToJsonElement(tool.parameters()))
+        assertEquals(listOf(JsonPrimitive("string"), JsonPrimitive("null")),
+            original["properties"]!!.jsonObject["emotion"]!!.jsonObject["type"]!!.jsonArray.toList())
+    }
+
     private fun args(text: String) = Json.parseToJsonElement(text)
     @Test fun aliasesAndOptionalTagsAreForgiving() {
         val p = normalizeOrbisMemoryArguments(args("""{"op":"save","content":"whole text","tags":"tea，咖啡","assistantId":"wrong","operation_key":"forged"}"""))

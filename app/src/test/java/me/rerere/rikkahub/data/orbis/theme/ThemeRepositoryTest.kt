@@ -40,8 +40,13 @@ class ThemeRepositoryTest {
         assertTrue(s.requestApply(a)); assertEquals(a, s.snapshot().active)
         assertThrows(Exception::class.java) { executeThemeTool(s, buildJsonObject { put("action", "apply"); put("id", a.id); put("revision", a.revision); put("autoApply", true) }) }
         val name = "a".repeat(64) + ".png"
-        val d = s.write(themeJson.encodeToString(ThemePackage(name="missing",background=ThemeBackground("image",name),assets=listOf(name))))
-        assertThrows(IllegalStateException::class.java) { s.publish(d.id, d.revision) }
+        assertEquals("background.asset", assertThrows(ThemeAssetException::class.java) {
+            s.write(themeJson.encodeToString(ThemePackage(name="missing",background=ThemeBackground("image",name),assets=listOf(name))))
+        }.field)
+        val existing = s.importAsset(byteArrayOf(1,2,3), "png")
+        val d = s.write(themeJson.encodeToString(ThemePackage(name="removed later",background=ThemeBackground("image",existing),assets=listOf(existing))))
+        s.asset(existing).delete()
+        assertEquals("background.asset", assertThrows(ThemeAssetException::class.java) { s.publish(d.id, d.revision) }.field)
         assertEquals(a, s.snapshot().active)
         assertThrows(Exception::class.java) { s.asset("../../secret.png") }
     }

@@ -26,8 +26,17 @@ export function useCurrentAssistant(): UseCurrentAssistantResult {
     );
   }, [assistants, currentAssistantId]);
 
+  const scopedSettings = React.useMemo(() => {
+    const choice = currentAssistantId && settings?.boundaryChoices?.[currentAssistantId];
+    if (!choice || !settings) return settings;
+    return { ...settings,
+      providers: settings.providers.map(p => ({ ...p, models: p.models.filter(m => !(choice.hiddenModels ?? []).includes(m.id)) })),
+      mcpServers: settings.mcpServers.filter(m => !(choice.hiddenMcp ?? []).includes(m.id)),
+    };
+  }, [settings, currentAssistantId]);
+
   return {
-    settings,
+    settings: scopedSettings,
     assistants,
     currentAssistantId,
     currentAssistant,

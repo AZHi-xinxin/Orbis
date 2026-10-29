@@ -30,6 +30,9 @@ data class QueuedMessage(
     // A previously queued message is not a new human acknowledgement of a later safety hold.
     val acknowledgeSafetyHold: Boolean = true,
     val freshHumanInputPermit: FreshHumanInputPermit? = null,
+    // Only a freshly claimed, human-requested boundary continuation. Never restored or queued for replay.
+    val boundaryRecoveryRevision: Long? = null,
+    val boundaryRecoveryAssistantId: Uuid? = null,
 )
 
 data class MessageQueueState(

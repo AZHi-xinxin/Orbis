@@ -7,6 +7,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OrbisSettingsPresentationTest {
+    @Test fun aiDecisionOverridesManualSelectionButKeepsSharedConnectionFact() {
+        val disabled = orbisMcpOverview(true, true, McpStatus.Connected, aiPermitted = false)
+        assertEquals("当前AI：已停用", disabled.selected)
+        assertEquals("连接：已连接", disabled.connection)
+        assertEquals("当前AI：已停用并收起", orbisMcpOverview(true, true, McpStatus.Connected, false, true).selected)
+        assertEquals("当前AI：未确定", orbisMcpOverview(true, null, null, false).selected)
+    }
+
     @Test fun characterEntryIsWidgetSettingsNotUnfinishedRoom() {
         val entry = orbisToolEntries.single { it.destination == OrbisToolDestination.CHARACTER }
         assertEquals("小部件设置", entry.title)

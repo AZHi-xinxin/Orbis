@@ -211,9 +211,14 @@ fun ChatInput(
     val ttsAvailable by tts.isAvailable.collectAsState()
     val ttsSpeaking by tts.isSpeaking.collectAsState()
     val containerShape = if (orbis) RoundedCornerShape(23.dp) else MaterialTheme.shapes.largeIncreased
+    val choiceContext = androidx.compose.ui.platform.LocalContext.current
+    val choiceHost = remember(choiceContext) { me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(choiceContext) }
+    val choiceStates by choiceHost.states.collectAsState()
+    val ownChoices = choiceStates[assistant.id.toString()] ?: me.rerere.rikkahub.data.orbis.boundary.AssistantBoundary()
     val modelListState = rememberModelListState(
         modelId = chatModel?.id,
-        providers = settings.providers,
+        disabledModels = ownChoices.models.keys.filter { !ownChoices.permits("model", it) }.mapNotNull { runCatching { Uuid.parse(it) }.getOrNull() }.toSet(),
+        providers = settings.providers.map { provider -> provider.copyProvider(models = provider.models.filter { !ownChoices.hidden("model", it.id.toString()) }.map { if (ownChoices.permits("model", it.id.toString())) it else it.copy(displayName = "${it.displayName} · AI 已停用") }) },
         type = ModelType.CHAT,
     )
 

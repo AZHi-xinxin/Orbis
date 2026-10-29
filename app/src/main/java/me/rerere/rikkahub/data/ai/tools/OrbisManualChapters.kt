@@ -14,6 +14,30 @@ internal data class OrbisManualChapter(
 )
 
 internal val orbisManualChapters = listOf(
+    OrbisManualChapter("tool_reference", "工具说明与精简回执", "AI按需读取说明书", listOf("orbis_help", "orbis_configure"), listOf(
+        OrbisManualSection("按需读完整用法", "部分工具常驻描述只保留用途、关键参数和限制；其中指向orbis_help的工具可用topic=tool、tool_name=实际工具名读取完整说明与示例。按需查阅不启用新工具、不改变权限。已有工具参数结构仍完整提供。"),
+        OrbisManualSection("配置目录分页", "orbis_configure action=inspect默认返回当前选择与目录数量。查ID加section=providers/models/tts/mcp，query筛选名称或ID，offset默认0、limit默认10且最大20；models可加provider_id。items是当前页，page.total是筛选后总数；有next_call时按其继续读取。providers不嵌套全部型号，型号从models取。"),
+        OrbisManualSection("修改结果与历史", "配置成功回执只含本次动作、目标、作用范围及实际保存值，不附整套目录；saved表示保存完成，连接是否可用仍按check/check_status实测。历史聊天与旧工具回执保留，新格式用于后续调用。精简后的费用和调用效果需结合实际使用评估。"),
+    )),
+    OrbisManualChapter("self_check", "AI自检与常见故障排查", "侧栏 → 当前助手设置 → 本地工具 → AI自检 → 检查当前助手", listOf("orbis_self_check", "orbis_configure"), listOf(
+        OrbisManualSection("先查事实", "遇到功能不可用、发布失败或连接报错时，可按需调用orbis_self_check，focus选择overview/tools/model/theme/mcp/workspace/stickers/permissions。此工具默认关闭，人类在本地工具打开；同页检查按钮无需AI或工具开关，模型400或无法工具调用时仍能用。查询只读当前助手的本机状态，不发送网络测试，不取聊天、系统提示或密钥。结果和教学全文不常驻注入。"),
+        OrbisManualSection("读懂检查结果", "ok只表示列出的本机检查通过，不代表上游、远端设备或全部功能验收。info可能只是没启用的可选功能；blocked需处理；unknown必须说明尚未查明。最近五条故障是带时间的历史摘要，可能已修复；新版本安装前不补录。不要仅看到旧错误就认定仍故障。不要让人类重复开已经开启的权限。"),
+        OrbisManualSection("按已有权限修复", "依据next步骤使用现有工具：主题read查版本→patch→publish(expected_revision)→apply(revision)；连接用orbis_configure inspect/check/check_status（check会发真实短请求，沿用审批）；工作区先workspace_status。人类授权、系统权限、API密钥由人类在对应设置填写；自检不能自己开权、改密钥或解除AI暂停。不能判断的问题请人类复制报告和错误卡反馈，不重放可能已经完成的写操作。"),
+        OrbisManualSection("主题与表情包", "主题错误回执的phase=argument_validation表示入参未通过，尚未检查主题库；按expected_fields修正或使用write返回的next_call。图片错误按field与issue区分名称无效、未声明、文件缺失；使用list/import_asset返回的完整文件名。主题工具开启、写草稿、发布版本、预览应用是不同阶段。交给AI自由装扮控制直接应用，不控制publish；未开时apply后人类在侧栏自定义美化确认。publish参数需要id/expected_revision，apply为id/revision。图片缺失时read返回missing_asset_fields；先导入真实图片再patch对应字段，不传assets时会同步新引用并移除被替换的旧引用，已发布版本和图片文件保留。人类点草稿可查看设计，再发布并预览。表情包人类导入不需要AI工具开关；自检给出格式/大小/尺寸与剩余空间，不能凭没开工具判定保存失败。"),
+    )),
+    OrbisManualChapter("boundaries", "拒绝的权利：自主决定对话、模型与工具", "会话侧栏 → 顶部 ⋮ → 当前会话配置 → 本地工具 → 拒绝的权利", listOf("orbis_boundary"), listOf(
+        OrbisManualSection("交给你决定", "人类在上述入口可以全部开启，也可分别开启对话、模型、MCP、工具选择。开启的类别由你自主决定，每次选择直接生效。默认关闭，关闭时不注册控制工具。详细说明只在查询本章时返回，不会持续注入人格提示。"),
+        OrbisManualSection("操作与范围", "先调用orbis_boundary(action=state)简短取得授权、revision和当前暂停状态。查询模型/MCP/工具ID时再加kind=model/mcp/tool，可用query搜索，按offset/limit分页，page.next_offset为下一页。单个工具的id是choices.tool返回的完整名称，原样使用；MCP的tool_ids只预览前5个，完整成员用state(kind=tool,mcp_id=该MCP的id)分页查。cloud_reading_*属于独立云端共读，并非任何游戏MCP。工具项mcp_id为空表示不归属于外部MCP；effective_enabled同时考虑工具和所属MCP的决定。切换当前模型调用orbis_configure(action=select_model)。写入带这个revision；pause/resume的kind=conversation；scope=conversation（默认）仅暂停或恢复当前窗口所有分支，scope=assistant暂停或恢复自己这个助手的全部已有与未来窗口，其他助手不受影响。全助手暂停时，新建窗口仍显示暂停，不能通过换窗口继续；两种暂停分别保留，恢复全助手后若某个窗口还有单独暂停，那一窗口仍保持暂停。pause必须明确填写allow_request=true或false，由你选择是否接受提前继续申请；漏填会退回且不执行。reason写给人类看的说明，until_epoch_ms必填，距离调用时至少60秒、最多24小时，到期自动恢复；state返回now_epoch_ms供你计算。例如查state得到revision=12后，pause(revision=12,allow_request=true,until_epoch_ms=now_epoch_ms+300000,reason=先休息五分钟)即开放申请；false则关闭。需要说明时在调用前说，暂停成功后工具回执保留，本轮直接结束，不会继续向模型请求收尾。模型、MCP、工具用enable/disable、kind=model/mcp/tool和id，disable时hidden=true收起该项。停用只影响你这个助手，原配置、密钥、其他助手使用保持；MCP停用不关闭共用服务器。版本改变时先重读，按当前状态重新决定。"),
+        OrbisManualSection("停用当前模型", "可在disable同一操作带alternate_model_id，下一轮使用该模型；不指定则停止当前模型请求，等待另选。停用同样作用于你自己的辅助、重试和备用模型请求。暂停或停用当前模型后宿主不会再请求本轮收尾，工具回执会保留，所以需要对人类说明时可在本次回复里一并说。model_builtin_开头是本模型已配置的内置搜索/网址/生图选项，通过enable/disable选择；改变这些服务端能力后，本次生成也在工具回执处结束，下一次请求采用新选择。orbis_boundary保持独立可用。"),
+        OrbisManualSection("工具续轮与立即生效", "停用MCP或普通工具后，宿主立即禁止后续执行，同批后续调用也会收到未执行回执。当前自动续轮保留最初工具名称、顺序和参数结构，以便网关识别并完成同一条工具链；目录中暂时仍出现名字不表示还能执行。开启或停用后的新目录在下一次新生成采用。无需重复停用，也不用为修复目录而重做已完成的外部操作。"),
+        OrbisManualSection("恢复与人类操作", "暂停后手机/Web输入区显示约定，历史与草稿保留。定时到点自动恢复输入，暂停卡自动收起；此前积压消息保留为待确认，不自动重发。allow_request=true时告诉人类：回到刚才这段聊天，在最下方“此对话已由对方暂停”卡片里点“申请继续”，填写后提交。这不是设置页里的按钮。allow_request=false时该按钮不显示；不要告诉人类去找不存在的按钮。申请作为新的人类消息进入原对话，沿用当前助手、原聊天上下文和记忆等配置；你的实际答复和工具结果都保存在这段聊天中。处理申请期间普通输入仍暂停，本轮沿用该助手已授权且未停用的工具；orbis_boundary可用state/pause/resume处理约定。可先state查最新revision；愿意继续调用resume，明确继续暂停调用pause并选择allow_request和新的until_epoch_ms，决定成功后本轮结束。全助手暂停时，本助手所有窗口共享正在处理的申请，同一时刻只处理一条，申请在发起窗口的原上下文中处理。每次pause最多3次申请，手机和Web显示剩余次数；提交即计数，只有文字、只查state或请求失败也计数，本轮结束有剩余额度才可再申请；不会自动重发，也不会把没有决定说成继续暂停。真正pause/resume成功后采用你的新约定；暂停始终在期限到达后恢复。新的pause重新计数，全助手范围跨窗口共享3次。关闭重开释放未完成申请的占用但不补次数，旧消息和工具不重放；旧无期限暂停按原开始时间补齐最长24小时期限，缺失开始时间时从首次升级读取起计算，之后不顺延。已授权哨兵的单次唤醒可在暂停期间完成回复并调用原本可用的工具，普通输入保持暂停；唤醒中再次pause会结束本轮，停用的模型和工具仍遵守选择。没有可用模型时会说明无法处理申请。人类也可从当前AI的本地工具→拒绝的权利设置卡明确重置这些选择（包括其他能力选择），记录为人类重置；你的恢复记录为AI主动恢复。操作记录只保留最近5条，旧历史清理不改变仍生效的暂停和能力设置；设置明细可展开查看。"),
+    )),
+    OrbisManualChapter("ombre_phone", "OmbreBrain部署与本手机持续运行", "右下角北斗导航 → 工具娱乐 → 工作区 → 当前助手对应工作区 → OmbreBrain持续运行", listOf("orbis_ombre_runtime", "workspace_shell", "orbis_configure"), listOf(
+        OrbisManualSection("先确认部署位置", "用户说装OB或OmbreBrain时先确认手机、电脑还是VPS；已有工作区不表示用户要装在手机。不确定就问清楚。电脑/VPS可用工作区SSH部署，沿用st_computer/st_vps章节的地址与登录教学，但安装命令按OB官方项目核对。Termux也是独立方案，先建立可操作通道。以下只针对用户已选择本手机Orbis工作区。"),
+        OrbisManualSection("准备环境", "先workspace_status检查助手绑定的工作区和Rootfs。缺环境时告诉人类：点右下角北斗导航→工具娱乐→工作区→当前助手对应工作区→安装Rootfs；显示重新安装表示完成，再回聊天告诉你。为OB建立独立源码、Python虚拟环境、配置和记忆目录，避开已有ST目录和端口。官方源码https://github.com/P0luz/Ombre-Brain；当前适配按Python3.12与官方requirements.lock.txt安装，优先python -m pip install --require-hashes -r requirements.lock.txt。下载慢可选用户可达镜像，保留锁定版本和哈希。先确认依赖安装成功再启动。"),
+        OrbisManualSection("配置与连接", "读取对应版本config.example.yaml，另存私有配置，填写host_port空闲端口和独立buckets_dir绝对路径；dehydration是压缩模型配置，按用户选择设置base_url/model及凭据。embedding按所选服务配置，也可先关闭用于连接测试。为本机MCP生成随机访问钥匙，mcp_auth_mode=token、mcp_token保存到私有配置；Dashboard独立设置密码。密钥由人类通过Orbis连接指引查看保存并填写，不贴入正文。MCP用Streamable HTTP、http://127.0.0.1:实际端口/mcp、Bearer token。OB的Dashboard与MCP共用端口，并非ST模型网关；不能把它当作OpenAI模型地址。"),
+        OrbisManualSection("托管与验收", "人类打开工作区卡的允许托管后，你调用orbis_ombre_runtime(action=start,target=this_phone_orbis,source=源码绝对路径,python=虚拟环境python绝对路径,config=私有YAML绝对路径)。工具自行读取已安装实例；status的ready表示MCP初始化及目录已通过。接着让人类填连接，调用OB真实工具验证读写；需要压缩模型的操作另核验模型配置。ST和OB可同时托管，各自停止与重启；重装Rootfs前先分别停止。Orbis重新打开会恢复之前托管状态，主动stop后不会自动启动；系统强行停止期间需先打开Orbis。"),
+    )),
     OrbisManualChapter("toy_lab", "自定义蓝牙设备调试台", "北斗导航 → 工具娱乐 → 蓝牙Toy → 自定义设备调试台", listOf("toy_lab", "toy_lab_stop"), listOf(
         OrbisManualSection("人类和AI共同调试", me.rerere.rikkahub.data.orbis.toy.lab.TOY_LAB_GUIDE),
     )),
@@ -81,7 +105,7 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("格式错误", "Codex 需完整 session_meta/response_item 支持子集，末行完整换行，不是 ChatGPT 导出/Markdown/history.jsonl；Operit 要明确的 v2 聊天归档，不是记忆导出/CSV。2.6.2 起已修复受支持的 Operit 思考内容导入；若曾用旧版导入，可在预览中选择另存修正版副本，不覆盖已有聊天，也不凭空找回原包没有的内容。导入成功不等于来源应用所有内容均已迁移，务必保管原件。格式、超限或原文件变动应重新导出和预览。取消导入可能保留已完成会话，核对结果后再操作，不以恢复旧工具来补齐。"),
     )),
     OrbisManualChapter("updates", "更新、覆盖安装与 Android 降级", "系统设置 → 版本更新与回退；系统安装确认页", emptyList(), listOf(
-        OrbisManualSection("更新入口", "内置更新读取本项目官方 GitHub Releases，自动检查最多每24小时一次，也可手动检查；不是持续后台推送。先阅读说明并确认备份，再下载校验并交给 Android 确认安装，不静默安装。下载进度在弹窗内，关闭弹窗取消下载。Dev 与正式版包名不同，Dev 不把正式 APK 当作自身覆盖更新。2.6.0 需先手动升级一次。读取到版本说明不代表 APK 下载线路畅通；下载失败先检查网络与系统提示，不能直接归因于手机品牌。实际安装结果须核实当前版本。"),
+        OrbisManualSection("更新入口", "内置更新读取本项目官方 GitHub Releases，自动检查最多每24小时一次，也可手动检查；不是持续后台推送。先阅读说明并确认备份，再下载校验并交给 Android 确认安装，不静默安装。下载进度在弹窗内显示大小、速度和预计剩余时间；最多四段并行，连接失败自动续传重试并可改走GitHub官方备用入口。点暂停并关闭或关闭弹窗会保留进度，重新进入同一版本点下载／继续下载更新包即可，应用重开后也可接续。删除下载进度只清这个安装包的缓存。服务器不支持分段时改普通下载，不支持续传时需要重新下载；系统清理缓存也会移除下载进度。Dev 与正式版包名不同，Dev 不把正式 APK 当作自身覆盖更新。2.6.0 需先手动升级一次。读取到版本说明不代表 APK 下载线路畅通；下载失败先检查网络与系统提示，不能直接归因于手机品牌。实际安装结果须核实当前版本。"),
         OrbisManualSection("升级前", "先确认安装包来自可信发布、应用包名和签名对应现有安装。停止正在生成/通话/咨询待命并保管可验证备份；功能说明不是备份成功证明。覆盖升级正常保留应用数据，但安装失败要看系统提示，不主动卸载。"),
         OrbisManualSection("为什么低版本装不上", "Android 通常拒绝较低 versionCode 的覆盖安装，也可能因签名/包名不匹配失败。不要用版本显示文字推断可降级。AI 不自动卸载、清数据或绕过降级保护；应获取同签名且版本号更高的修复包，或由用户了解数据风险后另作迁移决定。主线 Orbis 不应被 RikkaHub 上游更新直接替换。"),
         OrbisManualSection("结果未知", "安装确认迟迟未返回或用户稍后同意时，先只读核实当前安装版本和界面，不重复弹安装、不宣称成功。APK 存在、下载完成、编译成功与真机功能通过是四回事，分别报告。"),
@@ -174,7 +198,7 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("公开版本边界", "咨询室显示‘正在开发，暂未开放’。不要指导公开版用户配对、开启待命、重试旧场或调用内部咨询工具，也不要用哨兵或普通私聊替代内部协议。已保留的历史数据不代表功能已验收；其它本地功能不依赖咨询室。"),
         OrbisManualSection("如看到旧记录", "保留记录供后续明确授权的排查，不自动恢复生成、不清除失败现场、不公开内部正文。此说明不检查线上咨询状态，也不宣称已修好或已完成双机验收。"),
     )),
-) + orbisDeploymentChapters
+).filterNot { it.id == "ombre_phone" && !me.rerere.rikkahub.data.orbis.ombre.OMBRE_RUNTIME_ENTRY_ENABLED } + orbisStillerBrainChapters + orbisDeploymentChapters
 
 internal fun orbisManualChapterMatches(chapter: OrbisManualChapter, query: String): Boolean = query.isBlank() ||
     (listOf(chapter.id, chapter.title, chapter.uiPath) + chapter.tools + chapter.sections.flatMap { listOf(it.title, it.text) })

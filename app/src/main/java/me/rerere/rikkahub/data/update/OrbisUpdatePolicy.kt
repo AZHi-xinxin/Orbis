@@ -14,6 +14,7 @@ data class OrbisReleaseAsset(
     val name: String, val size: Long,
     @SerialName("browser_download_url") val downloadUrl: String,
     val digest: String? = null,
+    val id: Long = 0,
 )
 
 @Serializable
@@ -46,6 +47,7 @@ internal fun validateOrbisRelease(release: OrbisPublishedRelease): OrbisPublishe
     require((release.body?.length ?: 0) <= 300_000 && release.assets.size <= 100) { "发布资料超过大小限制" }
     require(release.assets.map { it.name }.distinct().size == release.assets.size) { "发布文件名重复" }
     release.assets.forEach { asset ->
+        require(asset.id >= 0) { "发布文件编号异常" }
         require(Regex("[A-Za-z0-9._-]{1,180}").matches(asset.name)) { "发布文件名异常" }
         require(asset.size >= 0 && asset.downloadUrl == "$ORBIS_RELEASES_PAGE/download/${release.tag}/${asset.name}") {
             "下载地址不属于该 Orbis 版本"

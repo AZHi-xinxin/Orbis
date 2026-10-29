@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.service
 
 import me.rerere.rikkahub.data.model.withMessageRecall
+import me.rerere.rikkahub.data.orbis.boundary.BoundaryWakePermit
 import me.rerere.rikkahub.data.model.recallableAiReplies
 
 import android.app.Application
@@ -13,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Deferred
@@ -254,6 +256,11 @@ private val outputTransformers by lazy {
     )
 }
 
+/** Preserve the session's exact generation identity across provider-admission withContext scopes. */
+private class ChatGenerationOwner(val job: Job) : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<ChatGenerationOwner>
+}
+
 class ChatService(
     private val context: Application,
     private val appScope: AppScope,
@@ -327,7 +334,7 @@ class ChatService(
     private fun freshHumanScope(session: ConversationSession): FreshHumanInputScope? {
         val settings = settingsStore.settingsFlow.value
         val assistant = settings.getAssistantById(session.state.value.assistantId) ?: return null
-        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId) ?: return null
+        val model = settings.findModelById(boundaryModelId(assistant, settings.chatModelId)) ?: return null
         fun snapshot(source: Model) = source.copy(providerOverwrite = source.providerOverwrite?.copyProvider(models = emptyList()))
         return FreshHumanInputScope(session.id, snapshot(model),
             settings.providers.map { it.copyProvider(models = it.models.map(::snapshot)) })
@@ -430,12 +437,13 @@ class ChatService(
         voiceRecovery.join()
         initializeConversation(conversationId, selectAssistant = false)
         val c = getConversationFlow(conversationId).value
+        boundaryHost.requireInput(c.assistantId.toString(), conversationId.toString())
         val settings = settingsStore.settingsFlow.first()
         val assistant = checkNotNull(settings.getAssistantById(c.assistantId)) { "当前 AI 不存在" }
         val record = voiceCalls.create(OrbisVoiceCallRecord(
             id = Uuid.random().toString(), conversationId = conversationId.toString(),
             assistantId = c.assistantId.toString(), startedAtMs = System.currentTimeMillis(),
-            modelId = (assistant.chatModelId ?: settings.chatModelId)?.toString(),
+            modelId = boundaryModelId(assistant, settings.chatModelId)?.toString(),
             video = video,
         ))
         liveVoiceContexts[record.id] = record
@@ -478,6 +486,7 @@ class ChatService(
         require(kind !in setOf("archive", "restore")) { "归档只能使用独立记录整理入口，不能进入聊天队列。" }
         val session = getOrCreateSession(conversationId)
         val reply = CompletableDeferred<String?>()
+        boundaryHost.requireInput(session.state.value.assistantId.toString(), conversationId.toString())
         synchronized(session) {
             if (!shouldEnqueue()) { reply.complete(null); return reply }
             val input = QueuedMessage(id = messageId, parts = listOf(UIMessagePart.Text(text)),
@@ -830,7 +839,7 @@ class ChatService(
                     // Claim/persistence can suspend; recheck authorization at the network boundary.
                     validateDispatch(checkNotNull(activeAttempt))
                     // Current-assistant persona is prepared separately; no chat/tool/queue execution.
-                    providerManager.getProviderByType(request.provider).streamText(
+                    providerManager.getProviderByType(request.provider, boundaryHost.requestContext(record.assistantId, record.conversationId).check).streamText(
                         providerSetting = request.provider, messages = request.messages, params = request.params)
                 })
             voiceCalls.completeArchiveAttempt(record.id, record.assistantId, result.attempt.sourceDigest,
@@ -1447,6 +1456,18 @@ class ChatService(
     // source folder, so folder deletion/moves cannot interleave with archive publication.
     private val folderMutationMutex = Mutex()
     private val _sessionsVersion = MutableStateFlow(0L)
+    private val boundaryObserver = appScope.launch {
+        boundaryHost.states.collect {
+            sessions.values.filter { it.isInitialized && (boundaryPaused(it) || boundaryModelDisabled(it)) }.forEach { session ->
+                session.messageQueue.holdAllInputsForFreshRecovery()
+                val call = OrbisVoiceCallRuntime.get(context).callState.value
+                if (call.conversationId == session.id && call.callId != null) withContext(Dispatchers.Main.immediate) {
+                    OrbisVoiceCallRuntime.get(context).endFromAssistant(call.callId, session.id.toString(), if (boundaryPaused(session)) "对方已暂停这段对话" else "当前模型已由 AI 停用")
+                }
+            }
+        }
+    }
+
 
     // 错误状态
     private val _errors = MutableStateFlow<List<ChatError>>(emptyList())
@@ -1459,6 +1480,12 @@ class ChatService(
         solution: ChatErrorSolution? = null,
     ) {
         if (error is CancellationException) return
+        if (BuildConfig.ORBIS_ENABLED && conversationId != null) {
+            sessions[conversationId]?.state?.value?.assistantId?.toString()?.let { owner ->
+                me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, owner, "model",
+                    me.rerere.rikkahub.data.orbis.diagnostics.diagnosticCode(error.message.orEmpty()))
+            }
+        }
         _errors.update {
             it + ChatError(title = title, error = error, conversationId = conversationId, solution = solution)
         }
@@ -1628,6 +1655,60 @@ class ChatService(
         }
     }
 
+    val boundaryHost get() = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context)
+    suspend fun requestBoundaryResume(conversationId: Uuid, revision: Long, text: String): String =
+        withContext(Dispatchers.Main.immediate) {
+            val requestText = text.trim()
+            require(requestText.isNotEmpty() && requestText.length <= 20_000) { "请填写继续申请（最多 20000 字）。" }
+            val session = getOrCreateSession(conversationId)
+            session.withRefSuspend {
+                val reply = CompletableDeferred<String?>()
+                var requestJob: Job? = null
+                val input = withWritableHistory(conversationId) { current ->
+                    val conversation = current.state.value
+                    val owner = conversation.assistantId.toString()
+                    val settings = settingsStore.settingsFlow.value
+                    val assistant = settings.getAssistantById(conversation.assistantId) ?: error("当前 AI 不存在")
+                    val modelId = boundaryModelId(assistant, settings.chatModelId)
+                    val model = settings.findModelById(modelId) ?: error("暂无可用模型处理申请")
+                    check(boundaryHost.permits(owner, "model", model.id.toString())) { "暂无可用模型处理申请" }
+                    check(model.findProvider(settings.providers) != null) { "暂无可用模型处理申请" }
+                    check(!gatewaySubmissionBlocked(conversationId)) { "旧轮仍在核对，暂未提交申请。" }
+                    // Claims only this new request; it does not resume ordinary input, old queues or tools.
+                    boundaryHost.claimRecovery(owner, conversationId.toString(), revision)
+                    QueuedMessage(parts = listOf(UIMessagePart.Text("【申请继续】\n$requestText")),
+                        reply = reply, acknowledgeSafetyHold = false,
+                        orbisUserMessageTime = captureHumanMessageTime(current), boundaryRecoveryRevision = revision,
+                        boundaryRecoveryAssistantId = conversation.assistantId)
+                        .also { queued ->
+                            current.submittingMessage = queued
+                            try { requestJob = sendQueuedMessage(current, queued) }
+                            catch (failure: Throwable) {
+                                if (current.submittingMessage?.id == queued.id) current.submittingMessage = null
+                                boundaryHost.finishRecovery(owner, conversationId.toString(), revision)
+                                throw failure
+                            }
+                        }
+                }
+                reply.await()
+                requestJob?.join()
+                me.rerere.rikkahub.data.orbis.boundary.boundaryRecoveryResult(
+                    session.state.value.currentMessages, input.id,
+                    boundaryHost.pause(session.state.value.assistantId.toString(), conversationId.toString()))
+            }
+        }
+    private fun boundaryPaused(session: ConversationSession): Boolean = boundaryHost.pause(
+        session.state.value.assistantId.toString(), session.id.toString()) != null
+    private fun boundaryModelDisabled(session: ConversationSession): Boolean {
+        val settings = settingsStore.settingsFlow.value
+        val assistant = settings.getAssistantById(session.state.value.assistantId) ?: return false
+        val id = boundaryModelId(assistant, settings.chatModelId) ?: return false
+        return !boundaryHost.permits(assistant.id.toString(), "model", id.toString())
+    }
+    private fun boundaryModelId(assistant: Assistant, fallback: Uuid?): Uuid? =
+        boundaryHost.state(assistant.id.toString()).takeIf { "model" in it.grants }?.modelOverride
+            ?.let { runCatching { Uuid.parse(it) }.getOrNull() } ?: assistant.chatModelId ?: fallback
+
     private fun launchGenerationJob(
         conversationId: Uuid,
         keepAliveInBackground: Boolean = true,
@@ -1635,6 +1716,19 @@ class ChatService(
         block: suspend () -> Unit,
     ): Job {
         return appScope.launch(start = CoroutineStart.LAZY) {
+            val generationOwner = ChatGenerationOwner(checkNotNull(kotlin.coroutines.coroutineContext[Job]))
+            val current = getOrCreateSession(conversationId)
+            if (!current.isInitialized) initializeConversation(conversationId, selectAssistant = false)
+            // Only the durable notification receipt may grant this single job a pause exemption.
+            val event = freshHumanInput?.orbisEventId?.let { orbisEvents.inbox.get(it) }
+            val wake = event?.takeIf { it.wake && it.attemptStarted && nativeSentinels.mayDeliver(it) &&
+                orbisEvents.inbox.targetStillMatches(it) && it.conversationId == conversationId.toString() &&
+                it.assistantId == current.state.value.assistantId.toString() &&
+                conversationRepo.getConversationById(conversationId)?.assistantId?.toString() == it.assistantId
+            }?.let { BoundaryWakePermit.capture(boundaryHost.state(it.assistantId), it.assistantId, it.conversationId, System.currentTimeMillis()) }
+            withContext(generationOwner + (wake ?: kotlin.coroutines.EmptyCoroutineContext) +
+                boundaryHost.requestContext(current.state.value.assistantId.toString(), conversationId.toString(),
+                    freshHumanInput?.boundaryRecoveryRevision, wake)) {
             withGatewayInputAdmission(freshHumanInput,
                 awaitHistory = { getOrCreateSession(conversationId).orbisPromptEditMutex.withLock { Unit } },
                 isBlocked = { gatewaySubmissionBlocked(conversationId, it) }) {
@@ -1646,6 +1740,7 @@ class ChatService(
                         if (foregroundStarted) ChatGenerationForegroundService.release(context, generationId)
                     }
                 }
+            }
             }
         }
     }
@@ -2974,6 +3069,7 @@ class ChatService(
         orbisQuote: me.rerere.ai.ui.OrbisMessageQuote? = null): Boolean {
         if (content.isEmptyInputMessage()) return false
         val session = getOrCreateSession(conversationId)
+        if (boundaryPaused(session) || (answer && boundaryModelDisabled(session))) return false
         synchronized(session) {
             if (needsHumanContinuation(session, freshHumanInput = true)) {
                 startHumanContinuation(session, QueuedMessage(parts = content.toList(), answer = answer,
@@ -3155,7 +3251,7 @@ class ChatService(
         val configured = settings.getAssistantById(snapshot.assistantId) ?: error("当前 AI 已不存在，请重新选择。")
         val assistant = voiceRecord?.modelId?.let { configured.copy(chatModelId = Uuid.parse(it)) } ?: configured
         check(voiceRecord == null || voiceRecord.assistantId == assistant.id.toString()) { "通话所属 AI 已改变。" }
-        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+        val model = settings.findModelById(boundaryModelId(assistant, settings.chatModelId))
             ?: error("请先选择可用的聊天模型。")
         return withHumanGatewayInvocation(gatewayInvocations, snapshot.id.toString(),
             gatewayApprovalBatch(snapshot, model.id.toString()),
@@ -3469,6 +3565,7 @@ class ChatService(
     private fun dispatchNextQueuedMessage(conversationId: Uuid): Job? {
         val session = sessions[conversationId] ?: return null
         synchronized(session) {
+            if (boundaryPaused(session) || boundaryModelDisabled(session)) { session.messageQueue.holdAllInputsForFreshRecovery(); return null }
             if (session.humanContinuation.value != null) return null
             // Check BEFORE takeNext removes an input. Recovery-blocked human messages must not disappear.
             if (session.generationRecoveryBlocked || session.manualContextWriteInProgress || session.submittingMessage != null ||
@@ -3546,11 +3643,17 @@ class ChatService(
             freshHumanInput = queued,
         ) {
             bodyEntered.set(true)
-            val sendJob = kotlin.coroutines.coroutineContext[Job]
+            val sendJob = kotlin.coroutines.coroutineContext[ChatGenerationOwner]?.job ?: kotlin.coroutines.coroutineContext[Job]
             try {
                 // A send can race initial loading or follow a failed load. Load successfully
                 // before taking the history snapshot, including the no-generation send path.
                 if (!session.isInitialized) initializeConversation(conversationId, selectAssistant = expectedAssistantId == null)
+                queued.boundaryRecoveryAssistantId?.let {
+                    check(session.state.value.assistantId == it && conversationRepo.getConversationById(conversationId)?.assistantId == it) {
+                        "继续申请所属 AI 已变化，本次未发送。"
+                    }
+                }
+                boundaryHost.requireInput(session.state.value.assistantId.toString(), conversationId.toString(), queued.boundaryRecoveryRevision, kotlin.coroutines.coroutineContext[BoundaryWakePermit])
                 if (withdrawInactiveVideoFrame(session, queued)) return@launchGenerationJob
                 if (session.state.value.isConsultation) consultationFeature.requireEnabled()
                 require(queued.voiceCallKind !in setOf("archive", "restore")) { "旧归档队列项不再执行，请在通话记录中独立整理。" }
@@ -3761,7 +3864,7 @@ class ChatService(
                     if (queued.voiceCallKind == "visual" && session.messageQueue.state.value.paused)
                         throw MessageQueuePausedException()
                     check(!answer || completed) { context.getString(R.string.chat_page_voice_generation_failed) }
-                    check(!session.messageQueue.state.value.paused) { context.getString(R.string.chat_page_voice_generation_failed) }
+                    check(queued.boundaryRecoveryRevision != null || kotlin.coroutines.coroutineContext[BoundaryWakePermit] != null || !session.messageQueue.state.value.paused) { context.getString(R.string.chat_page_voice_generation_failed) }
                     check(messages.none { message -> message.parts.any { it is UIMessagePart.Tool && it.isPending } }) {
                         context.getString(R.string.chat_page_voice_tool_approval)
                     }
@@ -3772,9 +3875,10 @@ class ChatService(
                 })
                 // Voice owns playback, including when its observer has already left the page.
                 // The ordinary autoplay collector must not read a late voice reply again.
-                if (queued.reply == null) notifyGenerationDone(session, completed)
+                if (queued.reply == null || queued.boundaryRecoveryRevision != null) notifyGenerationDone(session, completed)
             } catch (e: Exception) {
                 if (e !is CancellationException && !generationAttempted && queued.orbisEventId == null &&
+                    queued.boundaryRecoveryRevision == null &&
                     (queued.voiceCallId == null && queued.voiceCallKind == null ||
                         queued.voiceCallKind == "turn" && liveVoiceContexts.containsKey(queued.voiceCallId)) &&
                     !session.state.value.isConsultation) {
@@ -3818,7 +3922,7 @@ class ChatService(
                 }
                 // Failed preflight has not submitted a model/tool or attempted a history write.
                 // Keep exactly this human input; never requeue a possibly committed or dispatched turn.
-                if (queued.orbisEventId == null && !eventInputCommitted && !inputSaveAttempted &&
+                if (queued.orbisEventId == null && queued.boundaryRecoveryRevision == null && !eventInputCommitted && !inputSaveAttempted &&
                     queued.voiceCallKind !in setOf("archive", "restore", "visual") && e !is CancellationException) {
                     synchronized(session) { session.messageQueue.retainUndispatched(queued) }
                 }
@@ -3856,7 +3960,7 @@ class ChatService(
             queued.freshHumanInputPermit?.completed = true
             voiceGenerationJobs.remove(queued.id, job)
             if (cause != null && !bodyEntered.get() && queued.orbisEventId == null &&
-                queued.voiceCallId == null) synchronized(session) {
+                queued.voiceCallId == null && queued.boundaryRecoveryRevision == null) synchronized(session) {
                 session.messageQueue.retainUndispatched(queued)
             }
             if (cause != null && !bodyEntered.get() && queued.orbisEventId != null) {
@@ -3882,6 +3986,12 @@ class ChatService(
             else if (cause != null) queued.reply?.completeExceptionally(cause)
             synchronized(session) {
                 if (session.submittingMessage?.id == queued.id) session.submittingMessage = null
+            }
+            queued.boundaryRecoveryRevision?.let { revision ->
+                queued.boundaryRecoveryAssistantId?.let { owner ->
+                    runCatching { boundaryHost.finishRecovery(owner.toString(), conversationId.toString(), revision) }
+                        .onFailure { Log.w(TAG, "Could not release completed boundary request claim", it) }
+                }
             }
         }
         if (queued.voiceCallKind in setOf("turn", "opening", "visual")) voiceGenerationJobs[queued.id] = job
@@ -3968,6 +4078,7 @@ class ChatService(
         regenerateAssistantMsg: Boolean = true
     ) = synchronized(getOrCreateSession(conversationId)) {
         val session = getOrCreateSession(conversationId)
+        if (boundaryPaused(session) || boundaryModelDisabled(session)) return@synchronized
         if (session.state.value.isConsultation) consultationFeature.requireEnabled()
         if (needsHumanContinuation(session)) {
             if (message.role != MessageRole.USER && !regenerateAssistantMsg) {
@@ -4119,7 +4230,7 @@ class ChatService(
                         val settings = settingsStore.settingsFlow.first()
                         val assistant = settings.getAssistantById(conversation.assistantId)
                             ?: error("当前 AI 已不存在，未批准工具。")
-                        val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+                        val model = settings.findModelById(boundaryModelId(assistant, settings.chatModelId))
                             ?: error("未选中聊天模型。")
                         val definition = chatToolFactory.createTools(settings, assistant, model, conversation.workspaceCwd, conversationId.toString(),
                             voiceCallId = voiceBinding.callId, allowAmbientCallBinding = voiceBinding.allowAmbientCallBinding,
@@ -4240,7 +4351,7 @@ class ChatService(
                     val settings = settingsStore.settingsFlow.value
                     val configured = settings.getAssistantById(snapshot.assistantId) ?: error("当前 AI 不存在")
                     val assistant = voiceRecord?.modelId?.let { configured.copy(chatModelId = Uuid.parse(it)) } ?: configured
-                    val model = settings.findModelById(assistant.chatModelId ?: settings.chatModelId) ?: error("未选择模型")
+                    val model = settings.findModelById(boundaryModelId(assistant, settings.chatModelId)) ?: error("未选择模型")
                     val tools = withContext(Dispatchers.IO) {
                         chatToolFactory.createTools(settings, assistant, model, snapshot.workspaceCwd,
                             snapshot.id.toString(), voiceCallId = voiceRecord?.id, allowAmbientCallBinding = false,
@@ -4299,7 +4410,7 @@ class ChatService(
     ): Boolean {
         // Capture the actual invocation owner before any suspension. Reading the session job
         // only after failure could accidentally capture a replacement generation instead.
-        val invocationGenerationJob = kotlin.coroutines.coroutineContext[Job]
+        val invocationGenerationJob = kotlin.coroutines.coroutineContext[ChatGenerationOwner]?.job ?: kotlin.coroutines.coroutineContext[Job]
         expectedAssistantId?.let { requireGardenQuickChatTarget(conversationId, it) }
         val settings = settingsStore.settingsFlow.first()
         val initialSession = getOrCreateSession(conversationId)
@@ -4335,7 +4446,7 @@ class ChatService(
             customHeaders = boundAssistant.customHeaders.filterNot { it.name.lowercase() in sourceHeaders } + listOf(
                 CustomHeader("X-ST-Source-Kind", consultationTurn.sourceKind),
                 CustomHeader("X-Request-ID", consultationTurn.requestId)))
-        val selectedModel = settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
+        val selectedModel = settings.findModelById(boundaryModelId(assistant, settings.chatModelId))
             ?: throw IllegalStateException("No chat model selected")
         val model = if (consultationTurn == null) selectedModel else selectedModel.copy(
             customHeaders = selectedModel.customHeaders.filterNot { it.name.lowercase() in sourceHeaders })
@@ -4475,8 +4586,10 @@ class ChatService(
             val compaction = if (messageRange == null) createCompactionControl(conversationId,
                 assistant.compactionThresholdTokens, captureLocalMemory = consultationTurn == null) else null
 
+            val wakePermit = kotlin.coroutines.coroutineContext[BoundaryWakePermit]
+            val recoveryRevision = freshHumanInput?.boundaryRecoveryRevision
             val tools = try {
-                me.rerere.rikkahub.data.ai.tools.conversationToolSet(inputMessages, compaction,
+                val normalTools = me.rerere.rikkahub.data.ai.tools.conversationToolSet(inputMessages, compaction,
                     omitLocalMemory = consultationTurn != null) { sourceIds ->
                 chatToolFactory.createTools(
                     settings = settings,
@@ -4487,9 +4600,19 @@ class ChatService(
                     voiceCallId = voiceCallId,
                     allowAmbientCallBinding = allowAmbientCallBinding,
                     imageSourceMessageIds = sourceIds,
+                    boundaryPauseAllowed = {
+                        (recoveryRevision != null && boundaryHost.recoveryPending(assistant.id.toString(), conversationId.toString(), recoveryRevision)) ||
+                            boundaryHost.permitsWake(wakePermit, assistant.id.toString(), conversationId.toString())
+                    },
                     recallOwnMessage = { recallAiMessage(conversationId, assistant.id, it) },
                 )
                 }
+                if (recoveryRevision == null) normalTools else normalTools.filterNot {
+                    it.name == me.rerere.rikkahub.data.orbis.boundary.BOUNDARY_TOOL
+                } + me.rerere.rikkahub.data.ai.tools.createBoundaryRecoveryTool(
+                    boundaryHost, assistant.id.toString(), conversationId.toString(), recoveryRevision,
+                    bindingCurrent = { sessions[conversationId]?.state?.value?.assistantId == assistant.id },
+                    verifyConversation = { conversationRepo.getConversationById(conversationId)?.assistantId == assistant.id })
             } catch (error: InvalidMcpServerNamesException) {
                 sessions[conversationId]?.messageQueue?.pause()
                 // Do not nonlocally return out of runCatching: an approval continuation may
@@ -4544,6 +4667,8 @@ class ChatService(
                 },
                 assistant = assistant,
                 conversationId = conversationId,
+                boundaryRecoveryRevision = freshHumanInput?.boundaryRecoveryRevision,
+                boundaryWakePermit = wakePermit,
                 conversationSystemPrompt = conversation.customSystemPrompt,
                 orbisPrompt = conversation.orbisPrompt,
                 conversationModeInjectionIds = conversation.modeInjectionIds,
@@ -5056,7 +5181,7 @@ class ChatService(
         conversationId: Uuid,
         conversation: Conversation,
         force: Boolean = false
-    ) = withContext(Dispatchers.IO) {
+    ) = withContext(Dispatchers.IO + boundaryHost.requestContext(conversation.assistantId.toString(), conversationId.toString())) {
         // This is a model-generated title, not the separate human title-edit operation.
         if (!derivedModelRequestsAllowed(conversation)) return@withContext
         val shouldGenerate = when {
@@ -5113,7 +5238,7 @@ class ChatService(
     suspend fun generateSuggestion(
         conversationId: Uuid,
         conversation: Conversation,
-    ) = withContext(Dispatchers.IO) {
+    ) = withContext(Dispatchers.IO + boundaryHost.requestContext(conversation.assistantId.toString(), conversationId.toString())) {
         runCatching {
             if (conversation.id != conversationId) return@runCatching
             if (!derivedModelRequestsAllowed(conversation)) return@runCatching
@@ -5478,7 +5603,8 @@ class ChatService(
         val provider = model.findProvider(settings.providers)
             ?: throw IllegalStateException("Provider not found")
 
-        val providerHandler = providerManager.getProviderByType(provider)
+        val providerHandler = providerManager.getProviderByType(provider,
+            boundaryHost.requestContext(conversation.assistantId.toString(), conversationId.toString()).check)
 
         val maxMessagesPerChunk = 256
         val allMessages = conversation.currentMessages
@@ -5881,7 +6007,7 @@ class ChatService(
                     settings = settings,
                     sourceText = messageText,
                     targetLanguage = targetLanguage
-                ).collect { translatedText ->
+                ).flowOn(boundaryHost.requestContext(getOrCreateSession(conversationId).state.value.assistantId.toString(), conversationId.toString())).collect { translatedText ->
                     // The suspending collector can guard each update; the provider callback cannot.
                     updateTranslationField(conversationId, message, publishedTranslation, translatedText)
                     publishedTranslation = translatedText

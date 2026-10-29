@@ -82,6 +82,7 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): TextGenerationResult = withContext(Dispatchers.IO) {
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,
@@ -121,6 +122,7 @@ class ResponseAPI(
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<StreamChunk> = callbackFlow {
+        me.rerere.ai.provider.requireModelAccess(params.model)
         val requestBody = buildRequestBody(
             providerSetting = providerSetting,
             messages = messages,

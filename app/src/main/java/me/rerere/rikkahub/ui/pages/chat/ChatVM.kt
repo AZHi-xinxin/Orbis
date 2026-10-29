@@ -85,6 +85,7 @@ class ChatVM(
     private val favoriteRepository: FavoriteRepository,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
+    suspend fun requestBoundaryResume(revision: Long, text: String) = chatService.requestBoundaryResume(_conversationId, revision, text)
     val conversation: StateFlow<Conversation> = chatService.getDisplayedConversationFlow(_conversationId)
     val humanContinuationNotice = chatService.getHumanContinuationNotice(_conversationId)
     val humanContinuationPersistenceWarning = chatService.getHumanContinuationPersistenceWarning(_conversationId)
@@ -298,8 +299,13 @@ class ChatVM(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     // 当前模型
-    val currentChatModel = combine(settings, conversation) { current, chat ->
-        conversationComposerScope(current, chat.assistantId)?.model
+    val currentChatModel = combine(settings, conversation, chatService.boundaryHost.states) { current, chat, states ->
+        val choice = states[chat.assistantId.toString()]
+        val override = choice?.takeIf { "model" in it.grants }?.modelOverride
+        (override?.let { runCatching { current.findModelById(Uuid.parse(it)) }.getOrNull() }
+            ?: conversationComposerScope(current, chat.assistantId)?.model)?.takeIf {
+                choice?.permits("model", it.id.toString()) != false
+            }
     }.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     // 错误状态

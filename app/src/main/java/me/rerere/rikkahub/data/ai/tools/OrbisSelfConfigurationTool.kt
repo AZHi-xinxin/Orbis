@@ -15,6 +15,8 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.orbis.integration.AiConfigurationChecks
 import me.rerere.rikkahub.data.orbis.integration.AiConfigurationRules
 import me.rerere.rikkahub.data.orbis.integration.AiWorkspacePreparation
+import me.rerere.rikkahub.data.orbis.integration.configurationInspection
+import me.rerere.rikkahub.data.orbis.integration.configurationMutationReceipt
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 
 internal fun orbisSelfConfigurationTool(store: SettingsStore, owner: String, context: Context, mcp: McpManager,
@@ -50,14 +52,7 @@ internal fun createOrbisSelfConfigurationTool(
     workspaceStatus: suspend () -> JsonObject = { error("workspace_preparation_unavailable") },
 ) = Tool(
     name = "orbis_configure",
-    description = """管理自己的原生配置，无需人类替你填非秘密字段。inspect列提供方/模型/TTS/MCP的ID、当前选择及记忆模式，不返回密钥。
-register_model(provider_id,model,name可选,model_type=chat/image/embedding,supports_tools可选)：在已有API连接登记型号，复用原凭据。新地址用orbis_propose_connection：model_openai、tts_openai、mcp_http或mcp_sse，人类只填必要key；无key的MCP自动保存关闭，人类只需开启。
-select_model(role=chat/fast/translation/ocr/compression/image/voice_archive/voice_archive_fallback,id)：选择现有型号。chat仅当前助手；其余工具型号为应用共享设置。select_tts(id)选择全局TTS。update_tts(id,model和/或voice)调整已有原生TTS，保留key/地址/语音台；voice对应音色/参考音色/speaker，豆包model为resourceId。tts_from_provider(provider_id,model,voice,name)从同地址的单key OpenAI兼容API建立TTS，不传key。
-memory(mode=light/standard/independent,auto_inject=true/false,semantic_recall可选)：当前助手本地记忆；semantic_recall省略保留原值，不删除或唤醒暂停记忆。
-check(kind=model/tts/mcp,id)：后台发极短真实合成测试，可能产生少量费用；没有私人聊天、播放或通话操作。check_status读本助手测试回执。queued仅排队，继续回复，无需轮询等候。失败回执可据此修正配置再试；检测不等于完整功能验收。
-st_atlas_connect(provider_id)：用已配置ST的API向同服务器申请只读星图，要求该ST支持星图接入协议。已有同源待确认授权原样重试，不重新登记。st_atlas_status读结果。ST作为聊天API可用model_openai；ST MCP用连接建议。仅本地记忆无需ST。
-workspace_status：只读检查本助手工作区、Rootfs实际存在和Shell状态，返回人类逐步按钮路径；安装ST前先查，不需要审批。指南按需查询orbis_help(topic=guide,chapter=st_install)及workspace_setup，不自动注入全文。
-workspace_prepare：创建并绑定当前助手的默认本机文件工作区；已有绑定则复用，重建缺失目录不会恢复旧文件，不下载Linux。成功后可在本轮用workspace_write_file写/workspace/内的配置，并用orbis_backup(inspect/bind/check/save_now/status/restore_latest)备份或恢复；先inspect获得哈希，不要读取并复述凭据文件。配置修改/付费检查首次可选以后允许；不提交密钥，不修改别的助手的对话模型。""",
+    description = me.rerere.rikkahub.data.ai.tools.orbisToolFullDescription("orbis_configure"),
     parameters = { InputSchema.Obj(properties = buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf(
             "inspect", "register_model", "select_model", "select_tts", "update_tts", "tts_from_provider",
@@ -66,6 +61,10 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
             put(it, buildJsonObject { put("type", "string") })
         }
         listOf("supports_tools", "auto_inject", "semantic_recall").forEach { put(it, buildJsonObject { put("type", "boolean") }) }
+        put("section", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("current", "providers", "models", "tts", "mcp").map(::JsonPrimitive))); put("description", "inspect only; default current. Catalogues are paginated.") })
+        put("query", buildJsonObject { put("type", "string"); put("maxLength", 120); put("description", "inspect catalogue name or ID filter; models can also use provider_id.") })
+        put("offset", buildJsonObject { put("type", "integer"); put("minimum", 0) })
+        put("limit", buildJsonObject { put("type", "integer"); put("minimum", 1); put("maximum", 20); put("description", "inspect page size; default 10.") })
     }, required = listOf("action")) },
     needsApproval = { it.jsonObject["action"]?.jsonPrimitive?.content !in setOf("inspect", "check_status", "st_atlas_status", "workspace_status") },
     hostApproval = HostToolApproval("orbis:configure:$owner", "native-configuration-v2",
@@ -74,7 +73,7 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
     execute = { args ->
         val result = try { withContext(Dispatchers.IO) {
             val a = args.jsonObject
-            require(a.keys.all { it in setOf("action", "id", "provider_id", "model", "name", "model_type", "role", "voice", "mode", "kind", "supports_tools", "auto_inject", "semantic_recall") }) { "unknown_field" }
+            require(a.keys.all { it in setOf("action", "id", "provider_id", "model", "name", "model_type", "role", "voice", "mode", "kind", "supports_tools", "auto_inject", "semantic_recall", "section", "query", "offset", "limit") }) { "unknown_field" }
             fun text(key: String, default: String? = null): String =
                 a[key]?.let { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content ?: error("invalid_field") }
                     ?: default ?: error("required_field")
@@ -83,7 +82,8 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
             } ?: default
             AiConfigurationRules.requireOwner(snapshot(), owner)
             val action = text("action")
-            if (action == "inspect") AiConfigurationRules.inspect(snapshot(), owner)
+            require(action == "inspect" || a.keys.none { it in setOf("section", "query", "offset", "limit") }) { "unknown_field" }
+            if (action == "inspect") configurationInspection(snapshot(), owner, a)
             else if (action == "workspace_status") {
                 require(a.keys == setOf("action")) { "unknown_field" }
                 workspaceStatus()
@@ -114,10 +114,7 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
                     saved = next
                     next
                 }) { "save_failed" }
-                buildJsonObject {
-                    put("ok", true); put("status", "saved"); put("connection_verified", false)
-                    put("configuration", AiConfigurationRules.inspect(checkNotNull(saved), owner))
-                }
+                configurationMutationReceipt(checkNotNull(saved), owner, action, a)
             }
         } } catch (e: CancellationException) { throw e
         } catch (e: Exception) { buildJsonObject {
@@ -129,8 +126,15 @@ workspace_prepare：创建并绑定当前助手的默认本机文件工作区；
                 "openai_provider_required", "provider_not_reusable", "single_key_required", "invalid_memory_mode", "missing_change",
                 "invalid_tts_value", "tts_has_no_model_field", "system_tts_uses_system_voice", "unknown_field", "invalid_field",
                 "required_field", "unknown_action", "save_failed", "changed_in_settings", "workspace_missing",
-                "workspace_in_use", "workspace_binding_changed", "workspace_preparation_unavailable") } ?: "invalid_configuration")
-            put("help", "先inspect核对当前ID和设置；新服务用orbis_propose_connection，人类在原生页填必要key。")
+                "workspace_in_use", "workspace_binding_changed", "workspace_preparation_unavailable",
+                "invalid_section", "invalid_page", "invalid_query", "invalid_catalog_filter") } ?: "invalid_configuration")
+            put("help", when (code) {
+                "invalid_section" -> "inspect的section为current/providers/models/tts/mcp。"
+                "invalid_page" -> "offset为非负整数，limit为1至20的整数。"
+                "invalid_query" -> "query最多120字符，不含控制字符。"
+                "invalid_catalog_filter" -> "provider_id筛选仅用于inspect section=models；current不接收目录筛选或分页。"
+                else -> "inspect核对当前设置，section分目录查ID；完整参数查orbis_help(topic=tool,tool_name=orbis_configure)。"
+            })
         } }
         listOf(UIMessagePart.Text(result.toString()))
     },
