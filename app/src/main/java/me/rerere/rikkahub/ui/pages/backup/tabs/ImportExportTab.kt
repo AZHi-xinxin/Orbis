@@ -58,6 +58,11 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
     val polarisState by vm.polarisImport.state.collectAsStateWithLifecycle()
     val claudeState by vm.claudeImport.state.collectAsStateWithLifecycle()
     val chatGptState by vm.chatGptImport.state.collectAsStateWithLifecycle()
+    val universalState by vm.universalImport.state.collectAsStateWithLifecycle()
+    var universalGuide by remember { mutableStateOf(false) }
+    val openUniversal = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.universalImport.preview(uri)
+    }
     val rikkaState by vm.rikkaImportState.collectAsStateWithLifecycle()
     val openChatGpt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.chatGptImport.preview(uri)
@@ -139,6 +144,14 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         if (rikkaState.storageWarning) item {
             Text("本机导入回执未确认保存，重新打开后显示的计数可能不完整；已导入的聊天不会因此撤销。可重新选择原包，已有窗口会跳过。", fontSize = 12.sp)
         }
+        item { LocalCard {
+            Text("通用聊天记录", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("把其他前端的记录整理为 Orbis 通用 JSON，先预览、再选择会话追加。这里提供格式说明、示例，以及可复制给其他 AI 的转换提示词。", fontSize = 12.sp, lineHeight = 19.sp)
+            TextButton(onClick = { universalGuide = true }) { Text("格式说明与转换提示词") }
+            TextButton(enabled = !busy && !universalState.busy, onClick = {
+                openUniversal.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+            }) { Text("选择通用 JSON") }
+        } }
         item { BackupCard("ChatGPT 聊天记录", "选择官方导出包解压后的 conversations.json 或 conversations-NNN.json，分片逐个选择。先预览并选择完整路径，各分支另建窗口；全选保留全部可见分支，公共前文会重复。不导入系统设置，历史工具仅作文字，媒体仅留未恢复说明，不下载附件。请保留全部原始资料。", !busy && !chatGptState.busy, "选择 ChatGPT JSON") {
             openChatGpt.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }
@@ -188,6 +201,8 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
             }) }, confirmButton = { TextButton(onClick = { action = kind; confirm = null; open.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text("选择文件") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("取消") } })
     }
+    if (universalGuide) UniversalImportGuideDialog { universalGuide = false }
+    DeepSeekImportDialogs(vm.universalImport, universalState)
     DeepSeekImportDialogs(vm.deepSeekImport, deepSeekState)
     DeepSeekImportDialogs(vm.operitImport, operitState)
     DeepSeekImportDialogs(vm.kelivoImport, kelivoState)

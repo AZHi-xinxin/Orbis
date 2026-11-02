@@ -18,8 +18,8 @@ class OrbisGenerationParametersTest {
         assertEquals(before, Json.decodeFromString<OrbisGenerationParameters>(Json.encodeToString(before)))
     }
 
-    @Test fun `all six changed fields merge into current assistant`() {
-        val after = OrbisGenerationParameters(1.5f, 0.4f, 60, false, 2048, ReasoningLevel.HIGH)
+    @Test fun `all seven changed fields merge into current assistant`() {
+        val after = OrbisGenerationParameters(1.5f, 0.4f, 60, false, 2048, ReasoningLevel.HIGH, false)
         val saved = OrbisGenerationParameterEdit(original.id, before, after).mergeInto(original)
         assertEquals(after, OrbisGenerationParameters.from(saved))
         assertEquals(original.id, saved.id)
@@ -28,7 +28,7 @@ class OrbisGenerationParametersTest {
     @Test fun `merge preserves unrelated concurrent fields and untouched parameters`() {
         val latest = original.copy(name = "edited elsewhere", systemPrompt = "latest prompt",
             background = "synthetic background", workspaceId = Uuid.random(), topP = 0.6f,
-            maxTokens = 900, reasoningLevel = ReasoningLevel.MAX)
+            maxTokens = 900, reasoningLevel = ReasoningLevel.MAX, sendHistoryImages = false)
         val saved = OrbisGenerationParameterEdit(original.id, before, before.copy(temperature = 1f)).mergeInto(latest)
         assertEquals(latest.copy(temperature = 1f), saved)
     }

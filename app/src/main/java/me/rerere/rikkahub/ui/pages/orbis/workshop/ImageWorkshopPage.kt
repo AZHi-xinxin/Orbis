@@ -25,6 +25,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.providers.openai.NovelAiImageApi
 import me.rerere.rikkahub.data.orbis.workshop.*
 import me.rerere.rikkahub.ui.pages.orbis.orbisWorkshopAssistant
 import org.koin.compose.koinInject
@@ -74,12 +78,24 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
         ImageWorkshop.supports(it.providerOverwrite ?: provider, it)
     }.map { it.id.toString() to workshopMakerLabel(provider, it) } }
     var expanded by remember { mutableStateOf(false) }
+    var novelAiDialog by remember { mutableStateOf(false) }
+    val selectedModel = runCatching { settings.findModelById(kotlin.uuid.Uuid.parse(modelId)) }.getOrNull()
+    val selectedProvider = selectedModel?.findProvider(settings.providers)
+    val nativeNai = selectedProvider?.let(NovelAiImageApi::isConnection) == true
+    val preciseSupported = nativeNai && selectedModel?.modelId == NovelAiImageApi.MODEL
+    val referenceLimit = if (nativeNai) 1 else 4
+    val kitSupported = selectedProvider?.let(ImageWorkshop::supportsWidgetKit) ?: false
+    var referenceMode by rememberSaveable(owner) { mutableStateOf("img2img") }
+    var referenceStrength by rememberSaveable(owner) { mutableFloatStateOf(0.6f) }
+    LaunchedEffect(preciseSupported) { if (!preciseSupported) referenceMode = "img2img" }
+    val editingSupported = selectedProvider?.let(ImageWorkshop::supportsEditing) ?: true
     LaunchedEffect(makers.isEmpty()) { if (makers.isEmpty()) expanded = false }
     var references by rememberSaveable(owner) { mutableStateOf(emptyList<String>()) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var kitDialog by remember { mutableStateOf(false) }
     var retry by remember { mutableStateOf<WorkshopJob?>(null) }
+    var deletion by remember { mutableStateOf<Pair<WorkshopJob, String?>?>(null) }
     var exportAssetJson by rememberSaveable(owner) { mutableStateOf<String?>(null) }
     var exportAssetsJson by rememberSaveable(owner) { mutableStateOf<String?>(null) }
     var showAll by remember { mutableStateOf(false) }
@@ -117,12 +133,13 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
     }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         launchTask {
-            val imported = withContext(Dispatchers.IO) { uris.take((4 - references.size).coerceAtLeast(0)).map { workshop.importReference(it).file } }
-            references = (references + imported).distinct().take(4)
+            val imported = withContext(Dispatchers.IO) { uris.take((referenceLimit - references.size).coerceAtLeast(0)).map { workshop.importReference(it).file } }
+            references = (references + imported).distinct()
         }
     }
     fun submit(kit: Boolean) = launchTask {
-        val accepted = workshop.submit(owner, conversationId, false, modelId, prompt, kit, references, requestId)
+        val accepted = workshop.submit(owner, conversationId, false, modelId, prompt, kit, references, requestId,
+            notifyConversation = false, referenceMode = referenceMode, referenceStrength = referenceStrength.toDouble())
         notice = if (accepted.error == "workshop_schedule_pending") "任务已保存，正在等待后台调度。无需重复提交，下次启动会继续安排。"
             else "已交给后台制作，可以离开本页继续聊天。"
         prompt = ""; references = emptyList(); requestId = UUID.randomUUID().toString()
@@ -137,7 +154,7 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
                 Text("把想象交给工坊", style = MaterialTheme.typography.headlineSmall)
-                Text("你和伙伴都能创作。制作在后台进行，原图保存在这里。", style = MaterialTheme.typography.bodyMedium)
+                Text("你手动生成、修改或重做的作品只留在工坊，伙伴无法通过工坊工具查看；只有伙伴自己调用工具的作品才会送到聊天。", style = MaterialTheme.typography.bodyMedium)
                 Text("工坊原图暂不包含在常规聊天备份中。重要作品请使用下方“导出原图”或“打包导出全部原图”另存。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }
             notice?.let { message -> item { Card { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -162,7 +179,9 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                     if (makers.isEmpty()) Text("请先点下方“添加 / 管理生图 AI 和密钥”配置图片接口，再回到这里选择制作者。不会自动新增或选择付费接口。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     TextButton(onClick = onConfigureProviders) { Text("添加 / 管理生图 AI 和密钥") }
-                    Text("支持多个 OpenAI 兼容生图接口，及可输出图片的 Gemini 模型。请在模型配置中设为图片模型；密钥只在提供方配置中管理。", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { novelAiDialog = true }, enabled = !busy) { Text("连接 NovelAI") }
+                    Text("支持 NovelAI 官方文生图、图生图、OpenAI 兼容生图接口，以及可输出图片的 Gemini 模型。密钥在连接配置中管理。", style = MaterialTheme.typography.bodySmall)
+
                     Text("豆包生图请选 Seedream（例如 doubao-seedream-4-0-20260415）；Seedance 是视频模型，不能在这里生图。请核对完整模型 ID 和版本日期：旧版本即使仍列在模型列表中，也可能已停止新开通或不可调用。方舟连接使用 OpenAI 兼容格式，Base URL 填 https://ark.cn-beijing.volces.com/api/v3，不要把 /images/generations 拼进 Base URL。工坊会自行选用图片路径，不使用聊天 API 路径。先在方舟开通对应图片模型，再在连接的“模型”页添加；已有 Seedream 4/5 会在工坊自动识别。", style = MaterialTheme.typography.bodySmall)
                     Text(WORKSHOP_ACCESS_NOTICE, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary)
@@ -174,11 +193,15 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                             TextButton(onClick = { references = references - file }) { Text("移除") }
                         } }
                     }
-                    TextButton(onClick = { pick.launch(arrayOf("image/png", "image/jpeg", "image/webp")) }, enabled = references.size < 4 && !busy) { Text("添加参考图 / 修改图片（最多 4 张）") }
-                    Button(onClick = { submit(false) }, enabled = !busy && prompt.isNotBlank() && makers.any { it.first == modelId }, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { pick.launch(arrayOf("image/png", "image/jpeg", "image/webp")) }, enabled = editingSupported && references.size < referenceLimit && !busy) { Text("添加参考图 / 修改图片（最多 $referenceLimit 张）") }
+                    if (references.size > referenceLimit) Text("当前模型只接受 $referenceLimit 张参考图，请移除多余图片。", color = MaterialTheme.colorScheme.error)
+                    if (nativeNai && references.isNotEmpty()) NovelAiReferenceControls(preciseSupported, referenceMode, referenceStrength, !busy,
+                        { referenceMode = it }, { referenceStrength = it })
+                    if (nativeNai && references.isEmpty()) Text("Opus 文生图：单张、至多 1024×1024 像素面积、至多 28 步可享对应免费额度；V5 另有持续恢复的用量限制。超出条件可能消耗 Anlas。", style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = { submit(false) }, enabled = !busy && prompt.isNotBlank() && makers.any { it.first == modelId } && (editingSupported || references.isEmpty()) && references.size <= referenceLimit, modifier = Modifier.fillMaxWidth()) {
                         Text(if (references.isEmpty()) "开始生图" else "按描述修改参考图")
                     }
-                    OutlinedButton(onClick = { kitDialog = true }, enabled = !busy && prompt.isNotBlank() && makers.any { it.first == modelId }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { kitDialog = true }, enabled = kitSupported && !busy && prompt.isNotBlank() && makers.any { it.first == modelId }, modifier = Modifier.fillMaxWidth()) {
                         Text("生成小部件所需图片")
                     }
                     Text("Q 版套组：7 个动作 + 7 种表情，独立透明素材。真实透明效果取决于所选模型，成图后会检查并提示；不会把棋盘背景当作透明。", style = MaterialTheme.typography.bodySmall)
@@ -196,7 +219,7 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                 } }
             }
             item { Text("制作记录", style = MaterialTheme.typography.titleLarge) }
-            val ownedJobs = state.jobs.filter { it.assistantId == owner }.asReversed()
+            val ownedJobs = state.jobs.filter { it.assistantId == owner && !it.deleted }.asReversed()
             items(if (showAll) ownedJobs else ownedJobs.take(20), key = { it.id }) { job ->
                 Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("${if (job.byAi) "伙伴创作" else "我的创作"} · ${workshopStatus(job.status)}", style = MaterialTheme.typography.titleMedium)
@@ -209,30 +232,52 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                             Text(asset.label, maxLines = 1, style = MaterialTheme.typography.labelSmall)
                             if (job.widgetKit && !asset.transparent) Text("未检测到透明背景", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                             TextButton(onClick = { exportAssetJson = Json.encodeToString(asset); export.launch("${asset.label}.${asset.file.substringAfterLast('.')}") }, enabled = !busy) { Text("导出原图") }
-                            TextButton(onClick = { references = listOf(asset.file); notice = "已作为参考图，请在上方填写修改要求。" }) { Text("继续修改") }
+                            TextButton(onClick = { references = listOf(asset.file); notice = "已作为参考图，请在上方填写修改要求。新图只保存在工坊。" }) { Text("继续修改") }
+                            TextButton(onClick = { deletion = job to asset.file }, enabled = !busy && job.status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING)) { Text("删除图片") }
                         } }
                     }
+                    TextButton(onClick = { deletion = job to null }, enabled = !busy && job.status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING)) { Text("删除记录") }
                     if (job.assets.size > 1) TextButton(onClick = { exportAssetsJson = Json.encodeToString(job.assets); exportZip.launch("orbis-images-${job.id.take(8)}.zip") }, enabled = !busy) { Text("打包导出全部原图") }
                     if (job.status in setOf(WorkshopStatus.FAILED, WorkshopStatus.INTERRUPTED)) TextButton(onClick = { retry = job }, enabled = !busy) { Text("重新制作（会再次调用接口）") }
                     if (job.status == WorkshopStatus.QUEUED) TextButton(onClick = { launchTask {
                         withContext(Dispatchers.IO) { workshop.ledger.update(job.id) { if (it.status == WorkshopStatus.QUEUED) it.copy(status = WorkshopStatus.CANCELLED) else it } }
                     } }) { Text("取消排队") }
-                    if (job.status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING) && job.notifyConversation && !job.delivered) TextButton(onClick = { launchTask { workshop.deliver(job); notice = "已尝试投递原对话；不会重新生图。" } }) { Text("重投结果通知（不重新生图）") }
+                    if (job.status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING) && job.canNotifyConversation() && !job.delivered) TextButton(onClick = { launchTask { workshop.deliver(job); notice = "已尝试投递原对话；不会重新生图。" } }) { Text("重投结果通知（不重新生图）") }
                 } }
             }
             if (ownedJobs.isEmpty()) item { Text("还没有作品，第一张从你的描述开始。") }
             if (!showAll && ownedJobs.size > 20) item { TextButton(onClick = { showAll = true }) { Text("显示全部记录") } }
         }
     }
+    deletion?.let { (job, file) -> WorkshopDeleteDialog(file != null,
+        onDismiss = { deletion = null }, onConfirm = {
+            deletion = null
+            launchTask {
+                withContext(Dispatchers.IO) { workshop.delete(job.id, owner, file) }
+                references = references.filterNot { name -> if (file != null) name == file else job.assets.any { it.file == name } }
+                notice = "已从工坊删除。已发送到聊天的图片保留；删除不会触发重新制作。"
+            }
+        }) }
+    if (novelAiDialog) NovelAiConnectionDialog(
+        existing = settings.providers.filterIsInstance<ProviderSetting.OpenAI>().firstOrNull(NovelAiImageApi::isConnection),
+        busy = busy, onDismiss = { novelAiDialog = false }, onSave = { provider, modelId -> launchTask {
+            settingsStore.update { current ->
+                current.copy(providers = current.providers.filterNot { it.id == provider.id } + provider)
+            }
+            val selected = provider.models.first { it.modelId == modelId }.id.toString()
+            withContext(Dispatchers.IO) { workshop.ledger.preferences(defaultModel = selected) }
+            chosen = selected; novelAiDialog = false
+            notice = "NovelAI 连接已保存，已选为工坊制作者。"
+        } })
     if (kitDialog) AlertDialog(onDismissRequest = { kitDialog = false }, title = { Text("制作整套小部件素材") },
         text = { Text("将把你填写的外貌与内置提示词组合，依次请求 14 张原图（7 个动作、7 种表情），会多次调用所选服务并按所选接口计费。会使用首张成图保持人物一致；接口须支持改图。可以离开本页，后台继续制作。") },
         confirmButton = { TextButton(onClick = { kitDialog = false; submit(true) }) { Text("开始整套制作") } },
         dismissButton = { TextButton(onClick = { kitDialog = false }) { Text("取消") } })
     retry?.let { old -> AlertDialog(onDismissRequest = { retry = null }, title = { Text("确认重新制作？") },
-        text = { Text("上次请求可能已被接口计费，重新制作会发起新的请求。已有原图不会删除。") },
+        text = { Text("上次请求可能已被接口计费，重新制作会发起新的请求。已有原图保留，新图只存在工坊，不通知伙伴。") },
         confirmButton = { TextButton(onClick = { retry = null; launchTask {
             workshop.submit(old.assistantId, old.conversationId, false, old.modelId, old.prompt, old.widgetKit, old.references,
-                "retry-${old.id}", notifyConversation = old.notifyConversation)
+                "retry-${old.id}", notifyConversation = false, referenceMode = old.referenceMode, referenceStrength = old.referenceStrength)
             notice = "重做任务已接收。对同一记录重复点击不会重复制作；若重做仍失败，请在新的记录中确认重试。"
         } }) { Text("确认重新制作") } }, dismissButton = { TextButton(onClick = { retry = null }) { Text("取消") } }) }
 }
@@ -242,10 +287,20 @@ private fun workshopStatus(status: WorkshopStatus) = when (status) {
     WorkshopStatus.FAILED -> "制作未完成"; WorkshopStatus.INTERRUPTED -> "已中断，未自动重试"; WorkshopStatus.CANCELLED -> "已取消"
 }
 private fun workshopError(code: String?) = when (code) {
+    "workshop_delete_busy" -> "图片仍在排队或制作中，请先取消排队或等制作结束再删除。"
+    "workshop_deleted" -> "这条制作记录已删除，不会重新提交或计费。"
+    "workshop_request_deleted" -> "这次提交用了已删除作品的旧编号，并非图片过期；本次未请求生图接口。新的创作需使用新编号。"
+    "workshop_single_reference_only" -> "NovelAI 每次只能使用一张参考图，请移除多余图片。"
+    "workshop_reference_mode" -> "当前模型不支持所选参考方式。V5 请用原图重绘；角色与画风精确参考请选择 NAI 4.5。"
+    "workshop_reference", "workshop_reference_local_required" -> "参考图暂时无法读取，请重新添加本地图片。"
+    "workshop_widget_kit_unsupported" -> "这个模型暂不支持小部件套图，请改用单张生成。"
+    "workshop_text_to_image_only" -> "此制作者当前支持文生图，请移除参考图并选择单张制作。"
+    "workshop_novelai_parameters" -> "NovelAI 参数不适用。支持 width/height（64的倍数）、steps（1–50）、scale（0–10）、seed、sampler 和 negative_prompt；每次生成一张。"
+    "workshop_image_credit" -> "NovelAI 生图点数不足，请查看账户 Anlas 余额。"
     "workshop_video_model" -> "Seedance 是视频模型，请改选已开通的 Seedream 图片模型。"
     "workshop_single_image_only", "workshop_seedream_parameters" -> "方舟图片接口当前每次制作一张。请移除 n、stream、组图或图层拆分等自定义参数后重试；不会自动重做。"
     "workshop_image_auth" -> "图片接口鉴权失败，请检查这个连接的 API Key；不要把 ChatGPT 套餐授权填在这里。"
-    "workshop_image_access", "workshop_image_model" -> "图片模型没有访问权限或不存在，请核对方舟已开通的 Seedream 模型 ID。模型列表可见不代表已开通。"
+    "workshop_image_access", "workshop_image_model" -> "图片模型没有访问权限或不存在，请核对所选服务的账号权益及模型 ID。"
     "workshop_image_limit" -> "图片接口达到用量或速率限制，请检查额度；没有自动重试。"
     "workshop_configuration_changed" -> "提供方配置已变化，未继续调用。请检查模型后重新提交。"
     "workshop_ai_disabled" -> "人类已关闭伙伴调用工坊。"

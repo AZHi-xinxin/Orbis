@@ -88,6 +88,8 @@ class ChatToolFactory(
         recallOwnMessage: (suspend (kotlin.uuid.Uuid) -> Boolean)? = null,
     ): List<Tool> = buildList {
         if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null) {
+            if (assistant.allowHumanThought) add(humanThoughtTool(assistant.id,
+                { settingsStore.settingsFlow.value }, { transform -> settingsStore.update(transform) }))
             if (settings.aiGlobalObservation) add(observationWindowsTool(
                 enabled = { settingsStore.settingsFlow.value.aiGlobalObservation &&
                     settingsStore.settingsFlow.value.getAssistantById(assistant.id) != null },
@@ -238,6 +240,24 @@ class ChatToolFactory(
             else imageConversationId?.let { conversationRepository.getConversationById(it) })
                 ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
         }
+        val presentChatImage: suspend (me.rerere.ai.ui.UIMessagePart.Image) -> List<me.rerere.ai.ui.UIMessagePart> = { image ->
+            val ctx = me.rerere.rikkahub.data.ai.transformers.TransformerContext(context, model, assistant, settings)
+            val message = me.rerere.ai.ui.UIMessage.user("").copy(parts = listOf(image))
+            if (me.rerere.ai.provider.Modality.IMAGE in model.inputModalities) listOf(image)
+            else if (image.url.startsWith("file:"))
+                me.rerere.rikkahub.data.ai.transformers.OcrTransformer.transform(ctx, listOf(message)).single().parts
+            else listOf(me.rerere.ai.ui.UIMessagePart.Text("当前模型不支持直接看图，且此图片无法使用本地识别；不要假定已看到。"))
+        }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && imageConversationId != null &&
+            !assistant.sendHistoryImages && imageSourceMessageIds != null) {
+            val current = readBoundConversation()
+            if (current != null) {
+                val scope = ChatImageReadScope.capture(current, imageSourceMessageIds)
+                add(createChatImageReadTool(scope, readBoundConversation,
+                    enabled = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)?.sendHistoryImages == false },
+                    present = presentChatImage))
+            }
+        }
         if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && imageConversationId != null) {
             add(createOrbisConversationHistoryTool(assistant.id, imageConversationId, readBoundConversation,
                 listRemoved = { current, limit, offset -> conversationRepository.listRemovedHistory(current, limit, offset) },
@@ -327,6 +347,10 @@ class ChatToolFactory(
                     add(me.rerere.rikkahub.data.orbis.desire.localDesireTool(context, assistant.id.toString(),
                         org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository>(),
                         { liveOwner()?.localTools?.contains(LocalToolOption.LocalDesire) == true }))
+                }
+                if (LocalToolOption.LocalMusic in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.music.musicTool(context, assistant.id.toString(), assistant.name.ifBlank { "AI" },
+                        { liveOwner()?.localTools?.contains(LocalToolOption.LocalMusic) == true }))
                 }
                 if (LocalToolOption.ThemeDesign in assistant.localTools) {
                     add(me.rerere.rikkahub.data.orbis.theme.themeTool(
@@ -455,7 +479,9 @@ class ChatToolFactory(
                 if (conversationId != null && runCatching {
                     me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).state.value.allowAi
                 }.getOrDefault(false)) add(createOrbisImageWorkshopTool(context, assistant.id.toString(), conversationId,
-                    onNewAccepted = onWorkshopAccepted))
+                    onNewAccepted = onWorkshopAccepted,
+                    chatImages = if (imageSourceMessageIds == null) null else readBoundConversation()?.let { ChatImageReadScope.capture(it, imageSourceMessageIds) },
+                    readChat = readBoundConversation, presentImage = presentChatImage))
                 addAll(createOrbisCompanionSpaceTools(context, assistant.id.toString()))
                 if (conversationId != null) addAll(createOrbisScreenShareTools(context, assistant.id.toString(), conversationId))
                 if (conversationId != null) addAll(createOrbisVideoCallTools(context, assistant.id.toString(),

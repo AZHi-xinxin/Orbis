@@ -15,7 +15,13 @@ internal val galleryJson = Json { encodeDefaults = true; ignoreUnknownKeys = fal
     val id: String, val title: String, val kind: String, val author: String, val createdAt: Long,
     val updatedAt: Long, val versions: List<GalleryVersion>, val deletedAt: Long? = null,
     val deletedBy: String? = null, val favorite: Boolean = false, val preview: String = "",
+    val pinned: Boolean = false,
 ) { val current get() = versions.last() }
+
+/** Shared by the native shelf and AI pagination; content dates stay unchanged by pinning. */
+internal val galleryItemOrder = compareByDescending<GalleryItem> { it.pinned }
+    .thenByDescending { it.updatedAt }.thenBy { it.id }
+
 @Serializable internal data class GalleryAnswerRef(val id: String, val itemId: String, val revision: Int, val actor: String, val createdAt: Long)
 @Serializable internal data class GalleryIndex(
     val version: Int = 1, val customName: String = "", val items: List<GalleryItem> = emptyList(),

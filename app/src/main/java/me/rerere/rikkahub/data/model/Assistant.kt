@@ -26,6 +26,8 @@ data class Assistant(
     val topP: Float? = null,
     // 上下文消息条数上限, 超出后阶梯式截断; 0 表示不限制
     val contextMessageLimit: Int = 0,
+    // Human controlled. Legacy profiles keep their existing image context behaviour.
+    val sendHistoryImages: Boolean = true,
     // Advisory only. Zero disables reminders; the host never generates a summary or compacts automatically.
     val compactionThresholdTokens: Int = 0,
     // Human-only opt-in; not an AI tool argument and never retroactively reconstructs originals.
@@ -48,6 +50,9 @@ data class Assistant(
     val orbisBodyEnabled: Boolean = false,
     val orbisBodyKeywordsEnabled: Boolean = false,
     val orbisModelContinuityEnabled: Boolean = true,
+    // Human grants access; the assistant independently opens/closes the composer mode.
+    val allowHumanThought: Boolean = false,
+    val humanThoughtEnabled: Boolean = false,
     val messageTemplate: String = "{{ message }}",
     val presetMessages: List<UIMessage> = emptyList(),
     val quickMessageIds: Set<Uuid> = emptySet(),

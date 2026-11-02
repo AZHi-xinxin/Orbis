@@ -85,7 +85,14 @@ class BackupVM(
         settings.value.assistantId
     }
 
+    val universalImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+        source = ChatArchiveSource.UNIVERSAL, assistantName = ::importAssistantName) {
+        check(!settings.value.init)
+        settings.value.assistantId
+    }
+
     override fun onCleared() {
+        universalImport.close()
         chatGptImport.close()
         claudeImport.close()
         polarisImport.close()

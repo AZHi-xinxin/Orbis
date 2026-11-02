@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.ai.ui.projectHumanThought
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -92,7 +94,7 @@ fun ChatMessageCopySheet(
 
             // Content
             val textParts =
-                message.privateRoomSafePresentation().parts.filterIsInstance<UIMessagePart.Text>().filter { it.text.isNotBlank() }
+                message.privateRoomSafePresentation().projectHumanThought().parts.filterIsInstance<UIMessagePart.Text>().filter { it.text.isNotBlank() }
 
             if (textParts.isEmpty()) {
                 // No text content available

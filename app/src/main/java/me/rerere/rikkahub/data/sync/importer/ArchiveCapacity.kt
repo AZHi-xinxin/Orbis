@@ -78,6 +78,7 @@ object ArchiveCapacity {
     }
 
     fun publicError(failure: Throwable): String = when (failure) {
+        is UniversalChatFormatException -> failure.message!!
         is RikkaChatReadException -> failure.message!!
         is ArchiveReadException -> failure.message!!
         is DeepSeekUnsupportedFragmentException -> failure.message!!

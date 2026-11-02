@@ -49,7 +49,7 @@ class HealthRecordsTest {
         fun args(action:String)=buildJsonObject{put("action",action);put("date","2026-10-24");put("expected_revision",0);put("source","manual");put("evidence","伪装");put("fields",buildJsonObject{put("steps",1)})}
         assertThrows(IllegalArgumentException::class.java){executeHealthTool(s,"owner",args("write"))}
         assertThrows(IllegalStateException::class.java){executeHealthTool(s,"owner",args("confirm"))}
-        assertThrows(IllegalStateException::class.java){validateHealthFields(mapOf("diagnosis" to JsonPrimitive("伪造")))}
+        assertThrows(HealthParameterError::class.java){validateHealthFields(mapOf("diagnosis" to JsonPrimitive("伪造")))}
         assertTrue(s.snapshot().days.isEmpty())
     }
     @Test fun localOcrParserUsesLabelsAndLeavesAmbiguousUnlabelledNumbersAlone(){

@@ -8,7 +8,12 @@ enum class CompanionSpaceSection(val title: String) { SECRET("秘密基地"), SO
 data class SpaceStory(
     val id: String, val title: String, val prompt: String, val body: String = "",
     val paper: String = "letter", val revision: Int = 1, val createdAt: Long, val updatedAt: Long,
+    val pinned: Boolean = false,
 )
+
+/** Keep native cards and AI pagination in the same order. */
+internal val spaceStoryOrder = compareByDescending<SpaceStory> { it.pinned }
+    .thenByDescending { it.updatedAt }.thenBy { it.id }
 
 @Serializable
 data class SpaceComment(

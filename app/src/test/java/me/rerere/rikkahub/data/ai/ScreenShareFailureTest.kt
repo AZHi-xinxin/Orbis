@@ -8,6 +8,18 @@ import org.junit.Test
 import java.io.IOException
 
 class ScreenShareFailureTest {
+    @Test fun `ocr failure before main request remains actionable without releasing unknown older requests`() {
+        val error = me.rerere.rikkahub.data.orbis.screenshare.ScreenShareRecognitionException()
+        assertSame(error, sanitizeScreenShareFailure(error))
+        assertTrue(error.message.orEmpty().contains("OCR"))
+        assertNull(error.cause)
+        val messages = listOf(me.rerere.ai.ui.UIMessage.user("question"))
+        assertTrue(me.rerere.rikkahub.service.canContinueAfterIndependentModelFailure(error, messages, messages, false))
+        val unknown = sanitizeScreenShareFailure(error, hadUnknownTransportFailure = true)
+        assertFalse(me.rerere.rikkahub.service.canContinueAfterIndependentModelFailure(unknown, messages, messages, false))
+        val pending = me.rerere.ai.ui.UIMessage.assistant("").copy(parts = listOf(me.rerere.ai.ui.UIMessagePart.Tool("id", "action", "{}")))
+        assertFalse(me.rerere.rikkahub.service.canContinueAfterIndependentModelFailure(error, messages, messages + pending, false))
+    }
     @Test fun `provider reflected image is removed while status and exact busy proof survive`() {
         val unsafe = HttpException("PRIVATE_IMAGE_data:image/jpeg;base64,abcdefghijklmnop", code = "PRIVATE_IMAGE",
             errorType = "PRIVATE_IMAGE", httpStatus = 409, rejectedParameter = "messages", gatewayBusyBeforeGeneration = true)

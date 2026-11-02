@@ -78,6 +78,12 @@ function renderContentPart(
 ) {
   switch (part.type) {
     case "text":
+      if (part.metadata?.orbis_human_thought === true) {
+        return <details className="my-2 text-sm text-muted-foreground">
+          <summary className="cursor-pointer py-2 select-none">思考链</summary>
+          <TextPart text={part.text.trim() ? part.text : "（为空）"} />
+        </details>;
+      }
       return <TextPart text={part.text} isAnimating={loading} onClickCitation={onClickCitation} />;
     case "image":
       return <ImagePart url={part.url} />;

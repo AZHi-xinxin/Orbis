@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.model
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.OrbisMessageQuote
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.isHumanThought
 
 /** Only the selected ordinary message in this already-open conversation can be quoted. */
 fun Conversation.quoteMessage(nodeId: kotlin.uuid.Uuid, messageId: kotlin.uuid.Uuid): OrbisMessageQuote {
@@ -15,7 +16,8 @@ fun Conversation.quoteMessage(nodeId: kotlin.uuid.Uuid, messageId: kotlin.uuid.U
         message.orbisEvent == null && message.orbisVoiceCallKind !in setOf("begin", "opening", "archive", "summary", "ended_notice")) {
         "只能引用自己或 AI 的普通正文。"
     }
-    val body = message.parts.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+    val body = message.parts.filterIsInstance<UIMessagePart.Text>().filterNot { it.isHumanThought() }
+        .joinToString("\n") { it.text }
     check(body.isNotBlank()) { "这条消息没有可引用的正文；思考和工具参数不会作为引用发送。" }
     check(body.length <= OrbisMessageQuote.MAX_BODY_CHARS) { "正文过长，无法整条引用；请选取需要的正文后复制到输入框。" }
     return OrbisMessageQuote(id, nodeId, message.id, message.role, body, message.createdAt.toString())

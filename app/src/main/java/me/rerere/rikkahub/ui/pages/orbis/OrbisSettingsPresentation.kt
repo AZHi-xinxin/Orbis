@@ -66,7 +66,7 @@ internal data class OrbisSpeechRules(
 internal fun orbisSettingsInitialItem(startAtMcp: Boolean): Int = if (startAtMcp) 1 else 0
 
 internal enum class OrbisToolGroup { WORK, PLAY }
-internal enum class OrbisToolDestination { WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER, PET, STUDY, BODY, HUMAN_HEALTH }
+internal enum class OrbisToolDestination { MUSIC, WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER, PET, STUDY, BODY, HUMAN_HEALTH }
 internal data class OrbisToolEntry(
     val destination: OrbisToolDestination,
     val group: OrbisToolGroup,
@@ -95,4 +95,5 @@ internal val orbisToolEntries = listOf(
     OrbisToolEntry(OrbisToolDestination.HUMAN_HEALTH, OrbisToolGroup.WORK, "♡", "人类记录", "睡眠、活动与每天的变化"),
     OrbisToolEntry(OrbisToolDestination.PET, OrbisToolGroup.PLAY, "♡", "宠物区", "共同领养与照料"),
     OrbisToolEntry(OrbisToolDestination.BODY, OrbisToolGroup.PLAY, "♡", "身体表达", "此刻的状态与身体记录"),
+    OrbisToolEntry(OrbisToolDestination.MUSIC, OrbisToolGroup.PLAY, "♫", "星河音乐", "本地曲库 · 一起听歌"),
 )

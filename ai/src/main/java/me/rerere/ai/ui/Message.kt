@@ -59,7 +59,7 @@ data class UIMessage(
     val isSynthetic: Boolean = false,
 ) {
     fun summaryAsText(maxLength: Int = Int.MAX_VALUE): String {
-        val text = "[${role.name}]: " + parts.joinToString(separator = "\n") { part ->
+        val text = "[${role.name}]: " + projectHumanThought().parts.joinToString(separator = "\n") { part ->
             when (part) {
                 is UIMessagePart.Text -> part.text
                 else -> ""
@@ -68,7 +68,7 @@ data class UIMessage(
         return if (text.length > maxLength) text.take(maxLength) + "..." else text
     }
 
-    fun toText() = parts.joinToString(separator = "\n") { part ->
+    fun toText() = projectHumanThought().parts.joinToString(separator = "\n") { part ->
         when (part) {
             is UIMessagePart.Text -> part.text
             else -> ""

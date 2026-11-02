@@ -147,7 +147,7 @@ private fun CompanionSpacesContent(assistantId: String, assistantName: String, s
                 TextButton(onClick = { manualRefresh++ }) { Text("重试读取") }
             } else snapshot?.let { state ->
                 when (section) {
-                    CompanionSpaceSection.SECRET -> SecretBaseContent(state, busy, onEdit = { story, field -> storyEditor = StoryEditor(story, field) }, onDelete = { deleteStory = it })
+                    CompanionSpaceSection.SECRET -> SecretBaseContent(state, busy, onEdit = { story, field -> storyEditor = StoryEditor(story, field) }, onDelete = { deleteStory = it }, onPin = { story -> task { store.setStoryPinned(story.id, !story.pinned) } })
                     CompanionSpaceSection.SOCIAL -> SharedSpaceContent(state, store, humanName, humanAvatar, aiName, aiAvatar, busy,
                         onCover = { coverPicker.launch(arrayOf("image/*")) }, onLike = { post -> task { store.likePost(post.id, "human", "human" !in post.likes) } },
                         onComment = { post, comment -> reply = SpaceReply(post, comment) }, onDelete = { deletePost = it }, onImage = { imagePreview = it })
@@ -188,23 +188,22 @@ private fun CompanionSpacesContent(assistantId: String, assistantName: String, s
 }
 
 @Composable
-internal fun SecretBaseContent(state: CompanionSpaceSnapshot, busy: Boolean, onEdit: (SpaceStory?, String) -> Unit, onDelete: (SpaceStory) -> Unit) {
+internal fun SecretBaseContent(state: CompanionSpaceSnapshot, busy: Boolean, onEdit: (SpaceStory?, String) -> Unit, onDelete: (SpaceStory) -> Unit, onPin: (SpaceStory) -> Unit) {
     LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Surface(onClick = { onEdit(null, "prompt") }, modifier = Modifier.height(244.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .55f)) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.Center) { Text("✧", fontSize = 36.sp); Spacer(Modifier.height(14.dp)); Text("写一封番外邀请", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp)); Text("主线之外，给想象留一页空白。", style = MaterialTheme.typography.bodySmall) }
-        } }
-        items(state.stories.sortedByDescending { it.updatedAt }, key = { it.id }) { story ->
+        items(state.stories.sortedWith(spaceStoryOrder), key = { it.id }) { story ->
             var revealed by remember(story.id) { mutableStateOf(false) }
             var drag by remember(story.id) { mutableFloatStateOf(0f) }
             Box(Modifier.pointerInput(story.id) { detectHorizontalDragGestures(onDragStart = { drag = 0f }, onHorizontalDrag = { change, amount ->
                 change.consume(); drag += amount; if (drag < -70) revealed = true; if (drag > 70) revealed = false
             }) }) {
-                SpacePaper(story.paper, Modifier.fillMaxWidth().heightIn(min = 244.dp)) {
+                SpacePaper(story.paper, Modifier.fillMaxWidth().heightIn(min = 244.dp).testTag("story-${story.id}")) {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("✦", fontSize = 24.sp); Spacer(Modifier.width(6.dp)); Text(story.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
-                        Spacer(Modifier.height(14.dp))
+                        TextButton(enabled = !busy, onClick = { onPin(story) }, modifier = Modifier.testTag("story-pin-${story.id}"), contentPadding = PaddingValues(horizontal = 0.dp), colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current)) {
+                            Text(if (story.pinned) "已置顶 · 取消" else "置顶", color = LocalContentColor.current)
+                        }
                         StoryCollapsedField("原番外指令", story.prompt) { onEdit(story, "prompt") }
                         HorizontalDivider(Modifier.padding(vertical = 12.dp), color = LocalContentColor.current.copy(alpha = .15f))
                         StoryCollapsedField("番外正文", story.body.ifBlank { "等待故事落笔……" }) { onEdit(story, "body") }
@@ -217,6 +216,9 @@ internal fun SecretBaseContent(state: CompanionSpaceSnapshot, busy: Boolean, onE
                 }
             }
         }
+        item { Surface(onClick = { onEdit(null, "prompt") }, modifier = Modifier.height(244.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .55f)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.Center) { Text("✧", fontSize = 36.sp); Spacer(Modifier.height(14.dp)); Text("写一封番外邀请", fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(8.dp)); Text("主线之外，给想象留一页空白。", style = MaterialTheme.typography.bodySmall) }
+        } }
     }
 }
 

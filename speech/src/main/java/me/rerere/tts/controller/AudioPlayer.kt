@@ -50,6 +50,7 @@ import kotlin.coroutines.resumeWithException
 
 @OptIn(UnstableApi::class)
 class AudioPlayer(context: Context, private val audioUsage: Int = android.media.AudioAttributes.USAGE_MEDIA) {
+    private val musicDuckOwner = Any()
     private val appContext = context.applicationContext
     @Volatile private var playbackSnapshot = VoicePlaybackSnapshot.capture()
     private fun createPlayer() = ExoPlayer.Builder(appContext, object : DefaultRenderersFactory(appContext) {
@@ -59,6 +60,9 @@ class AudioPlayer(context: Context, private val audioUsage: Int = android.media.
                 .setAudioProcessors(arrayOf(VoiceMixAudioProcessor { playbackSnapshot.config }))
                 .build()
     }).build().apply {
+        addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { SpeechPlaybackActivity.update(musicDuckOwner, isPlaying) }
+        })
         // The call runtime owns communication focus/routing; do not alter global volume or mode here.
         setAudioAttributes(AudioAttributes.Builder().setUsage(audioUsage)
             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), false)
@@ -146,6 +150,7 @@ class AudioPlayer(context: Context, private val audioUsage: Int = android.media.
         }
     }
     fun release() {
+        SpeechPlaybackActivity.update(musicDuckOwner, false)
         if (released) return
         released = true
         generation.advance()
@@ -380,6 +385,7 @@ class AudioPlayer(context: Context, private val audioUsage: Int = android.media.
     }
 
     private fun discardFailedPlayer() {
+        SpeechPlaybackActivity.update(musicDuckOwner, false)
         if (needsPlayerRebuild) return
         needsPlayerRebuild = true
         runCatching { player.stop() }

@@ -1148,6 +1148,10 @@ class ChatService(
     suspend fun acceptOrbisEvent(input: OrbisIncomingEvent, expectedSentinelGeneration: Long? = null): Pair<OrbisInboxEvent, Boolean> = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main.immediate) {
       orbisEventDispatchMutex.withLock {
         val binding = orbisEvents.inbox.binding(input.source) ?: error("event_source_not_bound")
+        if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(input.source)) require(
+            me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).acceptsResultEvent(
+                input.source, binding.assistantId, binding.conversationId, input.workshopImages)
+        ) { "workshop_result_private_or_deleted" }
         val target = conversationRepo.getConversationById(Uuid.parse(binding.conversationId))
         require(target != null && target.assistantId.toString() == binding.assistantId) { "event_target_invalid" }
         require(settingsStore.settingsFlow.first { !it.init }.assistants.any { it.id.toString() == binding.assistantId }) { "event_assistant_missing" }
@@ -1179,7 +1183,14 @@ class ChatService(
       orbisEventDispatchMutex.withLock {
         settingsStore.settingsFlow.first { !it.init }
         orbisEventsAtStartup.forEach { event ->
-            if (event.state == "generating") {
+            if (!event.historyCommitted && me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source) &&
+                !me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).acceptsResultEvent(
+                    event.source, event.assistantId, event.conversationId, event.workshopImages)) {
+                withContext(Dispatchers.IO) {
+                    orbisEvents.inbox.mark(event.id, "suppressed", "workshop_result_private_or_deleted")
+                    orbisEvents.inbox.dismissNotification(event.id, event.assistantId, event.conversationId)
+                }
+            } else if (event.state == "generating") {
                 withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "unknown", "interrupted_generation_no_auto_retry") }
             } else if (event.independentDelivery && event.attemptStarted && event.state == "queued") {
                 withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "unknown", "interrupted_before_dispatch_no_auto_retry") }
@@ -1196,6 +1207,12 @@ class ChatService(
 
     private suspend fun queueOrbisEvent(event: OrbisInboxEvent) {
         if (orbisEvents.inbox.get(event.id)?.state !in setOf("accepted", "queued")) return
+        if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source) &&
+            !me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context).acceptsResultEvent(
+                event.source, event.assistantId, event.conversationId, event.workshopImages)) {
+            withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "suppressed", "workshop_result_private_or_deleted") }
+            return
+        }
         if (!nativeSentinels.mayDeliver(event)) {
             withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "suppressed", "sentinel_paused_no_replay") }
             return
@@ -1260,7 +1277,8 @@ class ChatService(
                 val input = QueuedMessage(id = messageId, parts = parts, answer = event.wake,
                     orbisEventId = event.id, acknowledgeSafetyHold = false)
                 session.submittingMessage = input
-                sendQueuedMessage(session, input, requireImageInput = parts.any { it is UIMessagePart.Image })
+                sendQueuedMessage(session, input, requireImageInput = parts.any { it is UIMessagePart.Image } &&
+                    !me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source))
             }
             return
         }
@@ -1290,7 +1308,8 @@ class ChatService(
                 val input = QueuedMessage(id = messageId, parts = eventParts, answer = event.wake,
                     orbisEventId = event.id, acknowledgeSafetyHold = false)
                 session.submittingMessage = input
-                sendQueuedMessage(session, input, requireImageInput = eventParts.any { it is UIMessagePart.Image })
+                sendQueuedMessage(session, input, requireImageInput = eventParts.any { it is UIMessagePart.Image } &&
+                    !me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source))
             })
         }
     }
@@ -1364,8 +1383,7 @@ class ChatService(
         val settings = settingsStore.settingsFlow.value
         val assistant = settings.getAssistantById(lane.baseline.assistantId)
         val model = assistant?.let { settings.findModelById(it.chatModelId ?: settings.chatModelId) }
-        if (model == null || event.workshopImages.isNotEmpty() &&
-            me.rerere.ai.provider.Modality.IMAGE !in model.inputModalities) {
+        if (model == null) {
             withContext(Dispatchers.IO) { orbisEvents.inbox.mark(event.id, "failed", "workshop_result_requires_image_model") }
             return
         }
@@ -1373,6 +1391,7 @@ class ChatService(
             targetMatches = sessions[session.id] === session && session.humanContinuation.value === lane,
             deliveryAllowed = me.rerere.rikkahub.data.orbis.sentinel.sentinelMayDeliver(nativeSentinels.rules.state.value, event),
             imageInputSupported = me.rerere.ai.provider.Modality.IMAGE in model.inputModalities,
+            allowOcrFallback = true,
             resetting = queueControls.isResetting(session.id) || gatewayStopInFlight.contains(session.id)) ?: return
         try {
             // No session/lane lock spans storage. Human sends invalidate the reservation immediately.
@@ -1400,7 +1419,7 @@ class ChatService(
                     if (event.wake) {
                         generateHumanContinuation(session, lane, snapshot, owner, publish,
                             requireFreshToolApproval = true, continuationEvent = event,
-                            requireImageInput = event.workshopImages.isNotEmpty())
+                            requireImageInput = false)
                         if (lane.isCurrent(owner)) status = orbisEventCompletionState(
                             lane.state.value.currentMessages, event.id, false)
                     } else status = "displayed"
@@ -3586,7 +3605,8 @@ class ChatService(
             }) ?: return null
             session.submittingMessage = next
             return sendQueuedMessage(session, next, requireImageInput =
-                next.voiceCallKind == "visual" || next.orbisEventId != null && next.parts.any { it is UIMessagePart.Image })
+                next.voiceCallKind == "visual" || next.orbisEventId != null && next.parts.any { it is UIMessagePart.Image } &&
+                    !me.rerere.rikkahub.data.orbis.isImageWorkshopSource(orbisEvents.inbox.get(next.orbisEventId)?.source.orEmpty()))
         }
     }
 

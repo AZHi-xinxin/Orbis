@@ -60,6 +60,8 @@ class OpenAIProvider(
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
         withContext(Dispatchers.IO) {
             providerSetting.chatGptAccountId?.let { return@withContext (planAccounts ?: error("siwc_not_signed_in")).models(it) }
+            // NovelAI publishes image model IDs in its documentation, not OpenAI /models.
+            if (NovelAiImageApi.isConnection(providerSetting)) return@withContext NovelAiImageApi.listModels(client, providerSetting)
             val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
             val request = Request.Builder()
                 .url("${providerSetting.baseUrl}/models")
@@ -223,6 +225,10 @@ class OpenAIProvider(
         }
         require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐接入不提供生图接口，请配置独立生图 AI。" }
         require(!SeedreamImageApi.isVideoModel(params.model.modelId)) { "workshop_video_model" }
+        if (NovelAiImageApi.isConnection(providerSetting)) {
+            NovelAiImageApi.generate(client, providerSetting, params).forEach { emit(it) }
+            return@flow
+        }
         if (SeedreamImageApi.usesArk(providerSetting, params.model)) {
             seedreamImages(providerSetting, params.model, params.prompt, params.size, params.numOfImages,
                 params.customHeaders, params.customBody, emptyList()).forEach { emit(it) }
@@ -277,6 +283,10 @@ class OpenAIProvider(
             "Expected OpenAI provider setting"
         }
         require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐接入不提供改图接口，请配置独立生图 AI。" }
+        if (NovelAiImageApi.isConnection(providerSetting)) {
+            NovelAiImageApi.edit(client, providerSetting, params).forEach { emit(it) }
+            return@flow
+        }
         require(!SeedreamImageApi.isVideoModel(params.model.modelId)) { "workshop_video_model" }
         require(params.images.isNotEmpty()) {
             "At least one image is required"

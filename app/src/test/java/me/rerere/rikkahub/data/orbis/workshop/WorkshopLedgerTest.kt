@@ -40,6 +40,15 @@ class WorkshopLedgerTest {
         val ledger = Disk().open(); val first = ledger.submit(job()); val duplicate = ledger.submit(job())
         assertEquals(first.id, duplicate.id); assertEquals(1, ledger.state.value.jobs.size)
     }
+    @Test fun `reference settings survive restart and cannot double charge under same request`() {
+        val disk=Disk();val ledger=disk.open()
+        val candidate=job().copy(references=listOf("a".repeat(64)+".png"),referenceMode="character&style",referenceStrength=0.4)
+        val accepted=ledger.submit(candidate)
+        assertEquals(accepted,disk.open().get(accepted.id))
+        assertEquals("workshop_request_conflict",runCatching{ledger.submit(candidate.copy(referenceStrength=0.8))}.exceptionOrNull()?.message)
+        assertEquals("workshop_request_conflict",runCatching{ledger.submit(candidate.copy(referenceMode="img2img"))}.exceptionOrNull()?.message)
+        assertEquals(1,ledger.state.value.jobs.size)
+    }
     @Test fun `same request id different prompt rejected`() {
         val ledger = Disk().open(); ledger.submit(job()); assertEquals("workshop_request_conflict", runCatching { ledger.submit(job().copy(prompt = "different")) }.exceptionOrNull()?.message)
     }
@@ -127,14 +136,14 @@ class WorkshopLedgerTest {
         val complete = ledger.submit(job("second")); ledger.update(complete.id) { it.copy(status = WorkshopStatus.COMPLETE) }
         assertEquals(WorkshopStatus.COMPLETE, ledger.fail(complete.id, "workshop_timeout").status)
     }
-    @Test fun `human confirmed retry retains original notification target without AI gate`() {
+    @Test fun `human confirmed retry remains private without AI gate`() {
         val disk = Disk(); val ledger = disk.open(); ledger.preferences(false)
         val original = job()
         val retry = original.copy(id = java.util.UUID.randomUUID().toString(), requestId = "retry-${original.id}", byAi = false,
-            notifyConversation = true)
+            notifyConversation = false)
         val accepted = ledger.submit(retry)
         assertNotNull(ledger.claim(accepted.id))
-        assertTrue(disk.open().get(accepted.id)!!.notifyConversation)
+        assertFalse(disk.open().get(accepted.id)!!.notifyConversation)
         assertEquals(conversation, disk.open().get(accepted.id)?.conversationId)
         assertEquals(accepted.id, ledger.submit(retry.copy(id = java.util.UUID.randomUUID().toString())).id)
     }

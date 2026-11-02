@@ -405,6 +405,15 @@ fun ChatInput(
                     if (state.messageContent.isNotEmpty()) {
                         MediaFileInputRow(state = state)
                     }
+                    val humanThoughtInput = if (state.isEditing()) state.hasExistingHumanThought
+                        else assistant.allowHumanThought && assistant.humanThoughtEnabled || state.hasExistingHumanThought
+                    if (orbis && humanThoughtInput && voiceState.phase == VoicePhase.Off) {
+                        HumanThoughtInput(state)
+                    } else if (orbis && state.humanThoughtContent.text.isNotBlank()) {
+                        Text("思考链草稿已保留，当前消息只发送正文。",
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 10.dp))
+                    }
                     if (loading) KeepScreenOn()
 
                     Row(verticalAlignment = Alignment.Top) {

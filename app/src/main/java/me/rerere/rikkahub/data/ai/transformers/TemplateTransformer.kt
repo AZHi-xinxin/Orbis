@@ -6,6 +6,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.isHumanThought
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.utils.toLocalDate
 import me.rerere.rikkahub.utils.toLocalTime
@@ -31,6 +32,7 @@ class TemplateTransformer(
             val createdAt = message.createdAt.toInstant(timeZone).toJavaInstant()
             message.copy(
                 parts = message.parts.map { part ->
+                    if (part.isHumanThought()) return@map part
                     when (part) {
                         is UIMessagePart.Text -> {
                             val result = StringWriter()

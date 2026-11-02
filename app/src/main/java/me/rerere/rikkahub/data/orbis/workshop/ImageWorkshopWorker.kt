@@ -57,6 +57,10 @@ class ImageWorkshopWorker(context: Context, parameters: WorkerParameters) : Coro
             val model = settings.findModelById(Uuid.parse(existing.modelId)) ?: error("workshop_model_missing")
             val config = model.findProvider(settings.providers) ?: error("workshop_model_missing")
             require(ImageWorkshop.supports(config, model)) { "workshop_provider_unsupported" }
+            require(ImageWorkshop.supportsEditing(config) || (!existing.widgetKit && existing.references.isEmpty())) {
+                "workshop_text_to_image_only"
+            }
+            require(!existing.widgetKit || ImageWorkshop.supportsWidgetKit(config)) { "workshop_widget_kit_unsupported" }
             require(settings.providers.any { it.enabled && it.models.any { candidate -> candidate.id == model.id } }) { "workshop_provider_unsupported" }
             require(ImageWorkshop.configurationHash(config, model) == existing.configHash) { "workshop_configuration_changed" }
             setForeground(foregroundInfo())
@@ -121,7 +125,10 @@ class ImageWorkshopWorker(context: Context, parameters: WorkerParameters) : Coro
                         customHeaders = model.customHeaders, customBody = body))
                     else provider.editImage(config, ImageEditParams(model = model, prompt = prompt,
                         images = refs.map { workshop.assetFile(it).absolutePath }, numOfImages = 1, partialImages = 0,
-                        customHeaders = model.customHeaders, customBody = body))
+                        customHeaders = model.customHeaders, customBody = if (me.rerere.ai.provider.providers.openai.NovelAiImageApi.isConnection(config))
+                            body.filterNot { it.key in setOf("reference_mode", "strength") } + listOf(
+                                CustomBody("reference_mode", JsonPrimitive(job.referenceMode)), CustomBody("strength", JsonPrimitive(job.referenceStrength)))
+                        else body))
                     flow.collect { if (!it.partial) save(it.data) }
                 }
                 }

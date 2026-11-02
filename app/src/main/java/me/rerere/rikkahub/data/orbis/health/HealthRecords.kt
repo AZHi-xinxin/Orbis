@@ -40,18 +40,33 @@ internal fun healthValue(field: HealthField, text:String):JsonPrimitive = if(tex
     } else JsonPrimitive(text.trim())
     validateHealthFields(mapOf(field.id to value));value
 }
+internal class HealthParameterError(code: String, val field: String, val expected: String,
+    val actual: String, val hint: String = "") : IllegalArgumentException(code)
+internal fun healthJsonType(value: JsonElement?): String = when {
+    value == null -> "missing"
+    value == JsonNull -> "null"
+    value is JsonObject -> "object"
+    value is JsonArray -> "array"
+    value is JsonPrimitive && value.isString -> "string"
+    value is JsonPrimitive && value.booleanOrNull != null -> "boolean"
+    else -> "number"
+}
+internal fun healthFieldType(field: HealthField) = if (field.min == null) "string" else if (field.whole) "integer" else "number"
 internal fun validateHealthFields(fields:Map<String,JsonPrimitive>) {
     require(fields.isNotEmpty() && fields.size<=healthFields.size) { "health_fields_invalid" }
     fields.forEach { (key,value) ->
-        val field=healthFields.firstOrNull { it.id==key } ?: error("health_field_unknown")
+        val field=healthFields.firstOrNull { it.id==key } ?: throw HealthParameterError("health_field_unknown", "fields", "known health field", "unknown key")
         if(value==JsonNull) return@forEach
+        fun invalid(code:String, hint:String=""):Nothing = throw HealthParameterError(code, "fields.$key", healthFieldType(field), healthJsonType(value), hint)
         if(field.min!=null) {
             val number=value.takeUnless { it.isString }?.doubleOrNull
-            require(number!=null && number.isFinite() && number>=field.min && number<=field.max!! && (!field.whole || number%1==0.0)) { "health_number_invalid" }
+            if(number==null || !number.isFinite() || number<field.min || number>field.max!! || (field.whole && number%1!=0.0))
+                invalid("health_number_invalid", "范围 ${field.min}..${field.max}" + if(field.whole) "，只接受整数" else "")
         } else {
-            require(value.isString && value.content.length<=if(key=="note") 2000 else 200) { "health_text_invalid" }
-            if(key=="periodStatus") require(value.content in setOf("none","active","pre","post")) { "health_period_invalid" }
-            if(key in setOf("bedtime","wakeTime")) require(value.content.matches(Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]"))) { "health_time_invalid" }
+            if(!value.isString || value.content.length>if(key=="note") 2000 else 200)
+                invalid("health_text_invalid", if(key=="sleepQuality") "睡眠感受是文字描述，不是数值评分；没有感受信息可省略此字段。" else "请使用限定长度内的文字。")
+            if(key=="periodStatus" && value.content !in setOf("none","active","pre","post")) invalid("health_period_invalid", "none / active / pre / post")
+            if(key in setOf("bedtime","wakeTime") && !value.content.matches(Regex("(?:[01][0-9]|2[0-3]):[0-5][0-9]"))) invalid("health_time_invalid", "HH:mm，24小时制")
         }
     }
 }

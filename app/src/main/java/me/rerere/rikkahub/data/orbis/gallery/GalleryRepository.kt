@@ -131,7 +131,7 @@ internal class GalleryRepository(
         val updated = now()
         val entry = GalleryItem(draft.itemId, draft.title, draft.kind, old?.author ?: actor, old?.createdAt ?: updated, updated,
             old?.versions.orEmpty() + GalleryVersion(revision, bytes.size, galleryHash(bytes), updated, actor), favorite = old?.favorite ?: false,
-            preview = galleryPreview(draft.kind, content))
+            preview = galleryPreview(draft.kind, content), pinned = old?.pinned ?: false)
         durable("${entry.id}-r$revision.txt", bytes)
         commit(before.copy(items = before.items.filterNot { it.id == entry.id } + entry))
         // Draft markers remain as a recovery receipt; a later publish must not create another version.
@@ -195,6 +195,13 @@ internal class GalleryRepository(
     fun favorite(id: String, enabled: Boolean) = synchronized(lock) {
         val before = index(); item(before, id)
         commit(before.copy(items = before.items.map { if (it.id == id) it.copy(favorite = enabled) else it }))
+    }
+    /** Human shelf preference, independent of content revisions and pending drafts. */
+    fun setPinned(id: String, pinned: Boolean) = synchronized(lock) {
+        val before = index(); val current = item(before, id)
+        if (current.pinned != pinned) {
+            commit(before.copy(items = before.items.map { if (it.id == id) it.copy(pinned = pinned) else it }))
+        }
     }
     fun submit(id: String, revision: Int, actor: String, values: Map<String, List<String>>): GalleryAnswerRef = synchronized(lock) {
         submitInternal(id, revision, actor, values, UUID.randomUUID().toString())

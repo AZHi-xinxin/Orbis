@@ -48,7 +48,7 @@ internal fun GalleryDetail(
     Box(Modifier.fillMaxSize().background(OrbisTheme.colors.page)) {
     Column(Modifier.fillMaxSize().padding(horizontal = if (fullScreen) 0.dp else 14.dp)) {
         if (!fullScreen) {
-        Text(item.title, style = MaterialTheme.typography.headlineSmall)
+        Text((if (item.pinned) "已置顶 · " else "") + item.title, style = MaterialTheme.typography.headlineSmall)
         Text("第 $revision 版 · ${if (item.author == "ai") "伙伴创作" else "人类导入"} · ${(item.versions.firstOrNull { it.revision == revision }?.bytes ?: 0) / 1024} KiB", style = MaterialTheme.typography.labelSmall)
         Row {
             TextButton(enabled = !busy, onClick = { onTask { withContext(Dispatchers.IO) { repo.favorite(item.id, !item.favorite) }; null } }) { Text(if (item.favorite) "取消收藏" else "收藏") }

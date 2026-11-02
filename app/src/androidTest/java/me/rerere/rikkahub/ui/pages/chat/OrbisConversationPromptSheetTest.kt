@@ -53,6 +53,41 @@ class OrbisConversationPromptSheetTest {
     @get:Rule
     val rules: RuleChain = RuleChain.outerRule(isolatedApplication).around(compose)
 
+    @Test fun historyImagesSwitchRequiresExplicitSaveAndReopensWithSavedChoice() {
+        val assistant = mutableStateOf(Assistant(name = "Synthetic image settings", sendHistoryImages = true))
+        val visible = mutableStateOf(true)
+        var saves = 0
+        compose.setContent {
+            MaterialTheme {
+                if (visible.value) OrbisConversationPromptSheet("synthetic-images-switch", OrbisConversationPrompt(),
+                    false, 1f, onSave = {}, onDismiss = { visible.value = false },
+                    assistant = assistant.value, onSaveGenerationParameters = {
+                        saves++
+                        assistant.value = it.mergeInto(assistant.value)
+                        OrbisGenerationParameters.from(assistant.value)
+                    })
+            }
+        }
+        fun switch() = compose.onNodeWithContentDescription("发送历史图片").performScrollTo()
+        fun reopen() {
+            compose.onNodeWithTag("orbis-conversation-dismiss").performScrollTo().performClick()
+            compose.runOnIdle { visible.value = true }
+        }
+        switch().assertIsOn().performClick().assertIsOff()
+        compose.runOnIdle { assertTrue(assistant.value.sendHistoryImages); assertEquals(0, saves) }
+        reopen()
+        switch().assertIsOn()
+        for (enabled in listOf(false, true)) {
+            switch().performClick()
+            compose.onNodeWithTag("orbis-generation-save").performScrollTo().performClick()
+            compose.waitForIdle()
+            compose.runOnIdle { assertEquals(enabled, assistant.value.sendHistoryImages) }
+            reopen()
+            if (enabled) switch().assertIsOn() else switch().assertIsOff()
+        }
+        compose.runOnIdle { assertEquals(2, saves) }
+    }
+
     @Test
     fun savingAndReopeningKeepsSavedTextAndEnabledState() {
         val saved = mutableStateOf(OrbisConversationPrompt(text = "原有合成提示", enabled = false))

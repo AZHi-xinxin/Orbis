@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flowOn
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.projectHumanThoughts
 import me.rerere.ai.provider.providers.claude.ClaudeProvider
 import me.rerere.ai.provider.providers.google.GoogleProvider
 import me.rerere.ai.provider.providers.openai.OpenAIProvider
@@ -68,12 +69,12 @@ private fun <T : ProviderSetting> guardedProvider(delegate: Provider<T>, access:
             override suspend fun generateText(providerSetting: T, messages: List<UIMessage>, params: TextGenerationParams): TextGenerationResult {
                 requireModelAccess(params.model)
                 access?.invoke(params.model.id.toString())
-                return withModelAccess(access) { delegate.generateText(providerSetting, messages, params) }
+                return withModelAccess(access) { delegate.generateText(providerSetting, messages.projectHumanThoughts(), params) }
             }
             override suspend fun streamText(providerSetting: T, messages: List<UIMessage>, params: TextGenerationParams) = flow {
                 requireModelAccess(params.model)
                 access?.invoke(params.model.id.toString())
-                emitAll(delegate.streamText(providerSetting, messages, params).flowOn(capturedModelAccess(access)))
+                emitAll(delegate.streamText(providerSetting, messages.projectHumanThoughts(), params).flowOn(capturedModelAccess(access)))
             }
             override suspend fun generateEmbedding(providerSetting: T, params: EmbeddingGenerationParams): EmbeddingGenerationResult {
                 requireModelAccess(params.model)

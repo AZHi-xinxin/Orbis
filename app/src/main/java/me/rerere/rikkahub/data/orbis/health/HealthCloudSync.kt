@@ -21,16 +21,17 @@ private fun healthInstant(value:JsonElement?):Instant?=runCatching { Instant.par
  */
 internal fun parseHealthCloudData(text:String,zone:ZoneId,from:LocalDate,through:LocalDate):Map<String,Map<String,JsonPrimitive>> {
     require(text.length<=2*1024*1024 && !through.isBefore(from) && through.toEpochDay()-from.toEpochDay()<=7){"health_cloud_range"}
-    val root=healthJson.parseToJsonElement(text).jsonObject
+    val root=try { healthJson.parseToJsonElement(text) as? JsonObject ?: error("health_cloud_format") }
+        catch(_:Exception) { error("health_cloud_format") }
     val uploads=root["data"] as? JsonArray ?: error("health_cloud_format")
     require(uploads.size<=100){"health_cloud_limit"}
     val result=mutableMapOf<String,MutableMap<String,JsonPrimitive>>()
     fun add(date:LocalDate,key:String,value:JsonPrimitive){if(date in from..through) {
         validateHealthFields(mapOf(key to value));result.getOrPut(date.toString()){mutableMapOf()}[key]=value
     }}
-    val sorted=uploads.map{it.jsonObject}.sortedByDescending{it["file"]?.jsonPrimitive?.content.orEmpty()}
+    val sorted=uploads.map{it as? JsonObject ?: error("health_cloud_format")}.sortedByDescending{it["file"]?.jsonPrimitive?.content.orEmpty()}
     fun rows(kind:String):List<JsonObject> = sorted.flatMap { upload ->
-        val rows=(upload[kind] as? JsonArray).orEmpty();require(rows.size<=10000){"health_cloud_limit"};rows.map{it.jsonObject}
+        val rows=upload[kind]?.takeUnless{it==JsonNull}?.let { it as? JsonArray ?: error("health_cloud_format") }.orEmpty();require(rows.size<=10000){"health_cloud_limit"};rows.map{it as? JsonObject ?: error("health_cloud_format")}
     }.also{require(it.size<=100000){"health_cloud_limit"}}
     data class Step(val start:Instant,val end:Instant,val count:Int)
     val steps=rows("steps").mapNotNull { r ->
@@ -84,3 +85,14 @@ private operator fun ClosedRange<LocalDate>.iterator():Iterator<LocalDate> = gen
 /** Human corrections (including explicit blanks) are never overwritten by automatic sync. */
 internal fun healthSyncPatch(day:HealthDay,incoming:Map<String,JsonPrimitive>):Map<String,JsonPrimitive> =
     incoming.filter { (key,value)->day.fields[key]?.actor!="human" && day.fields[key]?.value!=value }
+
+internal fun healthSyncFailureMessage(code:String):String = when(code) {
+    "health_cloud_format" -> "来源返回的格式暂不兼容：需要JSON的data数组及带时间戳的设备记录，不能直接读取Markdown或按日期汇总的字典。原记录保留；请核对MCP接口格式。"
+    "health_cloud_limit", "health_cloud_range" -> "来源返回的数据超过支持范围，原记录保留。请缩小设备数据范围后再同步。"
+    "health_sync_authorization" -> "MCP需要重新授权；请在连接设置中完成授权后同步。原记录保留。"
+    "health_sync_connection" -> "尚未连接到所选MCP，未读取记录；请检查该连接。原记录保留。"
+    "health_sync_binding_changed", "health_sync_disabled" -> "同步来源或授权已变化，请重新选择来源。原记录保留。"
+    "health_sync_timeout" -> "等待MCP响应超时，原记录保留；稍后可重试。"
+    else -> "同步未完成，原记录保留。请核对来源响应或本机存储；暂未确定原因。"
+}
+internal fun healthSyncRetryable(code:String) = code in setOf("health_sync_connection", "health_sync_timeout")

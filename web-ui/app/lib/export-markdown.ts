@@ -7,7 +7,9 @@ export function convertMessageToMarkdown(
   const lines: string[] = [];
 
   for (const part of message.parts) {
-    if (part.type === "text" && part.text.trim()) {
+    if (part.type === "text" && part.metadata?.orbis_human_thought === true) {
+      lines.push("【人类思考链】", part.text.trim() ? part.text : "（为空）", "", "【正文回复】");
+    } else if (part.type === "text" && part.text.trim()) {
       lines.push(part.text.trim());
       lines.push("");
     } else if (part.type === "reasoning" && includeReasoning && part.reasoning.trim()) {
@@ -54,7 +56,9 @@ export function convertConversationToMarkdown(
     lines.push("");
 
     for (const part of message.parts) {
-      if (part.type === "text" && part.text.trim()) {
+      if (part.type === "text" && part.metadata?.orbis_human_thought === true) {
+        lines.push("【人类思考链】", part.text.trim() ? part.text : "（为空）", "", "【正文回复】");
+      } else if (part.type === "text" && part.text.trim()) {
         lines.push(part.text.trim());
         lines.push("");
       } else if (part.type === "reasoning" && includeReasoning && part.reasoning.trim()) {

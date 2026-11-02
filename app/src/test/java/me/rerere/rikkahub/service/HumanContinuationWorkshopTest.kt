@@ -41,6 +41,14 @@ class HumanContinuationWorkshopTest {
         reserveWorkshopReturn(e, j, targetMatches = true, deliveryAllowed = true, imageInputSupported = true)
     private fun Conversation.answer(text: String) = copy(messageNodes = messageNodes + UIMessage.assistant(text).toMessageNode())
 
+    @Test fun `text model may accept own image result through the normal OCR pipeline`() = runTest {
+        val c = base(); val pending = submitted(c); val done = completed(pending); val e = event(done)
+        val lane = HumanContinuationLane(c, backgroundScope, { true }, {})
+        assertTrue(lane.registerWorkshopReturn(0, pending))
+        assertNull(lane.reserveWorkshopReturn(e, done, true, true, false))
+        assertNotNull(lane.reserveWorkshopReturn(e, done, true, true, false, allowOcrFallback = true))
+    }
+
     @Test fun `exact newly accepted job returns once with image to its original lane`() = runTest {
         val c = base(); val submitted = submitted(c); val done = completed(submitted); val e = event(done)
         val lane = HumanContinuationLane(c, backgroundScope, { true }, { fail(it.toString()) })

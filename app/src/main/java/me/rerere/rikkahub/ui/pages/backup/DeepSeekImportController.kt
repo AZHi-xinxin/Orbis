@@ -27,6 +27,7 @@ data class DeepSeekImportUiState(
 )
 
 enum class ChatArchiveSource(val label: String, val maxBytes: Long) {
+    UNIVERSAL("Orbis 通用聊天 JSON", UniversalChatArchive.MAX_ARCHIVE_BYTES),
     DEEPSEEK("DeepSeek 官方 ZIP", DeepSeekArchive.MAX_ARCHIVE_BYTES),
     OPERIT("Operit v2 JSON", OperitChatArchive.MAX_ARCHIVE_BYTES),
     KELIVO("Kelivo 安卓 ZIP", KelivoChatArchive.MAX_ARCHIVE_BYTES),
@@ -76,6 +77,11 @@ class DeepSeekImportController(
                         ChatImportStaging.copyArchive(input, file, source.maxBytes, { coroutine.ensureActive() })
                     }
                     when (source) {
+                        ChatArchiveSource.UNIVERSAL -> {
+                            val result = UniversalChatArchive.inspect(file, { coroutine.ensureActive() })
+                            fingerprint = UniversalChatImporter.archiveFingerprint(file) { coroutine.ensureActive() }
+                            result
+                        }
                         ChatArchiveSource.CHATGPT -> {
                             val result = ChatGPTChatArchive.inspect(file) { coroutine.ensureActive() }
                             fingerprint = ChatGPTChatImporter.archiveFingerprint(file) { coroutine.ensureActive() }
@@ -151,6 +157,8 @@ class DeepSeekImportController(
                     mutableState.update { it.copy(phase = "已处理 ${progress.completed} / ${progress.total} 个会话…") }
                 }
                 val result = when (source) {
+                    ChatArchiveSource.UNIVERSAL -> UniversalChatImporter(repository).import(file, target, selected,
+                        requireNotNull(fingerprint), progress)
                     ChatArchiveSource.CHATGPT -> ChatGPTChatImporter(repository).import(file, target, selected,
                         requireNotNull(fingerprint), progress)
                     ChatArchiveSource.CLAUDE -> ClaudeChatImporter(repository).import(file, target, selected,
@@ -211,6 +219,7 @@ class DeepSeekImportController(
         if (result.skippedSummaries > 0) append("\n本次新增会话跳过 ${result.skippedSummaries} 条内部摘要；没有把摘要当作聊天或系统提示，原导出文件未改动。")
         if (source == ChatArchiveSource.CLAUDE) append("\n按完整路径分别保存；公共前文可能重复。相同内容版本跳过，源会话内容变化则另建窗口，旧记录未更新或覆盖。")
         if (source == ChatArchiveSource.CHATGPT) append("\n按所选可见完整路径分别保存；公共前文可能重复。系统及隐藏消息未导入，附件未恢复。相同内容版本跳过，变化则另建窗口。请保管全部原始 JSON 与附件。")
+        if (source == ChatArchiveSource.UNIVERSAL) append("\n按文件顺序保存；同一助手内相同会话ID与内容自动跳过，内容变化另建窗口。未知原时间以导入时间显示。")
         result.failures.map { it.reason }.distinct().forEach { append("\n").append(it) }
         append("\n未覆盖原聊天、未导入账号/密钥/工具授权，也没有向模型发送消息。请保留原文件。")
     }

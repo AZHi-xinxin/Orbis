@@ -15,6 +15,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import me.rerere.rikkahub.data.orbis.screenshare.ScreenShareSetupException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.service.OrbisScreenShareRuntime
@@ -47,7 +49,7 @@ class OrbisScreenShareActivity : ComponentActivity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 64, 32, 32) }
         status = TextView(this).apply {
             textSize = 18f
-            text = "屏幕共享\n\n默认每 30 秒向当前 AI 发送一张有变化的画面，可能产生模型用量。可调 5–120 秒。\n\n右上小窗可拖动；点箭头收进侧边，点侧边标签展开。绿点表示近期采集正常，红点表示故障或授权结束，黄点表示处理或等待；点状态可查看/重试。\n\n麦克风和右下外放独立控制，默认均关闭。正文只显示 AI 对你的回复。共享结束清空画面，保留文字总结。\n\nOrbis 不限制系统截图；系统录屏可能结束当前共享，届时需要重新授权。受保护画面仍不能提供给 AI，共享范围以系统授权为准。"
+            text = "屏幕共享\n\n默认每 30 秒向当前 AI 发送一张有变化的画面，可能产生模型用量。可调 5–120 秒。支持图片的聊天模型直接看图；纯文字模型使用设置中的 OCR 模型识图，再把文字描述交回原聊天，识图也会产生用量。\n\n右上小窗可拖动；点箭头收进侧边，点侧边标签展开。绿点表示近期采集正常，红点表示故障或授权结束，黄点表示处理或等待；点状态可查看/重试。\n\n麦克风和右下外放独立控制，默认均关闭。正文只显示 AI 对你的回复。共享结束清空画面，保留文字总结。\n\nOrbis 不限制系统截图；系统录屏可能结束当前共享，届时需要重新授权。受保护画面仍不能提供给 AI，共享范围以系统授权为准。"
         }
         root.addView(status)
         fun button(label: String, action: () -> Unit) { root.addView(Button(this).apply { text = label; setOnClickListener { action() } }) }
@@ -90,7 +92,9 @@ class OrbisScreenShareActivity : ComponentActivity() {
                 runtime.validate(checkNotNull(intent.getStringExtra("assistant")), checkNotNull(intent.getStringExtra("conversation")))
                 permissionPending = true
                 projectionPermission.launch(getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent())
-            } catch (_: Exception) { permissionPending = false; status.text = "请确认当前聊天仍存在、模型支持图片，并先结束其他通话后重试。" }
+            } catch (cancelled: CancellationException) { permissionPending = false; throw cancelled }
+            catch (setup: ScreenShareSetupException) { permissionPending = false; status.text = setup.message }
+            catch (_: Exception) { permissionPending = false; status.text = "请回到发起共享的 AI，确认原聊天仍存在，并先结束其他通话后重试。" }
         }
     }
     private fun enableMicrophone() {

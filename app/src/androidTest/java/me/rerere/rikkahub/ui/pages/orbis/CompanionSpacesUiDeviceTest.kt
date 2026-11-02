@@ -117,7 +117,7 @@ class CompanionSpacesUiDeviceTest {
             val story = store.saveHumanStory(listOf("星海邮差", "雨天书店", "花园来信", "夜航日记")[index], "假如你们相遇在另一个世界。今晚，从一封没有署名的信开始。", paper)
             store.writeStoryBody(story.id, "星星落在旧窗台上，像一封寄错季节的信。\n他把信轻轻推到你面前：这一次，让故事慢一点。", story.revision)
         }
-        compose.setContent { MaterialTheme { SyntheticPreviewRoot { SecretBaseContent(store.snapshot(), false, { _, _ -> }, {}) } } }
+        compose.setContent { MaterialTheme { SyntheticPreviewRoot { SecretBaseContent(store.snapshot(), false, { _, _ -> }, {}, {}) } } }
         compose.onNodeWithText("星海邮差").assertIsDisplayed()
         capturePreview("space-secret")
     }
@@ -200,7 +200,7 @@ class CompanionSpacesUiDeviceTest {
     }
 
     @Test fun emptySecretBaseOffersHumanPremiseWithoutCreatingStorage() {
-        compose.setContent { MaterialTheme { SecretBaseContent(repo().snapshot(), false, { _, _ -> }, {}) } }
+        compose.setContent { MaterialTheme { SecretBaseContent(repo().snapshot(), false, { _, _ -> }, {}, {}) } }
         compose.onNodeWithText("写一封番外邀请").assertIsDisplayed()
         assertFalse(File(fixtureRoot, "orbis-companion-spaces").exists())
     }

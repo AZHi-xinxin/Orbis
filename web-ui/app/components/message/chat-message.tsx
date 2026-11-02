@@ -66,7 +66,7 @@ interface ChatMessageProps {
 function hasRenderablePart(part: UIMessagePart): boolean {
   switch (part.type) {
     case "text":
-      return part.text.trim().length > 0;
+      return part.metadata?.orbis_human_thought === true || part.text.trim().length > 0;
     case "image":
     case "video":
     case "audio":
@@ -83,7 +83,8 @@ function hasRenderablePart(part: UIMessagePart): boolean {
 function formatPartForCopy(part: UIMessagePart, t: TFunction): string | null {
   switch (part.type) {
     case "text":
-      return part.text;
+      return part.metadata?.orbis_human_thought === true
+        ? `【人类思考链】\n${part.text.trim() ? part.text : "（为空）"}\n\n【正文回复】` : part.text;
     case "image":
       return `[${t("chat_message.copy_image")}] ${part.url}`;
     case "video":

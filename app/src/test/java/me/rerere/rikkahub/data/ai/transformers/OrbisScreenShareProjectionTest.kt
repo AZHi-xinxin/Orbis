@@ -80,4 +80,29 @@ class OrbisScreenShareProjectionTest {
         assertEquals(0, reads)
         assertFalse(result.first().parts.any { it is UIMessagePart.Image })
     }
+
+    @Test fun textMainGetsOcrInOriginalUserAndToolMessagesWithoutStoringIt() = runBlocking {
+        val turn = ScreenShareTurn(session, "owner", "conversation", frame, "summary", true)
+        val source = listOf(UIMessage.user("earlier"), UIMessage.assistant("earlier reply"), UIMessage.user("现在呢"), tool())
+        val result = projectScreenShareTurn(turn, source, false, describe = { s, f ->
+            assertEquals(session, s); assertEquals(frame, f); "screen says SYNTHETIC READY"
+        }) { _, _ -> error("text model must never request an image") }
+        assertEquals(source.take(2), result.take(2))
+        assertTrue(result[2].toText().contains("SYNTHETIC READY"))
+        assertTrue((result.last().parts.single() as UIMessagePart.Tool).output.single() is UIMessagePart.Text)
+        assertTrue((source.last().parts.single() as UIMessagePart.Tool).output.single() is UIMessagePart.Image)
+        assertFalse(result.any { m -> m.parts.any { it is UIMessagePart.Image } })
+    }
+
+    @Test fun textFallbackNeverRevisitsOldToolFramesAndPropagatesOcrFailure() = runBlocking {
+        val turn = ScreenShareTurn(session, "owner", "conversation", null, "", true)
+        projectScreenShareTurn(turn, listOf(UIMessage.user("old"), tool(), UIMessage.user("new")), false,
+            describe = { _, _ -> error("old frame must not be read") }) { _, _ -> error("no image") }
+        val failure = IllegalStateException("ocr unavailable")
+        try {
+            projectScreenShareTurn(turn.copy(frameId = frame), listOf(UIMessage.user("new")), false,
+                describe = { _, _ -> throw failure }) { _, _ -> error("no image") }
+            fail("must stop before main model")
+        } catch (error: IllegalStateException) { assertSame(failure, error) }
+    }
 }

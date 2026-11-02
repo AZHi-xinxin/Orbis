@@ -188,6 +188,13 @@ internal fun MessageQueuePanel(
                         modifier = Modifier.testTag("chat_queue_fresh_input_notice"),
                     )
                     if (input.messageContent.isNotEmpty()) MediaFileInputRow(input)
+                    if (input.hasExistingHumanThought) TextField(
+                        state = input.humanThoughtContent,
+                        label = { Text("思考链") },
+                        placeholder = { Text("可以留空") },
+                        modifier = Modifier.fillMaxWidth().testTag("chat_queue_edit_thought"),
+                        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
+                    )
                     TextField(
                         state = input.textContent,
                         modifier = Modifier

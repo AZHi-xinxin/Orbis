@@ -13,6 +13,7 @@ data class OrbisGenerationParameters(
     val streamOutput: Boolean = true,
     val maxTokens: Int? = null,
     val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
+    val sendHistoryImages: Boolean = true,
 ) {
     fun validated(): OrbisGenerationParameters = apply {
         require(temperature == null || (temperature.isFinite() && temperature in 0f..2f)) { "温度应为 0–2。" }
@@ -25,6 +26,7 @@ data class OrbisGenerationParameters(
         fun from(assistant: Assistant) = OrbisGenerationParameters(
             assistant.temperature, assistant.topP, assistant.contextMessageLimit,
             assistant.streamOutput, assistant.maxTokens, assistant.reasoningLevel,
+            assistant.sendHistoryImages,
         )
     }
 }
@@ -40,6 +42,7 @@ data class OrbisGenerationParameterDraft(
     val streamOutput: Boolean,
     val maxTokens: String,
     val reasoningLevel: ReasoningLevel,
+    val sendHistoryImages: Boolean = true,
 ) {
     fun parameters(): OrbisGenerationParameters = OrbisGenerationParameters(
         temperature = if (temperatureEnabled) requireNotNull(temperature.trim().toFloatOrNull()) { "请填写有效的温度。" } else null,
@@ -48,6 +51,7 @@ data class OrbisGenerationParameterDraft(
         streamOutput = streamOutput,
         maxTokens = if (maxTokens.isBlank()) null else requireNotNull(maxTokens.trim().toIntOrNull()) { "请填写有效的最大输出 token。" },
         reasoningLevel = reasoningLevel,
+        sendHistoryImages = sendHistoryImages,
     ).validated()
 
     companion object {
@@ -56,6 +60,7 @@ data class OrbisGenerationParameterDraft(
             value.topP != null, (value.topP ?: 1f).toString(),
             value.contextMessageLimit.toString(), value.streamOutput,
             value.maxTokens?.toString().orEmpty(), value.reasoningLevel,
+            value.sendHistoryImages,
         )
     }
 }
@@ -86,6 +91,7 @@ data class OrbisGenerationParameterEdit(
             streamOutput = merge("流式输出", before.streamOutput, after.streamOutput, latest.streamOutput),
             maxTokens = merge("最大输出 token", before.maxTokens, after.maxTokens, latest.maxTokens),
             reasoningLevel = merge("推理预算", before.reasoningLevel, after.reasoningLevel, latest.reasoningLevel),
+            sendHistoryImages = merge("发送历史图片", before.sendHistoryImages, after.sendHistoryImages, latest.sendHistoryImages),
         )
     }
 }

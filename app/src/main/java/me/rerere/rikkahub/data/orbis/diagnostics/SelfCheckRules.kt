@@ -18,6 +18,7 @@ internal val diagnosticToolOptions = linkedMapOf(
     LocalToolOption.LocalSoup to ("orbis_soup" to "海龟汤"),
     LocalToolOption.MessageRecall to ("orbis_recall_message" to "允许AI撤回自己的消息"),
     LocalToolOption.ContextPruning to ("orbis_context_pruning" to "允许AI清理旧思考与工具记录"),
+    LocalToolOption.LocalMusic to ("orbis_music" to "星河音乐"),
     LocalToolOption.ThemeDesign to ("orbis_theme" to "AI自定义美化"),
     LocalToolOption.SelfCheck to ("orbis_self_check" to "AI自检"),
     LocalToolOption.TimeInfo to ("get_time_info" to "时间"),

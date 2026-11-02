@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 281
-        versionName = "2.6.15"
+        versionCode = 282
+        versionName = "2.6.16"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
@@ -196,6 +196,8 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)

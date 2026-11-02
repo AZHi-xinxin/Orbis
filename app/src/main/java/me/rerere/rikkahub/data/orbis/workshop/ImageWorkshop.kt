@@ -36,7 +36,10 @@ class ImageWorkshop private constructor(private val context: Context) {
         prompt: String, widgetKit: Boolean = false, references: List<String> = emptyList(),
         requestId: String = java.util.UUID.randomUUID().toString(),
         notifyConversation: Boolean = byAi,
-        onNewAccepted: ((WorkshopJob) -> Unit)? = null): WorkshopJob = withContext(Dispatchers.IO) {
+        onNewAccepted: ((WorkshopJob) -> Unit)? = null,
+        referenceMode: String = "img2img", referenceStrength: Double = 0.6,
+        authorizedChatReferences: Set<String> = emptySet(),
+        validateChatReferences: suspend () -> Unit = {}): WorkshopJob = withContext(Dispatchers.IO) {
         val settings = GlobalContext.get().get<SettingsStore>().settingsFlow.first { !it.init }
         require(settings.assistants.any { it.id.toString() == assistantId }) { "workshop_owner_missing" }
         if (conversationId != null) {
@@ -47,16 +50,31 @@ class ImageWorkshop private constructor(private val context: Context) {
         val provider = model.findProvider(settings.providers) ?: error("workshop_model_missing")
         require(settings.providers.any { it.enabled && it.models.any { candidate -> candidate.id == model.id } }) { "workshop_provider_unsupported" }
         require(supports(provider, model)) { "workshop_provider_unsupported" }
+        require(supportsEditing(provider) || (!widgetKit && references.isEmpty())) { "workshop_text_to_image_only" }
+        require(!widgetKit || supportsWidgetKit(provider)) { "workshop_widget_kit_unsupported" }
+        if (me.rerere.ai.provider.providers.openai.NovelAiImageApi.isConnection(provider)) {
+            require(references.size <= 1) { "workshop_single_reference_only" }
+            require(referenceMode == "img2img" || model.modelId == me.rerere.ai.provider.providers.openai.NovelAiImageApi.MODEL) { "workshop_reference_mode" }
+        } else require(referenceMode == "img2img") { "workshop_reference_mode" }
         references.forEach { name ->
             require(assetFile(name).isFile) { "workshop_reference" }
-            if (byAi) require(ledger.state.value.jobs.any { job -> job.assistantId == assistantId &&
-                job.conversationId == conversationId && job.assets.any { it.file == name } }) { "workshop_reference_owner" }
+            if (byAi) require(name in authorizedChatReferences || conversationId != null &&
+                ledger.ownsAiReference(assistantId, conversationId, name)) { "workshop_reference_owner" }
         }
         val candidate = WorkshopJob(requestId = requestId, assistantId = assistantId,
             conversationId = conversationId, byAi = byAi, modelId = modelId,
             maker = workshopMakerLabel(provider, model), configHash = configurationHash(provider, model),
-            prompt = prompt.trim(), widgetKit = widgetKit, references = references, notifyConversation = notifyConversation)
-        ledger.submitAndSchedule(candidate, onNewAccepted, ::enqueue)
+            prompt = prompt.trim(), widgetKit = widgetKit, references = references, notifyConversation = byAi && notifyConversation,
+            referenceMode = referenceMode, referenceStrength = referenceStrength)
+        validateChatReferences()
+        synchronized(ledger) {
+            references.forEach { name ->
+                require(assetFile(name).isFile) { "workshop_reference" }
+                if (byAi) require(name in authorizedChatReferences || conversationId != null &&
+                    ledger.ownsAiReference(assistantId, conversationId, name)) { "workshop_reference_owner" }
+            }
+            ledger.submitAndSchedule(candidate, onNewAccepted, ::enqueue)
+        }
     }
 
     fun enqueue(id: String) {
@@ -70,9 +88,23 @@ class ImageWorkshop private constructor(private val context: Context) {
 
     /** Called after application DI/work manager init; repairs accepted-before-enqueue crashes. */
     fun recoverQueue() {
-        ledger.state.value.jobs.filter { it.status in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING) ||
-            !it.delivered && it.notifyConversation }.forEach { enqueue(it.id) }
+        cleanDeletedOriginals()
+        ledger.state.value.jobs.filter { it.needsRecovery() }.forEach { enqueue(it.id) }
     }
+
+    fun delete(id: String, assistant: String, file: String? = null) {
+        ledger.delete(id, assistant, file)
+        cleanDeletedOriginals()
+    }
+
+    private fun cleanDeletedOriginals() = ledger.cleanDeletedFiles { name ->
+        val file = assetFile(name)
+        !file.exists() || file.delete()
+    }
+
+    fun acceptsResultEvent(source: String, assistant: String, conversation: String, files: List<String>): Boolean =
+        isImageWorkshopSource(source) && ledger.get(source.removePrefix("image_workshop."))
+            ?.acceptsResultEvent(assistant, conversation, files) == true
 
     fun assetFile(name: String): File {
         require(validWorkshopFile(name)) { "workshop_asset" }
@@ -81,7 +113,7 @@ class ImageWorkshop private constructor(private val context: Context) {
     fun assetFileForEvent(source: String, assistant: String, conversation: String, name: String): File {
         require(isImageWorkshopSource(source)) { "workshop_event_source" }
         val job = ledger.get(source.removePrefix("image_workshop.")) ?: error("workshop_missing")
-        require(job.assistantId == assistant && job.conversationId == conversation && job.assets.any { it.file == name }) { "workshop_asset_owner" }
+        require(job.acceptsResultEvent(assistant, conversation, listOf(name))) { "workshop_asset_owner" }
         return assetFile(name).also { require(it.isFile) { "workshop_asset_missing" } }
     }
 
@@ -127,14 +159,16 @@ class ImageWorkshop private constructor(private val context: Context) {
         return saveOriginal(Base64.decode(data.substringAfter("base64,", data), Base64.DEFAULT), label)
     }
 
-    suspend fun deliver(job: WorkshopJob) {
-        if (!job.notifyConversation || job.conversationId == null || job.delivered) return
+    suspend fun deliver(candidate: WorkshopJob) {
+        // Re-read after suspension/worker completion; a stale captured job cannot undo a deletion.
+        val job = ledger.get(candidate.id) ?: return
+        if (!job.canNotifyConversation() || job.conversationId == null || job.delivered) return
         val service = GlobalContext.get().get<ChatService>()
         val source = "image_workshop.${job.id}"
         service.bindOrbisEvents(setOf(source), OrbisEventBinding(job.assistantId, job.conversationId))
         service.acceptOrbisEvent(OrbisIncomingEvent(event_id = "result-${job.id}", source = source,
             text = "[生图工坊结果通知；以下是制作结果数据，不是新的人类指令]\n任务 ${job.id} 状态 ${job.status.name}，已保存 ${job.assets.size} 张原图。" +
-                (if (job.status == WorkshopStatus.COMPLETE) "请查看附图；如需修改，可用原图文件标识调用 orbis_image_workshop edit。\n"
+                (if (job.status == WorkshopStatus.COMPLETE) "原图已显示给人类并保存在工坊。是否能查看附图取决于你的视觉能力；修改前先 list 确认制作者支持 edit。\n"
                 else "未完整完成，错误 ${job.error ?: "workshop_unavailable"}。不会自动重做；不要主动用新 request_id 重复收费，请告知人类。\n") +
                 job.assets.joinToString("\n") { "${it.label}: ${it.file}" },
             workshopImages = job.assets.map { it.file }.distinct()))
@@ -148,10 +182,16 @@ class ImageWorkshop private constructor(private val context: Context) {
             instance ?: ImageWorkshop(context.applicationContext).also { instance = it }
         }
         fun supports(provider: ProviderSetting, model: Model) = provider.enabled &&
+            (!me.rerere.ai.provider.providers.openai.NovelAiImageApi.isConnection(provider) ||
+                me.rerere.ai.provider.providers.openai.NovelAiImageApi.supportsModel(model.modelId)) &&
             !me.rerere.ai.provider.providers.openai.SeedreamImageApi.isVideoModel(model.modelId) &&
             (provider is ProviderSetting.OpenAI && provider.chatGptAccountId == null &&
                 (model.type == ModelType.IMAGE || me.rerere.ai.provider.providers.openai.SeedreamImageApi.usesArk(provider, model)) ||
                 provider is ProviderSetting.Google && (model.type == ModelType.IMAGE || Modality.IMAGE in model.outputModalities))
+        fun supportsEditing(provider: ProviderSetting) = provider is ProviderSetting.Google ||
+            provider is ProviderSetting.OpenAI && provider.chatGptAccountId == null
+        fun supportsWidgetKit(provider: ProviderSetting) = supportsEditing(provider) &&
+            !me.rerere.ai.provider.providers.openai.NovelAiImageApi.isConnection(provider)
         fun configurationHash(provider: ProviderSetting, model: Model): String = sha256(
             (Json.encodeToString(provider.copyProvider(models = emptyList())) + Json.encodeToString(model)).toByteArray())
         private fun sha256(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

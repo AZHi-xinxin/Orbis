@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -202,13 +203,15 @@ internal fun OrbisGalleryPage(assistantId: String, assistantName: String, onClos
                             }
                             TextButton(enabled = !busy, onClick = { task { pendingDrafts = withContext(Dispatchers.IO) { repo.drafts() }; draftsOpen = true; null } }) { Text("管理未发布草稿") }
                         }
-                        val shown = snapshot.items.filter { it.deletedAt == null && it.title.contains(query, true) && when (filter) { "all" -> true; "favorite" -> it.favorite; else -> it.kind == filter } }.sortedByDescending { it.updatedAt }
+                        val shown = snapshot.items.filter { it.deletedAt == null && it.title.contains(query, true) && when (filter) { "all" -> true; "favorite" -> it.favorite; else -> it.kind == filter } }.sortedWith(galleryItemOrder)
                         if (shown.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("✧", fontSize = 56.sp, color = OrbisTheme.colors.indigo)
                                 Text("空格子也在等一个惊喜", style = MaterialTheme.typography.titleMedium)
                                 Text("请 AI 写一件作品，或导入已有的 HTML / 文本。", Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
                         } else LazyVerticalGrid(GridCells.Adaptive(155.dp), Modifier.weight(1f), contentPadding = PaddingValues(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(shown, key = { it.id }) { entry -> GalleryTile(entry, onClick = { selected = entry.id }) }
+                            items(shown, key = { it.id }) { entry -> GalleryTile(entry, busy = busy, onClick = { selected = entry.id }, onPin = {
+                                task { withContext(Dispatchers.IO) { repo.setPinned(entry.id, !entry.pinned) }; null }
+                            }) }
                         }
                     }
                 }
@@ -262,16 +265,23 @@ internal fun GalleryNavigationPanel(expanded: Boolean, onToggle: () -> Unit, act
     }
 }
 
-@Composable private fun GalleryTile(item: GalleryItem, onClick: () -> Unit) {
+@Composable internal fun GalleryTile(item: GalleryItem, busy: Boolean, onClick: () -> Unit, onPin: () -> Unit) {
     val palette = when (item.kind) { "questionnaire" -> listOf(Color(0xffd9d4f4), Color(0xffede8f8)); "html" -> listOf(Color(0xfff2d9d3), Color(0xfff7e9d2)); else -> listOf(Color(0xffc9ddd6), Color(0xffe4ede0)) }
     Surface(onClick = onClick, shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, OrbisTheme.colors.border), color = OrbisTheme.colors.panel) {
         Column {
             Column(Modifier.fillMaxWidth().height(145.dp).background(Brush.linearGradient(palette)).padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Text(if (item.kind == "questionnaire") "✎" else if (item.kind == "html") "✦" else "≋", fontSize = 30.sp, color = Color(0xff4c475f))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (item.kind == "questionnaire") "✎" else if (item.kind == "html") "✦" else "≋", fontSize = 30.sp, color = Color(0xff4c475f))
+                    TextButton(onClick = onPin, enabled = !busy, modifier = Modifier.testTag("gallery-pin-${item.id}"),
+                        contentPadding = PaddingValues(horizontal = 6.dp), colors = ButtonDefaults.textButtonColors(contentColor = Color(0xff4c475f))) {
+                        Text(if (item.pinned) "取消置顶" else "置顶", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
                 Text(item.preview.ifBlank { "一份属于我们的作品" }, maxLines = 3, overflow = TextOverflow.Ellipsis, color = Color(0xff484050), style = MaterialTheme.typography.bodySmall)
             }
             Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text((if (item.favorite) "♡ " else "") + item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                if (item.pinned) Text("已置顶", style = MaterialTheme.typography.labelSmall, color = OrbisTheme.colors.ink)
                 Text("${when (item.kind) { "html" -> "互动礼物"; "questionnaire" -> "问卷"; else -> "文字" }} · ${DateFormat.getDateInstance(DateFormat.SHORT).format(Date(item.updatedAt))}", style = MaterialTheme.typography.labelSmall, color = OrbisTheme.colors.mutedInk)
             }
         }

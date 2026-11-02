@@ -81,7 +81,7 @@ fun ImagePreviewDialog(
                         }
                     }
                 ) {
-                    Icon(HugeIcons.Download01, null, tint = Color.White)
+                    Icon(HugeIcons.Download01, "保存原图", tint = Color.White)
                 }
             }
         }

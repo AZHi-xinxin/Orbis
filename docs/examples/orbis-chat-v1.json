@@ -1,0 +1,14 @@
+{
+  "format": "orbis_chat",
+  "version": 1,
+  "conversations": [
+    {
+      "id": "my-app/chat-001/main",
+      "title": "一段旧对话",
+      "messages": [
+        {"role": "user", "content": "今天想聊聊星星。", "timestamp": "2026-01-01T20:00:00+08:00"},
+        {"role": "assistant", "content": "好呀，你想从哪颗星说起？", "reasoning": "先接住这个话题。", "timestamp": null}
+      ]
+    }
+  ]
+}

@@ -581,10 +581,13 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            if (!vm.handleMessageSend(inputState.getContents(), orbisQuote = inputState.orbisQuote)) return@ChatInput
+                            if (!vm.handleMessageSend(inputState.getContents(
+                                humanThoughtEnabled = composerAssistant?.let { it.allowHumanThought && it.humanThoughtEnabled } == true),
+                                orbisQuote = inputState.orbisQuote)) return@ChatInput
                             bottomFollowState.followForSend(chatListState.isScrollInProgress)
                         }
-                        inputState.clearInput()
+                        inputState.clearInput(preserveHumanThought = !inputState.hasExistingHumanThought &&
+                            composerAssistant?.let { it.allowHumanThought && it.humanThoughtEnabled } != true)
                     },
                     onLongSendClick = {
                         if (inputState.isEditing()) {
@@ -593,11 +596,13 @@ private fun ChatPageContent(
                                 messageId = inputState.editingMessage!!,
                             )
                         } else {
-                            if (!vm.handleMessageSend(content = inputState.getContents(), answer = false,
+                            if (!vm.handleMessageSend(content = inputState.getContents(
+                                humanThoughtEnabled = composerAssistant?.let { it.allowHumanThought && it.humanThoughtEnabled } == true), answer = false,
                                 orbisQuote = inputState.orbisQuote)) return@ChatInput
                             bottomFollowState.followForSend(chatListState.isScrollInProgress)
                         }
-                        inputState.clearInput()
+                        inputState.clearInput(preserveHumanThought = !inputState.hasExistingHumanThought &&
+                            composerAssistant?.let { it.allowHumanThought && it.humanThoughtEnabled } != true)
                     },
                     onUpdateChatModel = {
                         vm.setChatModel(ownerId = conversation.assistantId, model = it)
@@ -655,6 +660,7 @@ private fun ChatPageContent(
             },
             containerColor = Color.Transparent,
         ) { innerPadding ->
+            Box(Modifier.fillMaxSize()) {
             ChatList(
                 innerPadding = innerPadding,
                 conversation = conversation,
@@ -789,6 +795,10 @@ private fun ChatPageContent(
                     vm.saveConversationAsync()
                 },
             )
+            if (BuildConfig.ORBIS_ENABLED && !conversation.isConsultation) me.rerere.rikkahub.ui.pages.orbis.music.MusicOverlay(
+                ownerName = setting.assistants.firstOrNull { it.id == conversation.assistantId }?.name ?: "AI",
+                modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 8.dp))
+            }
         }
 
         if (BuildConfig.ORBIS_ENABLED && showOrbisPrompt) {
@@ -1017,6 +1027,7 @@ private fun TopBar(
                         me.rerere.rikkahub.ui.pages.orbis.OrbisBodyEntry(assistant.id.toString(), conversation.id.toString())
                     }
                 }
+                me.rerere.rikkahub.ui.pages.orbis.music.MusicEntry()
                 OrbisHeaderControlSurface(headerOpacity, shape = CircleShape) {
                     OrbisContextBudgetButton(
                         budget = budget,

@@ -6,11 +6,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterConflict
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterEdit
 import me.rerere.rikkahub.data.model.OrbisGenerationParameters
+import me.rerere.rikkahub.data.model.OrbisGenerationParameterDraft
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -23,6 +25,25 @@ class OrbisGenerationParameterPersistenceTest {
     private val assistant = Assistant(temperature = 0.5f)
     private val before = OrbisGenerationParameters.from(assistant)
     private val edit = OrbisGenerationParameterEdit(assistant.id, before, before.copy(temperature = 1f))
+
+    @Test fun `history images switch persists both ways without replacing concurrent settings or other assistants`() = runBlocking {
+        val other = Assistant(name = "other", sendHistoryImages = false)
+        var state = Settings(assistants = listOf(assistant.copy(temperature = 1.7f), other), assistantId = assistant.id)
+        for (enabled in listOf(false, true)) {
+            val snapshot = OrbisGenerationParameters.from(state.assistants.first())
+            val draft = OrbisGenerationParameterDraft.from(snapshot).copy(sendHistoryImages = enabled)
+            val restoredDraft = Json.decodeFromString<OrbisGenerationParameterDraft>(Json.encodeToString(draft))
+            val saved = persistOrbisGenerationParameters(OrbisGenerationParameterEdit(assistant.id, snapshot, restoredDraft.parameters())) {
+                state = it(state)
+            }
+            state = Json.decodeFromString<Settings>(Json.encodeToString(state))
+            assertEquals(enabled, saved.sendHistoryImages)
+            assertEquals(enabled, state.assistants.first().sendHistoryImages)
+            assertEquals(1.7f, state.assistants.first().temperature)
+            assertEquals(other, state.assistants.last())
+            assertEquals(assistant.id, state.assistantId)
+        }
+    }
 
     @Test fun `finite context limit then zero is saved in current assistant without replacing identity`() = runBlocking {
         var state = Settings(assistants = listOf(assistant), assistantId = assistant.id)

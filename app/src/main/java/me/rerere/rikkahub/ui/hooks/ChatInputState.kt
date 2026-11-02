@@ -7,18 +7,28 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.humanThoughtPart
+import me.rerere.ai.ui.isHumanThought
 import kotlin.uuid.Uuid
 
 class ChatInputState {
     var orbisQuote by mutableStateOf<me.rerere.ai.ui.OrbisMessageQuote?>(null)
     val textContent = TextFieldState()
+    val humanThoughtContent = TextFieldState()
+    // Only controls the editor's presentation; folded drafts are still part of the message.
+    var humanThoughtExpanded by mutableStateOf(false)
+    var hasExistingHumanThought by mutableStateOf(false)
+        private set
     var messageContent by mutableStateOf(listOf<UIMessagePart>())
     var editingMessage by mutableStateOf<Uuid?>(null)
     private var editingParts: List<UIMessagePart>? = null
     private var editingAttachmentUrls: Set<String> = emptySet()
 
-    fun clearInput() {
+    fun clearInput(preserveHumanThought: Boolean = false) {
         textContent.setTextAndPlaceCursorAtEnd("")
+        if (!preserveHumanThought) humanThoughtContent.setTextAndPlaceCursorAtEnd("")
+        humanThoughtExpanded = false
+        hasExistingHumanThought = false
         messageContent = emptyList()
         editingMessage = null
         editingParts = null
@@ -37,19 +47,30 @@ class ChatInputState {
     }
 
     fun setContents(contents: List<UIMessagePart>) {
-        val lastTextIndex = contents.indexOfLast { it is UIMessagePart.Text }
+        humanThoughtExpanded = false
+        hasExistingHumanThought = contents.any { it.isHumanThought() }
+        humanThoughtContent.setTextAndPlaceCursorAtEnd(contents.filter { it.isHumanThought() }
+            .filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text })
+        val bodyContents = contents.filterNot { it.isHumanThought() }
+        val lastTextIndex = bodyContents.indexOfLast { it is UIMessagePart.Text }
         val text = if (lastTextIndex >= 0) {
-            (contents[lastTextIndex] as UIMessagePart.Text).text
+            (bodyContents[lastTextIndex] as UIMessagePart.Text).text
         } else {
             ""
         }
         textContent.setTextAndPlaceCursorAtEnd(text)
-        messageContent = contents.filter { it !is UIMessagePart.Text }
-        editingParts = contents
+        messageContent = bodyContents.filter { it !is UIMessagePart.Text }
+        editingParts = bodyContents
         editingAttachmentUrls = contents.mapNotNull { it.attachmentUrlOrNull() }.toSet()
     }
 
-    fun getContents(): List<UIMessagePart> {
+    fun getContents(humanThoughtEnabled: Boolean = false): List<UIMessagePart> {
+        val includeThought = if (isEditing()) hasExistingHumanThought else humanThoughtEnabled || hasExistingHumanThought
+        val body = getBodyContents()
+        return if (includeThought) listOf(humanThoughtPart(humanThoughtContent.text.toString())) + body else body
+    }
+
+    private fun getBodyContents(): List<UIMessagePart> {
         val text = textContent.text.toString()
         if (isEditing()) {
             val originalParts = editingParts

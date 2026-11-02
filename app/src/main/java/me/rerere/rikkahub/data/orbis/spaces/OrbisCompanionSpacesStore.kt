@@ -113,7 +113,7 @@ class OrbisCompanionSpacesStore internal constructor(
     fun saveHumanStory(title: String, prompt: String, paper: String, id: String? = null, expectedRevision: Int? = null): SpaceStory = synchronized(lock) {
         require(title.isNotBlank() && prompt.isNotBlank() && paper in CompanionSpaceLimits.papers) { "space_story_empty" }
         val state = read(); val old = id?.let { ownedStory(state, it, expectedRevision) }
-        val item = SpaceStory(old?.id ?: uuid(), title.trim(), prompt, old?.body.orEmpty(), paper, (old?.revision ?: 0) + 1, old?.createdAt ?: now(), now())
+        val item = SpaceStory(old?.id ?: uuid(), title.trim(), prompt, old?.body.orEmpty(), paper, (old?.revision ?: 0) + 1, old?.createdAt ?: now(), now(), pinned = old?.pinned ?: false)
         commit(state.copy(stories = state.stories.filterNot { it.id == item.id } + item)); item
     }
 
@@ -126,6 +126,15 @@ class OrbisCompanionSpacesStore internal constructor(
     fun deleteStory(id: String, expectedRevision: Int) = synchronized(lock) {
         val state = read(); ownedStory(state, id, expectedRevision)
         commit(state.copy(stories = state.stories.filterNot { it.id == id }))
+    }
+
+    /** Human shelf preference; a concurrently open body editor keeps its content revision. */
+    fun setStoryPinned(id: String, pinned: Boolean) = synchronized(lock) {
+        val state = read()
+        val current = state.stories.firstOrNull { it.id == id } ?: error("space_not_found")
+        if (current.pinned != pinned) {
+            commit(state.copy(stories = state.stories.map { if (it.id == id) it.copy(pinned = pinned) else it }))
+        }
     }
 
     private fun ownedStory(state: CompanionSpaceSnapshot, id: String, revision: Int?): SpaceStory {

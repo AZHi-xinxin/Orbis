@@ -49,6 +49,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
     var showStickers by rememberSaveable { mutableStateOf(false) }
     var showPet by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showStudy by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showMusic by rememberSaveable { mutableStateOf(false) }
     var showHealth by rememberSaveable { mutableStateOf(false) }
     var showBody by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     val activityScope = rememberCoroutineScope()
@@ -122,6 +123,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                                                 val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
                                                 ToolsTile(tile, enabled, Modifier.weight(1f)) {
                                                     when (item.destination) {
+                                                        OrbisToolDestination.MUSIC -> showMusic = true
                                                         OrbisToolDestination.PET -> showPet = true
                                                         OrbisToolDestination.STUDY -> showStudy = true
                                                         OrbisToolDestination.BODY -> showBody = true
@@ -171,6 +173,7 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
             }
         }
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
+        if (showMusic) me.rerere.rikkahub.ui.pages.orbis.music.MusicLibraryLauncher(selected?.name ?: "AI") { showMusic = false }
         if (selected != null) key(selected.id) {
             if (showHealth) OrbisHealthPage { showHealth = false }
             if (showBody) OrbisBodyDetails(selected.id.toString(), conversationId) { showBody = false }

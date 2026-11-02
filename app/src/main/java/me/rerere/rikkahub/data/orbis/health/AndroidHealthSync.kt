@@ -20,7 +20,7 @@ import java.time.*
 import java.util.concurrent.TimeUnit
 
 @Serializable internal data class HealthSyncSettings(val enabled:Boolean=false,val serverId:String="",val binding:String="",
-    val generation:String="",val completedSlot:String="",val lastAttempt:Long=0,val lastSuccess:Long=0,val status:String="尚未同步")
+    val generation:String="",val completedSlot:String="",val lastAttempt:Long=0,val lastSuccess:Long=0,val status:String="尚未同步",val errorCode:String="")
 internal fun healthSyncGrantCurrent(live:HealthSyncSettings,grant:HealthSyncSettings)=live.enabled&&
     live.serverId==grant.serverId&&live.binding==grant.binding&&live.generation==grant.generation
 internal fun healthSyncBinding(server:McpServerConfig):String {
@@ -73,7 +73,7 @@ internal object AndroidHealthSync {
         if(!manual && (cfg.completedSlot==slot.key || System.currentTimeMillis()-cfg.lastAttempt<10*60_000))return@withLock true
         val admitted=synchronized(this) {
             if(!healthSyncGrantCurrent(read(context),cfg))false else {
-                save(context,cfg.copy(lastAttempt=System.currentTimeMillis(),status="正在读取设备记录…"));true
+                save(context,cfg.copy(lastAttempt=System.currentTimeMillis(),status="正在读取设备记录…",errorCode=""));true
             }
         }
         if(!admitted)return@withLock false
@@ -89,7 +89,11 @@ internal object AndroidHealthSync {
             val server=selected();val mcp=koin.get<McpManager>()
             val parts=withTimeout(45_000){
                 if(mcp.getClient(server)==null)mcp.addClient(server)
-                mcp.getStatus(server).first{it is McpStatus.Connected || it is McpStatus.Error || it is McpStatus.NeedsAuthorization}
+                when(mcp.getStatus(server).first{it is McpStatus.Connected || it is McpStatus.Error || it is McpStatus.NeedsAuthorization}) {
+                    is McpStatus.Connected -> Unit
+                    is McpStatus.NeedsAuthorization -> error("health_sync_authorization")
+                    else -> error("health_sync_connection")
+                }
                 mcp.callTool(server.id,"read_health_data",buildJsonObject{put("data_type","")})
             }
             val texts=parts.filterIsInstance<UIMessagePart.Text>();require(parts.size==texts.size&&texts.size==1){"health_cloud_format"}
@@ -116,17 +120,17 @@ internal object AndroidHealthSync {
                 val current=read(context)
                 if(healthSyncGrantCurrent(current,cfg))
                     save(context,current.copy(lastAttempt=System.currentTimeMillis(),lastSuccess=System.currentTimeMillis(),
-                        completedSlot=if(manual)current.completedSlot else slot.key,status=status))
+                        completedSlot=if(manual)current.completedSlot else slot.key,status=status,errorCode=""))
             };true
         }catch(cancel:CancellationException){
             if(cancel !is TimeoutCancellationException)throw cancel
-            failed(context,cfg);false
-        }catch(_:Exception){ failed(context,cfg);false }
+            failed(context,cfg,"health_sync_timeout");false
+        }catch(e:Exception){ failed(context,cfg,e.message.orEmpty());false }
     }
-    @Synchronized private fun failed(context:Context,cfg:HealthSyncSettings) {
+    @Synchronized private fun failed(context:Context,cfg:HealthSyncSettings,code:String) {
         val live=read(context)
         if(healthSyncGrantCurrent(live,cfg))
-            save(context,live.copy(status="同步未完成；原记录保留。请检查网络、MCP连接或重新选择来源。"))
+            save(context,live.copy(status=healthSyncFailureMessage(code),errorCode=code.takeIf{it.matches(Regex("health_[a-z_]+"))}?:"health_sync_failed"))
     }
 }
 
@@ -136,7 +140,7 @@ internal class HealthSyncWorker(context:Context,params:WorkerParameters):Corouti
             if(AndroidHealthSync.read(applicationContext).generation!=inputData.getString("generation"))
                 return@withContext Result.success()
             val ok=AndroidHealthSync.sync(applicationContext)
-            if(!ok&&runAttemptCount<3&&AndroidHealthSync.read(applicationContext).enabled)Result.retry()
+            if(!ok&&runAttemptCount<3&&AndroidHealthSync.read(applicationContext).let{it.enabled&&healthSyncRetryable(it.errorCode)})Result.retry()
             else {AndroidHealthSync.schedule(applicationContext,nextOnly=true);Result.success()}
         } catch(cancel:CancellationException){throw cancel}catch(_:Exception){Result.failure()}
     }

@@ -9,6 +9,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.rikkahub.data.orbis.workshop.acceptsResultEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -40,6 +42,29 @@ internal fun independentNotificationLabel(event: OrbisInboxEvent): String = when
 
 @Composable
 internal fun OrbisPendingNotificationCard(event: OrbisInboxEvent, onDismiss: () -> Unit = {}) {
+    if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source)) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val opened by androidx.compose.runtime.produceState<me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop?>(null) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { me.rerere.rikkahub.data.orbis.workshop.ImageWorkshop.open(context) }.getOrNull()
+            }
+        }
+        val workshop = opened ?: return
+        val state by workshop.state.collectAsStateWithLifecycle()
+        val job = state.jobs.firstOrNull { it.id == event.source.removePrefix("image_workshop.") } ?: return
+        if (!job.acceptsResultEvent(event.assistantId, event.conversationId, event.workshopImages)) return
+        val images by androidx.compose.runtime.produceState<List<String>>(emptyList(), event.id, event.workshopImages, job) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                event.workshopImages.mapNotNull { name ->
+                    runCatching { android.net.Uri.fromFile(workshop.assetFileForEvent(event.source,
+                        event.assistantId, event.conversationId, name)).toString() }.getOrNull()
+                }
+            }
+        }
+        me.rerere.rikkahub.ui.components.message.WorkshopResultCard(event.id, images,
+            event.source, event.eventId, event.assistantId)
+        return
+    }
     var expanded by rememberSaveable(event.id) { mutableStateOf(false) }
     var dismissed by rememberSaveable(event.id) { mutableStateOf(false) }
     if (dismissed) return

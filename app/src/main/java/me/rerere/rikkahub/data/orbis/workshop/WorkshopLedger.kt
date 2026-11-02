@@ -17,12 +17,29 @@ import java.util.UUID
     val createdAt: Long = System.currentTimeMillis(), val status: WorkshopStatus = WorkshopStatus.QUEUED,
     val assets: List<WorkshopAsset> = emptyList(), val error: String? = null,
     val delivered: Boolean = false,
-    // Execution authority and completion destination are independent. A human may retry
-    // a companion's failed job while still returning its result to the original conversation.
+    // Only AI-origin jobs may notify a conversation. Legacy human flags are never authority.
     val notifyConversation: Boolean = byAi,
+    val referenceMode: String = "img2img", val referenceStrength: Double = 0.6,
+    val deleted: Boolean = false,
 )
 @Serializable data class WorkshopState(val version: Int = 1, val allowAi: Boolean = true,
-    val defaultModel: String? = null, val jobs: List<WorkshopJob> = emptyList())
+    val defaultModel: String? = null, val jobs: List<WorkshopJob> = emptyList(),
+    val pendingFileDeletes: Set<String> = emptySet(), val sharedOriginals: Set<String> = emptySet())
+
+/** A deleted receipt reserves this request key, not the workshop or reference image. */
+class WorkshopRequestDeletedException(val requestId: String) : IllegalArgumentException("workshop_request_deleted")
+
+fun WorkshopJob.visibleToAi(assistant: String, conversation: String) =
+    byAi && !deleted && assistantId == assistant && conversationId == conversation
+
+fun WorkshopJob.canNotifyConversation() = byAi && !deleted && notifyConversation && conversationId != null
+
+fun WorkshopJob.needsRecovery() = !deleted &&
+    (status in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING) || !delivered && canNotifyConversation())
+
+fun WorkshopJob.acceptsResultEvent(assistant: String, conversation: String, files: List<String>) =
+    visibleToAi(assistant, conversation) && canNotifyConversation() &&
+        status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING) && files.all { file -> assets.any { it.file == file } }
 
 /** No credentials, daily quotas or background re-generation. A claim precedes any billable call. */
 class WorkshopLedger(private val read: () -> String?, private val write: (String) -> Unit,
@@ -40,12 +57,17 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
         UUID.fromString(job.assistantId); job.conversationId?.let(UUID::fromString); UUID.fromString(job.modelId)
         require(job.requestId.matches(Regex("[A-Za-z0-9_.-]{1,100}"))) { "workshop_request_id" }
         require(job.prompt.isNotBlank() && job.prompt.length <= 12000) { "workshop_prompt" }
+        require(job.referenceMode in setOf("img2img", "character&style") && job.referenceStrength.isFinite() && job.referenceStrength in 0.0..1.0) { "workshop_reference_mode" }
         require(job.references.size <= 4 && job.references.all(::validWorkshopFile)) { "workshop_reference" }
         require(!job.byAi || job.conversationId != null && state.value.allowAi) { "workshop_ai_disabled" }
         require(!job.notifyConversation || job.conversationId != null) { "workshop_target_changed" }
-        state.value.jobs.firstOrNull { it.assistantId == job.assistantId && it.conversationId == job.conversationId && it.requestId == job.requestId }?.let {
+        require(job.byAi || !job.notifyConversation) { "workshop_human_private" }
+        require(!job.deleted) { "workshop_deleted" }
+        state.value.jobs.firstOrNull { it.assistantId == job.assistantId && it.conversationId == job.conversationId &&
+            it.byAi == job.byAi && it.requestId == job.requestId }?.let {
+            if (it.deleted) throw WorkshopRequestDeletedException(job.requestId)
             require(it.modelId == job.modelId && it.prompt == job.prompt && it.references == job.references &&
-                it.widgetKit == job.widgetKit && it.byAi == job.byAi &&
+                it.widgetKit == job.widgetKit && it.byAi == job.byAi && it.referenceMode == job.referenceMode && it.referenceStrength == job.referenceStrength &&
                 it.notifyConversation == job.notifyConversation) { "workshop_request_conflict" }
             return it
         }
@@ -56,7 +78,7 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
     @Synchronized fun claim(id: String): WorkshopJob? {
         check(!storageUncertain) { "workshop_storage_unverified" }
         val job = get(id) ?: return null
-        if (job.status != WorkshopStatus.QUEUED) return null
+        if (job.deleted || job.status != WorkshopStatus.QUEUED) return null
         if (job.byAi && !state.value.allowAi) { update(id) { it.copy(status = WorkshopStatus.CANCELLED, error = "workshop_ai_disabled") }; return null }
         return update(id) { it.copy(status = WorkshopStatus.RUNNING, error = null) }
     }
@@ -64,8 +86,41 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
         val old = get(id) ?: error("workshop_missing")
         val next = transform(old)
         require(next.id == old.id && next.assistantId == old.assistantId && next.conversationId == old.conversationId)
+        require(next.byAi == old.byAi && !old.deleted) { "workshop_deleted" }
         commit(state.value.copy(jobs = state.value.jobs.map { if (it.id == id) next else it })); return next
     }
+
+    /** Human-only removal. Keep a content-free receipt so a stale request cannot charge again. */
+    @Synchronized fun delete(id: String, assistant: String, file: String? = null) {
+        val old = get(id) ?: error("workshop_missing")
+        require(old.assistantId == assistant) { "workshop_owner_missing" }
+        if (old.deleted) return
+        require(old.status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING)) { "workshop_delete_busy" }
+        require(file == null || old.assets.any { it.file == file }) { "workshop_asset_missing" }
+        val removed = if (file == null) old.assets.map { it.file }.toSet() + old.references else setOf(file)
+        // Files already handed to a chat must remain usable there, including old human notices.
+        val shared = state.value.sharedOriginals + state.value.jobs.filter { it.canNotifyConversation() || it.delivered && it.notifyConversation }
+            .flatMap { it.assets.map(WorkshopAsset::file) }
+        val next = if (file == null) old.copy(deleted = true, prompt = "", references = emptyList(),
+            assets = emptyList(), error = null, notifyConversation = false, delivered = true)
+        else old.copy(assets = old.assets.filterNot { it.file == file }, notifyConversation = false)
+        commit(state.value.copy(jobs = state.value.jobs.map { if (it.id == id) next else it },
+            pendingFileDeletes = state.value.pendingFileDeletes + removed, sharedOriginals = shared))
+    }
+
+    /** Under the same lock as submit: never unlink a concurrently accepted reference. */
+    @Synchronized fun cleanDeletedFiles(remove: (String) -> Boolean) {
+        val inUse = state.value.sharedOriginals + state.value.jobs.filterNot { it.deleted }
+            .flatMap { it.assets.map(WorkshopAsset::file) + it.references }
+        val removed = state.value.pendingFileDeletes.filter { validWorkshopFile(it) && it !in inUse && remove(it) }.toSet()
+        if (removed.isNotEmpty()) commit(state.value.copy(pendingFileDeletes = state.value.pendingFileDeletes - removed))
+    }
+
+    @Synchronized fun visibleJobs(assistant: String, conversation: String) =
+        state.value.jobs.filter { it.visibleToAi(assistant, conversation) }
+
+    @Synchronized fun ownsAiReference(assistant: String, conversation: String, file: String) =
+        visibleJobs(assistant, conversation).any { job -> job.assets.any { it.file == file } }
     @Synchronized fun recoverInterrupted(id: String) {
         if (get(id)?.status == WorkshopStatus.RUNNING) update(id) {
             it.copy(status = WorkshopStatus.INTERRUPTED, error = "workshop_interrupted_no_recharge")

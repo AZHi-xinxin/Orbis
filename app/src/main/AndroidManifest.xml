@@ -94,6 +94,9 @@
       <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
       <meta-data android:name="android.appwidget.provider" android:resource="@xml/orbis_character_widget_info" />
     </receiver>
+    <service android:name=".data.orbis.music.OrbisMusicService" android:exported="true" android:foregroundServiceType="mediaPlayback">
+      <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
+    </service>
     <service android:name=".service.OrbisScreenShareService" android:exported="false"
       android:foregroundServiceType="mediaProjection" />
     <!-- Ordinary launcher first: also works in hosts exposing only one package launch entry.

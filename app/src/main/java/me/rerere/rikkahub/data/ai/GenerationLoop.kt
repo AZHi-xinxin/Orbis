@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.ai.ui.projectHumanThoughts
+
 import me.rerere.ai.ui.recallModelInput
 
 import me.rerere.rikkahub.data.model.withVoiceNoteTranscripts
@@ -785,6 +787,9 @@ class GenerationLoop(
                     add(UIMessage.system(prompt = system).copy(isSynthetic = true))
                 }
                 addAll(selection.requestMessages())
+            }.let { selected ->
+                if (assistant.sendHistoryImages || conversationId == null) selected
+                else me.rerere.rikkahub.data.ai.tools.projectHistoryImages(selected, assistant.id, conversationId)
             }.transforms(
                 transformers = transformers,
                 context = context,
@@ -795,7 +800,7 @@ class GenerationLoop(
                 conversationLorebookIds = conversationLorebookIds,
                 processingStatus = processingStatus,
                 workspaceCwd = workspaceCwd,
-            ).let { projected -> localMemoryTurn?.project(projected) ?: projected }.also { projected ->
+            ).projectHumanThoughts().let { projected -> localMemoryTurn?.project(projected) ?: projected }.also { projected ->
                 // A reversible local pruning projection must not retain the old, larger usage
                 // anchor. The snapshot will estimate its actual bounded request plus tools.
                 if (shouldResetProjectedUsageEstimate(messages, projected)) initialEstimate = null

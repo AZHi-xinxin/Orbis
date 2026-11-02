@@ -388,6 +388,14 @@ internal fun GardenQuickChatMessage(
     // Use provenance, never keywords in ordinary prose. Folding is a durable display edit;
     // it must not rewrite the payload, replay a sentinel or save a paged conversation snapshot.
     message.orbisEvent?.let { event ->
+        if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(event.source)) {
+            ProvideTextStyle(textStyle) {
+                me.rerere.rikkahub.ui.components.message.WorkshopResultCard(event.recordId,
+                    message.parts.filterIsInstance<UIMessagePart.Image>().map { it.url },
+                    event.source, event.eventId, assistant?.id?.toString())
+            }
+            return
+        }
         ProvideTextStyle(textStyle) {
             OrbisEventMessageCard(event = event, originalText = message.toText(), appearance = appearance,
                 onUpdate = { checkNotNull(onEventPresentation)(it) },

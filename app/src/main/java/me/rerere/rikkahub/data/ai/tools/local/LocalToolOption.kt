@@ -82,6 +82,10 @@ sealed class LocalToolOption {
     data object ThemeDesign : LocalToolOption()
 
     @Serializable
+    @SerialName("orbis_music")
+    data object LocalMusic : LocalToolOption()
+
+    @Serializable
     @SerialName("orbis_context_pruning")
     data object ContextPruning : LocalToolOption()
 }

@@ -302,9 +302,9 @@ internal class HumanContinuationLane(
     /** Reserve RAM only. Claiming the durable event must happen outside all session/lane locks. */
     @Synchronized fun reserveWorkshopReturn(event: OrbisInboxEvent, completed: WorkshopJob,
         targetMatches: Boolean, deliveryAllowed: Boolean, imageInputSupported: Boolean,
-        resetting: Boolean = false): WorkshopReturnReservation? {
+        resetting: Boolean = false, allowOcrFallback: Boolean = false): WorkshopReturnReservation? {
         if (retired || !targetMatches || !deliveryAllowed || resetting ||
-            event.workshopImages.isNotEmpty() && !imageInputSupported ||
+            event.workshopImages.isNotEmpty() && !imageInputSupported && !allowOcrFallback ||
             !event.needsIndependentDispatch() || !matchesWorkshopReturn(event, completed) ||
             job.value != null || workshopReservation != null || sentinelReservation != null ||
             state.value.currentMessages.any { it.getTools().any { tool -> !tool.isExecuted } } ||

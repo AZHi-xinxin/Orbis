@@ -131,6 +131,11 @@ internal fun OrbisGenerationParametersSection(
         Text("仅记录本机发送前节点范围，不含正文；正文仍可能经过消息模板等处理，不代表网关或模型已收到、记住全部内容。重启后此记录清空。",
             style = MaterialTheme.typography.bodySmall)
     }
+    ParameterToggle("发送历史图片", draft.sendHistoryImages, editable) { change(draft.copy(sendHistoryImages = it)) }
+    Text("开启：发送本轮上下文中的全部原图。关闭：只直接发送本轮新增图片，旧图用图片码表示，AI 可按码调取。聊天原图始终保留。",
+        style = MaterialTheme.typography.bodySmall)
+    Text("切换后点击下方「保存当前 AI 参数」，下一次请求生效。此项不会把你在生图工坊的私密创作分享给 AI。",
+        style = MaterialTheme.typography.bodySmall)
     ParameterToggle("流式输出", draft.streamOutput, editable) { change(draft.copy(streamOutput = it)) }
     ParameterNumber("最大输出 token（留空使用默认）", "orbis-generation-max-tokens", draft.maxTokens,
         editable) { change(draft.copy(maxTokens = it)) }

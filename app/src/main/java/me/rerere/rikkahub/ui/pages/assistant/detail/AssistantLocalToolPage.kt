@@ -136,6 +136,15 @@ private fun AssistantLocalToolContent(
             { toggleLocalTool(LocalToolOption.SelfCheck, it) })
         if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) me.rerere.rikkahub.ui.pages.orbis.BoundarySettingsCard(assistant.id.toString())
         AssistantMessageTimeCard(assistant = assistant, onUpdate = onUpdate)
+        if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) CardGroup {
+            item(headlineContent = { Text("允许 AI 开启人类思考链") },
+                supportingContent = { Text(if (assistant.allowHumanThought && assistant.humanThoughtEnabled)
+                    "AI 已开启。输入框分为思考链与正文；思考链可留空，随正文一起发送。"
+                    else "授权后，由当前 AI 开启或关闭。发送后的思考链默认折叠，点击展开。") },
+                trailingContent = { Switch(assistant.allowHumanThought, {
+                    onUpdate(assistant.copy(allowHumanThought = it, humanThoughtEnabled = false))
+                }, modifier = Modifier.testTag("human-thought-permission")) })
+        }
         CardGroup {
             item(headlineContent = { Text("宠物区") },
                 supportingContent = { Text("开启本地照料及伙伴工具。关闭不联网、不加载图片；已领养宠物仍按离开时长变化，可先送去寄养。") },
@@ -169,6 +178,12 @@ private fun AssistantLocalToolContent(
                 supportingContent = { Text("让伙伴给已有本机记忆附上想做的事。星图只显示未完成数量；关闭后工具与自动浮现均停止。") },
                 trailingContent = { Switch(checked = LocalToolOption.LocalDesire in assistant.localTools,
                     onCheckedChange = { toggleLocalTool(LocalToolOption.LocalDesire, it) }) },
+            )
+            item(
+                headlineContent = { Text("星河音乐") },
+                supportingContent = { Text("让伙伴在本地曲库中自主选歌、播放、暂停、切歌并创建专属歌单。你可以同时操作播放器。") },
+                trailingContent = { Switch(checked = LocalToolOption.LocalMusic in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.LocalMusic, it) }) },
             )
             item(
                 headlineContent = { Text("AI 自定义美化") },

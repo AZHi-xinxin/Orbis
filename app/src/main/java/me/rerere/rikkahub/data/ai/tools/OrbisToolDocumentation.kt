@@ -7,6 +7,7 @@ import me.rerere.ai.core.Tool
  */
 internal data class OrbisToolDocumentation(val summary: String, val details: String)
 internal val orbisToolDocumentation = mapOf(
+    "orbis_music" to OrbisToolDocumentation(me.rerere.rikkahub.data.orbis.music.MUSIC_SUMMARY, me.rerere.rikkahub.data.orbis.music.MUSIC_GUIDE),
     "orbis_body" to OrbisToolDocumentation(
         "当前助手的身体表达模拟。先rules查看定义、revision和setup；按提示完成设置。修改规则用pause→draft→activate→resume，写入带最新expected_revision。首次规则默认auto，由新人类消息自动计算，auto禁用event/undo；state读值。私密层由AI共享与人类展开共同控制。创建规则前查完整说明；规则/数值不是生理测量。",
         """
@@ -76,7 +77,7 @@ action=restore_latest 是人类明确要求找回资料时才用的恢复命令�
     ),
     "orbis_health" to OrbisToolDocumentation(
         "人类日记录，需人类开启；本机保存，查询结果交当前模型，不进入云备份。read按date读取；write带expected_revision仅改指定字段，尊重人类修改；截图必须propose等待人类确认。写入前查完整字段说明，evidence填写真实来源；summary仅统计已有记录，不作诊断预测。",
-        "独立的人类日记录，与AI身体模拟不同。仅人类开启后可用，不自动注入；读取结果会交给当前聊天模型，记录本身保存在本机、不进入云备份。action=read/write/propose/summary。read按date读取，未记录返回空。write传date(YYYY-MM-DD)、expected_revision(新建0)、fields对象、source(ai或mcp)、evidence(事实来源，不编造)。仅改指定字段，null表示明确清除；人类改过的字段拒绝覆盖，可改用propose交人类确认。截图来源必须propose，source=screenshot，不直接入库。propose由工具娱乐“人类记录”内原生预览确认，AI没有confirm动作。fields可用sleepMinutes整数分钟/sleepQuality/bedtime或wakeTime(HH:mm)/periodStatus(none|active|pre|post)/periodDay/steps/activeMinutes/calories/restingHeart/averageHeart/heartRate(当次测量，非平均或静息)/systolic/diastolic/spo2/note。缺失留空，血压血氧需要真实设备来源。summary传start/end(一年以内)及可选sleep_target_minutes(仅统计阈值)，返回有记录日的平均睡眠、步数与经期原始时间序列；缺失不记0，不作诊断预测。",
+        "独立的人类日记录，与AI身体模拟不同。仅人类开启后可用，不自动注入；读取结果会交给当前聊天模型，记录本身保存在本机、不进入云备份。action=read/write/propose/summary。read按date读取，未记录返回空。write/propose均必填date(YYYY-MM-DD)、expected_revision(先read；新建0)、fields对象、source(ai或mcp)、evidence(事实来源，不编造)。仅改指定字段，null表示明确清除；人类改过的字段拒绝覆盖，可改用propose交人类确认。截图来源必须propose，source=screenshot，不直接入库。propose由工具娱乐“人类记录”内原生预览确认，AI没有confirm动作。fields可用sleepMinutes整数分钟/sleepQuality文字感受（不是数值评分）/bedtime或wakeTime(HH:mm)/periodStatus(none|active|pre|post)/periodDay/steps/activeMinutes/calories/restingHeart/averageHeart/heartRate(当次测量，非平均或静息)/systolic/diastolic/spo2/note。缺失留空，血压血氧需要真实设备来源。summary传start/end(一年以内)及可选sleep_target_minutes(仅统计阈值)，返回有记录日的平均睡眠、步数与经期原始时间序列；缺失不记0，不作诊断预测。",
     ),
 )
 

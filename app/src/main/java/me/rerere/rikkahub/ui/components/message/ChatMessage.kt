@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.ai.ui.isHumanThought
+
 import me.rerere.rikkahub.data.model.isOrbisVoiceNote
 import me.rerere.rikkahub.data.model.voiceNotePlaybackKey
 import me.rerere.rikkahub.data.model.OrbisVoiceNotePlayedEdit
@@ -187,6 +189,14 @@ fun ChatMessage(
     val textStyle = rememberChatMessageTextStyle(user = message.role == MessageRole.USER)
     val externalEvent = message.orbisEvent
     if (externalEvent != null) {
+        if (me.rerere.rikkahub.data.orbis.isImageWorkshopSource(externalEvent.source)) {
+            ProvideTextStyle(textStyle) {
+                WorkshopResultCard(externalEvent.recordId,
+                    message.parts.filterIsInstance<UIMessagePart.Image>().map { it.url },
+                    externalEvent.source, externalEvent.eventId, assistant?.id?.toString(), modifier)
+            }
+            return
+        }
         val settingsStore = koinInject<SettingsStore>()
         ProvideTextStyle(textStyle) {
             OrbisEventMessageCard(
@@ -391,7 +401,7 @@ fun ChatMessage(
             isFavorite = isFavorite,
             onToggleFavorite = onToggleFavorite,
             onQuote = if (!loading && message.role in setOf(MessageRole.USER, MessageRole.ASSISTANT) &&
-                message.parts.filterIsInstance<UIMessagePart.Text>().any { it.text.isNotBlank() })
+                message.parts.filterIsInstance<UIMessagePart.Text>().any { !it.isHumanThought() && it.text.isNotBlank() })
                 onQuote?.let { callback -> { callback(node.privateRoomSafePresentation()) } } else null,
             onWebViewPreview = {
                 val textContent = message.parts
@@ -551,7 +561,9 @@ internal fun MessagePartsBlock(
                 when (val part = block.part) {
                     is UIMessagePart.Text -> {
                         val textContent = @Composable {
-                            if (BuildConfig.ORBIS_ENABLED &&
+                            if (role == MessageRole.USER && part.isHumanThought()) {
+                                HumanThoughtCard(content = part.text, messageKey = "$messageKey:${block.index}")
+                            } else if (BuildConfig.ORBIS_ENABLED &&
                                 part.metadata?.get(me.rerere.rikkahub.data.ai.compaction.COMPACTION_SUMMARY_MARKER) ==
                                 kotlinx.serialization.json.JsonPrimitive(true)) {
                                 // A durable summary must remain inspectable even if the assistant's
@@ -647,7 +659,9 @@ internal fun MessagePartsBlock(
                         // 内部可选择的 Text 会频繁注册/注销，与 Compose 选择工具栏在绘制阶段
                         // 对 selectable 列表的排序产生并发修改，导致 ConcurrentModificationException。
                         // 生成结束后内容稳定，再启用文本选择。
-                        if (loading) {
+                        // Human thought owns selection inside its expanded body. Wrapping the
+                        // header in another selector can consume a rapid second collapse tap.
+                        if (loading || role == MessageRole.USER && part.isHumanThought()) {
                             textContent()
                         } else {
                             SelectionContainer {

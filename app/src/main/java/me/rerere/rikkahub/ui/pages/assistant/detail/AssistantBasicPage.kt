@@ -460,6 +460,14 @@ internal fun AssistantBasicContent(
             HorizontalDivider()
             FormItem(
                 modifier = Modifier.padding(8.dp),
+                label = { Text("发送历史图片") },
+                description = { Text("开启：发送当前上下文中的全部原图。关闭：只直接发送本轮新增图片，旧图用图片码表示，AI可按码调取。本机原图始终保留。") },
+                tail = { Switch(checked = assistant.sendHistoryImages,
+                    onCheckedChange = { onUpdate(assistant.copy(sendHistoryImages = it)) }) }
+            )
+            HorizontalDivider()
+            FormItem(
+                modifier = Modifier.padding(8.dp),
                 label = {
                     Text(stringResource(R.string.assistant_page_stream_output))
                 },

@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.pages.chat
 
+import me.rerere.ai.ui.projectHumanThought
+import me.rerere.ai.ui.isHumanThought
+
 import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 
 import android.content.Context
@@ -254,7 +257,7 @@ private fun exportToMarkdown(
         messages.map { it.privateRoomSafePresentation() }.forEach { message ->
             val role = if (message.role == MessageRole.USER) "**User**" else "**Assistant**"
             append("$role:\n\n")
-            message.parts.forEach { part ->
+            message.projectHumanThought().parts.forEach { part ->
                 when (part) {
                     is UIMessagePart.Text -> {
                         append(part.text)
@@ -584,7 +587,15 @@ private fun ExportedChatMessage(
                     is MessagePartBlock.ContentBlock -> {
                         when (val part = block.part) {
                             is UIMessagePart.Text -> {
-                                if (part.text.isNotBlank()) {
+                                if (message.role == MessageRole.USER && part.isHumanThought()) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text("思考链", style = MaterialTheme.typography.labelLarge)
+                                        if (options.expandReasoning) MarkdownBlock(
+                                            content = part.text.ifBlank { "（为空）" },
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                } else if (part.text.isNotBlank()) {
                                     ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
                                         if (message.role == MessageRole.USER) {
                                             Card(

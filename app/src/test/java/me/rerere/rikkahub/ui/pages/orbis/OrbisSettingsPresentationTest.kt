@@ -144,7 +144,8 @@ class OrbisSettingsPresentationTest {
         listOf("MCP", "TTS", "快捷消息", "天气", "未接入").forEach {
             assertFalse("Unexpected duplicated or unavailable tool: $it", labels.contains(it))
         }
-        assertEquals(12, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
+        assertEquals(13, orbisToolEntries.count { it.group == OrbisToolGroup.PLAY })
+        assertEquals(1, orbisToolEntries.count { it.destination == OrbisToolDestination.MUSIC })
         assertEquals(1, orbisToolEntries.count { it.destination == OrbisToolDestination.BLUETOOTH_TOY })
     }
 

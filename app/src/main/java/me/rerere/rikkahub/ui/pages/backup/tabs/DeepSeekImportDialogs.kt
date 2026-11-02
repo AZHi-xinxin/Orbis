@@ -101,7 +101,8 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
                                 } else if (controller.source == ChatArchiveSource.CHATGPT) {
                                     if (conversation.defaultSelectionReason == "chatgpt_complete_path_current")
                                         "完整路径 · 导出时的活动路径（current_node）" else "完整路径 · 其他分支或导出未指定活动路径"
-                                } else if (controller.source == ChatArchiveSource.POLARIS) "默认：原窗口中的聊天顺序"
+                                } else if (controller.source == ChatArchiveSource.UNIVERSAL) "按 messages 数组顺序保存"
+                                    else if (controller.source == ChatArchiveSource.POLARIS) "默认：原窗口中的聊天顺序"
                                     else if (controller.selectedAnswersOnly) "默认：导出时选中的回答"
                                     else if (conversation.defaultSelectionReason == "source_current_node")
                                         "默认：导出时的活动路径" else "默认：最后更新的末端路径",

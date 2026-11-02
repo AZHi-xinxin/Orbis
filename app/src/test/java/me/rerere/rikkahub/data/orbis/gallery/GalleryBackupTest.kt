@@ -18,11 +18,13 @@ class GalleryBackupTest {
         val ref = source.submit(item.id, 1, "human", mapOf("q1" to listOf("本人回答")))
         source.save("新版", "questionnaire", galleryJson.encodeToString(form.copy(description = "新版说明")), "ai", item.id, 1)
         source.begin("草稿", "text", "ai")
+        source.setPinned(item.id, true)
         val payload = temporary.newFolder("payload"); val files = File(payload, "files")
         val exported = GalleryBackup.stageSnapshot(live, files)
         assertEquals(4, exported.size); assertTrue(exported.none { "draft" in it.first || it.first.endsWith(".new") })
         GalleryBackup.validateStaged(payload)
         val restored = repo(files)
+        assertTrue(restored.snapshot().items.single().pinned)
         assertEquals("阿止", restored.snapshot().customName); assertEquals(2, restored.snapshot().items.single().versions.size)
         assertEquals("本人回答", restored.answers(ref.id).answers["q1"]!!.single())
     }

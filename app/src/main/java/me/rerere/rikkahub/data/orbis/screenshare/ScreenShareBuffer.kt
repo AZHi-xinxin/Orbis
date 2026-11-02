@@ -19,6 +19,7 @@ internal class ScreenShareBuffer {
         return frames.any { it.id == frame.id }
     }
     @Synchronized fun get(id: String): ScreenShareFrame? = frames.firstOrNull { it.id == id }?.let { it.copy(jpeg = it.jpeg.copyOf()) }
+    @Synchronized fun contains(id: String): Boolean = frames.any { it.id == id }
     @Synchronized fun back(index: Int): ScreenShareFrame? = frames.reversed().getOrNull(index)?.let { it.copy(jpeg = it.jpeg.copyOf()) }
     @Synchronized fun pin(id: String): Boolean {
         if (frames.none { it.id == id }) return false

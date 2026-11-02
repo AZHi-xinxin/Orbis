@@ -21,6 +21,8 @@ class CompanionSpacesBackupTest {
         val live = File(temp.root, "live"); val staged = File(temp.root, "payload/files")
         val repo = store(live); val media = repo.addMedia(image(1), "image/jpeg"); repo.addPhoto(media.id, "note")
         File(live, "orbis-companion-spaces/$owner/abandoned.new").writeText("uncommitted")
+        val story = repo.saveHumanStory("置顶番外", "保留原指令", "letter")
+        repo.setStoryPinned(story.id, true)
         val copied = CompanionSpacesBackup.stageSnapshot(live, staged)
         assertEquals(2, copied.size)
         CompanionSpacesBackup.validateStaged(staged.parentFile)
