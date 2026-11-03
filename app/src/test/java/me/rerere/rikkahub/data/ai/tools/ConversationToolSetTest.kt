@@ -93,4 +93,25 @@ class ConversationToolSetTest {
             assertNull(zip.nextEntry)
         }
     }
+
+    @Test fun `partial regeneration and approval continuation advertise identical schemas without partial compaction`() = runTest {
+        val messages = listOf(UIMessage.user("synthetic"))
+        val partial = generationCompactionScope(compact(messages), partial = true)
+        val resumed = generationCompactionScope(compact(messages), partial = false)
+        assertNull(partial.execution)
+        assertNotNull(resumed.execution)
+        suspend fun assemble(scope: GenerationCompactionScope) = conversationToolSet(messages, scope.catalog) {
+            listOf(tool("orbis_image_workshop"))
+        }
+        val first = assemble(partial)
+        val second = assemble(resumed)
+        fun wire(tools: List<Tool>) = tools.map { Triple(it.name, it.description,
+            it.parameters()?.let { p -> Json.encodeToString(InputSchema.serializer(), p) }) }
+        assertEquals(wire(first), wire(second))
+        assertEquals(4, first.size)
+        val result = first.single { it.name == me.rerere.rikkahub.data.ai.compaction.COMPACT_TOOL_NAME }
+            .execute(buildJsonObject { put("summary", "synthetic summary"); put("keep_recent", 0) })
+        assertTrue(result.filterIsInstance<UIMessagePart.Text>().single().text.contains("本次未整理"))
+        // compact()'s commit throws if any accidental write is attempted.
+    }
 }

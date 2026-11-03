@@ -536,7 +536,7 @@ fun MainScreen(
             OutlinedTextField(
                 value = city,
                 onValueChange = { city = it },
-                label = { Text("城市拼音（如 Beijing）") },
+                label = { Text("城市名或纬度,经度") },
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
@@ -548,7 +548,7 @@ fun MainScreen(
             }
         }
         Text(
-            text = "使用wttr.in查询，填城市拼音或英文名",
+            text = "使用 wttr.in；连接异常时尝试 Open-Meteo。重名城市请加省份或国家，也可填纬度,经度。不会自动使用手机定位。",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

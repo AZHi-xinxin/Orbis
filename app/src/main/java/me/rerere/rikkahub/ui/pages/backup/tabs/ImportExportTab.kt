@@ -158,7 +158,7 @@ fun ImportExportTab(vm: BackupVM, onShowRestartDialog: () -> Unit) {
         item { BackupCard("Claude 聊天记录", "选择 Claude 导出的 conversations.json。先预览并勾选完整路径；分支分别保存，全选保留全部原消息。思考单独折叠，工具只作历史文字，附件仅留引用；不导入账号、设置或授权。相同版本跳过，内容变化另建窗口。", !busy && !claudeState.busy, "选择 Claude JSON") {
             openClaude.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }
-        item { BackupCard("Operit 聊天记录", "支持 Operit v2 JSON 导出。先预览再选择会话，只追加当前选中的回答，内部摘要会跳过并提示；不导入模型设置、人格、权限、工作区或附件实体。", !busy && !operitState.busy, "选择 Operit JSON") {
+        item { BackupCard("Operit 聊天记录", "支持 Operit 聊天 JSON 的旧版正文与新版分段结构；新增版本按结构识别，陌生内容段保留为文字并提示。先预览再选择会话，只追加当前选中的回答，内部摘要会跳过并提示；不导入模型设置、人格、权限、工作区或附件实体。", !busy && !operitState.busy, "选择 Operit JSON") {
             openOperit.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
         } }
         item { BackupCard("Kelivo 聊天记录", "支持 Kelivo 安卓 v2/v3 ZIP 备份（需包含 SQLite v3 聊天数据库）。先预览再追加当前选中的回答，重复导入会跳过。只导聊天，附件保留引用说明；不导入配置、密钥、人格或技能。原备份可能包含密钥，请私密保管。", !busy && !kelivoState.busy, "选择 Kelivo 备份") {

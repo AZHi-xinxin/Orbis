@@ -45,6 +45,8 @@ class OperitLocalArchiveProbeTest {
         var parserFailureType = "none"
         var reasoningMessages = 0
         var reasoningBlocks = 0
+        var storedNodes = 0
+        val selectedDigest = java.security.MessageDigest.getInstance("SHA-256")
         try {
             try {
                 val preview = OperitChatArchive.inspect(file)
@@ -83,14 +85,20 @@ class OperitLocalArchiveProbeTest {
                         throw AssertionError("probe_in_memory_conversion_rejected")
                     }
                     checkSafe(converted.assistantId == syntheticAssistant &&
-                        converted.messageNodes.size == source.messages.size, "probe_conversion_structure")
+                        converted.messageNodes.size >= source.messages.size, "probe_conversion_structure")
+                    storedNodes += converted.messageNodes.size
+                    converted.messageNodes.forEach { me.rerere.rikkahub.data.db.MessageNodeBudget.measureNode(it.messages) }
                     checkSafe(converted.currentMessages.all { message ->
                         message.parts.all { it is UIMessagePart.Text || it is UIMessagePart.Reasoning } && message.getTools().isEmpty()
                     }, "probe_imported_history_not_inert")
-                    checkSafe(converted.currentMessages.indices.all { index ->
-                        val imported = converted.currentMessages[index]
-                        val original = source.messages[index]
-                        val sourceParts = if (original.attachmentReferences > 0) imported.parts.dropLast(1) else imported.parts
+                    val groups = converted.currentMessages.groupBy {
+                        it.parts.first().metadata!!["source_message_index"]!!.jsonPrimitive.content.toInt()
+                    }
+                    checkSafe(groups.keys.toList() == source.messages.map { it.sourceIndex }, "probe_source_order")
+                    checkSafe(source.messages.all { original ->
+                        val imported = groups.getValue(original.sourceIndex)
+                        val allParts = imported.flatMap { it.parts }
+                        val sourceParts = if (original.attachmentReferences > 0) allParts.dropLast(1) else allParts
                         val reconstructed = sourceParts.joinToString("") { part -> when (part) {
                             is UIMessagePart.Text -> part.text
                             is UIMessagePart.Reasoning -> "<think>${part.reasoning}</think>"
@@ -99,7 +107,13 @@ class OperitLocalArchiveProbeTest {
                         val blocks = sourceParts.count { it is UIMessagePart.Reasoning }
                         reasoningBlocks += blocks
                         if (blocks > 0) reasoningMessages++
-                        imported.id == operitImportId("message", source.sourceId, original.sourceIndex.toString()) &&
+                        for (field in listOf(original.sender, original.sourceIndex.toString(),
+                            original.timestamp.toEpochMilli().toString(), reconstructed)) {
+                            val bytes = field.toByteArray(Charsets.UTF_8)
+                            selectedDigest.update("${bytes.size}:".toByteArray(Charsets.UTF_8))
+                            selectedDigest.update(bytes)
+                        }
+                        imported.first().id == operitImportId("message", source.sourceId, original.sourceIndex.toString()) &&
                             reconstructed == original.text && sourceParts.all {
                                 it.metadata?.get("source_timestamp_ms")?.jsonPrimitive?.content == original.timestamp.toEpochMilli().toString() &&
                                     it.metadata?.get("source_message_index")?.jsonPrimitive?.content == original.sourceIndex.toString()
@@ -115,12 +129,17 @@ class OperitLocalArchiveProbeTest {
         } finally {
             checkSafe(fingerprint(file) == before, "probe_source_changed")
         }
+        val selectedHash = selectedDigest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+        System.getenv("ORBIS_OPERIT_PROBE_EXPECT_SELECTED_SHA")?.let {
+            checkSafe(it.matches(Regex("[0-9a-f]{64}")) && selectedHash == it, "probe_independent_selected_digest")
+        }
         // Scalars only: never emit titles, IDs, contents, prompts, source model names or a file path.
         println("ORBIS_OPERIT_LOCAL_PROBE preview_accepted=$previewAccepted parser_accepted=$parserAccepted " +
             "parser_code=$parserCode preview_failure_type=$previewFailureType parser_failure_type=$parserFailureType " +
             "conversations=$parsedConversations messages=$messages converted_in_memory=$convertedConversations " +
             "skipped_summaries=$skippedSummaries source_rows=${messages + skippedSummaries} " +
             "reasoning_messages=$reasoningMessages reasoning_blocks=$reasoningBlocks " +
+            "stored_nodes=$storedNodes selected_sha256=$selectedHash " +
             "source_sha256_unchanged=true database_opened=false network_called=false files_written=false")
         checkSafe(previewAccepted && parserAccepted, "probe_expected_acceptance")
         checkSafe(parsedConversations == expectedConversations, "probe_expected_conversation_count")

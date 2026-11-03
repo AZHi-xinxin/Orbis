@@ -21,6 +21,8 @@ internal data class OperitMessage(
     val sender: String, val text: String, val timestamp: Instant, val sourceIndex: Int,
     val selectedVariant: Int, val variantCount: Int, val roleName: String,
     val sourceModel: String, val attachmentReferences: Int,
+    val structuredContent: OperitContentSplit? = null,
+    val preservedUnknownSections: Int = 0,
 )
 
 internal data class OperitConversation(
@@ -30,7 +32,7 @@ internal data class OperitConversation(
     val omittedSummaryCount: Int = 0,
 )
 
-/** Only the explicit Operit 1.12.2 JSON-v2 export, not raw snapshots, CSV, memory JSON or legacy lists. */
+/** Explicit Operit chat envelopes; decode content/sections by structure, not a version whitelist. */
 object OperitChatArchive {
     const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_STREAM_JSON_BYTES
     const val SELECTED_PATH = "selected"
@@ -46,9 +48,13 @@ object OperitChatArchive {
             var summaryOnlyConversations = 0
             var reasoningMessages = 0
             var ambiguousReasoning = 0
+            var preservedUnknownSections = 0
+            var sectionedMessages = 0
             val conversations = archive.conversations().mapNotNull { source ->
                 source.messages.forEach { message ->
-                    val split = splitOperitReasoningContent(message.text, message.sender, checkCancelled)
+                    val split = message.contentSplit(checkCancelled)
+                    if (message.structuredContent != null) sectionedMessages++
+                    preservedUnknownSections += message.preservedUnknownSections
                     if (split.slices.any { it.reasoning }) reasoningMessages++
                     if (split.ambiguous) ambiguousReasoning++
                 }
@@ -69,6 +75,9 @@ object OperitChatArchive {
                 if (summaryOnlyConversations > 0) add("已排除 $summaryOnlyConversations 个只有内部摘要、没有普通消息的会话。")
                 if (reasoningMessages > 0) add("$reasoningMessages 条 AI 消息包含明确的思考标签，将分离为可折叠思考；正文与原文件保留，不执行历史工具。")
                 if (ambiguousReasoning > 0) add("$ambiguousReasoning 条消息的思考标签无法安全分离，将完整保留原文；不会猜测或删去正文。")
+                if (preservedUnknownSections > 0) add("$preservedUnknownSections 个内容段暂不能专门展示，已按原始结构保留为历史文字，不会执行其中的工具。")
+                if (sectionedMessages > 0) add("分段消息将按原顺序保留；过长时沿已有内容段拆成连续历史记录，不截断原文。")
+                if (archive.formatVersion !in 2..3) add("文件声明版本 ${archive.formatVersion}，已按可识别的聊天结构读取；请先核对预览。无法识别的关键结构会停止导入，不会默认为空白。")
             })
         }
     }.also { preview ->
@@ -85,6 +94,8 @@ object OperitChatArchive {
     internal class ArchiveReader(file: File, private val checkCancelled: () -> Unit,
         private val timeZone: ZoneId) : Closeable {
         private var consumed = false
+        var formatVersion: Int = 0
+            private set
         private var bytes = 0L
         private val stream = object : FilterInputStream(file.inputStream()) {
             override fun read(): Int {
@@ -111,8 +122,9 @@ object OperitChatArchive {
             val ids = hashSetOf<String>()
             var totalMessages = 0
             val items = DeepSeekStrictJson.objectArrayItems(reader, "chats",
-                setOf("archiveType", "formatVersion", "exportedAt"), checkCancelled) { header ->
-                require(header.string("archiveType") == "operit_chat_archive" && header.integer("formatVersion") == 2) {
+                setOf("archiveType", "formatVersion", "exportedAt"), checkCancelled, allowExtraMetadata = true) { header ->
+                formatVersion = header.integer("formatVersion")
+                require(header.string("archiveType") == "operit_chat_archive" && formatVersion > 0) {
                     "operit_format_version"
                 }
                 header["exportedAt"]?.let { timestamp(header.long("exportedAt")) }
@@ -152,14 +164,17 @@ object OperitChatArchive {
                     val indexed = variants.associateBy { it.integer("variantIndex") }
                     require(indexed.size == variants.size && indexed.keys.all { it > 0 }) { "operit_variant_indices" }
                     // Validate unselected variants too; never silently choose a different answer for malformed input.
-                    variants.forEach { it.string("content") }
+                    decodeOperitContent(base, sender, checkCancelled)
+                    variants.forEach { decodeOperitContent(it, sender, checkCancelled) }
                     val selected = base.optionalInteger("selectedVariantIndex") ?: 0
                     require(selected >= 0 && (sender == "ai" || selected == 0)) { "operit_selected_variant" }
                     val chosen = if (selected == 0) base else indexed[selected] ?: error("operit_missing_selected_variant")
-                    val text = chosen.optionalString("content") ?: ""
+                    val content = decodeOperitContent(chosen, sender, checkCancelled)
+                    val text = content.text
                     OperitMessage(sender, text, timestamp(base.long("timestamp")), index, selected,
                         variants.size + 1, chosen.optionalString("roleName") ?: base.optionalString("roleName") ?: "",
-                        chosen.optionalString("modelName") ?: "", attachments.findAll(text).count())
+                        chosen.optionalString("modelName") ?: "", attachments.findAll(text).count(),
+                        content.structured, content.preservedUnknownSections)
                 }
                 // Operit serializes these as ISO_LOCAL_DATE_TIME without an offset. Do not label them UTC.
                 val created = chat.string("createdAt")
@@ -181,7 +196,7 @@ object OperitChatArchive {
     catch (_: java.nio.charset.CharacterCodingException) { throw ArchiveReadException(ArchiveFailure.INVALID_UTF8) }
     catch (_: java.io.IOException) { throw ArchiveReadException(ArchiveFailure.READ_WRITE) }
     catch (_: Exception) {
-        throw IllegalArgumentException("请选择 Operit 的聊天 JSON v2 导出；文件不兼容、损坏或超限，现有聊天未覆盖")
+        throw IllegalArgumentException("请选择 Operit 的聊天 JSON 导出；消息角色、正文或选中分支无法完整识别，或文件损坏；现有聊天未覆盖，请保留原文件")
     }
 
     private fun JsonObject.string(key: String): String =

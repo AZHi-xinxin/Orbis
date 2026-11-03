@@ -29,6 +29,23 @@ class BoundaryUiDeviceTest {
     private fun store(assistant:Assistant, model:Model) = SettingsStore(context, AppScope().also { it.cancel() }).also {
         it.settingsFlow.value = Settings(assistants=listOf(assistant), providers=listOf(ProviderSetting.OpenAI(models=listOf(model))))
     }
+    @Test fun failedRequestExplainsPreflightAndRetainsDraftWithoutSpendingQuota() {
+        val model = Model(modelId = "synthetic"); val assistant = Assistant(chatModelId = model.id)
+        val host = BoundaryHost.get(context); val owner = assistant.id.toString(); val store = store(assistant, model)
+        host.grant(owner, BOUNDARY_CATEGORIES)
+        host.update(owner) { changeBoundary(it, it.revision, "chat", "pause", "conversation", "", allowRequest = true,
+            until = System.currentTimeMillis() + 120_000, now = System.currentTimeMillis()) }
+        compose.setContent { MaterialTheme { BoundaryInput(owner, "chat", { _, _ ->
+            error("续聊仍有生成、工具或保存任务，请结束后再整理历史。")
+        }, store) { Text("正文") } } }
+        compose.onNodeWithText("申请继续").performClick()
+        compose.onNodeWithText("你想说的话").performTextInput("我想继续聊")
+        compose.onNodeWithText("提交申请").performClick()
+        compose.onNodeWithText("申请未发送：这段对话还有待完成的保存或恢复记录，本次未消耗申请次数。请保留聊天并反馈此提示。（BR03）").assertIsDisplayed()
+        compose.onNodeWithText("剩余申请次数 3/3").assertIsDisplayed()
+        compose.onNodeWithText("申请继续").performClick()
+        compose.onNodeWithText("我想继续聊").assertIsDisplayed()
+    }
     @Test fun exhaustedQuotaShowsZeroAndExpiryRemovesCard() {
         val model=Model(modelId="synthetic"); val assistant=Assistant(chatModelId=model.id)
         val store=store(assistant,model); val owner=assistant.id.toString(); val host=BoundaryHost.get(context)

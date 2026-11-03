@@ -82,6 +82,11 @@ import org.koin.compose.koinInject
                     result.recent.reversed().forEach { event ->
                         Text("${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(event.at))} · ${event.code}", style = MaterialTheme.typography.labelSmall)
                         Text(diagnosticCodes.getValue(event.code), style = MaterialTheme.typography.bodySmall)
+                        val detail = listOfNotNull(
+                            event.phase?.let { if (it == "local_recovery") "阶段：本机恢复记录" else "阶段：收到HTTP响应" },
+                            event.httpStatus?.let { "HTTP $it" }, event.parameter?.let { "参数：$it" },
+                        ).joinToString(" · ")
+                        if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

@@ -66,6 +66,51 @@ class McpStaticAuthorizationWireTest {
     @get:Rule val temporary = TemporaryFolder()
     private val json = Json { encodeDefaults = true }
 
+    @Test(timeout = 15_000)
+    fun `unbounded SDK baseline keeps reconnecting after eight empty successful streams`() = runBlocking {
+        Fixture(loopingSse = true).use { fixture ->
+            fixture.expectedAuthorization.set("Bearer synthetic-baseline")
+            val client = Client(Implementation("synthetic-sdk-baseline", "1.0"))
+            val transport = StreamableHttpClientTransport(client = fixture.httpClient, url = fixture.url,
+                requestBuilder = {
+                    headers.append("Authorization", "Bearer synthetic-baseline")
+                    headers.append("X-Synthetic-Probe", "synthetic-extra")
+                })
+            try {
+                withTimeout(8_000) {
+                    client.connect(transport)
+                    while (fixture.requests.count { it.method == "GET" } < 12) delay(5)
+                }
+                assertTrue(fixture.requests.count { it.method == "GET" } >= 12)
+            } finally { client.close() }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun `successful but empty SSE reconnects stop without replaying a tool`() = runBlocking {
+        Fixture(loopingSse = true).use { fixture ->
+            fixture.expectedAuthorization.set("Bearer synthetic-manual-one")
+            val config = config(fixture.url, "Authorization", "Bearer synthetic-manual-one")
+            val client = Client(Implementation("synthetic-reconnect-only", "1.0"))
+            val transport = createMcpTransport(config, fixture.httpClient)
+            val exhausted = AtomicBoolean(false)
+            transport.onError { if (it.message.orEmpty().contains("Maximum reconnection attempts exceeded")) exhausted.set(true) }
+            try {
+                withTimeout(8_000) {
+                    client.connect(transport)
+                    while (!exhausted.get()) delay(10)
+                }
+                val count = fixture.requests.count { it.method == "GET" }
+                assertEquals(8, count)
+                delay(200)
+                assertEquals(count, fixture.requests.count { it.method == "GET" })
+                assertEquals(1, fixture.requests.count { it.rpcMethod == "initialize" })
+                assertFalse(fixture.requests.any { it.rpcMethod == "tools/call" })
+                fixture.assertHealthy()
+            } finally { client.close() }
+        }
+    }
+
     @Test(timeout = 30_000)
     fun `saved manual header survives initial connection and reconnect including get and delete`() = runBlocking {
         Fixture().use { fixture ->
@@ -167,7 +212,7 @@ class McpStaticAuthorizationWireTest {
 
     private data class Request(val method: String, val rpcMethod: String?, val authorization: List<String>, val extraHeader: String?)
 
-    private class Fixture : Closeable {
+    private class Fixture(private val loopingSse: Boolean = false) : Closeable {
         private val loopback = InetAddress.getByName("127.0.0.1")
         private val listener = ServerSocket().apply { bind(InetSocketAddress(loopback, 0)); soTimeout = 200 }
         val url = "http://127.0.0.1:${listener.localPort}/mcp"
@@ -252,7 +297,7 @@ class McpStaticAuthorizationWireTest {
             }
             val (code, response) = when {
                 auth != listOf(expectedAuthorization.get()) -> 401 to """{"error":"invalid_token","error_description":"Authentication required"}"""
-                requestLine[0] == "GET" -> 405 to ""
+                requestLine[0] == "GET" -> if (loopingSse) 200 to "id: synthetic-stuck-id\nretry: 1\n\n" else 405 to ""
                 requestLine[0] == "DELETE" -> 204 to ""
                 method == "notifications/initialized" -> 202 to ""
                 method == "initialize" -> 200 to buildJsonObject {
@@ -269,7 +314,8 @@ class McpStaticAuthorizationWireTest {
             val bytes = response.toByteArray(Charsets.UTF_8)
             val extra = if (method == "initialize" && code == 200) "Mcp-Session-Id: synthetic-session\r\n" else ""
             val output = socket.getOutputStream()
-            output.write(("HTTP/1.1 $code Synthetic\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\n" +
+            val type = if (loopingSse && requestLine[0] == "GET") "text/event-stream" else "application/json"
+            output.write(("HTTP/1.1 $code Synthetic\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\n" +
                 "Connection: close\r\n$extra\r\n").toByteArray(Charsets.US_ASCII))
             output.write(bytes)
             output.flush()

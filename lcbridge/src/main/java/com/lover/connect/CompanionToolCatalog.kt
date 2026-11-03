@@ -26,7 +26,7 @@ object CompanionToolCatalog {
         })
         put(JSONObject().apply {
             put("name", "get_weather")
-            put("description", "获取天气信息")
+            put("description", "查询人类已保存城市的天气；未配置时返回设置入口，不按出口IP猜位置。")
             put("inputSchema", JSONObject().apply { put("type", "object"); put("properties", JSONObject()) })
         })
         put(JSONObject().apply {

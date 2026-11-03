@@ -80,6 +80,45 @@ class OrbisGatewayRouteTest {
         code("unsupported") { gatewaySource(provider, model.copy(providerOverwrite = provider)) }
         code("unsupported") { gatewaySource(provider, model.copy(customHeaders = listOf(CustomHeader("X-Test", "private")))) }
     }
+    @Test fun unicodeModelIdsSurviveSourceDirectoryAndWriteWithoutNormalization() {
+        val provider = ProviderSetting.OpenAI(baseUrl = "https://up.example/v1", apiKey = upstreamKey)
+        val alias = "[自选]星河 Pro"
+        val model = "[反重力]gemini-3.1-pro【高】"
+        assertEquals(model, gatewaySource(provider, Model(modelId = model)).second)
+        val write = GatewayRouteWrite("a".repeat(32), 0, alias, "https://up.example/v1", model, upstreamKey)
+        write.validate()
+        val json = kotlinx.serialization.json.Json.parseToJsonElement(write.body()).toString()
+        assertTrue(json.contains(alias)); assertTrue(json.contains(model))
+        val parsed = parseGatewayRoutes("""{"schema":"orbis.st.routes/1","revision":1,"routes":[
+            {"publicModel":"$alias","upstreamBaseUrl":"https://up.example/v1","upstreamModel":"$model","managed":true,"keyConfigured":true}]}""")
+        assertEquals(alias, parsed.routes.single().publicModel)
+        assertEquals(model, parsed.routes.single().upstreamModel)
+        listOf("【官转】Gemini 3.1 Pro", "中文模型（测试）", "vendor/pro@2026", "模型🚀", "cafe\u0301", "café", "model\"quoted\\name").forEach {
+            assertEquals(it, gatewayRouteName(it)); assertEquals(it, gatewayUpstreamModel(it))
+        }
+    }
+    @Test fun modelIdsRejectHiddenCharactersAndDoNotSilentlyTrim() {
+        listOf("", " ", " model", "model ", "model\n", "model\r", "mo\t del", "m\u0000n", "m\u007fn", "m\u0085n",
+            "m\u00a0n", "m\u2028n", "m\u2029n", "m\u200bn", "m\u202en", "m\u2066n", "m\ufeffn", "m\ud800n", "m\ue000n").forEach {
+            code("invalid") { gatewayRouteName(it) }; code("invalid") { gatewayUpstreamModel(it) }
+        }
+    }
+    @Test fun modelLengthLimitsMatchStByCodePointsAndAuxiliarySuffixRemainsReserved() {
+        assertEquals("星".repeat(128), gatewayRouteName("星".repeat(128)))
+        assertEquals("🚀".repeat(256), gatewayUpstreamModel("🚀".repeat(256)))
+        code("invalid") { gatewayRouteName("星".repeat(129)) }
+        code("invalid") { gatewayUpstreamModel("🚀".repeat(257)) }
+        code("invalid") { gatewayRouteName("[中文]--auxiliary-no-memory") }
+    }
+    @Test fun unicodeRouteCreateUsesOriginalModelAndAlias() = runBlocking {
+        val p = MemoryPersistence(); val t = Transport(); val store = paired(p, t)
+        store.create(base, 4, "[自选]星河", "https://up.example/v1", "[反重力]gemini-3.1-pro", upstreamKey)
+        assertEquals(1, t.posts)
+        assertEquals("[自选]星河", t.writeSeen!!.publicModel)
+        assertEquals("[反重力]gemini-3.1-pro", t.writeSeen!!.upstreamModel)
+        assertEquals("[自选]星河", store.state.value.savedAlias)
+        assertFalse(p.saved!!.contains(upstreamKey))
+    }
     @Test fun capabilityIsExplicitAndNotAnAuthGrant() {
         assertTrue(parseGatewayCapability("""{"schema":"orbis.st.routes-capabilities/1","enabled":true,"authorization":"dedicated-human-bearer","maxRoutes":16}"""))
         assertFalse(parseGatewayCapability("""{"schema":"orbis.st.routes-capabilities/1","enabled":false,"authorization":"dedicated-human-bearer","maxRoutes":16}"""))

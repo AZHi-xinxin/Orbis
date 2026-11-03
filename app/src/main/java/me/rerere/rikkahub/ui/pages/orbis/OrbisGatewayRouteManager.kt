@@ -126,16 +126,17 @@ internal fun OrbisGatewayRouteManager(gateway: ProviderSetting.OpenAI, providers
                             visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(), enabled = !busy)
                     }
-                    OutlinedTextField(modelId, { modelId = it.take(128); confirm = null }, label = { Text("上游精确模型 ID") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                    OutlinedTextField(routeAlias, { routeAlias = it.take(128); confirm = null }, label = { Text("ST 中的新线路名，如 st-pro") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    OutlinedTextField(modelId, { modelId = it; confirm = null }, label = { Text("上游精确模型 ID") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    OutlinedTextField(routeAlias, { routeAlias = it; confirm = null }, label = { Text("ST 中的新线路名，如 [自选]星河") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    Text("支持中文和方括号，请保留服务商的完整模型 ID。型号最多 256 字，线路名最多 128 字；不要添加首尾空格或换行。旧版 ST 若仍拒绝，请更新服务器。", style = MaterialTheme.typography.bodySmall)
                     Text("支持 OpenAI Chat Completions 兼容服务。线路保存不测试模型，也不产生试聊费用；新线路默认按文字能力显示，图片、工具、思考需按实际能力核对。", style = MaterialTheme.typography.bodySmall)
                     TextButton(enabled = !busy && modelId.isNotBlank() && routeAlias.isNotBlank() && (modeManual || selected != null), onClick = {
                         try {
                             stillGateway()
                             val provider = selected
-                            val syntheticModel = provider?.models?.filter { it.modelId == modelId.trim() }?.let {
+                            val syntheticModel = provider?.models?.filter { it.modelId == modelId }?.let {
                                 routeRequire(it.size <= 1, "changed"); it.singleOrNull()
-                            } ?: Model(modelId = modelId.trim())
+                            } ?: Model(modelId = modelId)
                             val source = if (modeManual) gatewayUpstreamBase(upstream) to gatewayUpstreamModel(modelId)
                                 else gatewaySource(provider ?: throw GatewayRouteException("invalid"), syntheticModel)
                             val alias = gatewayRouteName(routeAlias)

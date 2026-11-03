@@ -46,6 +46,56 @@ class GenerationConflictPreservationTest {
         assertEquals(tail, j.recover(old)!!.conversation.messageNodes.drop(1))
     }
 
+    @Test fun `exact middle regeneration no longer leaves a recoverable history lock`() {
+        val store = Store(); val j = GenerationCheckpointJournal(store)
+        val current = base().let { it.copy(messageNodes = it.messageNodes + UIMessage.user("protected later question").toMessageNode()) }
+        j.begin(current, prefixCount = 1, suffixCount = 1)
+        // Reproduce the old dead end: neither containment nor conflict retirement accepts it.
+        assertFalse(j.clearContainedInDurableContinuation(current))
+        assertFalse(j.clearSettledInDurableContinuation(current, unknownEffectsRetained = true))
+        assertFalse(j.preserveIncompatible(current, { true }, {}))
+        assertFalse(j.recover(current)!!.changed)
+        var held = false
+        assertFalse(j.preserveAfterDurableContinuation(current, { true }, { held = true }))
+        assertTrue(held); assertNull(store.bytes); assertNull(store.archived)
+    }
+
+    @Test fun `recoverable missing tail is preserved byte for byte before history edits`() {
+        val store = Store(); val j = GenerationCheckpointJournal(store); val current = base()
+        val h = j.begin(current)
+        val tail = current.messageNodes.takeLast(1) + UIMessage.assistant("late saved chunk").toMessageNode()
+        j.checkpoint(h, current.assistantId, current.compactionEpoch, tail)
+        val bytes = store.bytes!!.copyOf()
+        assertTrue(j.recover(current)!!.changed)
+        assertFalse(j.preserveIncompatible(current, { true }, {}))
+        assertTrue(j.preserveAfterDurableContinuation(current, { true }, {}))
+        assertArrayEquals(bytes, store.archived); assertNull(store.bytes)
+        // The separately retained copy remains decodable and can recover the full old reply.
+        val copy = Store().also { it.bytes = store.archived }
+        assertEquals(tail, GenerationCheckpointJournal(copy).recover(current)!!.conversation.messageNodes.drop(1))
+    }
+
+    @Test fun `continuation retirement refuses failed hold storage foreign owner or a returning producer`() {
+        for (changed in listOf(false, true)) for (failure in listOf("foreign", "active", "hold", "changed", "returning", "delete", "archive")) {
+            if (!changed && failure == "archive") continue
+            val store = Store(); val j = GenerationCheckpointJournal(store); val current = base()
+            val h = j.begin(current)
+            if (changed) j.checkpoint(h, current.assistantId, current.compactionEpoch,
+                current.messageNodes.takeLast(1) + UIMessage.assistant("unsaved tail").toMessageNode())
+            val bytes = store.bytes!!.copyOf(); var quiet = failure != "active"
+            store.failDelete = failure == "delete"; store.failArchive = failure == "archive"
+            val result = runCatching { j.preserveAfterDurableContinuation(
+                if (failure == "foreign") current.copy(assistantId = Uuid.random()) else current,
+                { quiet }, {
+                    if (failure == "hold") error("hold unavailable")
+                    if (failure == "changed") store.bytes = "newer journal".toByteArray()
+                    if (failure == "returning") quiet = false
+                }) }
+            assertTrue("$changed/$failure", result.isFailure)
+            assertArrayEquals(if (failure == "changed") "newer journal".toByteArray() else bytes, store.bytes)
+        }
+    }
+
     @Test fun `malformed foreign active and failed storage or hold retain the active bytes`() {
         for (failure in listOf("malformed", "foreign", "active", "archive", "delete", "hold")) {
             val store = Store(); val j = GenerationCheckpointJournal(store); val old = base(); j.begin(old)

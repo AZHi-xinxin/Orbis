@@ -407,19 +407,50 @@ class GenerationCheckpointJournal(private val store: GenerationCheckpointStore) 
         persisted: Conversation,
         mayRetire: () -> Boolean,
         beforeRetire: () -> Unit,
+    ): Boolean = preserveRetired(persisted, mayRetire, beforeRetire, allowRecoverable = false)
+
+    /** A human continuation is already durably saved and all producers are fenced/joined.
+     * An exact recovered snapshot may be acknowledged (including earlier regeneration with
+     * a protected suffix). If recovery would change it, archive the complete old record first
+     * instead of overwriting the human's newer timeline or leaving its edit lock forever.
+     * Returns true only when a separate recovery copy was preserved.
+     */
+    @Synchronized
+    fun preserveAfterDurableContinuation(
+        persisted: Conversation,
+        mayRetire: () -> Boolean,
+        beforeRetire: () -> Unit,
+    ): Boolean = preserveRetired(persisted, mayRetire, beforeRetire, allowRecoverable = true)
+
+    private fun preserveRetired(
+        persisted: Conversation,
+        mayRetire: () -> Boolean,
+        beforeRetire: () -> Unit,
+        allowRecoverable: Boolean,
     ): Boolean = guarded {
         val original = store.read(persisted.id) ?: return@guarded false
         val record = read(persisted.id) ?: return@guarded false
         checkSafe(record.ownerId == persisted.assistantId && persisted.consultation == null,
             "conflict_owner_changed")
         checkSafe(mayRetire(), "conflict_producer_active")
-        try {
+        val recovery = try {
             recover(persisted)
-            return@guarded false // Recoverable content must follow the ordinary commit path.
         } catch (failure: GenerationCheckpointException) {
             checkSafe(failure.code in setOf("owner_or_epoch_changed", "database_prefix_changed",
                 "database_suffix_changed", "database_tail_changed", "checkpoint_overlaps_protected_nodes"),
                 "conflict_not_verified")
+            null
+        }
+        if (recovery != null) {
+            if (!allowRecoverable) return@guarded false
+            if (!recovery.changed) {
+                beforeRetire()
+                checkSafe(mayRetire() && store.read(persisted.id)?.contentEquals(original) == true,
+                    "conflict_record_changed")
+                clearAfterDurableCommit(recovery.handle, persisted)
+                checkSafe(store.read(persisted.id) == null, "conflict_retirement_failed")
+                return@guarded false
+            }
         }
         checkSafe(store.read(persisted.id)?.contentEquals(original) == true, "conflict_record_changed")
         store.preserveConflict(persisted.id, original)

@@ -125,7 +125,7 @@ fun BoundaryInput(owner: String, conversation: String, onRequest: suspend (Long,
             pause.until?.let { Text("${boundaryRemaining(it, now)} · 到期自动恢复", style = MaterialTheme.typography.bodySmall) }
             if (pause.allowRequest) Text("剩余申请次数 ${pause.requestsRemaining}/$BOUNDARY_REQUEST_LIMIT", style = MaterialTheme.typography.bodySmall)
             if (pause.allowRequest && pause.requestsRemaining == 0 && !pause.requestUsed) Text("本次暂停的申请次数已用完，到约定时间自动恢复。", style = MaterialTheme.typography.bodySmall)
-            if (pause.allowRequest && pause.requestsRemaining > 0 && !pause.requestUsed && modelAvailable) TextButton(onClick = { showRequest = true }) { Text("申请继续") }
+            if (pause.allowRequest && pause.requestsRemaining > 0 && !pause.requestUsed && modelAvailable) TextButton(enabled = !busy, onClick = { showRequest = true }) { Text("申请继续") }
             if (pause.allowRequest && pause.requestsRemaining > 0 && !pause.requestUsed && !modelAvailable) Text("暂无可用模型处理继续申请。", style = MaterialTheme.typography.bodySmall)
             if (busy) Text("申请处理中，答复会显示在本对话。", style = MaterialTheme.typography.bodySmall)
             else status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -139,7 +139,11 @@ fun BoundaryInput(owner: String, conversation: String, onRequest: suspend (Long,
             OutlinedTextField(request, { request = it }, label = { Text("你想说的话") })
         } }, confirmButton = { TextButton(enabled = !busy && request.isNotBlank(), onClick = {
             busy = true; showRequest = false
-            scope.launch { status = try { onRequest(pause.revision, request) } catch (_: Exception) { "暂未收到处理结果，请查看本对话中的申请与答复。" }
-                busy = false; showRequest = false }
+            scope.launch {
+                try { status = onRequest(pause.revision, request) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) { status = boundaryRequestFailureNotice(failure) }
+                finally { busy = false; showRequest = false }
+            }
         }) { Text(if (busy) "处理中" else "提交申请") } }, dismissButton = { TextButton(enabled = !busy, onClick = { showRequest = false }) { Text("返回") } })
 }

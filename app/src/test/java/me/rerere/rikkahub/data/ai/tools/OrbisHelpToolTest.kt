@@ -495,7 +495,7 @@ class OrbisHelpToolTest {
         }
         val imports = limits.getValue("chat_import_sources").jsonPrimitive.content
         listOf("密码保护", "DeepSeek官方ZIP≤8GiB", "RikkaHub含聊天数据库ZIP≤8GiB",
-            "Codex原始rollout JSONL≤64MiB", "Operit聊天JSON v2≤1GiB", "Kelivo安卓v2/v3 ZIP≤8GiB",
+            "Codex原始rollout JSONL≤64MiB", "Operit聊天JSON≤1GiB", "正文/分段结构兼容", "Kelivo安卓v2/v3 ZIP≤8GiB",
             "北极星Polaris ZIP≤8GiB", "ZIP展开总量≤16GiB", "流式聊天JSON≤1GiB",
             "单条/单窗口容量", "不是无限容量", "预览→人工确认", "不覆盖现有窗口",
             "历史工具不执行", "取消保留已完成会话", "不扩大模型上下文上限").forEach { assertTrue(it, imports.contains(it)) }

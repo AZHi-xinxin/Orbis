@@ -409,8 +409,26 @@ class CompanionNativeToolsTest {
         val bridge = CompanionNativeTools(runtime, CompanionMemoryStore(temporary.root), StandardTestDispatcher(testScheduler))
         val result = bridge.execute("get_weather", "{}")
         assertFalse(result.ok)
-        assertEquals("operation_unavailable", result.errorCode)
+        assertEquals("weather_upstream_failed", result.errorCode)
         assertEquals("failed", result.outcome)
         assertEquals(1, runtime.calls)
+    }
+
+    @Test fun weatherReceiptPreservesCauseAndRedactsException() {
+        val result = companionLegacyResult("get_weather", CompanionToolResult(false,
+            "SECRET private exception", "weather_network_failed", "failed").toJson())
+        assertFalse(result.ok)
+        assertEquals("weather_network_failed", result.errorCode)
+        assertNull(result.content)
+        assertFalse(result.toJson().contains("SECRET"))
+        assertTrue(result.toJson().contains("天气服务连接失败"))
+        assertEquals("not_started", companionLegacyResult("get_weather", "未设置城市，请在App中设置").outcome)
+        assertEquals("weather_response_invalid", companionLegacyResult("get_weather", "unknown").errorCode)
+    }
+
+    @Test fun anniversaryParseFailureIsNotSuccessfulDataAndMemoryTextIsNotAnError() {
+        assertEquals("anniversary_data_invalid", companionLegacyResult("get_anniversary", "纪念日解析失败：SECRET").errorCode)
+        assertTrue(companionLegacyResult("get_anniversary", "暂无纪念日，请在App中添加").ok)
+        assertTrue(companionLegacyResult("read_memory", "纪念日解析失败：a quoted note").ok)
     }
 }

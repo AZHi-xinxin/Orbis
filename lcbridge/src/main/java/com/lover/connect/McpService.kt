@@ -676,46 +676,9 @@ class McpService : Service(), SensorEventListener {
             "纪念日解析失败：${e.message}"
         }
     }
-    private fun toolGetWeather(): String {
-        return try {
-            val prefs = getSharedPreferences("lc_config", Context.MODE_PRIVATE)
-            val city = prefs.getString("city", "") ?: ""
-            if (city.isEmpty()) return "未设置城市，请在App中设置"
-
-            val url = URL("https://wttr.in/${city}?format=j1")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 10000
-            conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "curl/7.0")
-
-            val response = BufferedReader(InputStreamReader(conn.inputStream)).readText()
-            conn.disconnect()
-
-            val json = JSONObject(response)
-            val current = json.getJSONArray("current_condition").getJSONObject(0)
-            val tempC = current.getString("temp_C")
-            val humidity = current.getString("humidity")
-            val desc = (current.optJSONArray("lang_zh") ?: current.getJSONArray("weatherDesc")).getJSONObject(0).getString("value")
-            val feelsLike = current.getString("FeelsLikeC")
-            val windSpeed = current.getString("windspeedKmph")
-
-            val weather = json.getJSONArray("weather").getJSONObject(0)
-            val maxTemp = weather.getString("maxtempC")
-            val minTemp = weather.getString("mintempC")
-
-            val sb = StringBuilder()
-            sb.appendLine("${city}天气")
-            sb.appendLine("当前：${desc} ${tempC}°C")
-            sb.appendLine("体感：${feelsLike}°C")
-            sb.appendLine("湿度：${humidity}%")
-            sb.appendLine("风速：${windSpeed}km/h")
-            sb.appendLine("今日：${minTemp}°C ~ ${maxTemp}°C")
-            sb.toString()
-        } catch (e: Exception) {
-            "天气获取失败：${e.message}"
-        }
-    }
+    private fun toolGetWeather(): String = CompanionWeather().lookup(
+        getSharedPreferences("lc_config", Context.MODE_PRIVATE).getString("city", "").orEmpty()
+    ).toJson()
 
     private fun toolGetSteps(): String {
         if (!hasStepPermission()) return "步数暂不可用：请先在连接与权限中授予体力活动权限，再重新启动本机服务。"

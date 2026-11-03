@@ -8,6 +8,7 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 
 ## 从这里开始
 
+- [2.6.17 修复说明](docs/RELEASE-2.6.17.md)：天气备用查询、暂停后申请继续、聊天恢复、Operit 多版本导入，以及 MCP 授权、重连和故障诊断。
 - [2.6.16 更新说明](docs/RELEASE-2.6.16.md)：星河音乐、可折叠的人类思考链、屏幕共享 OCR、NovelAI V5 与参考图、工坊隐私及历史图片开关。
 
 - [下载已发布的 Orbis 安装包](https://github.com/AZHi-xinxin/Orbis/releases)：日常使用选择 `Orbis-` 主包；`OrbisRescue-` 备份入口包按需单独下载，以发布页实际附件为准。

@@ -10,16 +10,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.repository.ConversationRepository
-import me.rerere.rikkahub.utils.JsonInstant
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -132,11 +129,14 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
             fun importedId(kind: String, index: String = "") = operitImportId(
                 if (correctedCopy) "$kind-corrected-v1" else kind, idNamespace, index)
             var serializedBytes = 0L
-            val nodes = source.messages.map { message ->
+            val nodes = source.messages.flatMap { message ->
                 checkCancelled()
-                val split = splitOperitReasoningContent(message.text, message.sender, checkCancelled)
+                val split = message.contentSplit(checkCancelled)
                 val metadata = buildJsonObject {
                     put("import_source", "operit_json_v2")
+                    // Keep the original inert-history marker and ID namespace across export versions.
+                    put("source_content_format", if (message.structuredContent != null) "sections" else "content")
+                    if (message.preservedUnknownSections > 0) put("preserved_unknown_sections", message.preservedUnknownSections)
                     put("source_conversation_id", source.sourceId)
                     put("source_message_index", message.sourceIndex)
                     put("source_timestamp_ms", message.timestamp.toEpochMilli())
@@ -148,7 +148,8 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                     put("source_updated_at_local", source.sourceUpdatedAt)
                     put("source_timezone_assumption", source.assumedTimeZone)
                     put("omitted_attachment_references", message.attachmentReferences)
-                    if (split.slices.any { it.reasoning }) put("import_reasoning_format", "operit_think_v1")
+                    if (split.slices.any { it.reasoning }) put("import_reasoning_format",
+                        if (message.structuredContent != null) "operit_sections" else "operit_think_v1")
                     if (split.ambiguous) put("import_reasoning_unparsed", true)
                     if (correctedCopy) put("import_corrected_copy", true)
                 }
@@ -164,12 +165,17 @@ class OperitChatImporter internal constructor(private val sink: DeepSeekImportSi
                 val ui = UIMessage(id = importedId("message", message.sourceIndex.toString()),
                     role = if (message.sender == "user") MessageRole.USER else MessageRole.ASSISTANT,
                     parts = parts, createdAt = time, finishedAt = time)
-                val nodeBytes = JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size
-                if (nodeBytes > DeepSeekChatImporter.MAX_NODE_JSON_BYTES)
+                val segments = try {
+                    partitionOperitMessage(ui, importedId("node", message.sourceIndex.toString()),
+                        { kind, segment -> importedId(kind, "${message.sourceIndex}/$segment") }, checkCancelled)
+                } catch (_: me.rerere.rikkahub.data.db.MessageNodeCapacityException) {
                     throw OperitMessageTooLarge()
-                serializedBytes += nodeBytes
+                }
+                serializedBytes += segments.sumOf {
+                    me.rerere.rikkahub.data.db.MessageNodeBudget.measureNode(it.messages).toLong()
+                }
                 if (serializedBytes > ArchiveCapacity.MAX_WINDOW_CHARS) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
-                MessageNode(id = importedId("node", message.sourceIndex.toString()), messages = listOf(ui))
+                segments
             }
             return Conversation(id = importedId("conversation"), assistantId = assistantId,
                 title = source.title + if (correctedCopy) "（整理副本）" else "",

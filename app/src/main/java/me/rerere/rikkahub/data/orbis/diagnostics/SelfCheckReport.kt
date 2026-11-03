@@ -22,7 +22,8 @@ internal data class SelfCheckReport(
     val scope: String = "当前助手的本机配置与最近故障摘要；未发起网络测试",
 )
 @Serializable
-internal data class DiagnosticEvent(val at: Long, val source: String, val code: String)
+internal data class DiagnosticEvent(val at: Long, val source: String, val code: String,
+    val phase: String? = null, val httpStatus: Int? = null, val parameter: String? = null)
 
 internal val selfCheckFocus = listOf("overview", "tools", "model", "theme", "mcp", "workspace", "stickers", "permissions")
 internal val diagnosticCodes = mapOf(
@@ -32,6 +33,15 @@ internal val diagnosticCodes = mapOf(
     "model_network_failed" to "本次连接失败或等待超时。检查网络与服务地址；当前摘要不能判定是手机、网关还是上游故障。",
     "tool_not_advertised" to "模型调用了本轮目录外的工具。查当前已开启工具；不要猜工具名。持续出现时反馈错误码和版本。",
     "tool_continuation_catalog_mismatch" to "网关续轮目录不一致。保留已执行结果，从新消息继续；不要自动重复写入。",
+    "tool_continuation_lineage_mismatch" to "工具调用编号或顺序与旧轮不一致。保留已执行结果及错误卡，核对客户端续轮协议；不要重复执行写入。",
+    "tool_continuation_context_lost" to "工具续轮缺少原会话上下文。保留已执行结果，从新消息继续；不要重复执行写入。",
+    "upstream_invalid_stream" to "上游流式响应未能完整解析。保留已收到内容和工具结果，反馈该码与时间，不能据此认定工具没有执行。",
+    "upstream_unavailable" to "网关报告上游暂不可用。保留当前内容，稍后从新消息继续。",
+    "human_turn_in_progress" to "网关仍在处理该窗口的另一轮请求；等待旧轮结束，避免重复发送。",
+    "model_request_rejected" to "服务商拒绝了请求参数。核对报告中的HTTP状态与参数名，保留原始错误卡用于定位。",
+    "model_server_failed" to "本次请求收到服务端错误状态。不能仅凭此状态判断是网关还是上游故障。",
+    "history_recovery_pending" to "本机旧轮恢复副本尚未完成核对，历史编辑被保护；新消息仍可发送。保留原记录及错误卡，不要清数据。",
+    "checkpoint_processing_failed" to "本机恢复记录处理失败，原副本保留；此错误不代表模型或网络不可用。请反馈错误卡与时间。",
     "theme_invalid_parameters" to "主题调用参数不匹配。publish必须带id和expected_revision；apply使用id和revision。先read取当前版本，再按回执next_call操作。",
     "theme_revision_required" to "修改已有主题须传expected_revision；先read读取当前revision。",
     "theme_revision_conflict" to "主题版本已变化。先read取得新revision，再修改同一id。",
@@ -56,6 +66,20 @@ internal val diagnosticCodes = mapOf(
     "sticker_library_full" to "表情库达到数量或容量限制。先整理不需要的表情再导入。",
     "sticker_storage_invalid" to "表情库数据无法完整读取。保留原数据和错误码反馈。",
     "sticker_storage_error" to "表情库保存失败。检查剩余空间，重开表情库核对；不需要另开AI工具权限。",
+    "weather_city_missing" to "天气城市未配置：北斗导航→手机与陪伴→本地资料→天气城市，填写并保存。",
+    "weather_city_invalid" to "天气城市格式无效；修改城市名称或纬度,经度。",
+    "weather_city_not_found" to "天气城市未匹配；核对拼写，可加省份或国家。",
+    "weather_city_ambiguous" to "天气城市存在重名；添加省份或填写纬度,经度，未任意选择地点。",
+    "weather_timeout" to "天气源等待超时；这不是模型或全部工具不可用。",
+    "weather_network_failed" to "天气源网络连接失败；检查该站点可达性，不需要重填模型密钥。",
+    "weather_rate_limited" to "天气源限流，稍后再查。",
+    "weather_upstream_failed" to "天气源返回异常状态，未取得有效天气。",
+    "weather_response_invalid" to "天气数据格式不完整或异常，未冒充查询成功。",
+    "weather_sources_unavailable" to "主、备用天气源均未返回可用数据；检查网络或稍后再查。",
+    "anniversary_data_invalid" to "纪念日数据无法解析；到手机与陪伴→本地资料核对，保留原记录。",
+    "service_disabled" to "陪伴服务已关闭；可在手机与陪伴中启用。",
+    "service_unavailable" to "陪伴服务尚未就绪；在手机与陪伴查看运行状态。",
+    "operation_unavailable" to "本机工具未完成，旧回执没有提供更细原因；需对应错误卡，不直接推断为网络或权限。",
     "unclassified_failure" to "已有失败记录，但摘要不足以确定原因。保留对应错误卡，复制自检报告供核对。",
 )
 
@@ -75,3 +99,56 @@ internal fun diagnosticCode(message: String): String {
         else -> "unclassified_failure"
     }
 }
+
+/** Read machine fields before display prose. Wrappers and arbitrary upstream data stay private. */
+internal fun diagnosticFailure(error: Throwable, at: Long = System.currentTimeMillis()): DiagnosticEvent {
+    val chain = mutableListOf<Throwable>()
+    var current: Throwable? = error
+    while (current != null && chain.size < 8 && chain.none { it === current }) {
+        chain += current
+        current = current.cause
+    }
+    val http = chain.filterIsInstance<me.rerere.ai.util.HttpException>().firstOrNull()
+    val machineCode = chain.filterIsInstance<me.rerere.ai.util.HttpException>()
+        .firstNotNullOfOrNull { it.code?.takeIf { code -> code in diagnosticCodes } }
+    val historyPending = chain.any { it.message == "旧轮恢复记录尚未核对，原历史仍保留；新消息仍可发送。" }
+    val checkpoint = chain.any { it is me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointException }
+    val status = http?.httpStatus?.takeIf { it in 100..599 }
+    val proseCode = chain.firstNotNullOfOrNull { diagnosticCode(it.message.orEmpty()).takeUnless { code -> code == "unclassified_failure" } }
+    val code = machineCode ?: when {
+        historyPending -> "history_recovery_pending"
+        checkpoint -> "checkpoint_processing_failed"
+        status in setOf(401, 403) -> "model_auth_rejected"
+        status == 429 -> "model_rate_limited"
+        status != null && status >= 500 -> "model_server_failed"
+        proseCode != null -> proseCode
+        status in setOf(400, 422) -> "model_request_rejected"
+        chain.any { it is java.net.SocketTimeoutException || it is java.net.UnknownHostException || it is java.net.ConnectException } -> "model_network_failed"
+        else -> "unclassified_failure"
+    }
+    return DiagnosticEvent(at, "model", code,
+        phase = when { historyPending || checkpoint -> "local_recovery"; status != null -> "http_response"; else -> null },
+        httpStatus = status, parameter = me.rerere.ai.util.safeRejectedParameter(http?.rejectedParameter))
+}
+
+internal fun DiagnosticEvent.sanitized() = copy(
+    phase = phase?.takeIf { it in setOf("local_recovery", "http_response") },
+    httpStatus = httpStatus?.takeIf { it in 100..599 },
+    parameter = me.rerere.ai.util.safeRejectedParameter(parameter),
+)
+
+/** Decode both flat and nested tool receipts without retaining arbitrary upstream strings. */
+internal fun toolDiagnosticCode(failure: kotlinx.serialization.json.JsonObject): String {
+    val nested = failure["error"] as? kotlinx.serialization.json.JsonObject
+    return (listOf("code", "error", "reason").map { failure[it] } + nested?.get("code"))
+        .filterIsInstance<kotlinx.serialization.json.JsonPrimitive>()
+        .map { it.content }.firstOrNull { it in diagnosticCodes } ?: "unclassified_failure"
+}
+
+internal fun weatherConfigurationItem(configured: Boolean) = SelfCheckItem(
+    code = if (configured) "weather_city_configured" else "weather_city_missing",
+    title = "天气城市",
+    status = if (configured) "info" else "blocked",
+    evidence = if (configured) "已保存天气城市；未发起天气网络请求，不能据此判定服务可用。" else "尚未保存天气城市；不会使用出口IP猜测位置。",
+    next = "北斗导航→手机与陪伴→本地资料→天气城市，填写并保存。",
+)

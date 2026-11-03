@@ -132,7 +132,7 @@ class OrbisManualChaptersTest {
 
     @Test fun `imports do not force password or promise absent workspace recovery`() {
         val text = guide("imports")
-        listOf("未开启密码保护的模式也可", "仍须正常登录", "可信网络", "Operit", "JSON v2", "不覆盖", "不执行历史工具", "未打包的工作区文件无法", "不承诺自动恢复").forEach { assertTrue(it, text.contains(it)) }
+        listOf("未开启密码保护的模式也可", "仍须正常登录", "可信网络", "Operit", "正文/分段结构", "未知版本按结构识别", "不覆盖", "不执行历史工具", "未打包的工作区文件无法", "不承诺自动恢复").forEach { assertTrue(it, text.contains(it)) }
         val limits = call(createOrbisHelpTool(emptyList(), build), """{"topic":"limits"}""").getValue("content").jsonObject
         assertTrue(limits.getValue("chat_import_sources").jsonPrimitive.content.contains("无需强制开启密码"))
     }
@@ -142,7 +142,7 @@ class OrbisManualChaptersTest {
         val zipLimit = "ZIP≤${ArchiveCapacity.MAX_ZIP_BYTES / ArchiveCapacity.GIB}GiB"
         listOf("DeepSeek 官方 $zipLimit", "RikkaHub $zipLimit", "Kelivo 安卓 v2/v3 $zipLimit",
             "北极星 Polaris 备份 $zipLimit",
-            "JSON v2≤${ArchiveCapacity.MAX_STREAM_JSON_BYTES / ArchiveCapacity.GIB}GiB",
+            "JSON≤${ArchiveCapacity.MAX_STREAM_JSON_BYTES / ArchiveCapacity.GIB}GiB",
             "展开总量上限为${ArchiveCapacity.MAX_EXPANDED_BYTES / ArchiveCapacity.GIB}GiB",
             "Codex 原始 rollout JSONL≤64MiB", "单条消息", "单窗口", "设备可用空间检查",
             "不靠截断原文", "没有无限容量", "不导入群聊、附件实体或应用配置").forEach {

@@ -54,6 +54,12 @@ internal class SelfCheckHost(private val context: Context, private val settings:
                 }
             }
         }
+        if (focus in setOf("overview", "tools") &&
+            me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.CompanionDevice in a.localTools) section("weather") {
+            val configured = !context.getSharedPreferences("lc_config", Context.MODE_PRIVATE)
+                .getString("city", "").isNullOrBlank()
+            items.add(weatherConfigurationItem(configured))
+        }
         if (focus == "theme") section("theme") {
             val store = openThemes(context, owner)
             val state = store.snapshot()

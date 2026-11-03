@@ -29,7 +29,7 @@ data class DeepSeekImportUiState(
 enum class ChatArchiveSource(val label: String, val maxBytes: Long) {
     UNIVERSAL("Orbis 通用聊天 JSON", UniversalChatArchive.MAX_ARCHIVE_BYTES),
     DEEPSEEK("DeepSeek 官方 ZIP", DeepSeekArchive.MAX_ARCHIVE_BYTES),
-    OPERIT("Operit v2 JSON", OperitChatArchive.MAX_ARCHIVE_BYTES),
+    OPERIT("Operit 聊天 JSON", OperitChatArchive.MAX_ARCHIVE_BYTES),
     KELIVO("Kelivo 安卓 ZIP", KelivoChatArchive.MAX_ARCHIVE_BYTES),
     POLARIS("北极星 ZIP", PolarisChatArchive.MAX_ARCHIVE_BYTES),
     CLAUDE("Claude 对话 JSON", ClaudeChatArchive.MAX_ARCHIVE_BYTES),

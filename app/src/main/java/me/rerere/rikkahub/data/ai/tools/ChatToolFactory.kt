@@ -296,7 +296,7 @@ class ChatToolFactory(
             readImageConversation, readImageOriginal, ::imageTargetsCurrent))
         // This authenticated staging primitive is for the host bridge only, never model tool discovery.
         mcpTools.filterNot { me.rerere.rikkahub.data.ai.mcp.StMemoryImageProtocol.isHostUploadTool(it.third) }.forEach { (serverId, serverName, tool) ->
-            val server = settings.mcpServers.firstOrNull { it.id == serverId }
+            val server = settings.mcpServers.firstOrNull { it.id == serverId } ?: return@forEach
             // Bind to the executing server ID; names may be changed or share a prefix.
             fun mcpSelected(): Boolean {
                 val live = settingsStore?.settingsFlow?.value ?: settings
@@ -310,7 +310,7 @@ class ChatToolFactory(
                 tool.name in setOf("store_memory_image", "stbrain_manage")
             val schema = if (bridgeImageTool && tool.name == "store_memory_image")
                 stImageReferenceSchema(tool.inputSchema) else tool.inputSchema
-            val revision = approvalFingerprint("mcp-v1\n${json.encodeToString(server)}\n${json.encodeToString(tool)}" +
+            val revision = me.rerere.rikkahub.data.ai.mcp.mcpApprovalRevision(server, tool,
                 if (bridgeImageTool) "\nst-image-reference-v1\n$schema" else "")
             val definition = Tool(
                     name = "mcp__${serverName}__${tool.name}",
@@ -323,10 +323,7 @@ class ChatToolFactory(
                     isApprovalCurrent = {
                         val live = settingsStore?.settingsFlow?.value ?: settings
                         val current = live.mcpServers.firstOrNull { it.id == serverId }
-                        mcpSelected() && current == server && current?.commonOptions?.enable == true &&
-                            live.getAssistantById(assistant.id)?.let { owner ->
-                                mcpToolsForAssistant(live, owner).any { it.first == serverId && it.third == tool }
-                            } == true
+                        mcpSelected() && me.rerere.rikkahub.data.ai.mcp.mcpApprovalCurrent(server, tool, current)
                     },
                     execute = { mcpManager.callTool(serverId, tool.name, it.jsonObject) },
                 )
@@ -566,7 +563,7 @@ class ChatToolFactory(
                     tool.name.startsWith("calendar_") -> LocalToolOption.Calendar in live.localTools
                     tool.name.startsWith("workspace_") -> live.workspaceId?.toString() ==
                         hostWorkspaceId(assistant, consultationReferenceOnly)
-                    tool.name.startsWith("mcp__") || tool.name == ST_IMAGE_LIST_TOOL -> live.mcpServers == assistant.mcpServers
+                    tool.name.startsWith("mcp__") || tool.name == ST_IMAGE_LIST_TOOL -> live.mcpServers.toSet() == assistant.mcpServers.toSet()
                     else -> live.localTools == assistant.localTools &&
                         live.enableMemory == assistant.enableMemory &&
                         live.useGlobalMemory == assistant.useGlobalMemory &&
@@ -585,8 +582,7 @@ class ChatToolFactory(
                     result.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().asSequence().mapNotNull { part ->
                         if (part.text.length > 32 * 1024) null else runCatching { json.parseToJsonElement(part.text) as? kotlinx.serialization.json.JsonObject }.getOrNull()
                     }.firstOrNull { it["ok"] == kotlinx.serialization.json.JsonPrimitive(false) }?.let { failure ->
-                        val code = listOf("code", "error", "reason").mapNotNull { failure[it] as? kotlinx.serialization.json.JsonPrimitive }
-                            .map { it.content }.firstOrNull { it in me.rerere.rikkahub.data.orbis.diagnostics.diagnosticCodes } ?: "unclassified_failure"
+                        val code = me.rerere.rikkahub.data.orbis.diagnostics.toolDiagnosticCode(failure)
                         me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, ownerId,
                             if (tool.name == "orbis_theme") "theme" else "tool", code)
                     }

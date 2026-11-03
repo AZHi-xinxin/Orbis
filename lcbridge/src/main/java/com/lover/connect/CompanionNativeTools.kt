@@ -40,6 +40,8 @@ data class CompanionToolResult(
         }
         if (!ok) put("message", when {
             outcome == "unknown" -> "结果不确定，请核对状态，不要自动重试。"
+            errorCode in weatherProblems -> weatherProblems.getValue(errorCode!!)
+            errorCode == "anniversary_data_invalid" -> "纪念日数据无法解析。请到手机与陪伴→本地资料核对纪念日；没有删除或重写原记录。"
             errorCode == "service_disabled" -> "陪伴服务已关闭；未自动开启。可在手机与陪伴中启动服务。"
             errorCode == "service_unavailable" -> "已尝试恢复原先启用的陪伴服务，但尚未就绪，本次操作未执行。可调用 companion_get_runtime_status 检查状态，或在手机与陪伴中点恢复运行。"
             else -> "本次未完成。请检查系统权限和工具参数；不会自动授权或开启原先关闭的观察。"
@@ -143,6 +145,9 @@ private fun dispatchedFailure(name: String, code: String) = CompanionToolResult(
 
 /** Existing MCP text is retained as data, but known failure/ambiguous results are not labelled success. */
 internal fun companionLegacyResult(name: String, value: String): CompanionToolResult {
+    if (name == "get_weather") return companionWeatherResult(value)
+    if (name == "get_anniversary" && value.startsWith("纪念日解析失败"))
+        return dispatchedFailure(name, "anniversary_data_invalid")
     if (name in setOf("set_alarm", "cancel_alarm", "get_alarms")) return companionAlarmResult(name, value)
     if (name == "test_sentinel" && value != "Sentinel test: delivered")
         return dispatchedFailure(name, "sentinel_delivery_unconfirmed")
@@ -213,5 +218,33 @@ internal fun validateCompanionArguments(descriptor: CompanionToolDescriptor, arg
         "send_notification" -> require(args.getString("message").isNotBlank())
         "play_music" -> require(args.getString("query").isNotBlank() && args.optString("platform", "auto") in setOf("auto", "qq", "netease", "kugou"))
         "lock_app", "unlock_app" -> require(args.getString("package_name").isNotBlank())
+    }
+}
+
+/** Weather receipts retain a closed cause instead of dropping it as operation_unavailable. */
+private fun companionWeatherResult(value: String): CompanionToolResult {
+    if (value.startsWith("未设置城市")) return CompanionToolResult(false,
+        errorCode = "weather_city_missing", outcome = "not_started")
+    if (value.startsWith("天气获取失败")) return CompanionToolResult(false,
+        errorCode = "weather_upstream_failed", outcome = "failed")
+    return try {
+        val parser = JSONTokener(value)
+        val receipt = parser.nextValue() as? JSONObject ?: error("invalid")
+        require(parser.nextClean() == '\u0000')
+        val ok = receipt.get("ok") as? Boolean ?: error("invalid")
+        val outcome = receipt.getString("outcome")
+        val content = receipt.opt("content") as? String
+        if (ok) {
+            require(outcome == "completed" && !content.isNullOrBlank() && !receipt.has("error"))
+            CompanionToolResult(true, content)
+        } else {
+            val code = receipt.getJSONObject("error").getString("code")
+            require(code in weatherProblems && outcome in setOf("not_started", "failed"))
+            // Only locally formed, closed source codes may be preserved on failure.
+            val safeContent = content?.takeIf { it.matches(Regex("wttr\\.in：weather_[a-z_]+；Open-Meteo：weather_[a-z_]+")) }
+            CompanionToolResult(false, safeContent, code, outcome)
+        }
+    } catch (_: Exception) {
+        CompanionToolResult(false, errorCode = "weather_response_invalid", outcome = "failed")
     }
 }

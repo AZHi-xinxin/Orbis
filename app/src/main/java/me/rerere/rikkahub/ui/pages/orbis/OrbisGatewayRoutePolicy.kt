@@ -62,12 +62,23 @@ internal fun gatewayUpstreamBase(value: String): String {
         !host.endsWith(".local") && '.' in host, "unsafe_address")
     return url.toString().trimEnd('/') // Server also resolves and checks all addresses against its allowlist.
 }
-internal fun gatewayRouteName(value: String): String = value.trim().also {
-    routeRequire(it.matches(Regex("[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")) && !it.endsWith("--auxiliary-no-memory"))
+/** Same printable-Unicode/code-point limits as ST; preserve the provider ID verbatim. */
+private fun gatewayModelLabel(value: String, maximum: Int): String = value.also {
+    routeRequire(it.codePointCount(0, it.length) in 1..maximum && it == it.trim())
+    var index = 0
+    while (index < it.length) {
+        val point = it.codePointAt(index)
+        val type = Character.getType(point)
+        routeRequire(point == 0x20 || (!Character.isWhitespace(point) && !Character.isSpaceChar(point) &&
+            type !in setOf(Character.CONTROL.toInt(), Character.FORMAT.toInt(), Character.SURROGATE.toInt(),
+                Character.PRIVATE_USE.toInt(), Character.UNASSIGNED.toInt())))
+        index += Character.charCount(point)
+    }
 }
-internal fun gatewayUpstreamModel(value: String): String = value.trim().also {
-    routeRequire(it.length in 1..128 && it.none { c -> c.isWhitespace() || c.isISOControl() })
+internal fun gatewayRouteName(value: String): String = gatewayModelLabel(value, 128).also {
+    routeRequire(!it.endsWith("--auxiliary-no-memory"))
 }
+internal fun gatewayUpstreamModel(value: String): String = gatewayModelLabel(value, 256)
 internal fun gatewayAdminToken(value: String): String = value.trim().also {
     routeRequire(it.length in 32..4096 && it.all { c -> c.code in 33..126 }, "unauthorized")
 }

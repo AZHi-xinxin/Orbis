@@ -27,3 +27,13 @@ internal suspend fun conversationToolSet(
         contextTools.any { it.name == tool.name } || (omitLocalMemory && tool.name == ORBIS_MEMORY_TOOL)
     } + contextTools)
 }
+
+/** Partial regeneration keeps the same advertised schemas as approval-resume, but cannot
+ * compact the full conversation. The compact tool's ordinary executor returns a refusal;
+ * only the generation loop with a non-null execution control can commit a replacement. */
+internal data class GenerationCompactionScope(
+    val catalog: ConversationCompactionControl,
+    val execution: ConversationCompactionControl?,
+)
+internal fun generationCompactionScope(control: ConversationCompactionControl, partial: Boolean) =
+    GenerationCompactionScope(control, control.takeUnless { partial })

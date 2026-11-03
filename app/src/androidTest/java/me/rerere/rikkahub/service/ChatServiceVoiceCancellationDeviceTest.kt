@@ -114,6 +114,25 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class ChatServiceVoiceCancellationDeviceTest {
+    @Test fun requestAfterModelPausesOriginalConversation() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertModelPauseThenRequest() }
+    }
+    @Test fun requestAfterModelPausesIndependentContinuation() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertModelPauseThenRequest(continuation = true) }
+    }
+    @Test fun pausedContinuationCanResumeWithoutErasingOldGatewayHold() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertModelPauseThenRequest(continuation = true, decision = "resume", oldHold = true) }
+    }
+    @Test fun pausedContinuationCanKeepAllWindowsPaused() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertModelPauseThenRequest(continuation = true, decision = "pause", scope = "assistant") }
+    }
+    @Test fun pausedContinuationRequestDoesNotWaitForHistoryWriter() = runBlocking {
+        fixture(maxRequests = 2, connectCall = false) { it.assertModelPauseThenRequest(continuation = true, holdWriter = true) }
+    }
+    @Test fun pausedContinuationKeepsSharedThreeRequestLimit() = runBlocking {
+        fixture(maxRequests = 4, connectCall = false) { it.assertModelPauseThenRequest(continuation = true, scope = "assistant", repeatRequests = true) }
+    }
+
     @Test fun pausedApplicationsKeepToolsAndStopAfterThree() = runBlocking {
         fixture(maxRequests = 4, connectCall = false) { it.assertPausedTurn(wake = false) }
     }
@@ -201,6 +220,18 @@ class ChatServiceVoiceCancellationDeviceTest {
         fixture(connectCall = false) { f ->
             f.assertFreshCallOverOldQueue(pendingTool = true)
         }
+    }
+
+    @Test fun stoppedMiddleRegenerationReleasesHistoryAfterExactDurableCheck() = runBlocking {
+        fixture(connectCall = false) { it.assertStoppedCheckpointCanEdit(missingTail = false) }
+    }
+
+    @Test fun stoppedRecoverableTailIsPreservedBeforeHistoryUnlock() = runBlocking {
+        fixture(connectCall = false) { it.assertStoppedCheckpointCanEdit(missingTail = true) }
+    }
+
+    @Test fun stoppingPartialReasoningWithoutToolsPreservesTextAndUnlocksHistory() = runBlocking {
+        fixture(connectCall = false) { it.assertStoppedReasoningStreamCanEdit() }
     }
 
     @Test fun savedContinuationReturnsToNormalWithoutSentinelAndKeepsUsageEpoch() = runBlocking {
@@ -733,6 +764,67 @@ class ChatServiceVoiceCancellationDeviceTest {
             assertEquals(c.compactionEpoch, receipt!!.contextEpoch)
         }
 
+        suspend fun assertStoppedCheckpointCanEdit(missingTail: Boolean) {
+            val base = checkNotNull(repository.getConversationById(conversationId)).copy(messageNodes = listOf(
+                UIMessage.user("protected first").toMessageNode(),
+                UIMessage.user("middle input").toMessageNode(),
+                UIMessage.user("protected later").toMessageNode()))
+            withContext(Dispatchers.Main) { service.saveConversation(conversationId, base) }
+            withContext(Dispatchers.IO) {
+                val h = journal.begin(base, prefixCount = 1, suffixCount = 1)
+                if (missingTail) journal.checkpoint(h, base.assistantId, base.compactionEpoch,
+                    base.messageNodes.drop(1).dropLast(1) + UIMessage.assistant("saved late reply").toMessageNode())
+                // Old implementation left this recoverable record in the active slot forever.
+                assertFalse(journal.clearContainedInDurableContinuation(base))
+                assertFalse(journal.preserveIncompatible(base, { true }, {}))
+            }
+            withContext(Dispatchers.Main) { service.interruptGenerationForHuman(conversationId) }
+            awaitNormalHistory()
+            assertFalse(journal.hasCheckpoint(conversationId))
+            assertEquals(base.messageNodes, repository.getConversationById(conversationId)!!.messageNodes)
+            assertEquals(0, peer.requests.get())
+            assertBatchDeleteWorks()
+            assertEquals(0, peer.requests.get())
+        }
+
+        suspend fun assertStoppedReasoningStreamCanEdit() {
+            settings.settingsFlow.value = settings.settingsFlow.value.copy(
+                assistants = listOf(assistant.copy(streamOutput = true)))
+            peer.holdReasoningStream.set(true)
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("synthetic plain text request"))))
+            }
+            val reasoning = try { withTimeout(10_000) {
+                service.getDisplayedConversationFlow(conversationId).first { c ->
+                    c.currentMessages.flatMap { it.parts }.filterIsInstance<UIMessagePart.Reasoning>()
+                        .any { it.reasoning == PARTIAL_REASONING }
+                }.currentMessages.flatMap { it.parts }.filterIsInstance<UIMessagePart.Reasoning>().single()
+            } } catch (failure: kotlinx.coroutines.TimeoutCancellationException) {
+                peer.assertHealthy()
+                throw AssertionError("Partial reasoning not displayed; requests=${peer.requests.get()}, " +
+                    "parts=${service.getDisplayedConversationSnapshot(conversationId).currentMessages.flatMap { it.parts }}, " +
+                    "errors=${service.errors.value}", failure)
+            }
+            assertNull(reasoning.finishedAt)
+            val oldJob = currentJob()
+            withContext(Dispatchers.Main) { service.interruptGenerationForHuman(conversationId) }
+            peer.releaseReasoningStream.countDown()
+            withTimeout(10_000) { oldJob.join() }
+            try { awaitNormalHistory() } catch (failure: kotlinx.coroutines.TimeoutCancellationException) {
+                throw AssertionError("Stopped stream history did not unlock; checkpoint=${journal.hasCheckpoint(conversationId)}, " +
+                    "errors=${service.errors.value}", failure)
+            }
+            val saved = checkNotNull(repository.getConversationById(conversationId))
+            val retained = saved.currentMessages.flatMap { it.parts }.filterIsInstance<UIMessagePart.Reasoning>().single()
+            assertEquals(PARTIAL_REASONING, retained.reasoning)
+            assertNotNull(retained.finishedAt)
+            assertFalse(saved.currentMessages.flatMap { it.parts }.any { it is UIMessagePart.Tool })
+            assertFalse(journal.hasCheckpoint(conversationId))
+            assertEquals(saved.messageNodes, service.getDisplayedConversationSnapshot(conversationId).messageNodes)
+            assertBatchDeleteWorks()
+            assertEquals("Stopping and editing must not send another request", 1, peer.requests.get())
+        }
+
         suspend fun assertBatchDeleteWorks() {
             val c = service.getDisplayedConversationFlow(conversationId).value
             val preview = service.previewMessageBatch(conversationId, setOf(c.messageNodes.first().id),
@@ -771,6 +863,75 @@ class ChatServiceVoiceCancellationDeviceTest {
         suspend fun awaitFreshHumanAnswer(): Conversation = withTimeout(15_000) {
             service.getDisplayedConversationFlow(conversationId).first { c ->
                 c.currentMessages.any { it.toText() == ANSWER }
+            }
+        }
+
+        suspend fun assertModelPauseThenRequest(continuation: Boolean = false, decision: String? = null,
+            oldHold: Boolean = false, holdWriter: Boolean = false, scope: String = "conversation", repeatRequests: Boolean = false) {
+            if (continuation) installStaleLocalLatch()
+            val holdBytes = if (oldHold) installLegacyGatewayHold() else null
+            settings.settingsFlow.value = settings.settingsFlow.value.let { original -> original.copy(
+                providers = original.providers.map { (it as ProviderSetting.OpenAI).copy(models = listOf(model.copy(
+                    abilities = listOf(me.rerere.ai.provider.ModelAbility.TOOL)))) }) }
+            val host = service.boundaryHost
+            val owner = assistant.id.toString()
+            host.grant(owner, setOf("conversation"))
+            val args = buildJsonObject {
+                put("action", "pause"); put("kind", "conversation")
+                put("scope", scope)
+                put("revision", host.state(owner).revision); put("allow_request", true)
+                put("until_epoch_ms", System.currentTimeMillis() + 120_000)
+            }
+            peer.customMessages.add(buildJsonObject {
+                put("role", "assistant"); put("content", "SYNTHETIC-PAUSE")
+                putJsonArray("tool_calls") { addJsonObject {
+                    put("id", "pause-original"); put("type", "function")
+                    putJsonObject("function") { put("name", "orbis_boundary"); put("arguments", args.toString()) }
+                } }
+            }.toString())
+            withContext(Dispatchers.Main) {
+                assertTrue(service.sendMessage(conversationId, listOf(UIMessagePart.Text("SYNTHETIC-PAUSE-REQUEST"))))
+            }
+            withTimeout(15_000) { host.states.first { host.pause(owner, conversationId.toString()) != null } }
+            withTimeout(10_000) { service.getGenerationJobStateFlow(conversationId).first { it == null } }
+            val pause = checkNotNull(host.pause(owner, conversationId.toString()))
+            assertEquals(3, pause.requestsRemaining)
+            if (oldHold) kotlinx.coroutines.delay(2_000) // A durable old hold outlives final-save scheduling.
+            if (decision != null) peer.customMessages.add(buildJsonObject {
+                put("role", "assistant"); put("content", "SYNTHETIC-DECISION")
+                putJsonArray("tool_calls") { addJsonObject {
+                    put("id", "decide-pause"); put("type", "function")
+                    putJsonObject("function") {
+                        put("name", "orbis_boundary")
+                        put("arguments", buildJsonObject {
+                            put("action", decision); put("scope", scope); put("revision", host.state(owner).revision + 1)
+                            put("allow_request", true); put("until_epoch_ms", System.currentTimeMillis() + 120_000)
+                        }.toString())
+                    }
+                } }
+            }.toString())
+            if (holdWriter) session().orbisPromptEditMutex.lock()
+            try {
+                val result = withTimeout(10_000) { service.requestBoundaryResume(conversationId, pause.revision, "AFTER-MODEL-PAUSE") }
+                assertTrue(result, result.contains(when (decision) {
+                    "resume" -> "主动恢复"; "pause" -> "明确继续暂停"; else -> "尚未通过工具"
+                }))
+                assertEquals(2, peer.requests.get())
+                if (decision == "resume") assertNull(host.pause(owner, conversationId.toString()))
+                else assertEquals(if (decision == "pause") 3 else 2, host.pause(owner, conversationId.toString())!!.requestsRemaining)
+                assertTrue(service.getDisplayedConversationSnapshot(conversationId).currentMessages.any { it.toText().contains("AFTER-MODEL-PAUSE") })
+                if (holdWriter) assertTrue(session().orbisPromptEditMutex.isLocked)
+                holdBytes?.let(::assertLegacyGatewayHoldUnchanged)
+                if (repeatRequests) {
+                    repeat(2) { service.requestBoundaryResume(conversationId, pause.revision, "REPEAT-$it") }
+                    assertEquals(0, host.pause(owner, "another-window")!!.requestsRemaining)
+                    assertTrue(runCatching { service.requestBoundaryResume(conversationId, pause.revision, "FOURTH") }.isFailure)
+                    assertEquals(4, peer.requests.get())
+                    assertFalse(service.getDisplayedConversationSnapshot(conversationId).currentMessages.any { it.toText().contains("FOURTH") })
+                    assertTrue(runCatching { host.requireInput(owner, "another-window") }.isFailure)
+                }
+            } finally {
+                if (holdWriter) session().orbisPromptEditMutex.unlock()
             }
         }
 
@@ -1258,7 +1419,12 @@ class ChatServiceVoiceCancellationDeviceTest {
                 activeScope.cancel()
                 current
             }
-            withTimeout(15_000) { job?.join() }
+            withTimeout(15_000) {
+                job?.join()
+                // Independent replies also own asynchronous persistence jobs in this scope.
+                // Cancellation alone does not finish their NonCancellable finalizers.
+                activeScope.coroutineContext[Job]?.join()
+            }
             // Tool registration initializes idle runtime singletons. Stop only our exact
             // context-owned scopes so their maintenance jobs cannot outlive this cache tree.
             val runtimeJobs = withContext(Dispatchers.Main) {
@@ -1342,6 +1508,8 @@ class ChatServiceVoiceCancellationDeviceTest {
         val holdFirstRequest = AtomicBoolean(false)
         val firstRequestHeld = CompletableDeferred<Unit>()
         val releaseFirstRequest = CountDownLatch(1)
+        val holdReasoningStream = AtomicBoolean(false)
+        val releaseReasoningStream = CountDownLatch(1)
         private val stopped = AtomicBoolean(false)
         private val failure = AtomicReference<Throwable?>()
         private val worker = thread(name = "synthetic-chat-service-peer", isDaemon = true) {
@@ -1366,6 +1534,26 @@ class ChatServiceVoiceCancellationDeviceTest {
                     check(request.size == count)
                     requestBodies += request.toString(Charsets.UTF_8)
                     check(requests.incrementAndGet() <= maxRequests) { "Unexpected replay/derived request" }
+                    if (holdReasoningStream.compareAndSet(true, false)) {
+                        check(Json.parseToJsonElement(requestBodies.last()).jsonObject["stream"] == JsonPrimitive(true))
+                        // A real open SSE response: already-visible reasoning, no tools,
+                        // no finish marker. Cancellation must keep the received content.
+                        connection.getOutputStream().apply {
+                            write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n".toByteArray())
+                            // Span the host's 100 ms visual/checkpoint cadence, as a real
+                            // continuing reasoning response does, before holding it open.
+                            listOf(PARTIAL_REASONING.dropLast(1), PARTIAL_REASONING.takeLast(1)).forEachIndexed { index, text ->
+                                if (index > 0) Thread.sleep(250)
+                                val delta = buildJsonObject {
+                                    put("role", "assistant"); put("reasoning_content", text)
+                                }
+                                write(("data: " + """{"id":"partial","object":"chat.completion.chunk","choices":[{"index":0,"delta":$delta,"finish_reason":null}]}""" + "\n\n").toByteArray())
+                                flush()
+                            }
+                        }
+                        check(releaseReasoningStream.await(15, TimeUnit.SECONDS))
+                        return@use
+                    }
                     if (holdFirstRequest.compareAndSet(true, false)) {
                         firstRequestHeld.complete(Unit)
                         check(releaseFirstRequest.await(15, TimeUnit.SECONDS)) { "Synthetic request gate timed out" }
@@ -1402,11 +1590,12 @@ class ChatServiceVoiceCancellationDeviceTest {
             }
         }
         fun assertHealthy() { failure.get()?.let { throw AssertionError("Synthetic loopback failed", it) } }
-        override fun close() { stopped.set(true); releaseBoundaryRequest.countDown(); releaseFirstRequest.countDown(); socket.close(); worker.join(9_000); check(!worker.isAlive); assertHealthy() }
+        override fun close() { stopped.set(true); releaseBoundaryRequest.countDown(); releaseFirstRequest.countDown(); releaseReasoningStream.countDown(); socket.close(); worker.join(9_000); check(!worker.isAlive); assertHealthy() }
     }
 
     private companion object {
         const val ANSWER = "synthetic fully committed reply"
+        const val PARTIAL_REASONING = "synthetic thinking thinking thinking without tools"
         const val GATEWAY_HOLD_FILE = "orbis-gateway-recovery-holds-v1.json"
         val LOOPBACK: InetAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
     }

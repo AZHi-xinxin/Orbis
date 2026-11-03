@@ -4,6 +4,7 @@ import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.util.StringValues
+import io.ktor.http.HttpMethod
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.SseClientTransport
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
@@ -340,7 +341,22 @@ internal class McpSessionRegistry(
         }
         transport.onError { error ->
             Log.e(TAG, "Transport error for ${config.id}: ${error.message}")
-            if (!isSseStreamGiveUpError(error)) requestReconnect(config.id, sdkClient)
+            if (isSseStreamGiveUpError(error)) {
+                // A dead SSE reader is not a connected session. Do not start a new automatic
+                // session and repeat the same reconnect storm (or replay tools with unknown outcomes).
+                appScope.launch {
+                    val session = sessions[config.id] ?: return@launch
+                    session.lifecycleMutex.withLock {
+                        if (sessions[config.id] !== session || session.client !== sdkClient) return@withLock
+                        session.reconnectJob?.cancel()
+                        session.reconnectJob = null
+                        session.client = null
+                        session.connectedConfig = null
+                        statusStore.update(config.id, McpStatus.Error("事件流反复断开，已停止自动重连；请检查MCP服务后手动重新连接。已发起工具的结果需核对，不会自动重放。"))
+                        closeClient(sdkClient, config.commonOptions.name)
+                    }
+                }
+            } else requestReconnect(config.id, sdkClient)
         }
     }
 
@@ -475,11 +491,17 @@ internal fun createMcpTransport(config: McpServerConfig, httpClient: HttpClient)
         client = httpClient,
         requestBuilder = { appendMcpHeaders(config) },
     )
-    is McpServerConfig.StreamableHTTPServer -> StreamableHttpClientTransport(
-        url = config.url,
-        client = httpClient,
-        requestBuilder = { appendMcpHeaders(config) },
-    )
+    is McpServerConfig.StreamableHTTPServer -> {
+        val reconnectGuard = McpStreamReconnectGuard()
+        StreamableHttpClientTransport(
+            url = config.url,
+            client = httpClient,
+            requestBuilder = {
+                if (method == HttpMethod.Get) reconnectGuard.beforeGet()
+                appendMcpHeaders(config)
+            },
+        )
+    }
 }
 
 private fun HttpRequestBuilder.appendMcpHeaders(config: McpServerConfig) {

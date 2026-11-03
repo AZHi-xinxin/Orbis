@@ -11,7 +11,7 @@ export const IMPORT_SOURCE_INFO = {
   },
   operit: {
     label: "Operit", extension: ".json", accept: ".json,application/json", contentType: "application/json", maxBytes: 1024 * 1024 * 1024,
-    fileLabel: "选择电脑上的 Operit v2 JSON", limit: "最多 1 GiB JSON，逐窗口读取；单窗与手机可用空间仍有限制。仅支持 operit_chat_archive / formatVersion 2。",
+    fileLabel: "选择电脑上的 Operit 聊天 JSON", limit: "最多 1 GiB JSON，逐窗口读取；单窗与手机可用空间仍有限制。支持 operit_chat_archive 正文/分段结构；新增版本按结构识别，陌生内容段保留并提示。",
     description: "预览后选择会话，仅追加导出时选中的回答。不导入模型设置、人格、工具权限、工作区或附件实体。",
     preview: "保留当前选中的回答；内部摘要会跳过并提示，不当作聊天或系统提示。备用回答与附件实体不迁移，历史工具只作为记录，不执行。",
     confirmation: "我确认接收身份和所选会话；仅追加记录，不覆盖聊天或导入设置。",

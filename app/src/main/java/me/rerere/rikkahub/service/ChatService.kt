@@ -1501,8 +1501,7 @@ class ChatService(
         if (error is CancellationException) return
         if (BuildConfig.ORBIS_ENABLED && conversationId != null) {
             sessions[conversationId]?.state?.value?.assistantId?.toString()?.let { owner ->
-                me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, owner, "model",
-                    me.rerere.rikkahub.data.orbis.diagnostics.diagnosticCode(error.message.orEmpty()))
+                me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.recordFailure(context, owner, error)
             }
         }
         _errors.update {
@@ -1681,10 +1680,11 @@ class ChatService(
             require(requestText.isNotEmpty() && requestText.length <= 20_000) { "请填写继续申请（最多 20000 字）。" }
             val session = getOrCreateSession(conversationId)
             session.withRefSuspend {
+                if (!session.isInitialized) initializeConversation(conversationId, selectAssistant = false)
                 val reply = CompletableDeferred<String?>()
                 var requestJob: Job? = null
-                val input = withWritableHistory(conversationId) { current ->
-                    val conversation = current.state.value
+                suspend fun submit(current: ConversationSession, independent: Boolean): QueuedMessage {
+                    val conversation = current.displayedSnapshot()
                     val owner = conversation.assistantId.toString()
                     val settings = settingsStore.settingsFlow.value
                     val assistant = settings.getAssistantById(conversation.assistantId) ?: error("当前 AI 不存在")
@@ -1692,16 +1692,30 @@ class ChatService(
                     val model = settings.findModelById(modelId) ?: error("暂无可用模型处理申请")
                     check(boundaryHost.permits(owner, "model", model.id.toString())) { "暂无可用模型处理申请" }
                     check(model.findProvider(settings.providers) != null) { "暂无可用模型处理申请" }
-                    check(!gatewaySubmissionBlocked(conversationId)) { "旧轮仍在核对，暂未提交申请。" }
+                    check(conversationRepo.getConversationById(conversationId)?.assistantId == conversation.assistantId) {
+                        "继续申请所属 AI 已变化，本次未发送。"
+                    }
+                    if (!independent) check(!gatewaySubmissionBlocked(conversationId)) { "旧轮仍在核对，暂未提交申请。" }
                     // Claims only this new request; it does not resume ordinary input, old queues or tools.
                     boundaryHost.claimRecovery(owner, conversationId.toString(), revision)
-                    QueuedMessage(parts = listOf(UIMessagePart.Text("【申请继续】\n$requestText")),
+                    return QueuedMessage(parts = listOf(UIMessagePart.Text("【申请继续】\n$requestText")),
                         reply = reply, acknowledgeSafetyHold = false,
                         orbisUserMessageTime = captureHumanMessageTime(current), boundaryRecoveryRevision = revision,
                         boundaryRecoveryAssistantId = conversation.assistantId)
                         .also { queued ->
-                            current.submittingMessage = queued
-                            try { requestJob = sendQueuedMessage(current, queued) }
+                            try {
+                                if (independent) {
+                                    requestJob = startHumanContinuation(current, queued).also { job ->
+                                        job.invokeOnCompletion {
+                                            runCatching { boundaryHost.finishRecovery(owner, conversationId.toString(), revision) }
+                                                .onFailure { Log.w(TAG, "Could not release completed boundary request claim", it) }
+                                        }
+                                    }
+                                } else {
+                                    current.submittingMessage = queued
+                                    requestJob = sendQueuedMessage(current, queued)
+                                }
+                            }
                             catch (failure: Throwable) {
                                 if (current.submittingMessage?.id == queued.id) current.submittingMessage = null
                                 boundaryHost.finishRecovery(owner, conversationId.toString(), revision)
@@ -1709,11 +1723,15 @@ class ChatService(
                             }
                         }
                 }
+                // A continue request is new human input in the displayed conversation. It must
+                // not retire the independent lane or wait for its unrelated old history writer.
+                val input = if (needsHumanContinuation(session, freshHumanInput = true)) submit(session, independent = true)
+                    else withWritableHistory(conversationId) { submit(it, independent = false) }
                 reply.await()
                 requestJob?.join()
                 me.rerere.rikkahub.data.orbis.boundary.boundaryRecoveryResult(
-                    session.state.value.currentMessages, input.id,
-                    boundaryHost.pause(session.state.value.assistantId.toString(), conversationId.toString()))
+                    session.displayedSnapshot().currentMessages, input.id,
+                    boundaryHost.pause(input.boundaryRecoveryAssistantId.toString(), conversationId.toString()))
             }
         }
     private fun boundaryPaused(session: ConversationSession): Boolean = boundaryHost.pause(
@@ -1982,7 +2000,16 @@ class ChatService(
         } catch (failure: me.rerere.rikkahub.data.ai.checkpoint.GenerationCheckpointException) {
             if (!preserveGenerationConflict(session, persisted)) throw failure
         }
-        if (generationJournal.hasCheckpoint(session.id)) preserveGenerationConflict(session, persisted)
+        if (generationJournal.hasCheckpoint(session.id)) {
+            val preserved = generationJournal.preserveAfterDurableContinuation(persisted,
+                mayRetire = { !session.hasUnfinishedJobs() && session.submittingMessage == null &&
+                    !session.manualContextWriteInProgress && !gatewayStopInFlight.contains(session.id) },
+                beforeRetire = {
+                    requireAutomaticRecoveryHold { holdAutomaticWakes(session, "generation_continuation_preserved") }
+                })
+            if (preserved) addError(IllegalStateException(
+                "当前聊天已保存；旧回复恢复副本已单独保留并纳入备份，旧工具不会自动重跑。"), persisted.id)
+        }
     }
 
     /** Called only after the previous generation has ended, before mutating its conversation. */
@@ -3214,7 +3241,16 @@ class ChatService(
         recordBodyHuman(session.state.value, userMessage)
         val generation = lane.send(userMessage, input.answer) { snapshot, owner, publish ->
             try {
-                val completed = generateHumanContinuation(session, lane, snapshot, owner, publish, voiceRecord)
+                input.boundaryRecoveryAssistantId?.let { expected ->
+                    check(snapshot.assistantId == expected && conversationRepo.getConversationById(session.id)?.assistantId == expected) {
+                        "继续申请所属 AI 已变化，本次未发送。"
+                    }
+                }
+                input.boundaryRecoveryRevision?.let { revision ->
+                    boundaryHost.requireInput(snapshot.assistantId.toString(), session.id.toString(), revision)
+                }
+                val completed = generateHumanContinuation(session, lane, snapshot, owner, publish, voiceRecord,
+                    boundaryRecoveryRevision = input.boundaryRecoveryRevision)
                 if (lane.isCurrent(owner)) {
                     val previousIds = snapshot.currentMessages.map { it.id }.toSet()
                     val messages = lane.state.value.currentMessages.filter { it.id !in previousIds }
@@ -3254,6 +3290,7 @@ class ChatService(
         continuationEvent: OrbisInboxEvent? = null,
         requireImageInput: Boolean = false,
         allowCompaction: Boolean = true,
+        boundaryRecoveryRevision: Long? = null,
     ): Boolean {
         fun requireOwner() {
             if (!lane.isCurrent(owner)) throw CancellationException("已由新的人类消息接替")
@@ -3299,18 +3336,27 @@ class ChatService(
                     AppliedCompaction(saved.currentMessages, saved.compactionEpoch)
                 },
             ) else null
-            val preparedTools = me.rerere.rikkahub.data.ai.tools.conversationToolSet(
+            val normalTools = me.rerere.rikkahub.data.ai.tools.conversationToolSet(
                 snapshot.currentMessages, compaction,
             ) { sourceIds ->
                 withContext(Dispatchers.IO) {
                     chatToolFactory.createTools(settings, assistant, model, snapshot.workspaceCwd,
                         snapshot.id.toString(), voiceCallId = voiceRecord?.id, allowAmbientCallBinding = false,
                         imageSourceMessageIds = sourceIds,
+                        boundaryPauseAllowed = { boundaryRecoveryRevision != null &&
+                            boundaryHost.recoveryPending(assistant.id.toString(), snapshot.id.toString(), boundaryRecoveryRevision) },
                         readActiveConversation = { requireOwner(); lane.state.value },
                         recallOwnMessage = { requireOwner(); recallAiMessage(snapshot.id, assistant.id, it) },
                         onWorkshopAccepted = { accepted -> lane.registerWorkshopReturn(owner, accepted) })
                 }
-            }.map { definition -> definition.copy(execute = { arguments ->
+            }
+            val recoveryTools = if (boundaryRecoveryRevision == null) normalTools else normalTools.filterNot {
+                it.name == me.rerere.rikkahub.data.orbis.boundary.BOUNDARY_TOOL
+            } + me.rerere.rikkahub.data.ai.tools.createBoundaryRecoveryTool(
+                boundaryHost, assistant.id.toString(), snapshot.id.toString(), boundaryRecoveryRevision,
+                bindingCurrent = { lane.isCurrent(owner) && lane.state.value.assistantId == assistant.id },
+                verifyConversation = { conversationRepo.getConversationById(snapshot.id)?.assistantId == assistant.id })
+            val preparedTools = recoveryTools.map { definition -> definition.copy(execute = { arguments ->
                 requireOwner()
                 definition.execute(arguments)
             }) }
@@ -3362,6 +3408,7 @@ class ChatService(
                                 tool.hostApproval?.let { approvals.permits(assistant.id.toString(), it) } == true)
                         }),
                     conversationId = snapshot.id, conversationSystemPrompt = snapshot.customSystemPrompt,
+                    boundaryRecoveryRevision = boundaryRecoveryRevision,
                     orbisPrompt = snapshot.orbisPrompt, conversationModeInjectionIds = snapshot.modeInjectionIds,
                     conversationLorebookIds = snapshot.lorebookIds, workspaceCwd = snapshot.workspaceCwd,
                     initialContextEpoch = snapshot.compactionEpoch,
@@ -4603,13 +4650,15 @@ class ChatService(
                 }
             }
             conversation = conversation.updateCurrentMessages(normalizedHistory)
-            val compaction = if (messageRange == null) createCompactionControl(conversationId,
-                assistant.compactionThresholdTokens, captureLocalMemory = consultationTurn == null) else null
+            val compactionScope = me.rerere.rikkahub.data.ai.tools.generationCompactionScope(
+                createCompactionControl(conversationId, assistant.compactionThresholdTokens,
+                    captureLocalMemory = consultationTurn == null), partial = messageRange != null)
+            val compaction = compactionScope.execution
 
             val wakePermit = kotlin.coroutines.coroutineContext[BoundaryWakePermit]
             val recoveryRevision = freshHumanInput?.boundaryRecoveryRevision
             val tools = try {
-                val normalTools = me.rerere.rikkahub.data.ai.tools.conversationToolSet(inputMessages, compaction,
+                val normalTools = me.rerere.rikkahub.data.ai.tools.conversationToolSet(inputMessages, compactionScope.catalog,
                     omitLocalMemory = consultationTurn != null) { sourceIds ->
                 chatToolFactory.createTools(
                     settings = settings,

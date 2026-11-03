@@ -198,8 +198,9 @@ internal object DeepSeekStrictJson {
         budget: StreamingJsonBudget = StreamingJsonBudget()): Sequence<JsonElement> = JsonReader(reader, checkCancelled, budget).arrayItems()
     /** Streams a named array inside a small, explicitly allowed object envelope. Header order is not significant. */
     fun objectArrayItems(reader: Reader, arrayKey: String, headerKeys: Set<String>,
-        checkCancelled: () -> Unit, validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> =
-        JsonReader(reader, checkCancelled).objectArrayItems(arrayKey, headerKeys, validateHeader)
+        checkCancelled: () -> Unit, allowExtraMetadata: Boolean = false,
+        validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> =
+        JsonReader(reader, checkCancelled).objectArrayItems(arrayKey, headerKeys, allowExtraMetadata, validateHeader)
 
     private class JsonReader(private val source: Reader, private val checkCancelled: () -> Unit,
         private val budget: StreamingJsonBudget = StreamingJsonBudget()) {
@@ -231,6 +232,7 @@ internal object DeepSeekStrictJson {
             whitespace(); require(peek() == -1) { "deepseek_json_trailing" }
         }
         fun objectArrayItems(arrayKey: String, headerKeys: Set<String>,
+            allowExtraMetadata: Boolean,
             validateHeader: (JsonObject) -> Unit): Sequence<JsonElement> = sequence {
             itemStart = null
             whitespace(); require(next() == '{') { "archive_root_object" }; whitespace()
@@ -238,7 +240,8 @@ internal object DeepSeekStrictJson {
             val header = linkedMapOf<String, JsonElement>()
             if (peek() == '}'.code) next() else while (true) {
                 whitespace(); val key = string()
-                require(seen.add(key) && (key == arrayKey || key in headerKeys)) { "archive_header_key" }
+                require(!allowExtraMetadata || (seen.size < 256 && key.length <= 256)) { "archive_header_limit" }
+                require(seen.add(key) && (key == arrayKey || key in headerKeys || allowExtraMetadata)) { "archive_header_key" }
                 whitespace(); require(next() == ':') { "archive_json_separator" }; whitespace()
                 if (key == arrayKey) {
                     require(next() == '[') { "archive_items_array" }; whitespace()
@@ -248,10 +251,18 @@ internal object DeepSeekStrictJson {
                         if (separator == ']') break
                         require(separator == ',') { "archive_json_separator" }
                     }
-                } else {
+                } else if (key in headerKeys) {
                     // Envelope fields are primitives, never settings objects or another unbounded array.
                     require(peek().toChar() !in "{[") { "archive_header_primitive" }
                     header[key] = value(1)
+                } else {
+                    // Opt-in format metadata (e.g. Operit folders), never imported as settings.
+                    // Validate the entire value with the same per-item/depth/string limits,
+                    // but do not retain its arrays/objects in memory.
+                    values = 0
+                    itemStart = offset
+                    value(1, discard = true)
+                    itemStart = null
                 }
                 whitespace(); val separator = next()
                 if (separator == '}') break
@@ -266,7 +277,7 @@ internal object DeepSeekStrictJson {
             itemStart = offset
             return value(depth).also { itemStart = null }
         }
-        private fun value(depth: Int): JsonElement {
+        private fun value(depth: Int, discard: Boolean = false): JsonElement {
             if (depth > 48 || ++values > budget.itemValues) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
             whitespace()
             return when (peek().toChar()) {
@@ -277,18 +288,20 @@ internal object DeepSeekStrictJson {
                         whitespace(); val key = string()
                         require(key !in entries) { "deepseek_json_duplicate_key" }
                         whitespace(); require(next() == ':') { "deepseek_json_separator" }
-                        entries[key] = value(depth + 1); whitespace()
+                        entries[key] = value(depth + 1, discard); whitespace()
                         val end = next()
                         if (end == '}') break
                         require(end == ',') { "deepseek_json_separator" }
                     }
-                    JsonObject(entries)
+                    if (discard) JsonNull else JsonObject(entries)
                 }
                 '[' -> {
                     next(); whitespace()
                     val items = mutableListOf<JsonElement>()
                     if (peek() == ']'.code) next() else while (true) {
-                        items += value(depth + 1); whitespace()
+                        val item = value(depth + 1, discard)
+                        if (!discard) items += item
+                        whitespace()
                         val end = next()
                         if (end == ']') break
                         require(end == ',') { "deepseek_json_separator" }

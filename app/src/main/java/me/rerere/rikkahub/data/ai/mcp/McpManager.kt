@@ -150,6 +150,10 @@ class McpManager(
         }
     }
 
+    /** Native consumers need structuredContent and isError before rendering loses that envelope. */
+    internal suspend fun callToolResult(serverId: Uuid, toolName: String, args: JsonObject) =
+        sessionRegistry.callTool(serverId, toolName, args)
+
     fun supportsMemoryImageUploads(serverId: Uuid): Boolean {
         val server = settingsStore.settingsFlow.value.mcpServers.find { it.id == serverId }
             ?: return false

@@ -87,7 +87,8 @@ internal fun healthSyncPatch(day:HealthDay,incoming:Map<String,JsonPrimitive>):M
     incoming.filter { (key,value)->day.fields[key]?.actor!="human" && day.fields[key]?.value!=value }
 
 internal fun healthSyncFailureMessage(code:String):String = when(code) {
-    "health_cloud_format" -> "来源返回的格式暂不兼容：需要JSON的data数组及带时间戳的设备记录，不能直接读取Markdown或按日期汇总的字典。原记录保留；请核对MCP接口格式。"
+    "health_cloud_format" -> "来源返回的格式暂不兼容：支持结构化JSON或JSON文本中的data数组，以及按日期汇总的步数；不能直接读取Markdown。原记录保留，请核对MCP接口格式。"
+    "health_sync_tool_error" -> "MCP已连接，但设备读取工具报告失败，未导入返回内容。请检查该工具的数据源；原记录保留。"
     "health_cloud_limit", "health_cloud_range" -> "来源返回的数据超过支持范围，原记录保留。请缩小设备数据范围后再同步。"
     "health_sync_authorization" -> "MCP需要重新授权；请在连接设置中完成授权后同步。原记录保留。"
     "health_sync_connection" -> "尚未连接到所选MCP，未读取记录；请检查该连接。原记录保留。"

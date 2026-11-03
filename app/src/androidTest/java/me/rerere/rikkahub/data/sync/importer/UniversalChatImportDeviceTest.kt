@@ -16,6 +16,7 @@ import com.lover.connect.LcExternalRecoveryGate
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.*
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.ai.IsolatedGenerationLoopRunner
@@ -120,6 +121,63 @@ class UniversalChatImportDeviceTest {
             assertEquals(1, importer.import(file, owner, selected, UniversalChatImporter.archiveFingerprint(file)).skipped)
             assertEquals(saved, JsonInstant.encodeToString(checkNotNull(repo.getConversationById(id))))
             assertEquals(before, JsonInstant.encodeToString(checkNotNull(repo.getConversationById(old.id))))
+        }
+    }
+
+    @Test fun operitSectionedFutureEnvelopeAndLongMessagesRoundTripThroughRoomWithoutReplayingTools() = runBlocking {
+        Fixture().use { fixture ->
+            val owner = Uuid.parse("11111111-1111-4111-8111-111111111111")
+            val reason = "思考🙂".repeat(25_000)
+            val body = "正文🙂".repeat(25_000)
+            val historicalTool = "<tool_result>" + "历史结果".repeat(30_000) + "</tool_result>"
+            val root = buildJsonObject {
+                put("chats", JsonArray(listOf(buildJsonObject {
+                    put("id", "synthetic-sections"); put("title", "合成分段聊天")
+                    put("createdAt", "2026-11-03T12:00:00"); put("updatedAt", "2026-11-03T12:00:00")
+                    put("messages", JsonArray(listOf(buildJsonObject {
+                        put("baseMessage", buildJsonObject {
+                            put("sender", "ai"); put("timestamp", 123456789L)
+                            put("sections", JsonArray(listOf(
+                                buildJsonObject { put("type", "thinking"); put("content", reason) },
+                                buildJsonObject { put("type", "text"); put("content", body) },
+                                buildJsonObject { put("type", "tool_result"); put("raw", historicalTool) },
+                                buildJsonObject { put("type", "future_section"); put("payload", "保留新类型") },
+                            )))
+                        })
+                    })))
+                })))
+                put("folders", JsonArray(emptyList()))
+                put("settings", buildJsonObject { put("secret", "SYNTHETIC_NOT_IMPORTED") })
+                put("archiveType", "operit_chat_archive"); put("formatVersion", 99)
+            }
+            val file = File(fixture.directory, "operit-synthetic.json").apply { writeText(root.toString()) }
+            val repo = fixture.repository
+            val old = Conversation(assistantId = owner, title = "已有合成聊天", messageNodes = emptyList())
+            assertEquals(1, repo.insertImportedConversations(listOf(old)))
+            val before = JsonInstant.encodeToString(checkNotNull(repo.getConversationById(old.id)))
+            val preview = OperitChatArchive.inspect(file)
+            assertTrue(preview.warnings.any { it.contains("原始结构") })
+            val selected = preview.conversations.associate { it.sourceId to it.defaultLeafId }
+            val importer = OperitChatImporter(repo)
+            val fingerprint = OperitChatImporter.archiveFingerprint(file)
+            val first = importer.import(file, owner, selected, fingerprint)
+            assertEquals(1, first.imported); assertEquals(0, first.failed)
+            val id = operitImportId("conversation", "synthetic-sections")
+            val loaded = checkNotNull(repo.getConversationById(id))
+            assertTrue(loaded.messageNodes.size > 1)
+            loaded.messageNodes.forEach { me.rerere.rikkahub.data.db.MessageNodeBudget.measureNode(it.messages) }
+            val parts = loaded.currentMessages.flatMap { it.parts }
+            assertEquals(reason, (parts[0] as UIMessagePart.Reasoning).reasoning)
+            assertEquals(body, (parts[1] as UIMessagePart.Text).text)
+            assertEquals(historicalTool, (parts[2] as UIMessagePart.Text).text)
+            assertEquals("保留新类型", Json.parseToJsonElement((parts[3] as UIMessagePart.Text).text).jsonObject["payload"]!!.jsonPrimitive.content)
+            assertTrue(loaded.currentMessages.all { it.getTools().isEmpty() })
+            val saved = JsonInstant.encodeToString(loaded)
+            assertFalse(saved.contains("SYNTHETIC_NOT_IMPORTED"))
+            assertEquals(1, importer.import(file, owner, selected, fingerprint).skipped)
+            assertEquals(saved, JsonInstant.encodeToString(checkNotNull(repo.getConversationById(id))))
+            assertEquals(before, JsonInstant.encodeToString(checkNotNull(repo.getConversationById(old.id))))
+            assertEquals(fingerprint, OperitChatImporter.archiveFingerprint(file))
         }
     }
 }

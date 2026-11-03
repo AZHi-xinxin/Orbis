@@ -10,7 +10,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
-import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.ai.mcp.*
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import org.koin.core.context.GlobalContext
@@ -87,18 +86,18 @@ internal object AndroidHealthSync {
                 ?.takeIf{supportsHealthSync(it)&&healthSyncBinding(it)==cfg.binding}?:error("health_sync_binding_changed")
             }
             val server=selected();val mcp=koin.get<McpManager>()
-            val parts=withTimeout(45_000){
+            val result=withTimeout(45_000){
                 if(mcp.getClient(server)==null)mcp.addClient(server)
                 when(mcp.getStatus(server).first{it is McpStatus.Connected || it is McpStatus.Error || it is McpStatus.NeedsAuthorization}) {
                     is McpStatus.Connected -> Unit
                     is McpStatus.NeedsAuthorization -> error("health_sync_authorization")
                     else -> error("health_sync_connection")
                 }
-                mcp.callTool(server.id,"read_health_data",buildJsonObject{put("data_type","")})
+                mcp.callToolResult(server.id,"read_health_data",buildJsonObject{put("data_type","")})
             }
-            val texts=parts.filterIsInstance<UIMessagePart.Text>();require(parts.size==texts.size&&texts.size==1){"health_cloud_format"}
             val through=if(manual)now.toLocalDate() else slot.through
-            val days=parseHealthCloudData(texts.single().text,now.zone,through.minusDays(6),through)
+            val batch=parseHealthMcpResult(result,now.zone,through.minusDays(6),through)
+            val days=batch.days
             selected() // The destination/permission must still match before any write.
             val live=read(context);check(healthSyncGrantCurrent(live,cfg))
             val repo=openHealth(context)
@@ -110,12 +109,12 @@ internal object AndroidHealthSync {
                     synchronized(this) {
                         check(read(context).let{healthSyncGrantCurrent(it,cfg)})
                         selected()
-                        repo.write(date,day.revision,patch,"mcp","device:hcmcp","已授权设备同步 · 按原始时间戳和手机时区归日")
+                        repo.write(date,day.revision,patch,"mcp","device:hcmcp",batch.provenance)
                     }
                     changed+=patch.size
                 }
             }
-            val status=if(days.isEmpty())"服务已连接，近7天暂无可用记录" else "已同步 ${days.size} 天，更新 $changed 项"+(if(protected>0)"；保留 $protected 项手动校正" else "")
+            val status=(if(days.isEmpty())"服务已连接，近7天暂无可用记录" else "已同步 ${days.size} 天，更新 $changed 项"+(if(protected>0)"；保留 $protected 项手动校正" else ""))+batch.notice
             synchronized(this) {
                 val current=read(context)
                 if(healthSyncGrantCurrent(current,cfg))

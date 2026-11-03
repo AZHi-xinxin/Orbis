@@ -65,4 +65,20 @@ class SelfCheckTest {
         val result = (tool.execute(buildJsonObject {}).single() as UIMessagePart.Text).text
         assertTrue(result.contains("self_check_disabled")); assertFalse(result.contains("report"))
     }
+
+    @Test fun `tool receipts preserve only allowlisted flat or nested codes`() {
+        fun code(value: String) = toolDiagnosticCode(Json.parseToJsonElement(value).jsonObject)
+        assertEquals("weather_city_missing", code("""{"ok":false,"error":{"code":"weather_city_missing","detail":"SECRET"}}"""))
+        assertEquals("theme_invalid_parameters", code("""{"ok":false,"code":"theme_invalid_parameters"}"""))
+        assertEquals("operation_unavailable", code("""{"ok":false,"error":{"code":"operation_unavailable"}}"""))
+        assertEquals("unclassified_failure", code("""{"ok":false,"error":{"code":"SECRET_URL"},"message":"weather_city_missing SECRET"}"""))
+        assertEquals("unclassified_failure", code("""{"ok":false,"error":["weather_city_missing"]}"""))
+    }
+
+    @Test fun `weather configuration check never equates configured with reachable`() {
+        assertEquals("blocked", weatherConfigurationItem(false).status)
+        assertEquals("weather_city_missing", weatherConfigurationItem(false).code)
+        assertEquals("info", weatherConfigurationItem(true).status)
+        assertTrue(weatherConfigurationItem(true).evidence.contains("未发起"))
+    }
 }
