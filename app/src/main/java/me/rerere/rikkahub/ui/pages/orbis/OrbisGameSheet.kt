@@ -102,45 +102,47 @@ import java.util.Date
 /** One game-machine entry: native verified chess and separately sandboxed, game-reported HTML. */
 @Composable
 internal fun OrbisGameSheet(onDismiss: () -> Unit) {
-    val context = LocalContext.current.applicationContext
-    var repository by remember { mutableStateOf<OrbisGameRepository?>(null) }
-    var miniRepository by remember { mutableStateOf<OrbisMiniGameRepository?>(null) }
-    val settingsStore = koinInject<SettingsStore>()
-    val providerManager = koinInject<ProviderManager>()
-    val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
-    val selectedAssistant = settings.assistants.find { it.id == settings.assistantId }
-    val modelOpponent = remember(settingsStore, providerManager) { OrbisGameModelOpponent(settingsStore, providerManager) }
-    var loadFailed by remember { mutableStateOf(false) }
-    var retry by remember { mutableStateOf(0) }
-    LaunchedEffect(context, retry) {
-        loadFailed = false
-        try {
-            repository = withContext(Dispatchers.IO) { OrbisGames.open(context) }
-            miniRepository = withContext(Dispatchers.IO) { OrbisMiniGames.open(context) }
-        } catch (error: CancellationException) { throw error }
-        catch (_: Exception) { loadFailed = true }
-    }
-    val colors = OrbisTheme.colors
-    // Keep one dialog and one GameContent composition while switching library/play views. A game
-    // must not restart merely because its surrounding chrome becomes full-screen or is resized.
-    Dialog(onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-      Surface(Modifier.fillMaxSize(), color = colors.panel) {
-       Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        val ready = repository
-        val miniReady = miniRepository
-        if (ready != null && miniReady != null) GameContent(ready, miniReady,
-            selectedAssistant?.id?.toString(), selectedAssistant?.name?.ifBlank { "当前 AI" } ?: "未选择 AI",
-            modelOpponent::chooseMove, onDismiss)
-        else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            GameHeading("游戏机", "原生五子棋与 AI 写的小游戏", onDismiss)
-            Text(if (loadFailed) "无法读取本地游戏记录。原文件保留，未重置、覆盖或生成示例战绩。" else "正在读取本地游戏记录…",
-                fontSize = 13.sp, lineHeight = 20.sp, color = colors.mutedInk)
-            if (loadFailed) TextButton(onClick = { retry++ }) { Text("重试读取") }
+    OrbisInterfaceTheme {
+        val context = LocalContext.current.applicationContext
+        var repository by remember { mutableStateOf<OrbisGameRepository?>(null) }
+        var miniRepository by remember { mutableStateOf<OrbisMiniGameRepository?>(null) }
+        val settingsStore = koinInject<SettingsStore>()
+        val providerManager = koinInject<ProviderManager>()
+        val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+        val selectedAssistant = settings.assistants.find { it.id == settings.assistantId }
+        val modelOpponent = remember(settingsStore, providerManager) { OrbisGameModelOpponent(settingsStore, providerManager) }
+        var loadFailed by remember { mutableStateOf(false) }
+        var retry by remember { mutableStateOf(0) }
+        LaunchedEffect(context, retry) {
+            loadFailed = false
+            try {
+                repository = withContext(Dispatchers.IO) { OrbisGames.open(context) }
+                miniRepository = withContext(Dispatchers.IO) { OrbisMiniGames.open(context) }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { loadFailed = true }
         }
-       }
-      }
+        val colors = OrbisTheme.colors
+        // Keep one dialog and one GameContent composition while switching library/play views. A game
+        // must not restart merely because its surrounding chrome becomes full-screen or is resized.
+        Dialog(onDismissRequest = onDismiss,
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+          Surface(Modifier.fillMaxSize(), color = colors.panel) {
+           Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            val ready = repository
+            val miniReady = miniRepository
+            if (ready != null && miniReady != null) GameContent(ready, miniReady,
+                selectedAssistant?.id?.toString(), selectedAssistant?.name?.ifBlank { "当前 AI" } ?: "未选择 AI",
+                modelOpponent::chooseMove, onDismiss)
+            else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                GameHeading("游戏机", "原生五子棋与 AI 写的小游戏", onDismiss)
+                Text(if (loadFailed) "无法读取本地游戏记录。原文件保留，未重置、覆盖或生成示例战绩。" else "正在读取本地游戏记录…",
+                    fontSize = 13.sp, lineHeight = 20.sp, color = colors.mutedInk)
+                if (loadFailed) TextButton(onClick = { retry++ }) { Text("重试读取") }
+            }
+           }
+          }
+        }
     }
 }
 

@@ -50,6 +50,8 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
     var showPet by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showStudy by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showMusic by rememberSaveable { mutableStateOf(false) }
+    var showPlugins by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showAgentWork by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showHealth by rememberSaveable { mutableStateOf(false) }
     var showBody by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     val activityScope = rememberCoroutineScope()
@@ -57,6 +59,10 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
     var showCalls by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showConnections by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var showGallery by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showMarket by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
+    var showCommunity by rememberSaveable { mutableStateOf(false) }
+    var showWerewolf by rememberSaveable { mutableStateOf(false) }
+    var showTabletop by rememberSaveable { mutableStateOf(false) }
     var showPrivateRoom by rememberSaveable(selected?.id?.toString()) { mutableStateOf(false) }
     var companionSpace by rememberSaveable(selected?.id?.toString()) { mutableStateOf<CompanionSpaceSection?>(null) }
     val context = LocalContext.current
@@ -99,6 +105,22 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                             fontSize = 12.sp, lineHeight = 18.sp, color = colors.mutedInk)
                     }
                 }
+                item("community-and-games") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ToolsTile(orbisToolEntries.single { it.destination == OrbisToolDestination.COMMUNITY },
+                            selected != null, Modifier.weight(1f)) { showCommunity = true }
+                        OrbisToolEntryCard("剧本杀", "星夜圆桌 · 人机搭档",
+                            { showTabletop = true }, Modifier.weight(1f), selected != null) {
+                            Icon(HugeIcons.Files02, contentDescription = null,
+                                modifier = Modifier.size(30.dp), tint = colors.indigo)
+                        }
+                        OrbisToolEntryCard("星夜桌游", "狼人杀 · 你画我猜",
+                            { showWerewolf = true }, Modifier.weight(1f), selected != null) {
+                            Icon(HugeIcons.Sparkles, contentDescription = null,
+                                modifier = Modifier.size(30.dp), tint = colors.indigo)
+                        }
+                    }
+                }
                 OrbisToolGroup.entries.forEach { group ->
                     item(group.name) {
                         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -112,18 +134,20 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                                     else -> 1
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    orbisToolEntries.filter { it.group == group }.chunked(columns).forEach { row ->
+                                    orbisToolEntries.filter { it.group == group && it.destination != OrbisToolDestination.COMMUNITY }.chunked(columns).forEach { row ->
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             row.forEach { item ->
                                                 val enabled = item.destination !in setOf(OrbisToolDestination.LOCAL_CAPABILITIES,
-                                                    OrbisToolDestination.GALLERY, OrbisToolDestination.PRIVATE_ROOM,
+                                                    OrbisToolDestination.GALLERY, OrbisToolDestination.MARKET, OrbisToolDestination.COMMUNITY, OrbisToolDestination.PRIVATE_ROOM,
                                                     OrbisToolDestination.SECRET_BASE, OrbisToolDestination.SHARED_SPACE,
                                                     OrbisToolDestination.PHOTO_WALL, OrbisToolDestination.CHARACTER, OrbisToolDestination.IMAGE_WORKSHOP,
-                                                    OrbisToolDestination.PET, OrbisToolDestination.STUDY, OrbisToolDestination.BODY, OrbisToolDestination.HUMAN_HEALTH) || selected != null
+                                                    OrbisToolDestination.PET, OrbisToolDestination.STUDY, OrbisToolDestination.BODY, OrbisToolDestination.HUMAN_HEALTH,
+                                                    OrbisToolDestination.PLUGINS) || selected != null
                                                 val tile = if (item.destination == OrbisToolDestination.GALLERY) item.copy(title = "${galleryName.ifBlank { selected?.name?.ifBlank { "伙伴" } ?: "伙伴" }}的格子") else item
                                                 ToolsTile(tile, enabled, Modifier.weight(1f)) {
                                                     when (item.destination) {
                                                         OrbisToolDestination.MUSIC -> showMusic = true
+                                                        OrbisToolDestination.PLUGINS -> showPlugins = true
                                                         OrbisToolDestination.PET -> showPet = true
                                                         OrbisToolDestination.STUDY -> showStudy = true
                                                         OrbisToolDestination.BODY -> showBody = true
@@ -138,6 +162,8 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                                                         OrbisToolDestination.STICKERS -> showStickers = true
                                                         OrbisToolDestination.BLUETOOTH_TOY -> navigator.navigate(Screen.OrbisToy)
                                                         OrbisToolDestination.GALLERY -> showGallery = true
+                                                        OrbisToolDestination.MARKET -> showMarket = true
+                                                        OrbisToolDestination.COMMUNITY -> showCommunity = true
                                                         OrbisToolDestination.SCHEDULE -> navigator.navigate(Screen.OrbisSchedule)
                                                         OrbisToolDestination.PRIVATE_ROOM -> showPrivateRoom = true
                                                         OrbisToolDestination.SECRET_BASE -> companionSpace = CompanionSpaceSection.SECRET
@@ -158,6 +184,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
                     }
                 }
                 item("permissions") {
+                    OutlinedButton(onClick = { showAgentWork = true }, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
+                        Text("任务与能力 · 工具诊断与手机操作")
+                    }
                     OutlinedButton(onClick = { showConnections = true }, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
                         val pending = settings.connectionProposals.count { it.owner == selected?.id?.toString() && it.status == "pending" }
                         Text(if(pending > 0) "AI 连接建议 · $pending 条待查看" else "AI 连接建议 · 原生配置与以后允许")
@@ -175,6 +204,9 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
         if (showGames) OrbisGameSheet(onDismiss = { showGames = false })
         if (showMusic) me.rerere.rikkahub.ui.pages.orbis.music.MusicLibraryLauncher(selected?.name ?: "AI") { showMusic = false }
         if (selected != null) key(selected.id) {
+            if (showAgentWork) AgentWorkbenchPage(selected.id.toString()) { showAgentWork = false }
+            if (showPlugins) me.rerere.rikkahub.ui.pages.orbis.plugins.PluginLibraryPage(selected.id.toString(), selected.name,
+                conversationId, close = { showPlugins = false })
             if (showHealth) OrbisHealthPage { showHealth = false }
             if (showBody) OrbisBodyDetails(selected.id.toString(), conversationId) { showBody = false }
             if (showConnections) OrbisConnectionProposals(selected.id.toString(), onClose = { showConnections = false })
@@ -191,6 +223,10 @@ fun OrbisToolsPage(vm: SettingVM = koinViewModel(), ownerAssistantId: String? = 
             if (showPrivateRoom) OrbisPrivateRoomPage(selected.id.toString(), selected.name,
                 onClose = { showPrivateRoom = false })
             if (showGallery) OrbisGalleryPage(selected.id.toString(), selected.name, onClose = { showGallery = false })
+            if (showMarket) me.rerere.rikkahub.ui.pages.orbis.market.OrbisMarketPage(selected.id.toString(), conversationId) { showMarket = false }
+            if (showCommunity) me.rerere.rikkahub.ui.pages.orbis.community.CommunityPage(selected.id.toString()) { showCommunity = false }
+            if (showWerewolf) OrbisTabletopPage(selected.id.toString(),ownerScope.conversationId,gameKind="boardgames") { showWerewolf = false }
+            if (showTabletop) OrbisTabletopPage(selected.id.toString(),ownerScope.conversationId) { showTabletop = false }
             if (showCalls) OrbisVoiceCallHistorySheet(chatService.voiceCalls,
                 assistantId = selected.id.toString(), onRetry = chatService::retryVoiceCallArchiveIsolated,
                 onDismiss = { showCalls = false })
@@ -210,6 +246,7 @@ internal fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifie
     val artwork = when (item.destination) {
         OrbisToolDestination.GAMES -> OrbisEntryArtwork.ARCADE
         OrbisToolDestination.SECRET_BASE -> OrbisEntryArtwork.SEALED_LETTER
+        OrbisToolDestination.MARKET -> OrbisEntryArtwork.SEALED_LETTER
         OrbisToolDestination.PRIVATE_ROOM -> OrbisEntryArtwork.PRIVATE_ROOM
         else -> null
     }
@@ -223,6 +260,7 @@ internal fun ToolsTile(item: OrbisToolEntry, enabled: Boolean, modifier: Modifie
         OrbisToolDestination.ATTACHMENTS -> HugeIcons.Files02
         OrbisToolDestination.LOCAL_CAPABILITIES -> HugeIcons.AiBrain01
         OrbisToolDestination.STICKERS -> HugeIcons.Sparkles
+        OrbisToolDestination.PLUGINS -> HugeIcons.Sparkles
         OrbisToolDestination.BLUETOOTH_TOY -> HugeIcons.Connect
         OrbisToolDestination.GALLERY -> HugeIcons.Package
         OrbisToolDestination.SCHEDULE -> HugeIcons.Calendar03

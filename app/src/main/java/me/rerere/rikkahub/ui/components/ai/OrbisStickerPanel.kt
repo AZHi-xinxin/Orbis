@@ -39,6 +39,7 @@ import me.rerere.rikkahub.data.orbis.OrbisSticker
 import me.rerere.rikkahub.data.orbis.OrbisStickerLimits
 import me.rerere.rikkahub.data.datastore.getCurrentAssistant
 import me.rerere.rikkahub.data.orbis.OrbisStickers
+import me.rerere.rikkahub.ui.pages.orbis.OrbisInterfaceTheme
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 
 /** In chat, an explicit tile tap sends one image. The management-only entry never sends. */
@@ -364,15 +365,17 @@ private fun StickerNote(text: String) {
 
 @Composable
 private fun StickerDialog(onDismiss: () -> Unit, dismissible: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
-    val maxHeight = (LocalConfiguration.current.screenHeightDp * .85f).dp
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
-        dismissOnBackPress = dismissible, dismissOnClickOutside = dismissible, usePlatformDefaultWidth = false,
-    )) {
-        Surface(Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp), color = OrbisTheme.colors.panel,
-            contentColor = OrbisTheme.colors.ink) {
-            Column(Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+    OrbisInterfaceTheme {
+        val maxHeight = (LocalConfiguration.current.screenHeightDp * .85f).dp
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
+            dismissOnBackPress = dismissible, dismissOnClickOutside = dismissible, usePlatformDefaultWidth = false,
+        )) {
+            Surface(Modifier.padding(16.dp).widthIn(max = 560.dp).fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp), color = OrbisTheme.colors.panel,
+                contentColor = OrbisTheme.colors.ink) {
+                Column(Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+            }
         }
     }
 }

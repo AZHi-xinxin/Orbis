@@ -45,6 +45,7 @@ fun SettingAboutPage() {
         val colors = OrbisTheme.colors
         LazyColumn(Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            item("fault-diagnostics") { me.rerere.rikkahub.ui.pages.orbis.FaultDiagnosticsButton() }
             item("community") { OrbisCommunityCard() }
             item("support") { OrbisSupportCard() }
             item("identity") {

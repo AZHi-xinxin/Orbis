@@ -7,6 +7,15 @@ import org.junit.Test
 
 /** All data is synthetic; the policy cannot start an observer, enqueue work, or contact a model. */
 class OrbisSentinelDeliveryPolicyTest {
+    @Test fun `queued old event stays rejected after explicit same assistant rebind`() {
+        var disk: String? = null
+        val store = OrbisSentinelRuleStore({ disk }, { disk = it }, Any())
+        store.create(rule.copy(createdAtMs = 100, updatedAtMs = 100, scheduleSinceMs = 100))
+        val target = rule.binding.copy(conversationId = "33333333-3333-4333-8333-333333333333")
+        store.rebind(rule.id, rule.binding, target, 2000)
+        assertFalse(sentinelMayDeliver(store.refresh(), event))
+    }
+
     @Test fun `delayed stop cancels old work but never a later resumed generation`() {
         assertTrue(sentinelBelongsToPause(event.copy(sentinelGeneration = 0), 1))
         assertTrue(sentinelBelongsToPause(event.copy(sentinelGeneration = 1), 1))

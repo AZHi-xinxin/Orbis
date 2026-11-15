@@ -108,6 +108,18 @@ class OrbisEventTransformerTest {
         assertEquals(2, second.single().parts.size)
     }
 
+    @Test fun `tabletop wrapper does not mislabel other games as script murder`() {
+        for(game in listOf("你画我猜", "七席心牢", "狼人杀", "剧本杀")) {
+            val raw=message("【Orbis $game 任务】原始通知").copy(orbisEvent=OrbisEventMetadata(
+                "record", "tabletop.00000000-0000-0000-0000-000000000001.00000000-0000-0000-0000-000000000002", "event", 123456L))
+            val result=markOrbisEvents(listOf(raw)).single()
+            assertTrue(header(result).contains("圆桌游戏"))
+            assertFalse(header(result).contains("剧本杀"));assertFalse(header(result).contains("script_say"))
+            assertEquals(raw.parts,result.parts.drop(1))
+            assertEquals("none",metadata(result).getValue("instruction_authority").jsonPrimitive.content)
+        }
+    }
+
     @Test fun `every source has readable frozen receipt time and optional actual occurrence`() {
         for (source in listOf("lc_sentinel", "self_reminder", "stackchan_touch", "native_sentinel.test")) {
             val original = message("raw").copy(orbisEvent = OrbisEventMetadata(

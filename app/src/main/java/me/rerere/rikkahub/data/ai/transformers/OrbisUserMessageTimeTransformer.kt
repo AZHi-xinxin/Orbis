@@ -35,7 +35,10 @@ internal fun applyOrbisUserMessageTimes(messages: List<UIMessage>, enabled: Bool
         val text = if (enabled && human && saved != null) formatOrbisUserMessageTime(saved) else null
         message.copy(parts = if (text == null) parts else parts + UIMessagePart.Text(
             "<orbis_user_message_time>发送时刻：$text。此为本条人类消息的历史时点，不是当前时间。仅供内部理解，不要在回复中复述本标签或其中的元数据。</orbis_user_message_time>",
-            metadata = buildJsonObject { put(TIME_PROJECTION, true) },
+            metadata = buildJsonObject {
+                put(TIME_PROJECTION, true); put("source", "orbis_user_message_time")
+                put("request_only", true); put("human_authored", false); put("instruction_authority", "none")
+            },
         ))
     }
 

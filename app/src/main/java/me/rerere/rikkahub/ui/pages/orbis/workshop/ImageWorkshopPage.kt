@@ -91,6 +91,12 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
     val editingSupported = selectedProvider?.let(ImageWorkshop::supportsEditing) ?: true
     LaunchedEffect(makers.isEmpty()) { if (makers.isEmpty()) expanded = false }
     var references by rememberSaveable(owner) { mutableStateOf(emptyList<String>()) }
+    var referenceIds by rememberSaveable(owner) { mutableStateOf(emptyList<String>()) }
+    val library = state.referenceLibrary.filter { it.assistantId == owner }
+    val allReferenceFiles = (references + library.filter { it.id in referenceIds }.map { it.asset.file }).distinct()
+    var referenceEditor by remember { mutableStateOf(false) }
+    var editingReference by remember { mutableStateOf<WorkshopReference?>(null) }
+    var referenceSeed by remember { mutableStateOf<WorkshopAsset?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var kitDialog by remember { mutableStateOf(false) }
@@ -133,16 +139,16 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
     }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         launchTask {
-            val imported = withContext(Dispatchers.IO) { uris.take((referenceLimit - references.size).coerceAtLeast(0)).map { workshop.importReference(it).file } }
+            val imported = withContext(Dispatchers.IO) { uris.take((referenceLimit - allReferenceFiles.size).coerceAtLeast(0)).map { workshop.importReference(it).file } }
             references = (references + imported).distinct()
         }
     }
     fun submit(kit: Boolean) = launchTask {
         val accepted = workshop.submit(owner, conversationId, false, modelId, prompt, kit, references, requestId,
-            notifyConversation = false, referenceMode = referenceMode, referenceStrength = referenceStrength.toDouble())
+            notifyConversation = false, referenceMode = referenceMode, referenceStrength = referenceStrength.toDouble(), referenceIds = referenceIds)
         notice = if (accepted.error == "workshop_schedule_pending") "任务已保存，正在等待后台调度。无需重复提交，下次启动会继续安排。"
             else "已交给后台制作，可以离开本页继续聊天。"
-        prompt = ""; references = emptyList(); requestId = UUID.randomUUID().toString()
+        prompt = ""; references = emptyList(); referenceIds = emptyList(); requestId = UUID.randomUUID().toString()
     }
     Scaffold(topBar = { TopAppBar(title = { Column {
         Text("AI 生图工坊")
@@ -155,7 +161,8 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
             item {
                 Text("把想象交给工坊", style = MaterialTheme.typography.headlineSmall)
                 Text("你手动生成、修改或重做的作品只留在工坊，伙伴无法通过工坊工具查看；只有伙伴自己调用工具的作品才会送到聊天。", style = MaterialTheme.typography.bodyMedium)
-                Text("工坊原图暂不包含在常规聊天备份中。重要作品请使用下方“导出原图”或“打包导出全部原图”另存。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                Text("另存为人物参考并允许伙伴使用的图片，可由当前伙伴跨聊天调用。", style = MaterialTheme.typography.bodySmall)
+                Text("工坊原图和人物参考暂不包含在常规聊天备份中。重要作品请使用下方“导出原图”或“打包导出全部原图”另存，人物照片请保留原件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }
             notice?.let { message -> item { Card { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(message, Modifier.weight(1f)); TextButton(onClick = { notice = null }) { Text("知道了") }
@@ -187,21 +194,30 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                         color = MaterialTheme.colorScheme.primary)
                     OutlinedTextField(value = prompt, onValueChange = { prompt = it.take(12000) },
                         label = { Text("描述想画的内容，或填写 Q 版人物外貌") }, minLines = 4, modifier = Modifier.fillMaxWidth())
+                    WorkshopReferenceSection(library, referenceIds, !busy, workshop::assetFile,
+                        onSelect = { id ->
+                            if (id in referenceIds) referenceIds = referenceIds - id
+                            else if (!editingSupported) notice = "当前制作者不支持参考图，请选择支持改图的模型。"
+                            else if ((allReferenceFiles + library.first { it.id == id }.asset.file).distinct().size > referenceLimit)
+                                notice = "当前模型最多使用 $referenceLimit 张参考图，请先取消其他选择。"
+                            else referenceIds = referenceIds + id
+                        }, onCreate = { editingReference = null; referenceSeed = null; notice = null; referenceEditor = true },
+                        onEdit = { editingReference = it; referenceSeed = null; notice = null; referenceEditor = true })
                     if (references.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(references) { file -> Column {
                             AsyncImage(model = workshop.assetFile(file), contentDescription = "参考图", modifier = Modifier.size(84.dp), contentScale = ContentScale.Fit)
                             TextButton(onClick = { references = references - file }) { Text("移除") }
                         } }
                     }
-                    TextButton(onClick = { pick.launch(arrayOf("image/png", "image/jpeg", "image/webp")) }, enabled = editingSupported && references.size < referenceLimit && !busy) { Text("添加参考图 / 修改图片（最多 $referenceLimit 张）") }
-                    if (references.size > referenceLimit) Text("当前模型只接受 $referenceLimit 张参考图，请移除多余图片。", color = MaterialTheme.colorScheme.error)
-                    if (nativeNai && references.isNotEmpty()) NovelAiReferenceControls(preciseSupported, referenceMode, referenceStrength, !busy,
+                    TextButton(onClick = { pick.launch(arrayOf("image/png", "image/jpeg", "image/webp")) }, enabled = editingSupported && allReferenceFiles.size < referenceLimit && !busy) { Text("添加临时参考图 / 修改图片（最多 $referenceLimit 张）") }
+                    if (allReferenceFiles.size > referenceLimit) Text("当前模型只接受 $referenceLimit 张参考图，请移除多余图片。", color = MaterialTheme.colorScheme.error)
+                    if (nativeNai && allReferenceFiles.isNotEmpty()) NovelAiReferenceControls(preciseSupported, referenceMode, referenceStrength, !busy,
                         { referenceMode = it }, { referenceStrength = it })
-                    if (nativeNai && references.isEmpty()) Text("Opus 文生图：单张、至多 1024×1024 像素面积、至多 28 步可享对应免费额度；V5 另有持续恢复的用量限制。超出条件可能消耗 Anlas。", style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = { submit(false) }, enabled = !busy && prompt.isNotBlank() && makers.any { it.first == modelId } && (editingSupported || references.isEmpty()) && references.size <= referenceLimit, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (references.isEmpty()) "开始生图" else "按描述修改参考图")
+                    if (nativeNai && allReferenceFiles.isEmpty()) Text("Opus 文生图：单张、至多 1024×1024 像素面积、至多 28 步可享对应免费额度；V5 另有持续恢复的用量限制。超出条件可能消耗 Anlas。", style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = { submit(false) }, enabled = !busy && prompt.isNotBlank() && makers.any { it.first == modelId } && (editingSupported || allReferenceFiles.isEmpty()) && allReferenceFiles.size <= referenceLimit, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (allReferenceFiles.isEmpty()) "开始生图" else "按参考生图")
                     }
-                    OutlinedButton(onClick = { kitDialog = true }, enabled = kitSupported && !busy && prompt.isNotBlank() && makers.any { it.first == modelId }, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { kitDialog = true }, enabled = kitSupported && !busy && prompt.isNotBlank() && makers.any { it.first == modelId } && allReferenceFiles.size <= referenceLimit, modifier = Modifier.fillMaxWidth()) {
                         Text("生成小部件所需图片")
                     }
                     Text("Q 版套组：7 个动作 + 7 种表情，独立透明素材。真实透明效果取决于所选模型，成图后会检查并提示；不会把棋盘背景当作透明。", style = MaterialTheme.typography.bodySmall)
@@ -225,6 +241,7 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                     Text("${if (job.byAi) "伙伴创作" else "我的创作"} · ${workshopStatus(job.status)}", style = MaterialTheme.typography.titleMedium)
                     Text(job.maker, style = MaterialTheme.typography.bodySmall)
                     Text(job.prompt.take(180), maxLines = 4)
+                    if (job.namedReferences.isNotEmpty()) Text("人物参考：${job.namedReferences.joinToString { it.name }}", style = MaterialTheme.typography.bodySmall)
                     job.error?.let { Text(workshopError(it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     if (job.assets.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(job.assets) { asset -> Column(Modifier.width(144.dp)) {
@@ -233,6 +250,7 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
                             if (job.widgetKit && !asset.transparent) Text("未检测到透明背景", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                             TextButton(onClick = { exportAssetJson = Json.encodeToString(asset); export.launch("${asset.label}.${asset.file.substringAfterLast('.')}") }, enabled = !busy) { Text("导出原图") }
                             TextButton(onClick = { references = listOf(asset.file); notice = "已作为参考图，请在上方填写修改要求。新图只保存在工坊。" }) { Text("继续修改") }
+                            TextButton(onClick = { editingReference = null; referenceSeed = asset; notice = null; referenceEditor = true }, enabled = !busy) { Text("存为人物参考") }
                             TextButton(onClick = { deletion = job to asset.file }, enabled = !busy && job.status !in setOf(WorkshopStatus.QUEUED, WorkshopStatus.RUNNING)) { Text("删除图片") }
                         } }
                     }
@@ -249,6 +267,14 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
             if (!showAll && ownedJobs.size > 20) item { TextButton(onClick = { showAll = true }) { Text("显示全部记录") } }
         }
     }
+    if (referenceEditor) WorkshopReferenceEditor(workshop, owner, editingReference, referenceSeed, busy, notice,
+        onDismiss = { referenceEditor = false }, onSave = { reference, revision -> launchTask {
+            withContext(Dispatchers.IO) { workshop.saveReference(reference, revision) }
+            referenceEditor = false; notice = "人物参考已保存，可在上方选用。"
+        } }, onDelete = { id -> launchTask {
+            withContext(Dispatchers.IO) { workshop.deleteReference(id, owner) }
+            referenceIds = referenceIds - id; referenceEditor = false; notice = "人物参考已删除，已有作品保留。"
+        } })
     deletion?.let { (job, file) -> WorkshopDeleteDialog(file != null,
         onDismiss = { deletion = null }, onConfirm = {
             deletion = null
@@ -276,8 +302,11 @@ fun ImageWorkshopPage(assistantId: String? = null, conversationId: String? = nul
     retry?.let { old -> AlertDialog(onDismissRequest = { retry = null }, title = { Text("确认重新制作？") },
         text = { Text("上次请求可能已被接口计费，重新制作会发起新的请求。已有原图保留，新图只存在工坊，不通知伙伴。") },
         confirmButton = { TextButton(onClick = { retry = null; launchTask {
-            workshop.submit(old.assistantId, old.conversationId, false, old.modelId, old.prompt, old.widgetKit, old.references,
-                "retry-${old.id}", notifyConversation = false, referenceMode = old.referenceMode, referenceStrength = old.referenceStrength)
+            workshop.ledger.validateReferences(old.assistantId, false, old.namedReferences)
+            workshop.submit(old.assistantId, old.conversationId, false, old.modelId, old.prompt, old.widgetKit,
+                old.references.filterNot { file -> old.namedReferences.any { it.asset.file == file } },
+                "retry-${old.id}", notifyConversation = false, referenceMode = old.referenceMode, referenceStrength = old.referenceStrength,
+                referenceIds = old.namedReferences.map { it.id })
             notice = "重做任务已接收。对同一记录重复点击不会重复制作；若重做仍失败，请在新的记录中确认重试。"
         } }) { Text("确认重新制作") } }, dismissButton = { TextButton(onClick = { retry = null }) { Text("取消") } }) }
 }
@@ -287,6 +316,11 @@ private fun workshopStatus(status: WorkshopStatus) = when (status) {
     WorkshopStatus.FAILED -> "制作未完成"; WorkshopStatus.INTERRUPTED -> "已中断，未自动重试"; WorkshopStatus.CANCELLED -> "已取消"
 }
 private fun workshopError(code: String?) = when (code) {
+    "workshop_reference_name" -> "人物名字请填 1–32 个字，不含换行。"
+    "workshop_reference_name_duplicate" -> "当前伙伴已有这个名字的参考，请编辑原参考或换个名字。"
+    "workshop_reference_library_full" -> "当前伙伴已保存 32 份人物参考，请先整理不再使用的。"
+    "workshop_reference_missing", "workshop_reference_changed" -> "人物参考已更换、删除或关闭授权，请重新选择后制作。"
+    "workshop_reference_limit" -> "一次最多使用 4 张参考图，请取消多余选择。"
     "workshop_delete_busy" -> "图片仍在排队或制作中，请先取消排队或等制作结束再删除。"
     "workshop_deleted" -> "这条制作记录已删除，不会重新提交或计费。"
     "workshop_request_deleted" -> "这次提交用了已删除作品的旧编号，并非图片过期；本次未请求生图接口。新的创作需使用新编号。"

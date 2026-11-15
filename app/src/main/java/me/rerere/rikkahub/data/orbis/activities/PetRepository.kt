@@ -33,6 +33,7 @@ data class PetState(
     val noticeConversationId: String? = null, val noticesEnabled: Boolean = false,
     val notices: List<PetNotice> = emptyList(), val lastNoticeAt: Long = 0,
     val aiDailyLimit: Int = 30, val aiUsageDay: String = "", val aiUsageCount: Int = 0,
+    val originalArtwork: Boolean = true,
 )
 
 object PetRules {
@@ -153,6 +154,10 @@ class PetRepository(private val storage: ActivityStorage, private val now: () ->
         require(limit in 0..1000)
         val old = snapshot()
         commit(old.copy(aiDailyLimit = limit, revision = old.revision + 1))
+    }
+    @Synchronized fun configureArtwork(original: Boolean) {
+        val old = snapshot()
+        if (old.originalArtwork != original) commit(old.copy(originalArtwork = original, revision = old.revision + 1))
     }
     @Synchronized fun finishAi(ticket: PetAiTicket, reply: PetAiReply?): Boolean {
         val old = snapshot()

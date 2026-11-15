@@ -5,12 +5,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.rerere.rikkahub.data.model.OrbisCompactionEvent
 import me.rerere.rikkahub.data.model.deriveOrbisContextBudget
 import me.rerere.rikkahub.testutil.createShellComposeRule
 import me.rerere.rikkahub.ui.components.ai.OrbisCapabilityPanel
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
+import me.rerere.rikkahub.data.orbis.theme.MaterialThemePreset
+import me.rerere.rikkahub.data.orbis.theme.materialThemePreset
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -39,6 +47,34 @@ class OrbisCompactionUiTest {
         isGenerating = false, reminderThresholdTokens = threshold,
         currentUsageTokens = 120000, currentUsageSource = "合成估算",
     )
+
+    @Test fun compressionSheetUsesReadableDayNightChromeWithPaleChatMaterial() {
+        var dark by mutableStateOf(true)
+        val theme=ChatTheme(materialThemePreset(MaterialThemePreset.LIQUID_STILL,"0".repeat(64)+".png"),null)
+        var actions=0
+        compose.setContent { MaterialTheme {
+            CompositionLocalProvider(LocalDarkMode provides dark,LocalChatTheme provides theme) {
+                OrbisContextBudgetSheet(budget(),"合成模型",onSaveThreshold={actions++},
+                    onManualContext={actions++},onOriginalArchives={actions++},onDismiss={actions++})
+            }
+        } }
+        fun checkSurface(name:String,night:Boolean) {
+            compose.waitForIdle()
+            val shot=compose.onNodeWithTag("orbis-context-budget-sheet").captureToImage()
+            val pixels=shot.toPixelMap();val background=pixels[5,pixels.height/2]
+            assertTrue("$name sheet background",if(night) background.luminance()<.15f else background.luminance()>.7f)
+            val layouts=mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithText("上下文与压缩").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) {it(layouts)}
+            val ink=layouts.single().layoutInput.style.color.luminance();val bg=background.luminance()
+            assertTrue("$name title contrast",(maxOf(ink,bg)+.05f)/(minOf(ink,bg)+.05f)>4.5f)
+            val dir=java.io.File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir,"avatar-geometry-review").apply {mkdirs()}
+            java.io.File(dir,"compression-$name.png").outputStream().use {shot.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+        }
+        checkSurface("night",true)
+        compose.runOnIdle {dark=false}
+        checkSurface("day",false)
+        compose.runOnIdle {assertEquals(0,actions)}
+    }
 
     @Test fun ringUsesHumanThresholdAndOpeningDoesNotSubmitCompression() {
         var opened = 0

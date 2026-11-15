@@ -3,7 +3,7 @@ export interface ImportStatus {
   id: string; state: string; assistantId: string; expiresAt: number; uploadedBytes: number;
   maxArchiveBytes: number; conversationCount: number; reviewToken?: string | null;
   total: number; completed: number; imported: number; skipped: number; failed: number;
-  messages: number; attachmentReferences: number; rows: ImportRowResult[]; error?: string | null;
+  messages: number; attachmentReferences: number; restoredAttachments?: number; rows: ImportRowResult[]; error?: string | null;
   warnings?: string[]; skippedSummaries?: number;
 }
 export interface ImportConversation {

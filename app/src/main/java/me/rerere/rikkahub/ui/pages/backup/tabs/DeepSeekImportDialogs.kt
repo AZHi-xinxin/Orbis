@@ -62,7 +62,7 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
                             ChatArchiveSource.CHATGPT -> "只追加所选完整路径，不合并互斥分支。活动路径已标明；系统、开发者和隐藏消息不导入。历史工具只作文字，附件未恢复；相同版本跳过，变化另建窗口。请保管所有原始文件。"
                             ChatArchiveSource.CLAUDE -> "只追加所选完整路径，不把互斥分支拼成连续聊天。缺失的前文会标明，文字副本差异与思考会保留。相同版本跳过，源会话变化会另建窗口；不覆盖记录、执行历史工具或导入账号与授权。"
                             ChatArchiveSource.POLARIS -> "按原顺序追加所选窗口的聊天与独立思考；历史图片只保留引用说明。不导入账号、密钥、人格、设置或工具授权。请保管原文件。"
-                            ChatArchiveSource.DEEPSEEK -> "仅追加所选完整路径，不覆盖聊天。其他分支保留在原 ZIP，可再次选择导入；请保管好原文件。历史图片不会自动联网加载。"
+                            ChatArchiveSource.DEEPSEEK -> "仅追加所选完整路径，不覆盖聊天。其他分支保留在原 ZIP，可再次选择导入；请保管好原文件。新版 ZIP 中的本地附件会一并恢复；缺失附件保留说明，不会自动联网下载。"
                             else -> "仅追加所选会话的当前回答，不合并备用回答、不运行历史工具。附件只保留文字引用，请保管原文件。"
                         },
                             style = MaterialTheme.typography.bodySmall)

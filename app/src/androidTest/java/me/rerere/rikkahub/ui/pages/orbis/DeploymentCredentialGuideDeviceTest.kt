@@ -16,6 +16,7 @@ import me.rerere.rikkahub.data.datastore.*
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.orbis.integration.*
+import me.rerere.rikkahub.data.orbis.diagnostics.OrbisFaultDiagnostics
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.testutil.createShellComposeRule
 import me.rerere.workspace.*
@@ -42,6 +43,7 @@ class DeploymentCredentialGuideDeviceTest {
         val repo=WorkspaceRepository(db.workspaceDao(),manager,RootfsInstaller(manager),store)
         val shown=mutableStateOf(true);var continued=0
         try {
+            OrbisFaultDiagnostics.start(context)
             repo.createNative(workspace.toString(),"Synthetic")
             repo.writeNativeText(workspace.toString(),draft.credentialFile,
                 """{"STBRAIN_GATEWAY_TOKEN":"synthetic-gateway-secret","STBRAIN_MCP_TOKEN":"synthetic-mcp-secret","api_key":"must-not-render"}""",false)
@@ -53,6 +55,10 @@ class DeploymentCredentialGuideDeviceTest {
             val f=File(manager.filesDir(workspace.toString()),".orbis-st-upstream.json")
             assertEquals(384,Os.stat(f.path).st_mode and 511)
             assertTrue(f.readText().contains("synthetic-upstream-key"))
+            compose.waitUntil(10000){!compose.onNodeWithTag("connection-prepare-upstream").fetchSemanticsNode().config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)}
+            val diagnostic=OrbisFaultDiagnostics.report(context)
+            assertTrue(diagnostic.contains("PREPARE_SUCCEEDED"));assertTrue(diagnostic.contains("ATOMIC_WRITE"))
+            assertFalse(diagnostic.contains("synthetic-upstream-key"));assertFalse(diagnostic.contains("example.invalid"))
             compose.onNodeWithText("synthetic-upstream-key").assertDoesNotExist()
             compose.onNodeWithText("查看部署密钥").performScrollTo().performClick()
             compose.waitUntil(10000){compose.onAllNodesWithText("ST 网关密钥").fetchSemanticsNodes().isNotEmpty()}
@@ -64,6 +70,6 @@ class DeploymentCredentialGuideDeviceTest {
             assertEquals(1,continued)
             compose.onNodeWithText("收起").performClick()
             compose.onNodeWithTag("connection-credential-guide").assertDoesNotExist()
-        } finally {compose.runOnIdle {shown.value=false};db.close();root.deleteRecursively()}
+        } finally {OrbisFaultDiagnostics.clear(context);compose.runOnIdle {shown.value=false};db.close();root.deleteRecursively()}
     }
 }

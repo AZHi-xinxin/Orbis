@@ -46,7 +46,7 @@ data class DeepSeekConversation(
 }
 
 data class DeepSeekNode(val sourceId: String, val parentId: String?, val children: List<String>, val message: DeepSeekMessage?)
-data class DeepSeekMessage(val role: MessageRole, val createdAt: Instant, val sourceModel: String, val fragments: List<DeepSeekFragment>)
+data class DeepSeekMessage(val role: MessageRole, val createdAt: Instant, val sourceModel: String, val fragments: List<DeepSeekFragment>, val sourceMetadata: JsonObject = JsonObject(emptyMap()))
 data class DeepSeekFragment(val type: String, val raw: JsonObject) {
     val content: String? get() = (raw["content"] as? JsonPrimitive)?.takeIf { it.isString }?.content
 }
@@ -61,8 +61,8 @@ object DeepSeekParser {
     private const val MAX_CONVERSATIONS = 2_000
     private const val MAX_NODES = 100_000
     private val USER_TYPES = setOf("REQUEST", "FILE")
-    private val ASSISTANT_TYPES = setOf("RESPONSE", "THINK", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN", "TOOL_FIND")
-    private val TYPES = USER_TYPES + ASSISTANT_TYPES
+    private val ASSISTANT_TYPES = setOf("RESPONSE", "THINK", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN", "TOOL_FIND", "TEMPLATE_RESPONSE", "READ_LINK")
+    private val TYPES = USER_TYPES + ASSISTANT_TYPES + setOf("CONTENT_RISK", "TIP")
 
     fun parse(root: JsonElement, checkCancelled: () -> Unit = {}): DeepSeekExport {
         try {
@@ -138,12 +138,18 @@ object DeepSeekParser {
                         require(!(user && assistant)) { "deepseek_mixed_roles" }
                         // Official exports have no role field. Keep even the empty interrupted message.
                         val role = when {
+                            content["export_v3"] == JsonPrimitive(true) -> when (content.string("role")) {
+                                "USER" -> MessageRole.USER
+                                "ASSISTANT" -> MessageRole.ASSISTANT
+                                else -> error("deepseek_unknown_role")
+                            }
                             user -> MessageRole.USER
                             assistant -> MessageRole.ASSISTANT
                             nodes[link.parentId]?.message?.role == MessageRole.USER -> MessageRole.ASSISTANT
                             else -> MessageRole.USER
                         }
-                        DeepSeekMessage(role, content.string("inserted_at").timestamp(), content.string("model"), fragments)
+                        DeepSeekMessage(role, content.string("inserted_at").timestamp(), content.string("model"), fragments,
+                            JsonObject(content.filterKeys { it in setOf("status", "thinking_enabled", "search_enabled", "accumulated_token_usage") }))
                     }
                     nodes[key] = link.copy(message = parsed)
                     link.children.forEach(queue::addLast)

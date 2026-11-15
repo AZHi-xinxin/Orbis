@@ -1,0 +1,7 @@
+button.tabletop-music{display:inline-flex;align-items:center;justify-content:center;flex:none;width:40px;min-height:40px;padding:8px;border:1px solid currentColor;border-radius:50%;background:transparent;color:inherit;vertical-align:middle;opacity:.9}
+button.tabletop-music svg{display:block;width:22px;height:22px}
+button.tabletop-music[aria-pressed=true]{background:#d6b47726}
+button.tabletop-music:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+.heading h1 button.tabletop-music{width:32px;min-height:32px;padding:5px;margin-left:3px;border:0}
+.title button.tabletop-music{color:var(--gold)}
+.topbar button.tabletop-music{margin-left:auto}

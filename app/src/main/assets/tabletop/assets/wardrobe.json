@@ -1,0 +1,5560 @@
+{
+  "revision": "pixel-20261109-expressions-v1",
+  "categories": {
+    "tops": "上衣",
+    "pants": "裤子",
+    "skirts": "裙子",
+    "shoes": "鞋子",
+    "accessories": "装饰",
+    "hair": "发型",
+    "skin": "肤色",
+    "faces": "表情"
+  },
+  "items": [
+    {
+      "id": "tops-01",
+      "name": "奶油衬衫",
+      "category": "tops"
+    },
+    {
+      "id": "tops-02",
+      "name": "海军外套",
+      "category": "tops"
+    },
+    {
+      "id": "tops-03",
+      "name": "莓红马甲",
+      "category": "tops"
+    },
+    {
+      "id": "tops-04",
+      "name": "松绿披肩",
+      "category": "tops"
+    },
+    {
+      "id": "tops-05",
+      "name": "蜂蜜毛衣",
+      "category": "tops"
+    },
+    {
+      "id": "tops-06",
+      "name": "天蓝开衫",
+      "category": "tops"
+    },
+    {
+      "id": "tops-07",
+      "name": "丁香短袄",
+      "category": "tops"
+    },
+    {
+      "id": "tops-08",
+      "name": "梅枝上衫",
+      "category": "tops"
+    },
+    {
+      "id": "tops-09",
+      "name": "侦探短风衣",
+      "category": "tops"
+    },
+    {
+      "id": "tops-10",
+      "name": "雨夜斗篷",
+      "category": "tops"
+    },
+    {
+      "id": "tops-11",
+      "name": "桃粉卫衣",
+      "category": "tops"
+    },
+    {
+      "id": "tops-12",
+      "name": "橘子背带衣",
+      "category": "tops"
+    },
+    {
+      "id": "tops-13",
+      "name": "星夜礼服上衣",
+      "category": "tops"
+    },
+    {
+      "id": "tops-14",
+      "name": "月白水手衫",
+      "category": "tops"
+    },
+    {
+      "id": "tops-15",
+      "name": "黑咖学院服",
+      "category": "tops"
+    },
+    {
+      "id": "pants-01",
+      "name": "炭灰长裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-02",
+      "name": "棕色短裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-03",
+      "name": "靛蓝牛仔",
+      "category": "pants"
+    },
+    {
+      "id": "pants-04",
+      "name": "奶油灯笼裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-05",
+      "name": "森林背带裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-06",
+      "name": "浅蓝长裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-07",
+      "name": "格纹短裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-08",
+      "name": "酒红长裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-09",
+      "name": "紫灰阔腿裤",
+      "category": "pants"
+    },
+    {
+      "id": "pants-10",
+      "name": "米色工装裤",
+      "category": "pants"
+    },
+    {
+      "id": "skirts-01",
+      "name": "莓红百褶裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-02",
+      "name": "月白长裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-03",
+      "name": "湖蓝短裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-04",
+      "name": "梅花襦裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-05",
+      "name": "深绿学院裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-06",
+      "name": "丁香纱裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-07",
+      "name": "蜂蜜围裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-08",
+      "name": "靛蓝牛仔裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-09",
+      "name": "玫瑰蕾丝裙",
+      "category": "skirts"
+    },
+    {
+      "id": "skirts-10",
+      "name": "星夜裙",
+      "category": "skirts"
+    },
+    {
+      "id": "shoes-01",
+      "name": "棕色短靴",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-02",
+      "name": "奶白皮鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-03",
+      "name": "深灰系带鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-04",
+      "name": "湖蓝运动鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-05",
+      "name": "酒红长靴",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-06",
+      "name": "墨绿雨靴",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-07",
+      "name": "木棕便鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-08",
+      "name": "粉色芭蕾鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-09",
+      "name": "白色布鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "shoes-10",
+      "name": "紫色高帮鞋",
+      "category": "shoes"
+    },
+    {
+      "id": "hair-01",
+      "name": "栗色短碎发",
+      "category": "hair"
+    },
+    {
+      "id": "hair-02",
+      "name": "乌黑齐短发",
+      "category": "hair"
+    },
+    {
+      "id": "hair-03",
+      "name": "奶茶蘑菇头",
+      "category": "hair"
+    },
+    {
+      "id": "hair-04",
+      "name": "银白微卷",
+      "category": "hair"
+    },
+    {
+      "id": "hair-05",
+      "name": "亚麻偏分",
+      "category": "hair"
+    },
+    {
+      "id": "hair-06",
+      "name": "深棕中长卷",
+      "category": "hair"
+    },
+    {
+      "id": "hair-07",
+      "name": "红棕双辫",
+      "category": "hair"
+    },
+    {
+      "id": "hair-08",
+      "name": "月白长发",
+      "category": "hair"
+    },
+    {
+      "id": "hair-09",
+      "name": "墨黑高马尾",
+      "category": "hair"
+    },
+    {
+      "id": "hair-10",
+      "name": "浅粉双马尾",
+      "category": "hair"
+    },
+    {
+      "id": "hair-11",
+      "name": "深蓝低马尾",
+      "category": "hair"
+    },
+    {
+      "id": "hair-12",
+      "name": "紫灰短卷",
+      "category": "hair"
+    },
+    {
+      "id": "hair-13",
+      "name": "金色长卷",
+      "category": "hair"
+    },
+    {
+      "id": "hair-14",
+      "name": "茶棕低盘发",
+      "category": "hair"
+    },
+    {
+      "id": "hair-15",
+      "name": "乌黑丸子头",
+      "category": "hair"
+    },
+    {
+      "id": "hair-16",
+      "name": "橘红狼尾",
+      "category": "hair"
+    },
+    {
+      "id": "hair-17",
+      "name": "青灰侧辫",
+      "category": "hair"
+    },
+    {
+      "id": "hair-18",
+      "name": "玫瑰棕齐刘海",
+      "category": "hair"
+    },
+    {
+      "id": "hair-19",
+      "name": "栗色双丸子",
+      "category": "hair"
+    },
+    {
+      "id": "hair-20",
+      "name": "黑发半扎",
+      "category": "hair"
+    },
+    {
+      "id": "accessories-01",
+      "name": "金框眼镜",
+      "category": "accessories",
+      "slot": "eyes"
+    },
+    {
+      "id": "accessories-02",
+      "name": "墨框眼镜",
+      "category": "accessories",
+      "slot": "eyes"
+    },
+    {
+      "id": "accessories-03",
+      "name": "单片镜",
+      "category": "accessories",
+      "slot": "eyes"
+    },
+    {
+      "id": "accessories-04",
+      "name": "红蝴蝶结",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "accessories-05",
+      "name": "梅花发簪",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "accessories-06",
+      "name": "星星发夹",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "accessories-07",
+      "name": "月牙发饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "accessories-08",
+      "name": "奶油贝雷帽",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "accessories-09",
+      "name": "侦探帽",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "accessories-10",
+      "name": "小礼帽",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "accessories-11",
+      "name": "画家帽",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "accessories-12",
+      "name": "花环",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "accessories-13",
+      "name": "松绿围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "accessories-14",
+      "name": "格纹围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "accessories-15",
+      "name": "蓝色领结",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "accessories-16",
+      "name": "金色怀表",
+      "category": "accessories",
+      "slot": "bag"
+    },
+    {
+      "id": "accessories-17",
+      "name": "斜挎书包",
+      "category": "accessories",
+      "slot": "bag"
+    },
+    {
+      "id": "accessories-18",
+      "name": "月亮胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "accessories-19",
+      "name": "玫瑰胸花",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "accessories-20",
+      "name": "星夜披领",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "skin-01",
+      "name": "瓷白",
+      "category": "skin"
+    },
+    {
+      "id": "skin-02",
+      "name": "杏桃",
+      "category": "skin"
+    },
+    {
+      "id": "skin-03",
+      "name": "暖麦",
+      "category": "skin"
+    },
+    {
+      "id": "skin-04",
+      "name": "焦糖",
+      "category": "skin"
+    },
+    {
+      "id": "skin-05",
+      "name": "深可可",
+      "category": "skin"
+    },
+    {
+      "id": "faces-01",
+      "name": "平静",
+      "category": "faces",
+      "emotion": "平静",
+      "style": "经典"
+    },
+    {
+      "id": "faces-02",
+      "name": "微笑",
+      "category": "faces",
+      "emotion": "微笑",
+      "style": "经典"
+    },
+    {
+      "id": "faces-03",
+      "name": "开心",
+      "category": "faces",
+      "emotion": "开心",
+      "style": "经典"
+    },
+    {
+      "id": "faces-04",
+      "name": "惊讶",
+      "category": "faces",
+      "emotion": "惊讶",
+      "style": "经典"
+    },
+    {
+      "id": "faces-05",
+      "name": "思考",
+      "category": "faces",
+      "emotion": "思考",
+      "style": "经典"
+    },
+    {
+      "id": "faces-06",
+      "name": "害羞",
+      "category": "faces",
+      "emotion": "害羞",
+      "style": "经典"
+    },
+    {
+      "id": "faces-07",
+      "name": "委屈",
+      "category": "faces",
+      "emotion": "委屈",
+      "style": "经典"
+    },
+    {
+      "id": "faces-08",
+      "name": "生气",
+      "category": "faces",
+      "emotion": "生气",
+      "style": "经典"
+    },
+    {
+      "id": "faces-09",
+      "name": "困困",
+      "category": "faces",
+      "emotion": "困困",
+      "style": "经典"
+    },
+    {
+      "id": "faces-10",
+      "name": "眨眼",
+      "category": "faces",
+      "emotion": "眨眼",
+      "style": "经典"
+    },
+    {
+      "id": "llm-deepseek-brooch",
+      "name": "DS小鲸鱼胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "llm-deepseek-hat",
+      "name": "DS小鲸鱼帽子",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "llm-deepseek-headpiece",
+      "name": "DS小鲸鱼头饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "llm-deepseek-scarf",
+      "name": "DS小鲸鱼围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "llm-claude-brooch",
+      "name": "Claude暖阳胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "llm-claude-hat",
+      "name": "Claude暖阳帽子",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "llm-claude-headpiece",
+      "name": "Claude暖阳头饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "llm-claude-scarf",
+      "name": "Claude暖阳围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "llm-doubao-brooch",
+      "name": "豆包小团子胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "llm-doubao-hat",
+      "name": "豆包小团子帽子",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "llm-doubao-headpiece",
+      "name": "豆包小团子头饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "llm-doubao-scarf",
+      "name": "豆包小团子围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "llm-gpt-brooch",
+      "name": "GPT绳结胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "llm-gpt-hat",
+      "name": "GPT绳结帽子",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "llm-gpt-headpiece",
+      "name": "GPT绳结头饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "llm-gpt-scarf",
+      "name": "GPT绳结围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "llm-gemini-brooch",
+      "name": "Gemini星光胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "llm-gemini-hat",
+      "name": "Gemini星光帽子",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "llm-gemini-headpiece",
+      "name": "Gemini星光头饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "llm-gemini-scarf",
+      "name": "Gemini星光围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "llm-grok-brooch",
+      "name": "Grok轨道胸针",
+      "category": "accessories",
+      "slot": "brooch"
+    },
+    {
+      "id": "llm-grok-hat",
+      "name": "Grok轨道帽子",
+      "category": "accessories",
+      "slot": "hat"
+    },
+    {
+      "id": "llm-grok-headpiece",
+      "name": "Grok轨道头饰",
+      "category": "accessories",
+      "slot": "headpiece"
+    },
+    {
+      "id": "llm-grok-scarf",
+      "name": "Grok轨道围巾",
+      "category": "accessories",
+      "slot": "neck"
+    },
+    {
+      "id": "faces-11",
+      "category": "faces",
+      "name": "平静·清朗",
+      "emotion": "平静",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-12",
+      "category": "faces",
+      "name": "平静·猫系",
+      "emotion": "平静",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-13",
+      "category": "faces",
+      "name": "平静·豆豆",
+      "emotion": "平静",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-14",
+      "category": "faces",
+      "name": "微笑·清朗",
+      "emotion": "微笑",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-15",
+      "category": "faces",
+      "name": "微笑·猫系",
+      "emotion": "微笑",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-16",
+      "category": "faces",
+      "name": "微笑·豆豆",
+      "emotion": "微笑",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-17",
+      "category": "faces",
+      "name": "开心·清朗",
+      "emotion": "开心",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-18",
+      "category": "faces",
+      "name": "开心·猫系",
+      "emotion": "开心",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-19",
+      "category": "faces",
+      "name": "开心·豆豆",
+      "emotion": "开心",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-20",
+      "category": "faces",
+      "name": "惊讶·清朗",
+      "emotion": "惊讶",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-21",
+      "category": "faces",
+      "name": "惊讶·猫系",
+      "emotion": "惊讶",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-22",
+      "category": "faces",
+      "name": "惊讶·豆豆",
+      "emotion": "惊讶",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-23",
+      "category": "faces",
+      "name": "思考·清朗",
+      "emotion": "思考",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-24",
+      "category": "faces",
+      "name": "思考·猫系",
+      "emotion": "思考",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-25",
+      "category": "faces",
+      "name": "思考·豆豆",
+      "emotion": "思考",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-26",
+      "category": "faces",
+      "name": "害羞·清朗",
+      "emotion": "害羞",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-27",
+      "category": "faces",
+      "name": "害羞·猫系",
+      "emotion": "害羞",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-28",
+      "category": "faces",
+      "name": "害羞·豆豆",
+      "emotion": "害羞",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-29",
+      "category": "faces",
+      "name": "委屈·清朗",
+      "emotion": "委屈",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-30",
+      "category": "faces",
+      "name": "委屈·猫系",
+      "emotion": "委屈",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-31",
+      "category": "faces",
+      "name": "委屈·豆豆",
+      "emotion": "委屈",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-32",
+      "category": "faces",
+      "name": "生气·清朗",
+      "emotion": "生气",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-33",
+      "category": "faces",
+      "name": "生气·猫系",
+      "emotion": "生气",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-34",
+      "category": "faces",
+      "name": "生气·豆豆",
+      "emotion": "生气",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-35",
+      "category": "faces",
+      "name": "困困·清朗",
+      "emotion": "困困",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-36",
+      "category": "faces",
+      "name": "困困·猫系",
+      "emotion": "困困",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-37",
+      "category": "faces",
+      "name": "困困·豆豆",
+      "emotion": "困困",
+      "style": "豆豆"
+    },
+    {
+      "id": "faces-38",
+      "category": "faces",
+      "name": "眨眼·清朗",
+      "emotion": "眨眼",
+      "style": "清朗"
+    },
+    {
+      "id": "faces-39",
+      "category": "faces",
+      "name": "眨眼·猫系",
+      "emotion": "眨眼",
+      "style": "猫系"
+    },
+    {
+      "id": "faces-40",
+      "category": "faces",
+      "name": "眨眼·豆豆",
+      "emotion": "眨眼",
+      "style": "豆豆"
+    }
+  ],
+  "defaults": {
+    "tops": "tops-01",
+    "pants": "pants-02",
+    "shoes": "shoes-01",
+    "hair": "hair-01",
+    "skin": "skin-02",
+    "faces": "faces-01",
+    "accessories": []
+  },
+  "canvas": [
+    96,
+    128
+  ],
+  "draw": {
+    "tops-01": [
+      {
+        "file": "tops-01.png",
+        "source": [
+          327,
+          494,
+          928,
+          903
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-02": [
+      {
+        "file": "tops-02.png",
+        "source": [
+          323,
+          523,
+          931,
+          936
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-03": [
+      {
+        "file": "tops-03.png",
+        "source": [
+          323,
+          475,
+          931,
+          853
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-04": [
+      {
+        "file": "tops-04.png",
+        "source": [
+          359,
+          620,
+          894,
+          1008
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-05": [
+      {
+        "file": "tops-05.png",
+        "source": [
+          340,
+          502,
+          915,
+          861
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-06": [
+      {
+        "file": "tops-06.png",
+        "source": [
+          411,
+          616,
+          844,
+          906
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-07": [
+      {
+        "file": "tops-07.png",
+        "source": [
+          270,
+          423,
+          984,
+          900
+        ],
+        "target": [
+          19,
+          61,
+          58,
+          33
+        ],
+        "z": 40
+      }
+    ],
+    "tops-08": [
+      {
+        "file": "tops-08.png",
+        "source": [
+          340,
+          449,
+          912,
+          842
+        ],
+        "target": [
+          20,
+          62,
+          56,
+          32
+        ],
+        "z": 40
+      }
+    ],
+    "tops-09": [
+      {
+        "file": "tops-09.png",
+        "source": [
+          273,
+          450,
+          982,
+          896
+        ],
+        "target": [
+          19,
+          61,
+          58,
+          33
+        ],
+        "z": 40
+      }
+    ],
+    "tops-10": [
+      {
+        "file": "tops-10.png",
+        "source": [
+          542.1428571428571,
+          525.0,
+          711.8571428571429,
+          625.2352941176471
+        ],
+        "target": [
+          40,
+          60,
+          16,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "tops-10.png",
+        "source": [
+          330.0,
+          625.2352941176471,
+          924.0,
+          951.0
+        ],
+        "target": [
+          20,
+          68,
+          56,
+          26
+        ],
+        "z": 40
+      },
+      {
+        "file": "tops-10.png",
+        "source": [
+          330.0,
+          525.0,
+          542.1428571428571,
+          625.2352941176471
+        ],
+        "target": [
+          20,
+          60,
+          20,
+          8
+        ],
+        "z": 40
+      },
+      {
+        "file": "tops-10.png",
+        "source": [
+          711.8571428571429,
+          525.0,
+          924.0,
+          625.2352941176471
+        ],
+        "target": [
+          56,
+          60,
+          20,
+          8
+        ],
+        "z": 40
+      }
+    ],
+    "tops-11": [
+      {
+        "file": "tops-11.png",
+        "source": [
+          494.9107142857143,
+          547.0,
+          760.0892857142857,
+          624.5806451612904
+        ],
+        "target": [
+          37,
+          63,
+          22,
+          5
+        ],
+        "z": 5
+      },
+      {
+        "file": "tops-11.png",
+        "source": [
+          290.0,
+          624.5806451612904,
+          965.0,
+          1028.0
+        ],
+        "target": [
+          20,
+          68,
+          56,
+          26
+        ],
+        "z": 40
+      },
+      {
+        "file": "tops-11.png",
+        "source": [
+          290.0,
+          547.0,
+          494.9107142857143,
+          624.5806451612904
+        ],
+        "target": [
+          20,
+          63,
+          17,
+          5
+        ],
+        "z": 40
+      },
+      {
+        "file": "tops-11.png",
+        "source": [
+          760.0892857142857,
+          547.0,
+          965.0,
+          624.5806451612904
+        ],
+        "target": [
+          59,
+          63,
+          17,
+          5
+        ],
+        "z": 40
+      }
+    ],
+    "tops-12": [
+      {
+        "file": "tops-12.png",
+        "source": [
+          273,
+          471,
+          981,
+          915
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-13": [
+      {
+        "file": "tops-13.png",
+        "source": [
+          356,
+          603,
+          898,
+          924
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-14": [
+      {
+        "file": "tops-14.png",
+        "source": [
+          359,
+          574,
+          895,
+          927
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "tops-15": [
+      {
+        "file": "tops-15.png",
+        "source": [
+          362,
+          538,
+          891,
+          881
+        ],
+        "target": [
+          20,
+          63,
+          56,
+          31
+        ],
+        "z": 40
+      }
+    ],
+    "pants-01": [
+      {
+        "file": "pants-01.png",
+        "source": [
+          382,
+          437,
+          873,
+          1044
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "pants-02": [
+      {
+        "file": "pants-02.png",
+        "source": [
+          348,
+          470,
+          907,
+          851
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          15
+        ],
+        "z": 30
+      }
+    ],
+    "pants-03": [
+      {
+        "file": "pants-03.png",
+        "source": [
+          415,
+          531,
+          841,
+          998
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "pants-04": [
+      {
+        "file": "pants-04.png",
+        "source": [
+          335,
+          481,
+          918,
+          880
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          15
+        ],
+        "z": 30
+      }
+    ],
+    "pants-05": [
+      {
+        "file": "pants-05.png",
+        "source": [
+          386,
+          417,
+          868,
+          971
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "pants-06": [
+      {
+        "file": "pants-06.png",
+        "source": [
+          437,
+          625,
+          817,
+          1059
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "pants-07": [
+      {
+        "file": "pants-07.png",
+        "source": [
+          312,
+          470,
+          942,
+          898
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          15
+        ],
+        "z": 30
+      }
+    ],
+    "pants-08": [
+      {
+        "file": "pants-08.png",
+        "source": [
+          471,
+          642,
+          783,
+          1109
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "pants-09": [
+      {
+        "file": "pants-09.png",
+        "source": [
+          398,
+          589,
+          856,
+          1131
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "pants-10": [
+      {
+        "file": "pants-10.png",
+        "source": [
+          380,
+          405,
+          874,
+          1014
+        ],
+        "target": [
+          32,
+          89,
+          32,
+          29
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-01": [
+      {
+        "file": "skirts-01.png",
+        "source": [
+          338,
+          489,
+          917,
+          860
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-02": [
+      {
+        "file": "skirts-02.png",
+        "source": [
+          313,
+          442,
+          941,
+          1117
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-03": [
+      {
+        "file": "skirts-03.png",
+        "source": [
+          317,
+          488,
+          937,
+          904
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-04": [
+      {
+        "file": "skirts-04.png",
+        "source": [
+          259,
+          412,
+          995,
+          924
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-05": [
+      {
+        "file": "skirts-05.png",
+        "source": [
+          337,
+          599,
+          918,
+          954
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-06": [
+      {
+        "file": "skirts-06.png",
+        "source": [
+          298,
+          434,
+          956,
+          931
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-07": [
+      {
+        "file": "skirts-07.png",
+        "source": [
+          295,
+          470,
+          959,
+          967
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-08": [
+      {
+        "file": "skirts-08.png",
+        "source": [
+          286,
+          494,
+          968,
+          956
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-09": [
+      {
+        "file": "skirts-09.png",
+        "source": [
+          311,
+          536,
+          943,
+          975
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "skirts-10": [
+      {
+        "file": "skirts-10.png",
+        "source": [
+          378,
+          611,
+          877,
+          943
+        ],
+        "target": [
+          23,
+          88,
+          50,
+          31
+        ],
+        "z": 30
+      }
+    ],
+    "shoes-01": [
+      {
+        "file": "shoes-01.png",
+        "source": [
+          458.0,
+          969.0,
+          797.0,
+          1005.5454545454545
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-01.png",
+        "source": [
+          458.0,
+          1005.5454545454545,
+          797.0,
+          1170.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-02": [
+      {
+        "file": "shoes-02.png",
+        "source": [
+          340.0,
+          642.0,
+          914.0,
+          707.4545454545455
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-02.png",
+        "source": [
+          340.0,
+          707.4545454545455,
+          914.0,
+          1002.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-03": [
+      {
+        "file": "shoes-03.png",
+        "source": [
+          377.0,
+          585.0,
+          877.0,
+          639.5454545454545
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-03.png",
+        "source": [
+          377.0,
+          639.5454545454545,
+          877.0,
+          885.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-04": [
+      {
+        "file": "shoes-04.png",
+        "source": [
+          416.0,
+          942.0,
+          838.0,
+          982.5454545454545
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-04.png",
+        "source": [
+          416.0,
+          982.5454545454545,
+          838.0,
+          1165.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-05": [
+      {
+        "file": "shoes-05.png",
+        "source": [
+          320.0,
+          509.0,
+          935.0,
+          639.25
+        ],
+        "target": [
+          30.5,
+          112,
+          35.0,
+          3
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-05.png",
+        "source": [
+          320.0,
+          639.25,
+          935.0,
+          1030.0
+        ],
+        "target": [
+          30.5,
+          115,
+          35.0,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-06": [
+      {
+        "file": "shoes-06.png",
+        "source": [
+          398.0,
+          681.0,
+          857.0,
+          744.0909090909091
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-06.png",
+        "source": [
+          398.0,
+          744.0909090909091,
+          857.0,
+          1028.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-07": [
+      {
+        "file": "shoes-07.png",
+        "source": [
+          339.0,
+          620.0,
+          915.0,
+          669.8181818181819
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-07.png",
+        "source": [
+          339.0,
+          669.8181818181819,
+          915.0,
+          894.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-08": [
+      {
+        "file": "shoes-08.png",
+        "source": [
+          346.0,
+          578.0,
+          908.0,
+          635.4545454545455
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-08.png",
+        "source": [
+          346.0,
+          635.4545454545455,
+          908.0,
+          894.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-09": [
+      {
+        "file": "shoes-09.png",
+        "source": [
+          349.0,
+          534.0,
+          905.0,
+          675.3636363636364
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          5
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-09.png",
+        "source": [
+          349.0,
+          675.3636363636364,
+          905.0,
+          845.0
+        ],
+        "target": [
+          32,
+          118,
+          32,
+          6
+        ],
+        "z": 20
+      }
+    ],
+    "shoes-10": [
+      {
+        "file": "shoes-10.png",
+        "source": [
+          388.0,
+          732.0,
+          867.0,
+          785.6363636363636
+        ],
+        "target": [
+          32,
+          113,
+          32,
+          2
+        ],
+        "z": 5
+      },
+      {
+        "file": "shoes-10.png",
+        "source": [
+          388.0,
+          785.6363636363636,
+          867.0,
+          1027.0
+        ],
+        "target": [
+          32,
+          115,
+          32,
+          9
+        ],
+        "z": 20
+      }
+    ],
+    "hair-01": [
+      {
+        "file": "hair-01.png",
+        "source": [
+          236,
+          169,
+          1018,
+          860
+        ],
+        "target": [
+          23,
+          12,
+          50,
+          48
+        ],
+        "z": 60
+      }
+    ],
+    "hair-02": [
+      {
+        "file": "hair-02.png",
+        "source": [
+          227,
+          195,
+          1025,
+          862
+        ],
+        "target": [
+          24,
+          12,
+          48,
+          48
+        ],
+        "z": 60
+      }
+    ],
+    "hair-03": [
+      {
+        "file": "hair-03.png",
+        "source": [
+          244,
+          255,
+          1010,
+          880
+        ],
+        "target": [
+          23,
+          14,
+          50,
+          49
+        ],
+        "z": 60
+      }
+    ],
+    "hair-04": [
+      {
+        "file": "hair-04.png",
+        "source": [
+          278,
+          251,
+          969,
+          851
+        ],
+        "target": [
+          23,
+          13,
+          50,
+          47
+        ],
+        "z": 60
+      }
+    ],
+    "hair-05": [
+      {
+        "file": "hair-05.png",
+        "source": [
+          275,
+          274,
+          976,
+          836
+        ],
+        "target": [
+          23,
+          14,
+          50,
+          47
+        ],
+        "z": 60
+      }
+    ],
+    "hair-06": [
+      {
+        "file": "hair-06.png",
+        "source": [
+          223,
+          209,
+          1030,
+          949
+        ],
+        "target": [
+          22.5,
+          13,
+          51,
+          66
+        ],
+        "z": 60
+      }
+    ],
+    "hair-07": [
+      {
+        "file": "hair-07.png",
+        "source": [
+          290.0,
+          574.0933333333334,
+          965.0,
+          1025.0
+        ],
+        "target": [
+          17,
+          45,
+          62,
+          37
+        ],
+        "z": 60
+      },
+      {
+        "file": "hair-07.png",
+        "source": [
+          290.0,
+          111.0,
+          965.0,
+          574.0933333333334
+        ],
+        "target": [
+          17,
+          10,
+          62,
+          38
+        ],
+        "z": 60
+      }
+    ],
+    "hair-08": [
+      {
+        "file": "hair-08.png",
+        "source": [
+          328,
+          122,
+          926,
+          1021
+        ],
+        "target": [
+          23,
+          17,
+          50,
+          73
+        ],
+        "z": 60
+      }
+    ],
+    "hair-09": [
+      {
+        "file": "hair-09.png",
+        "source": [
+          250,
+          127,
+          1028,
+          928
+        ],
+        "target": [
+          23,
+          4,
+          55,
+          58
+        ],
+        "z": 60
+      }
+    ],
+    "hair-10": [
+      {
+        "file": "hair-10.png",
+        "source": [
+          123,
+          262,
+          1130,
+          960
+        ],
+        "target": [
+          15,
+          13,
+          66,
+          68
+        ],
+        "z": 60
+      }
+    ],
+    "hair-11": [
+      {
+        "file": "hair-11.png",
+        "source": [
+          257.0,
+          132.0,
+          997.0,
+          700.0
+        ],
+        "target": [
+          21,
+          14,
+          54,
+          40
+        ],
+        "z": 60
+      },
+      {
+        "file": "hair-11.png",
+        "source": [
+          257.0,
+          700.0,
+          997.0,
+          1126.0
+        ],
+        "target": [
+          21,
+          54,
+          54,
+          30
+        ],
+        "z": 0
+      }
+    ],
+    "hair-12": [
+      {
+        "file": "hair-12.png",
+        "source": [
+          231,
+          266,
+          1015,
+          922
+        ],
+        "target": [
+          23,
+          15,
+          50,
+          49
+        ],
+        "z": 60
+      }
+    ],
+    "hair-13": [
+      {
+        "file": "hair-13.png",
+        "source": [
+          257,
+          73,
+          1004,
+          998
+        ],
+        "target": [
+          22,
+          15,
+          52,
+          70
+        ],
+        "z": 60
+      }
+    ],
+    "hair-14": [
+      {
+        "file": "hair-14-v2.png",
+        "source": [
+          286,
+          261,
+          968,
+          772
+        ],
+        "target": [
+          23,
+          15,
+          50,
+          42
+        ],
+        "z": 60
+      }
+    ],
+    "hair-15": [
+      {
+        "file": "hair-15.png",
+        "source": [
+          310,
+          83,
+          944,
+          879
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          53
+        ],
+        "z": 60
+      }
+    ],
+    "hair-16": [
+      {
+        "file": "hair-16.png",
+        "source": [
+          197,
+          143,
+          1058,
+          910
+        ],
+        "target": [
+          23,
+          14,
+          50,
+          48
+        ],
+        "z": 60
+      }
+    ],
+    "hair-17": [
+      {
+        "file": "hair-17.png",
+        "source": [
+          276,
+          108,
+          980,
+          1116
+        ],
+        "target": [
+          21,
+          14,
+          54,
+          72
+        ],
+        "z": 60
+      }
+    ],
+    "hair-18": [
+      {
+        "file": "hair-18.png",
+        "source": [
+          264,
+          218,
+          990,
+          946
+        ],
+        "target": [
+          23.5,
+          12,
+          49,
+          62
+        ],
+        "z": 60
+      }
+    ],
+    "hair-19": [
+      {
+        "file": "hair-19.png",
+        "source": [
+          199,
+          267,
+          1055,
+          912
+        ],
+        "target": [
+          23,
+          12,
+          50,
+          50
+        ],
+        "z": 60
+      }
+    ],
+    "hair-20": [
+      {
+        "file": "hair-20.png",
+        "source": [
+          226,
+          84,
+          1028,
+          1103
+        ],
+        "target": [
+          21.5,
+          12,
+          53,
+          70
+        ],
+        "z": 60
+      }
+    ],
+    "accessories-01": [
+      {
+        "file": "accessories-01.png",
+        "source": [
+          258,
+          493,
+          996,
+          780
+        ],
+        "target": [
+          33,
+          42.5,
+          30,
+          11.666666666666666
+        ],
+        "z": 80
+      }
+    ],
+    "accessories-02": [
+      {
+        "file": "accessories-02.png",
+        "source": [
+          209,
+          514,
+          1045,
+          801
+        ],
+        "target": [
+          33,
+          43,
+          30,
+          10.299043062200957
+        ],
+        "z": 80
+      }
+    ],
+    "accessories-03": [
+      {
+        "file": "accessories-03.png",
+        "source": [
+          452,
+          448,
+          817,
+          908
+        ],
+        "target": [
+          49,
+          43,
+          13,
+          16.383561643835616
+        ],
+        "z": 80
+      }
+    ],
+    "accessories-04": [
+      {
+        "file": "accessories-04.png",
+        "source": [
+          306,
+          392,
+          948,
+          870
+        ],
+        "target": [
+          27,
+          19,
+          14,
+          10.423676012461058
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-05": [
+      {
+        "file": "accessories-05.png",
+        "source": [
+          444,
+          349,
+          868,
+          753
+        ],
+        "target": [
+          56,
+          19,
+          12,
+          11.433962264150944
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-06": [
+      {
+        "file": "accessories-06.png",
+        "source": [
+          459,
+          520,
+          782,
+          725
+        ],
+        "target": [
+          29,
+          28,
+          14,
+          8.885448916408668
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-07": [
+      {
+        "file": "accessories-07.png",
+        "source": [
+          527,
+          346,
+          795,
+          725
+        ],
+        "target": [
+          56,
+          23,
+          11,
+          15.555970149253731
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-08": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      }
+    ],
+    "accessories-09": [
+      {
+        "file": "accessories-09.png",
+        "source": [
+          278,
+          290,
+          976,
+          777
+        ],
+        "target": [
+          24,
+          6,
+          48,
+          33.48997134670487
+        ],
+        "z": 70
+      }
+    ],
+    "accessories-10": [
+      {
+        "file": "accessories-10.png",
+        "source": [
+          446,
+          77,
+          809,
+          396
+        ],
+        "target": [
+          27,
+          0,
+          42,
+          36.90909090909091
+        ],
+        "z": 70
+      }
+    ],
+    "accessories-11": [
+      {
+        "file": "accessories-11.png",
+        "source": [
+          224,
+          268,
+          1030,
+          761
+        ],
+        "target": [
+          24.5,
+          10,
+          47,
+          28.748138957816376
+        ],
+        "z": 70
+      }
+    ],
+    "accessories-12": [
+      {
+        "file": "accessories-12.png",
+        "source": [
+          276,
+          310,
+          975,
+          671
+        ],
+        "target": [
+          25,
+          14,
+          46,
+          23.756795422031473
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-13": [
+      {
+        "file": "accessories-13.png",
+        "source": [
+          520.5625,
+          492.0,
+          731.4375,
+          597.4375
+        ],
+        "target": [
+          41,
+          58,
+          14,
+          7
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-13.png",
+        "source": [
+          385.0,
+          597.4375,
+          867.0,
+          965.0000000000001
+        ],
+        "target": [
+          32,
+          65,
+          32,
+          24.40248962655602
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-13.png",
+        "source": [
+          385.0,
+          492.0,
+          520.5625,
+          597.4375
+        ],
+        "target": [
+          32,
+          58,
+          9,
+          7
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-13.png",
+        "source": [
+          731.4375,
+          492.0,
+          867.0,
+          597.4375
+        ],
+        "target": [
+          55,
+          58,
+          9,
+          7
+        ],
+        "z": 65
+      }
+    ],
+    "accessories-14": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      }
+    ],
+    "accessories-15": [
+      {
+        "file": "accessories-15.png",
+        "source": [
+          442,
+          560,
+          812,
+          751
+        ],
+        "target": [
+          40,
+          65,
+          16,
+          8.259459459459459
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-16": [
+      {
+        "file": "accessories-16.png",
+        "source": [
+          269,
+          381,
+          952,
+          895
+        ],
+        "target": [
+          42,
+          73,
+          16,
+          12.04099560761347
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-17": [
+      {
+        "file": "accessories-17.png",
+        "source": [
+          496.0,
+          595.0,
+          802.0,
+          645.5500000000001
+        ],
+        "target": [
+          35,
+          65,
+          29,
+          4.7906862745098096
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-17.png",
+        "source": [
+          496.0,
+          645.5500000000001,
+          802.0,
+          932.0
+        ],
+        "target": [
+          35,
+          69.79068627450981,
+          29,
+          27.14722222222221
+        ],
+        "z": 55
+      }
+    ],
+    "accessories-18": [
+      {
+        "file": "accessories-18.png",
+        "source": [
+          437,
+          468,
+          817,
+          807
+        ],
+        "target": [
+          53,
+          72,
+          8,
+          7.136842105263158
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-19": [
+      {
+        "file": "accessories-19.png",
+        "source": [
+          470,
+          573,
+          768,
+          872
+        ],
+        "target": [
+          53,
+          72,
+          10,
+          10.033557046979865
+        ],
+        "z": 75
+      }
+    ],
+    "accessories-20": [
+      {
+        "file": "accessories-20.png",
+        "source": [
+          528.1521739130435,
+          571.0,
+          726.8478260869565,
+          650.4782608695652
+        ],
+        "target": [
+          38,
+          61,
+          20,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-20.png",
+        "source": [
+          399.0,
+          650.4782608695652,
+          856.0,
+          803.0
+        ],
+        "target": [
+          25,
+          69,
+          46,
+          15.352297592997814
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-20.png",
+        "source": [
+          399.0,
+          571.0,
+          528.1521739130435,
+          650.4782608695652
+        ],
+        "target": [
+          25,
+          61,
+          13,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-20.png",
+        "source": [
+          726.8478260869565,
+          571.0,
+          856.0,
+          650.4782608695652
+        ],
+        "target": [
+          58,
+          61,
+          13,
+          8
+        ],
+        "z": 65
+      }
+    ],
+    "skin-01": [
+      {
+        "file": "skin-01.png",
+        "source": [
+          355,
+          607,
+          899,
+          1176
+        ],
+        "target": [
+          20,
+          63.66821994408201,
+          56,
+          58.33178005591799
+        ],
+        "z": 10
+      },
+      {
+        "file": "skin-01-v2.png",
+        "source": [
+          450,
+          206,
+          804,
+          590
+        ],
+        "target": [
+          27,
+          20,
+          42,
+          45
+        ],
+        "z": 10
+      }
+    ],
+    "skin-02": [
+      {
+        "file": "skin-02.png",
+        "source": [
+          354,
+          607,
+          900,
+          1176
+        ],
+        "target": [
+          20,
+          63.72253258845437,
+          56,
+          58.27746741154562
+        ],
+        "z": 10
+      },
+      {
+        "file": "skin-02-v2.png",
+        "source": [
+          450,
+          206,
+          804,
+          590
+        ],
+        "target": [
+          27,
+          20,
+          42,
+          45
+        ],
+        "z": 10
+      }
+    ],
+    "skin-03": [
+      {
+        "file": "skin-03.png",
+        "source": [
+          354,
+          607,
+          900,
+          1175
+        ],
+        "target": [
+          20,
+          63.66199813258637,
+          56,
+          58.33800186741363
+        ],
+        "z": 10
+      },
+      {
+        "file": "skin-03-v2.png",
+        "source": [
+          450,
+          206,
+          804,
+          590
+        ],
+        "target": [
+          27,
+          20,
+          42,
+          45
+        ],
+        "z": 10
+      }
+    ],
+    "skin-04": [
+      {
+        "file": "skin-04.png",
+        "source": [
+          355,
+          607,
+          900,
+          1176
+        ],
+        "target": [
+          20,
+          63.72253258845437,
+          56,
+          58.27746741154562
+        ],
+        "z": 10
+      },
+      {
+        "file": "skin-04-v2.png",
+        "source": [
+          450,
+          206,
+          804,
+          590
+        ],
+        "target": [
+          27,
+          20,
+          42,
+          45
+        ],
+        "z": 10
+      }
+    ],
+    "skin-05": [
+      {
+        "file": "skin-05.png",
+        "source": [
+          354,
+          607,
+          900,
+          1176
+        ],
+        "target": [
+          20,
+          63.72253258845437,
+          56,
+          58.27746741154562
+        ],
+        "z": 10
+      },
+      {
+        "file": "skin-05-v2.png",
+        "source": [
+          450,
+          206,
+          804,
+          590
+        ],
+        "target": [
+          27,
+          20,
+          42,
+          45
+        ],
+        "z": 10
+      }
+    ],
+    "faces-01": [
+      {
+        "file": "faces-01.png",
+        "source": [
+          466,
+          561,
+          789,
+          687
+        ],
+        "target": [
+          37,
+          44,
+          22,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-02": [
+      {
+        "file": "faces-02.png",
+        "source": [
+          391,
+          533,
+          864,
+          730
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-03": [
+      {
+        "file": "faces-03.png",
+        "source": [
+          400,
+          631,
+          855,
+          799
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-04": [
+      {
+        "file": "faces-04.png",
+        "source": [
+          443,
+          579,
+          811,
+          760
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-05": [
+      {
+        "file": "faces-05.png",
+        "source": [
+          399,
+          541,
+          852,
+          821
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-06": [
+      {
+        "file": "faces-06.png",
+        "source": [
+          395,
+          556,
+          858,
+          767
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-07": [
+      {
+        "file": "faces-07.png",
+        "source": [
+          409,
+          564,
+          845,
+          815
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-08": [
+      {
+        "file": "faces-08.png",
+        "source": [
+          446,
+          558,
+          809,
+          780
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-09": [
+      {
+        "file": "faces-09.png",
+        "source": [
+          396,
+          686,
+          857,
+          843
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-10": [
+      {
+        "file": "faces-10.png",
+        "source": [
+          434,
+          531,
+          808,
+          802
+        ],
+        "target": [
+          35,
+          44,
+          26,
+          11
+        ],
+        "z": 50
+      }
+    ],
+    "faces-11": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          146,
+          76,
+          295,
+          145
+        ],
+        "target": [
+          36.0,
+          42.36241610738255,
+          24,
+          11.114093959731543
+        ],
+        "z": 50
+      }
+    ],
+    "faces-12": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          90,
+          620,
+          146
+        ],
+        "target": [
+          36.0,
+          44.72727272727273,
+          24,
+          8.727272727272727
+        ],
+        "z": 50
+      }
+    ],
+    "faces-13": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          809,
+          98,
+          925,
+          142
+        ],
+        "target": [
+          38.0,
+          45.758620689655174,
+          20,
+          7.586206896551724
+        ],
+        "z": 50
+      }
+    ],
+    "faces-14": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          147,
+          220,
+          295,
+          292
+        ],
+        "target": [
+          36.0,
+          42.32432432432432,
+          24,
+          11.675675675675677
+        ],
+        "z": 50
+      }
+    ],
+    "faces-15": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          234,
+          620,
+          291
+        ],
+        "target": [
+          36.0,
+          44.72727272727273,
+          24,
+          8.883116883116882
+        ],
+        "z": 50
+      }
+    ],
+    "faces-16": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          809,
+          242,
+          925,
+          291
+        ],
+        "target": [
+          38.0,
+          45.758620689655174,
+          20,
+          8.448275862068966
+        ],
+        "z": 50
+      }
+    ],
+    "faces-17": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          149,
+          370,
+          292,
+          444
+        ],
+        "target": [
+          36.0,
+          43.46853146853147,
+          24,
+          12.41958041958042
+        ],
+        "z": 50
+      }
+    ],
+    "faces-18": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          469,
+          381,
+          617,
+          441
+        ],
+        "target": [
+          36.0,
+          45.4054054054054,
+          24,
+          9.72972972972973
+        ],
+        "z": 50
+      }
+    ],
+    "faces-19": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          799,
+          385,
+          936,
+          441
+        ],
+        "target": [
+          38.0,
+          46.24817518248175,
+          20,
+          8.175182481751824
+        ],
+        "z": 50
+      }
+    ],
+    "faces-20": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          146,
+          509,
+          295,
+          586
+        ],
+        "target": [
+          36.0,
+          43.006711409395976,
+          24,
+          12.402684563758388
+        ],
+        "z": 50
+      }
+    ],
+    "faces-21": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          517,
+          620,
+          584
+        ],
+        "target": [
+          36.0,
+          44.41558441558442,
+          24,
+          10.441558441558442
+        ],
+        "z": 50
+      }
+    ],
+    "faces-22": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          809,
+          528,
+          925,
+          580
+        ],
+        "target": [
+          38.0,
+          45.93103448275862,
+          20,
+          8.965517241379311
+        ],
+        "z": 50
+      }
+    ],
+    "faces-23": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          146,
+          643,
+          296,
+          716
+        ],
+        "target": [
+          36.0,
+          41.12,
+          24,
+          11.68
+        ],
+        "z": 50
+      }
+    ],
+    "faces-24": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          645,
+          620,
+          717
+        ],
+        "target": [
+          36.0,
+          41.61038961038961,
+          24,
+          11.220779220779221
+        ],
+        "z": 50
+      }
+    ],
+    "faces-25": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          809,
+          646,
+          927,
+          713
+        ],
+        "target": [
+          38.0,
+          41.22033898305085,
+          20,
+          11.35593220338983
+        ],
+        "z": 50
+      }
+    ],
+    "faces-26": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          146,
+          776,
+          297,
+          854
+        ],
+        "target": [
+          36.0,
+          41.16556291390729,
+          24,
+          12.397350993377485
+        ],
+        "z": 50
+      }
+    ],
+    "faces-27": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          779,
+          621,
+          853
+        ],
+        "target": [
+          36.0,
+          41.806451612903224,
+          24,
+          11.458064516129033
+        ],
+        "z": 50
+      }
+    ],
+    "faces-28": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          800,
+          802,
+          936,
+          850
+        ],
+        "target": [
+          38.0,
+          45.5,
+          20,
+          7.0588235294117645
+        ],
+        "z": 50
+      }
+    ],
+    "faces-29": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          145,
+          908,
+          297,
+          981
+        ],
+        "target": [
+          36.0,
+          42.1578947368421,
+          24,
+          11.526315789473683
+        ],
+        "z": 50
+      }
+    ],
+    "faces-30": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          912,
+          620,
+          981
+        ],
+        "target": [
+          36.0,
+          42.85714285714286,
+          24,
+          10.753246753246753
+        ],
+        "z": 50
+      }
+    ],
+    "faces-31": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          810,
+          933,
+          925,
+          977
+        ],
+        "target": [
+          38.0,
+          45.91304347826087,
+          20,
+          7.6521739130434785
+        ],
+        "z": 50
+      }
+    ],
+    "faces-32": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          145,
+          1033,
+          297,
+          1105
+        ],
+        "target": [
+          36.0,
+          41.36842105263158,
+          24,
+          11.368421052631579
+        ],
+        "z": 50
+      }
+    ],
+    "faces-33": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          465,
+          1047,
+          622,
+          1103
+        ],
+        "target": [
+          36.0,
+          43.71974522292994,
+          24,
+          8.560509554140127
+        ],
+        "z": 50
+      }
+    ],
+    "faces-34": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          810,
+          1032,
+          926,
+          1101
+        ],
+        "target": [
+          38.0,
+          40.58620689655172,
+          20,
+          11.896551724137932
+        ],
+        "z": 50
+      }
+    ],
+    "faces-35": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          145,
+          1168,
+          297,
+          1240
+        ],
+        "target": [
+          36.0,
+          42.94736842105263,
+          24,
+          11.368421052631579
+        ],
+        "z": 50
+      }
+    ],
+    "faces-36": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          463,
+          1186,
+          624,
+          1238
+        ],
+        "target": [
+          36.0,
+          45.91304347826087,
+          24,
+          7.751552795031056
+        ],
+        "z": 50
+      }
+    ],
+    "faces-37": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          796,
+          1188,
+          936,
+          1235
+        ],
+        "target": [
+          38.0,
+          46.285714285714285,
+          20,
+          6.7142857142857135
+        ],
+        "z": 50
+      }
+    ],
+    "faces-38": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          147,
+          1306,
+          295,
+          1378
+        ],
+        "target": [
+          36.0,
+          42.0,
+          24,
+          11.675675675675677
+        ],
+        "z": 50
+      }
+    ],
+    "faces-39": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          466,
+          1317,
+          621,
+          1375
+        ],
+        "target": [
+          36.0,
+          43.9741935483871,
+          24,
+          8.980645161290322
+        ],
+        "z": 50
+      }
+    ],
+    "faces-40": [
+      {
+        "file": "faces-variants-v1.png",
+        "source": [
+          810,
+          1328,
+          936,
+          1375
+        ],
+        "target": [
+          38.0,
+          45.61904761904762,
+          20,
+          7.46031746031746
+        ],
+        "z": 50
+      }
+    ],
+    "base": [
+      {
+        "file": "base.png",
+        "source": [
+          356,
+          103,
+          898,
+          1175
+        ],
+        "target": [
+          20,
+          12,
+          56,
+          110
+        ],
+        "z": 10
+      }
+    ],
+    "llm-deepseek-brooch": [
+      {
+        "file": "llm-deepseek-v1.png",
+        "source": [
+          323,
+          153,
+          1126,
+          878
+        ],
+        "target": [
+          52,
+          72,
+          10,
+          10
+        ],
+        "z": 75
+      }
+    ],
+    "llm-deepseek-headpiece": [
+      {
+        "file": "llm-deepseek-v1.png",
+        "source": [
+          323,
+          153,
+          1126,
+          878
+        ],
+        "target": [
+          55,
+          22,
+          12,
+          12
+        ],
+        "z": 75
+      }
+    ],
+    "llm-deepseek-hat": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      },
+      {
+        "file": "llm-deepseek-v1.png",
+        "source": [
+          323,
+          153,
+          1126,
+          878
+        ],
+        "target": [
+          42,
+          16,
+          12,
+          12
+        ],
+        "z": 76
+      }
+    ],
+    "llm-deepseek-scarf": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "llm-deepseek-v1.png",
+        "source": [
+          323,
+          153,
+          1126,
+          878
+        ],
+        "target": [
+          51,
+          77,
+          8,
+          8
+        ],
+        "z": 76
+      }
+    ],
+    "llm-claude-brooch": [
+      {
+        "file": "llm-claude-v1.png",
+        "source": [
+          292,
+          44,
+          1241,
+          999
+        ],
+        "target": [
+          52,
+          72,
+          10,
+          10
+        ],
+        "z": 75
+      }
+    ],
+    "llm-claude-headpiece": [
+      {
+        "file": "llm-claude-v1.png",
+        "source": [
+          292,
+          44,
+          1241,
+          999
+        ],
+        "target": [
+          55,
+          22,
+          12,
+          12
+        ],
+        "z": 75
+      }
+    ],
+    "llm-claude-hat": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      },
+      {
+        "file": "llm-claude-v1.png",
+        "source": [
+          292,
+          44,
+          1241,
+          999
+        ],
+        "target": [
+          42,
+          16,
+          12,
+          12
+        ],
+        "z": 76
+      }
+    ],
+    "llm-claude-scarf": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "llm-claude-v1.png",
+        "source": [
+          292,
+          44,
+          1241,
+          999
+        ],
+        "target": [
+          51,
+          77,
+          8,
+          8
+        ],
+        "z": 76
+      }
+    ],
+    "llm-doubao-brooch": [
+      {
+        "file": "llm-doubao-v1.png",
+        "source": [
+          338,
+          95,
+          1182,
+          937
+        ],
+        "target": [
+          52,
+          72,
+          10,
+          10
+        ],
+        "z": 75
+      }
+    ],
+    "llm-doubao-headpiece": [
+      {
+        "file": "llm-doubao-v1.png",
+        "source": [
+          338,
+          95,
+          1182,
+          937
+        ],
+        "target": [
+          55,
+          22,
+          12,
+          12
+        ],
+        "z": 75
+      }
+    ],
+    "llm-doubao-hat": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      },
+      {
+        "file": "llm-doubao-v1.png",
+        "source": [
+          338,
+          95,
+          1182,
+          937
+        ],
+        "target": [
+          42,
+          16,
+          12,
+          12
+        ],
+        "z": 76
+      }
+    ],
+    "llm-doubao-scarf": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "llm-doubao-v1.png",
+        "source": [
+          338,
+          95,
+          1182,
+          937
+        ],
+        "target": [
+          51,
+          77,
+          8,
+          8
+        ],
+        "z": 76
+      }
+    ],
+    "llm-gpt-brooch": [
+      {
+        "file": "llm-gpt-v1.png",
+        "source": [
+          133,
+          114,
+          1130,
+          1175
+        ],
+        "target": [
+          52,
+          72,
+          10,
+          10
+        ],
+        "z": 75
+      }
+    ],
+    "llm-gpt-headpiece": [
+      {
+        "file": "llm-gpt-v1.png",
+        "source": [
+          133,
+          114,
+          1130,
+          1175
+        ],
+        "target": [
+          55,
+          22,
+          12,
+          12
+        ],
+        "z": 75
+      }
+    ],
+    "llm-gpt-hat": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      },
+      {
+        "file": "llm-gpt-v1.png",
+        "source": [
+          133,
+          114,
+          1130,
+          1175
+        ],
+        "target": [
+          42,
+          16,
+          12,
+          12
+        ],
+        "z": 76
+      }
+    ],
+    "llm-gpt-scarf": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "llm-gpt-v1.png",
+        "source": [
+          133,
+          114,
+          1130,
+          1175
+        ],
+        "target": [
+          51,
+          77,
+          8,
+          8
+        ],
+        "z": 76
+      }
+    ],
+    "llm-gemini-brooch": [
+      {
+        "file": "llm-gemini-v1.png",
+        "source": [
+          42,
+          21,
+          1220,
+          1230
+        ],
+        "target": [
+          52,
+          72,
+          10,
+          10
+        ],
+        "z": 75
+      }
+    ],
+    "llm-gemini-headpiece": [
+      {
+        "file": "llm-gemini-v1.png",
+        "source": [
+          42,
+          21,
+          1220,
+          1230
+        ],
+        "target": [
+          55,
+          22,
+          12,
+          12
+        ],
+        "z": 75
+      }
+    ],
+    "llm-gemini-hat": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      },
+      {
+        "file": "llm-gemini-v1.png",
+        "source": [
+          42,
+          21,
+          1220,
+          1230
+        ],
+        "target": [
+          42,
+          16,
+          12,
+          12
+        ],
+        "z": 76
+      }
+    ],
+    "llm-gemini-scarf": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "llm-gemini-v1.png",
+        "source": [
+          42,
+          21,
+          1220,
+          1230
+        ],
+        "target": [
+          51,
+          77,
+          8,
+          8
+        ],
+        "z": 76
+      }
+    ],
+    "llm-grok-brooch": [
+      {
+        "file": "llm-grok-v1.png",
+        "source": [
+          344,
+          126,
+          1186,
+          904
+        ],
+        "target": [
+          52,
+          72,
+          10,
+          10
+        ],
+        "z": 75
+      }
+    ],
+    "llm-grok-headpiece": [
+      {
+        "file": "llm-grok-v1.png",
+        "source": [
+          344,
+          126,
+          1186,
+          904
+        ],
+        "target": [
+          55,
+          22,
+          12,
+          12
+        ],
+        "z": 75
+      }
+    ],
+    "llm-grok-hat": [
+      {
+        "file": "accessories-08.png",
+        "source": [
+          308,
+          408,
+          945,
+          821
+        ],
+        "target": [
+          24,
+          9,
+          48,
+          31.12087912087912
+        ],
+        "z": 70
+      },
+      {
+        "file": "llm-grok-v1.png",
+        "source": [
+          344,
+          126,
+          1186,
+          904
+        ],
+        "target": [
+          42,
+          16,
+          12,
+          12
+        ],
+        "z": 76
+      }
+    ],
+    "llm-grok-scarf": [
+      {
+        "file": "accessories-14.png",
+        "source": [
+          516.6666666666666,
+          440.0,
+          738.3333333333333,
+          566.6666666666666
+        ],
+        "target": [
+          41,
+          57,
+          14,
+          8
+        ],
+        "z": 5
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          566.6666666666666,
+          865.0,
+          989.0
+        ],
+        "target": [
+          33,
+          65,
+          30,
+          26.673684210526318
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          390.0,
+          440.0,
+          516.6666666666666,
+          566.6666666666666
+        ],
+        "target": [
+          33,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "accessories-14.png",
+        "source": [
+          738.3333333333333,
+          440.0,
+          865.0,
+          566.6666666666666
+        ],
+        "target": [
+          55,
+          57,
+          8,
+          8
+        ],
+        "z": 65
+      },
+      {
+        "file": "llm-grok-v1.png",
+        "source": [
+          344,
+          126,
+          1186,
+          904
+        ],
+        "target": [
+          51,
+          77,
+          8,
+          8
+        ],
+        "z": 76
+      }
+    ]
+  },
+  "images": {
+    "tops-01.png": {
+      "sha256": "cd8a24b4752341b213f3e8cc7ff337f90675310fc2056a59c270356944dfae95",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-02.png": {
+      "sha256": "d26f3700b363bc71272b4c0883ca350e3a3ba8cb466e1c3957a26ba66c3b457b",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-03.png": {
+      "sha256": "8a8e052a3129501c2cfb9ddf0846c2960165a93edbaadc53f5df9477ad8490c6",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-04.png": {
+      "sha256": "3802b95269f8943e25ee79b0adcec9f6330e539539a981fcaab588fc6b6f341b",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-05.png": {
+      "sha256": "e60702d9b7b0962f133a6a53faada9059d93020613d411f4567ed26041156611",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-06.png": {
+      "sha256": "fd610b25ad509fbe8327e06326081824b843edc4307122e4fdca629743dbf130",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-07.png": {
+      "sha256": "17617a00dae7f4426e9b7269fa9e845f9f53afea2dee41787e2de77e21587308",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-08.png": {
+      "sha256": "2527c7cf71b4389ae162f116e08060161e640960554e2befd5e89f09817867e7",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-09.png": {
+      "sha256": "f498f88f7196f29ce2a8c853017ec9f93254e7c8509ec6be0f814e9546dc8ff3",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-10.png": {
+      "sha256": "84803b7810a05ed69ddcb8abf069d1da06e1635bc54f174d8dc58cf4a65c0e06",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-11.png": {
+      "sha256": "5cc0e71736443915ac34927b420b841a5d31d8041c9cec43f309c28dad82e59b",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-12.png": {
+      "sha256": "208d8825e1e18c67ba1ac695aff462fe6a9ece364be96e27cc90774f12e1a619",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-13.png": {
+      "sha256": "0af7ade88a7bc9ba7d979edc5f41e9524af1fb4fcfd64734a48222bdfc228241",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-14.png": {
+      "sha256": "8c704823c9a9eee64d39fb95da5184422057f18deec1ec5a1e6e1323c331729d",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "tops-15.png": {
+      "sha256": "716ab22f054317650700e0598888ff1741dd6a1f05065aabb980dc9b670e883c",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-01.png": {
+      "sha256": "9a70940dcf8d345b1d703a2893cfa554c76c0d411e2e03037f03bb295c00eae4",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-02.png": {
+      "sha256": "a6e2d321f5d80811a4aaab4445012fd5759f5efc7dbf61c82e5e56de7026a383",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-03.png": {
+      "sha256": "143a48f81ba519e42b2471e26f8252fcc96b5b7a83244a10fd33513d4432c1ed",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-04.png": {
+      "sha256": "932a792b5131dc20c12e2f14a4f6b424b15db8108c9fc4bf8e6cd1535b4a2fc8",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-05.png": {
+      "sha256": "6fbaea53dd207827ab49a2f82ff4fbef34744758a546729b34676f09394bb7db",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-06.png": {
+      "sha256": "d924b5494888b139c6bf509d212a4f66fd752aa9ce1c3a43ece2f8b7d4cca99a",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-07.png": {
+      "sha256": "35dec87744d25ea7962507e5e9413efa3e8f16f78b9d8dd45cec1e3559e5fefc",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-08.png": {
+      "sha256": "3f245395e0c73a238bc9e48d6d04944046add49e8455891971e533becaad6533",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-09.png": {
+      "sha256": "83173e1be08034c51efc657a1f988d51365cc6b4107e7047bf5ed1dd50493ced",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "pants-10.png": {
+      "sha256": "83b68f205d6665ce3489cf3c5501d2f082fcaca4ae81124ce1245feb0fc9b60c",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-01.png": {
+      "sha256": "3e28953d3236969eb46548af902e020de3d1143df990fe1ad9aff649a1fe54b8",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-02.png": {
+      "sha256": "bc50fffb75b7e09765a28cb58b93b6c26372b0eac074e3ab372fded9997b0636",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-03.png": {
+      "sha256": "9fe8ca38ce2ad0193984089b2166d0da928bb3b343283cef2618f901b5738e70",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-04.png": {
+      "sha256": "9920670a64c0424065f69ea2aca167e888a52ada6bedbc71f8223cb5f2d4e1a1",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-05.png": {
+      "sha256": "87153ac237d48497057e17f10421d7570df18b409c1b1763ebece9b13d02c32d",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-06.png": {
+      "sha256": "14e64639484dbb3aa4cd630d76a0ea09973285aed6b353435cfb768f2ca87936",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-07.png": {
+      "sha256": "0b9c0e1c311d93bb4649d03b70b6ea30f170bea99d8b930da79e45cb9b8c32d1",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-08.png": {
+      "sha256": "61eb5617ad35318868eb2607d60884c0984a1b428e77f86c94c85773a46ae1f8",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-09.png": {
+      "sha256": "efb75db7e9bf70cb2bff2302e3353fa076328bc3bece3833f839d4bfdac970df",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skirts-10.png": {
+      "sha256": "824497596c997401f17376e9174063924aef5090ff32f612cdc7f151ed6cec2f",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-01.png": {
+      "sha256": "4106ec5a4ba803e616a1f169d5413f51e651db170d68771e52ceaa7f394d8f03",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-02.png": {
+      "sha256": "4de4144e71b4523a16f99c459b2aca8593ccb126f6c7c5ccdf2cc602cef90145",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-03.png": {
+      "sha256": "bd5fe5af3a812b7c42fa9279b6b35b7b1871825c798ebab2398502e851bf2d89",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-04.png": {
+      "sha256": "da43d25cb52d78f0b3a80724fe8528eaf7bafdaae454e21da14d2e00c650d94b",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-05.png": {
+      "sha256": "2c30168da7e7a291df94f49ebac33ec722ec07092f07c3a0c635d8c8092fd9fe",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-06.png": {
+      "sha256": "ad540e1d9c69a2b5b35922f8ef5cc8674883665776be08f2fc2be4561ce1677d",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-07.png": {
+      "sha256": "f60448eaea57334dabef7371c346c3daf7f2f6d8058066e05b43826e8f998ae5",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-08.png": {
+      "sha256": "3bf03d5e48d1097f155c5f10ead1089d0c85aba95aa360ea284981825b7af8f9",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-09.png": {
+      "sha256": "0cef7a86463ed51bb3e3a1db2fc80a5969d1ce183205e41938318f5a73825944",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "shoes-10.png": {
+      "sha256": "f9847740d42ce6a60566019003e220ca2b4af1dc9d1d637aea7c6f9c67aec1be",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-01.png": {
+      "sha256": "75a54c079233803e998f488b470b37f6af71c8614a19793c6c49efbeb87ef5cc",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-02.png": {
+      "sha256": "fec2d6f332956a63371153fde5167426206f47fbca8ae590b9e75f1cf84e8baf",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-03.png": {
+      "sha256": "3a941c9d81b11f8cc35190b05391d74bbce1c9cbd46b52dd0240b03d8edf77a5",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-04.png": {
+      "sha256": "ab48affc97b7cce091cebc0dffbc7eff6eed878b2c8350035b2f4f052e7b7fb8",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-05.png": {
+      "sha256": "2742f4b0cb43ae4d9dbc072fac766c264275f9cf89f8230ef724359cfa41d745",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-06.png": {
+      "sha256": "e8462d0e467156d35f28792f4b32cdb833892ae878f62e18a64bf998936a0e5e",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-07.png": {
+      "sha256": "a86cdfd310edcc8f7bfacd7de29ec18eef7144f1f68993ec0238c097b8446785",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-08.png": {
+      "sha256": "552f307941fac6e753570a1d29414ed979d80e7430094c07764e51b1d26cb848",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-09.png": {
+      "sha256": "f400036e00e0478a1d6aee6456e1c6795d129aefeb0c50f1d2cd060968655ca6",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-10.png": {
+      "sha256": "91912a87789cd92bd2f6d0c5c765d13c593c43fbd508d7707c8441acb6d3a44e",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-11.png": {
+      "sha256": "d5f52ca158ed5b9026765473f6df96e7a9ae30caf5a5403d41f858ef0d20f696",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-12.png": {
+      "sha256": "f5ffb2b0f99aaad919a9c27fdca7b2849dc6b9328b7319dfbf15a32661c6f385",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-13.png": {
+      "sha256": "0ef4388b2f12358403cc67b250775025496d5ec809f34f0a8d1b0b282e6449ab",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-14-v2.png": {
+      "sha256": "bb4939af7677f9fae04b7a9a20bed60be238dcd4e4b9673446f6993b990a5e0f",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-15.png": {
+      "sha256": "3eaa1a4a7622a1fbeba720ede46d31409fe4572985814067adf7206a9bfb1c9c",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-16.png": {
+      "sha256": "87a1771be9193f99453b236dcf731d7085834f213f8dcd80d250ef096ca8fa6f",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-17.png": {
+      "sha256": "f9e1fcfb74aee38898217aae9ae62fe8ce2c52b19b65b1eb11fbec14187c1cfb",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-18.png": {
+      "sha256": "9bfd8abc39be2a06ad08cb360a66cd41de3c39cf9194afc7af283421cd4dfcb5",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-19.png": {
+      "sha256": "db4b68d4155de634515128fec6bb7098efe394c5ce50d901cda7820f58024419",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "hair-20.png": {
+      "sha256": "e27ce1d2829517e13898cc0ec76f68e8d35aae47d7fff38d29066f12351fbed4",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-01.png": {
+      "sha256": "484895b56ca2985340c84cb9b38e48f75a330a1a501dee78aee97579306cbc21",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-02.png": {
+      "sha256": "53437786ffe053345c8899da23df63ec2d34c37ee25fe52f12eece98cacd9fe8",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-03.png": {
+      "sha256": "3c89b80a97c1d2598b04a18dec64f432e952b91587915f610bf342d077c0ef67",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-04.png": {
+      "sha256": "3018ab7a489ed4b311b4992f9c844477a66297f4d0e4aa3251ca23fd4b49fc81",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-05.png": {
+      "sha256": "032c75bb935865cea543776357040845aa4910ce698fffd7bdd0f439c429b099",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-06.png": {
+      "sha256": "d5663d81f76d6094927367928d4671e6d353b34ed5c5958c798068ad6011cf77",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-07.png": {
+      "sha256": "0145f27b62d99c9f8128dfbf0d2b0bb1931066cbcd6fbf7ef6a6edb78ee9bd49",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-08.png": {
+      "sha256": "255eb7ad68b4990970c229f5f02083c4a85995a212ddf7fe060eb4a64f6504ac",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-09.png": {
+      "sha256": "a3853693c120a7d2a75f144ff40d966122bfe3520a00f1e3c16337b53494cbed",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-10.png": {
+      "sha256": "d80502ac6c5b03bc4cbd1bd4d739b6b5433509f2108905f416a9675d4022df02",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-11.png": {
+      "sha256": "0b1ba8cc8e8031c5bb7da0a952589662a54a17b09caca73198b24f6570a3bd8d",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-12.png": {
+      "sha256": "5183fa8f8e4e1726bee2b387914399935fbe11670a3760af9b995b3c55ec590e",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-13.png": {
+      "sha256": "2bf7c3cdacd1fa9e2af32d2cd129fbee26a066331d14c02fd78c6694d9e5563e",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-14.png": {
+      "sha256": "b6e3d0ea73341e221be24ac9bd255ff04a471b7d4d9864bcd318f97a6b602bfb",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-15.png": {
+      "sha256": "eeffb044d6e1d39e219384d2c34da907cd29ac381e67dba6f7c98282f0ed2a55",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-16.png": {
+      "sha256": "7d2c83f1aec5637514c81d808d434ace6f70e3215bebd70657853fe8db9f02d0",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-17.png": {
+      "sha256": "7f48b9af54cca27b92fe7ffd148ec32e818f31f6026373b202f62922dfae392e",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-18.png": {
+      "sha256": "66c573c599b44dd5b55e65e0fd0b0023c524c620ea9405ded9e71a4224257579",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-19.png": {
+      "sha256": "d0b9e7267688a82e8e63d3c39762539ccc3e6b5d2569f1815934297f0da7f718",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "accessories-20.png": {
+      "sha256": "9c00a47335367e8f83fca2268813f65a7fcd8bd972a513bffed406ed57f732ab",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-01.png": {
+      "sha256": "ed4645d8f6243afd21389c853a547c76617bde09a86e0869746a218a641ae5f1",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-01-v2.png": {
+      "sha256": "801aa18ba23e745f57f075271342dbfcf298ca52c3b2f9b57cba8ace70e28db9",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-02.png": {
+      "sha256": "d32363998674220e4c8f72b8553614afbe95a07d363e892677af34f6415d27af",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-02-v2.png": {
+      "sha256": "45e24563cae349a79278de6b8054dba1a8d10deb1bfb2ee5d1c93246b03aaa61",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-03.png": {
+      "sha256": "e845d48a630dbbdd70bf4db72cc94fb6a64011890eb552c210c9d28a39ea8bbf",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-03-v2.png": {
+      "sha256": "1369de4d128f727c2ab0fd78d4a98238571445f165b7c8190f3590a7e340690e",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-04.png": {
+      "sha256": "2b317c155d0117d189338a88d71ef841d296b00dac3735edfe1201aec98fb2d1",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-04-v2.png": {
+      "sha256": "83544fddf5d07087260d80701e6b78d4945a1a61f4abf09d4e132cd53bbc5f96",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-05.png": {
+      "sha256": "74d500eda9250bcdfec44411a18775aa95b0c92481b0c440699460f0bf606d32",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "skin-05-v2.png": {
+      "sha256": "cd90ba9f5d0a6f2310ca615e5dc3e8581fd4010c35c89f865eabc13c6e3a9798",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-01.png": {
+      "sha256": "c365ceabf639f7f8609ce485cf568eaea13700551e3d8dadc00b80f1c1acae01",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-02.png": {
+      "sha256": "2dc237e1e311904311edacc83184bb92fcb6919d0bdfd6bedfe420c1df3ebd53",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-03.png": {
+      "sha256": "32e4e7a1187575e088feabbd0a92c4df48d01bcab0a1d562ddbee9fecfc7fa72",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-04.png": {
+      "sha256": "6efcd23a7bbaae91001c509b6d5cc2114e0af560f6635986c60c16071735ad56",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-05.png": {
+      "sha256": "cea07562b31cad64da6de8670361d425be21f9bfc3689d40f8bc0cd1ee87aa33",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-06.png": {
+      "sha256": "895678f24700f77bbbf039efc8c652943d22e50f17768b37280d19b7e3a2badd",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-07.png": {
+      "sha256": "b00b119ca78804b7c7bd1911af04e9ac4ce31c418eefcdfff7b3991b7988a89f",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-08.png": {
+      "sha256": "58aa21c86a5c8a84f58afa08deecee373c5d1f3cdaf72c3215053dddb877b8bd",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-09.png": {
+      "sha256": "c029df1623a9b28dcbfba5e04ee300e784cfdd6161c3ef9cceaf40fdc067fd32",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-10.png": {
+      "sha256": "617ce2d71a46013c1fd3a05e6fe8db92c145e465fdfc13bbf30ae8edd66f6e5b",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "faces-variants-v1.png": {
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624",
+      "size": [
+        1086,
+        1448
+      ]
+    },
+    "base.png": {
+      "sha256": "56ea37d82e1381f2fd329b46566aa71d25e6a3599974360f4803057b9f5b4301",
+      "size": [
+        1254,
+        1254
+      ]
+    },
+    "llm-deepseek-v1.png": {
+      "sha256": "1e35945ef2c08a1ada782b903e9f08a875ed2588cce9e88cfbfffd57ca67bf6c",
+      "size": [
+        1536,
+        1024
+      ]
+    },
+    "llm-claude-v1.png": {
+      "sha256": "c9c5ec1c572282994f94ae2ea03490f57c4b5fce9ee3a3e408c1dd10d7773b5b",
+      "size": [
+        1536,
+        1024
+      ]
+    },
+    "llm-doubao-v1.png": {
+      "sha256": "8056fb8da7c2e4ce9f4585d2f623145090bbd08a7ad6f4f1111dfa707beb9534",
+      "size": [
+        1536,
+        1024
+      ]
+    },
+    "llm-gpt-v1.png": {
+      "sha256": "11a6be8a54f8a8add6f32b50fe1a5e1ee77ca2e1652915e7d854f75c2aa8a594",
+      "size": [
+        1263,
+        1246
+      ]
+    },
+    "llm-gemini-v1.png": {
+      "sha256": "d9da93f79b4028f92407859b19ca0adb18c23919f5ad4296bba37ffd086ac22b",
+      "size": [
+        1261,
+        1247
+      ]
+    },
+    "llm-grok-v1.png": {
+      "sha256": "91de05c902bacac0bc230971e2ad26e0ea0c78494974073847b7c79dee7bf29b",
+      "size": [
+        1536,
+        1024
+      ]
+    }
+  },
+  "draw_version": 4,
+  "hair_masks": {
+    "accessories-08": [
+      31,
+      0,
+      34,
+      40
+    ],
+    "llm-deepseek-hat": [
+      31,
+      0,
+      34,
+      40
+    ],
+    "llm-claude-hat": [
+      31,
+      0,
+      34,
+      40
+    ],
+    "llm-doubao-hat": [
+      31,
+      0,
+      34,
+      40
+    ],
+    "llm-gpt-hat": [
+      31,
+      0,
+      34,
+      40
+    ],
+    "llm-gemini-hat": [
+      31,
+      0,
+      34,
+      40
+    ],
+    "llm-grok-hat": [
+      31,
+      0,
+      34,
+      40
+    ]
+  }
+}

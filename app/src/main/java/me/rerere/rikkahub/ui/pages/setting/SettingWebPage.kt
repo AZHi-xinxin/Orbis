@@ -213,6 +213,7 @@ fun SettingWebPage() {
             contentPadding = innerPadding + PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item { StackchanConnectionCard(serverState) }
             item {
                 CardGroup(
                     modifier = Modifier

@@ -38,6 +38,7 @@ fun ASRProviderConfigure(
                     is ASRProviderSetting.MiMo -> "MiMo"
                     is ASRProviderSetting.Step -> "Step"
                     is ASRProviderSetting.SiliconFlow -> "硅基流动"
+                            is ASRProviderSetting.DeepSeek -> "DeepSeek"
                 },
                 onValueChange = {},
                 readOnly = true,
@@ -64,6 +65,7 @@ fun ASRProviderConfigure(
             is ASRProviderSetting.MiMo -> MiMoASRConfiguration(setting, onValueChange)
             is ASRProviderSetting.Step -> StepASRConfiguration(setting, onValueChange)
             is ASRProviderSetting.SiliconFlow -> SiliconFlowASRConfiguration(setting, onValueChange)
+            is ASRProviderSetting.DeepSeek -> DeepSeekASRConfiguration(setting, onValueChange)
         }
     }
 }
@@ -558,4 +560,13 @@ private fun SiliconFlowASRConfiguration(setting: ASRProviderSetting.SiliconFlow,
     OutlinedTextField(setting.model, { onValueChange(setting.copy(model = it)) },
         label = { Text("模型名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
     Text("默认 FunAudioLLM/SenseVoiceSmall，也可填写平台当前支持的其他转写模型。录音为 16 kHz 单声道。")
+}
+
+@Composable
+private fun DeepSeekASRConfiguration(setting: ASRProviderSetting.DeepSeek, onValueChange: (ASRProviderSetting) -> Unit) {
+    Text("DeepSeek 官方语音识别：本机分段录音后上传，自动识别语言。适用于语音输入和停顿后识别的通话；不支持边说边返回文字。")
+    OutlinedTextField(setting.apiKey, { onValueChange(setting.copy(apiKey = it)) },
+        label = { Text("DeepSeek 官方 API Key") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    Text("按录音时长计费。当前优惠价 0.39 元/小时，以官方最新价格为准。选择后录音才会上传，不使用聊天或 ST 的密钥。")
 }

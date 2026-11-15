@@ -24,7 +24,7 @@ class PetAssetsImportDeviceTest {
         assertEquals(Application::class.java, target.applicationContext.javaClass)
         val root = File(target.cacheDir, "pet-import-fixture-${UUID.randomUUID()}").apply { mkdirs() }
         val context = object : ContextWrapper(target) { override fun getFilesDir() = root }
-        val fixtures = File(checkNotNull(target.getExternalFilesDir(null)), "pet-import-fixtures")
+        val fixtures = File(target.filesDir, "pet-import-fixtures")
         val packs = fixtures.listFiles()?.filter { it.extension == "zip" }.orEmpty()
         assertEquals("Push all forty official packs into the isolated emulator", 40, packs.size)
         try {
@@ -67,7 +67,7 @@ class PetAssetsImportDeviceTest {
         val alias = File(root, "alias")
         Os.symlink(real.path, alias.path)
         val context = object : ContextWrapper(target) { override fun getFilesDir() = alias }
-        val packs = File(checkNotNull(target.getExternalFilesDir(null)), "pet-import-fixtures").listFiles().orEmpty()
+        val packs = File(target.filesDir, "pet-import-fixtures").listFiles().orEmpty()
         val pack = packs.first { it.extension == "zip" && appearance(it) == "cat-black-v1" }
         try { test(context, root, pack) }
         finally { alias.delete(); check(root.parentFile == target.cacheDir.canonicalFile); root.deleteRecursively() }

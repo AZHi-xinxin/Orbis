@@ -218,7 +218,19 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
 ) {
+    // Some compatible relays send a whitespace-only reasoning delta. Its receive time
+    // is not a measured thinking duration, and expanding it cannot reveal any text.
+    if (BuildConfig.ORBIS_ENABLED && !generating && reasoning.reasoning.isBlank()) {
+        Text(
+            text = "服务未返回思考文本",
+            style = MaterialTheme.typography.labelLarge,
+            color = LocalOrbisChatTextColor.current ?: OrbisTheme.colors.mutedInk,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+        return
+    }
     val (state, loading) = rememberReasoningState(reasoning, generating)
+    ReportLiquidGlassDetail(state.expandState != ReasoningCardState.Collapsed)
     val unknownDuration = !loading && reasoning.finishedAt == null
     val thinkingTitle = reasoning.reasoning.extractThinkingTitle()
     val showThinkingTitle = loading && thinkingTitle != null

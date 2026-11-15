@@ -36,7 +36,9 @@ internal fun orbisReleaseIsNewer(tag: String, installed: String): Boolean {
     fun parse(value: String): List<Long>? = Regex("v?(\\d{1,8})\\.(\\d{1,8})\\.(\\d{1,8})")
         .matchEntire(value)?.groupValues?.drop(1)?.map(String::toLong)
     val candidate = parse(tag) ?: return false
-    val current = parse(installed.replace(Regex("(?:-no-rescue|-rescue)$"), "")) ?: return false
+    // Signed private acceptance builds keep the public version code and must still
+    // discover the next stable release. Never accept development or arbitrary suffixes.
+    val current = parse(installed.replace(Regex("(?:-no-rescue|-rescue|-rc\\.[1-9][0-9]{0,5})$"), "")) ?: return false
     return candidate.zip(current).firstOrNull { it.first != it.second }?.let { it.first > it.second } ?: false
 }
 

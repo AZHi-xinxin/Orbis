@@ -19,8 +19,9 @@ internal class WebDeepSeekImports(
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     additionalFormats: Map<String, WebChatArchiveFormat> = emptyMap(),
     private val uploadBudgetBytes: Long = ArchiveCapacity.MAX_ZIP_BYTES,
+    filesManager: me.rerere.rikkahub.data.files.FilesManager? = null,
 ) {
-    private val formats = additionalFormats + ("deepseek" to WebDeepSeekArchiveFormat(repository))
+    private val formats = additionalFormats + ("deepseek" to WebDeepSeekArchiveFormat(repository, filesManager, directory))
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) + dispatcher)
     private val lock = Any()
     private val jobs = linkedMapOf<String, ImportJob>()
@@ -347,7 +348,7 @@ internal class WebDeepSeekImports(
         job.maxArchiveBytes, job.preview?.conversations?.size ?: 0, job.reviewToken,
         job.total, job.completed, job.result.imported, job.result.skipped, job.result.failed,
         job.result.messages, job.result.attachmentReferences, job.rows, job.error,
-        job.preview?.warnings ?: emptyList(), job.result.skippedSummaries,
+        job.preview?.warnings ?: emptyList(), job.result.skippedSummaries, job.result.restoredAttachments,
     )
 
     private class ImportTooLarge : IllegalArgumentException()

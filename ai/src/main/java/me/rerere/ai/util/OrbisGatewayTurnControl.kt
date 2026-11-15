@@ -197,6 +197,7 @@ internal fun Request.observeOrbisGatewayRequest(params: TextGenerationParams, ef
 
 /** Response headers are capability evidence only for the exact non-redirected accepted request. */
 internal fun Request.observeOrbisGatewayResponse(response: Response) {
+    GatewayImagePeers.observe(this, response)
     val handle = tag(OrbisGatewayRequest::class.java) ?: return
     val actual = response.request
     if (!response.isSuccessful || response.priorResponse != null || actual.url != url || actual.method != method ||

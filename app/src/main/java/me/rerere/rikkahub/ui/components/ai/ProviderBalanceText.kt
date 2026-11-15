@@ -27,6 +27,8 @@ import me.rerere.ai.provider.providers.openai.balanceCacheIdentity
 import me.rerere.ai.provider.providers.openai.retiredSiliconFlowBalanceNotice
 import me.rerere.ai.provider.providers.openai.SILICON_FLOW_BALANCE_WEBSITE
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import java.io.InterruptedIOException
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.MoneyBag02
 import me.rerere.rikkahub.utils.SimpleCache
@@ -76,12 +78,15 @@ fun ProviderBalanceText(
                 // Cache the result
                 cache.put(identity, balance)
                 value = balance
+            } catch (_: TimeoutCancellationException) {
+                value = "余额查询超时，点此刷新"
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
                 // Never put raw remote bodies, URLs or credentials into the model picker.
                 value = when {
                     providerSetting.apiKey.isBlank() -> "未配置此连接的密钥"
+                    failure is InterruptedIOException -> "余额查询超时，点此刷新"
                     failure is IllegalStateException && failure.message?.startsWith("余额") == true -> failure.message!!
                     failure is IllegalStateException && failure.message == "此连接未提供余额接口" -> failure.message!!
                     else -> "余额暂不可用，点此刷新"

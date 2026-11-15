@@ -19,6 +19,7 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.withMessageRecall
 import me.rerere.rikkahub.data.model.toMessageNode
 import org.junit.Assert.*
 import org.junit.Test
@@ -26,6 +27,24 @@ import kotlin.uuid.Uuid
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HumanContinuationLaneTest {
+    @Test fun `prompt saved by tool survives later chunks from frozen generation input`() = runTest {
+        val lane = HumanContinuationLane(base(), backgroundScope, { true }, { fail(it.toString()) })
+        val waiting = CompletableDeferred<Unit>()
+        var owner = -1L
+        var frozen = base()
+        lane.send(UIMessage.user("edit next turn settings")) { snapshot, turn, _ ->
+            frozen = snapshot; owner = turn; waiting.await()
+        }
+        runCurrent()
+        val prompt = me.rerere.rikkahub.data.model.OrbisConversationPrompt("saved preference", true, "saved world", true)
+        lane.acceptPrompt(prompt)
+        lane.publish(owner, frozen.answer("tool result and continued reply"))
+        assertEquals(prompt, lane.state.value.orbisPrompt)
+        assertEquals("tool result and continued reply", lane.state.value.currentMessages.last().toText())
+        assertEquals(prompt, lane.projectContext(frozen)!!.orbisPrompt)
+        waiting.complete(Unit); runCurrent()
+    }
+
     @Test fun `streaming human tail checkpoints independently of a hung main history writer`() = runTest {
         val blockedRoom = CompletableDeferred<Boolean>()
         var durable: Conversation? = null
@@ -190,6 +209,25 @@ class HumanContinuationLaneTest {
         }
     }
 
+    @Test fun `committed recall in idle lane settles its revision without another human message`() = runTest {
+        var durable = base()
+        var ready = 0
+        val lane = HumanContinuationLane(durable, backgroundScope, { durable = it; true },
+            { fail(it.toString()) }, onIdleSaved = { ready++ }, checkpoint = { true })
+        lane.requestSave(); runCurrent()
+        assertTrue(lane.communityIdleAndSaved())
+        val id = lane.state.value.currentMessages.single().id
+        // The service commits this flag to Room before publishing the recall to the lane.
+        durable = durable.withMessageRecall(id, MessageRole.USER)
+        ready = 0
+        lane.acceptRecall(id, MessageRole.USER)
+        runCurrent(); advanceTimeBy(251); runCurrent()
+        assertTrue("a committed recall must not leave history permanently busy", lane.communityIdleAndSaved())
+        assertTrue(ready > 0)
+        assertEquals(durable.messageNodes, lane.state.value.messageNodes)
+        assertTrue(lane.retireForHistoryEdit(lane.state.value))
+    }
+
     @Test fun `failed or blocked persistence never releases history editing`() = runTest {
         val disk = CompletableDeferred<Boolean>()
         var ready = 0
@@ -288,7 +326,8 @@ class HumanContinuationLaneTest {
 
     @Test fun `only a failed save emits a warning and a confirmed save clears it`() = runTest {
         var saved = false
-        val lane = HumanContinuationLane(base(), backgroundScope, { saved }, { fail(it.toString()) })
+        val failures = mutableListOf<Exception>()
+        val lane = HumanContinuationLane(base(), backgroundScope, { if (!saved) error("disk unavailable") else true }, { failures += it })
         lane.send(UIMessage.user("first")) { c, _, p -> p(c.answer("first answer")) }
         runCurrent()
         val warning = lane.persistenceWarning.value
@@ -340,7 +379,8 @@ class HumanContinuationLaneTest {
 
     @Test fun `disk failure never gates the first or following human request`() = runTest {
         var requests = 0
-        val lane = HumanContinuationLane(base(), backgroundScope, { error("disk unavailable") }, { fail(it.toString()) })
+        val failures = mutableListOf<Exception>()
+        val lane = HumanContinuationLane(base(), backgroundScope, { error("disk unavailable") }, { failures += it })
         repeat(3) { index ->
             lane.send(UIMessage.user("human $index")) { snapshot, _, publish -> requests++; publish(snapshot.answer("reply $index")) }
             runCurrent()
@@ -435,6 +475,70 @@ class HumanContinuationLaneTest {
         held.complete(Unit)
         runCurrent()
         assertEquals("awake", lane.state.value.currentMessages.last().toText())
+    }
+
+    @Test fun `input receipt waits for Room and still succeeds when reply advances revision`() = runTest {
+        val room = CompletableDeferred<Boolean>()
+        val model = CompletableDeferred<Unit>()
+        val receipts = mutableListOf<Boolean>()
+        val lane = HumanContinuationLane(base(), backgroundScope, { room.await() }, { fail(it.toString()) }, checkpoint = { true })
+        lane.send(UIMessage.user("drawer input"), onInputPersisted = { receipts += it }) { snapshot, _, publish ->
+            publish(snapshot.answer("streamed reply")); model.await()
+        }
+        runCurrent(); advanceTimeBy(300); runCurrent()
+        assertTrue("An AtomicFile checkpoint is not a Room receipt", receipts.isEmpty())
+        room.complete(true); runCurrent()
+        assertEquals(listOf(true), receipts)
+        model.complete(Unit); runCurrent()
+        assertEquals(listOf(true), receipts)
+    }
+
+    @Test fun `busy save keeps receipt pending then succeeds without sending again`() = runTest {
+        val receipts = mutableListOf<Boolean>()
+        var available = false
+        var requests = 0
+        val input = UIMessage.user("keep this draft")
+        val lane = HumanContinuationLane(base(), backgroundScope, { available }, { fail(it.toString()) }, checkpoint = { true })
+        lane.send(input, onInputPersisted = { receipts += it }) { _, _, _ -> requests++ }
+        runCurrent()
+        assertTrue(receipts.isEmpty())
+        assertNull(lane.persistenceWarning.value)
+        available = true
+        lane.requestSave(); runCurrent()
+        assertEquals(listOf(true), receipts)
+        assertEquals(1, requests)
+        assertEquals(1, lane.state.value.currentMessages.count { it.id == input.id })
+    }
+
+    @Test fun `actual disk error retains receipt so later success can clear the same drawer draft`() = runTest {
+        var writable = false
+        val receipts = mutableListOf<Boolean>()
+        val failures = mutableListOf<Exception>()
+        val lane = HumanContinuationLane(base(), backgroundScope,
+            { if (!writable) throw java.io.IOException("disk full") else true }, { failures += it })
+        val input = UIMessage.user("draft")
+        lane.send(input, answer = false, onInputPersisted = { receipts += it }) { _, _, _ -> fail("no request") }
+        runCurrent()
+        assertTrue(failures.isNotEmpty())
+        assertTrue(receipts.isNotEmpty() && receipts.none { it })
+        writable = true; lane.requestSave(); runCurrent()
+        assertEquals(true, receipts.last())
+        assertNull(lane.persistenceWarning.value)
+        assertEquals(1, lane.state.value.currentMessages.count { it.id == input.id })
+    }
+
+    @Test fun `continuation publishes directly into main chat state without stale save rollback`() = runTest {
+        val main = kotlinx.coroutines.flow.MutableStateFlow(base())
+        val firstSave = CompletableDeferred<Boolean>()
+        val lane = HumanContinuationLane(main.value, backgroundScope, { firstSave.await() }, { fail(it.toString()) }, sharedState = main)
+        val hold = CompletableDeferred<Unit>()
+        lane.send(UIMessage.user("new")) { c, _, publish -> publish(c.answer("visible partial")); hold.await() }
+        runCurrent()
+        assertSame(main, lane.state)
+        assertEquals("visible partial", main.value.currentMessages.last().toText())
+        lane.stop()
+        firstSave.complete(true); hold.complete(Unit); runCurrent()
+        assertEquals("visible partial", main.value.currentMessages.last().toText())
     }
 
     @Test fun `retrying the latest failed human input does not duplicate it or wait for disk`() = runTest {

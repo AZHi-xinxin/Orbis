@@ -15,6 +15,7 @@ import kotlinx.serialization.Serializable
     val imported: Int = 0, val skipped: Int = 0, val failed: Int = 0, val messages: Int = 0,
     val attachmentReferences: Int = 0, val rows: List<WebImportRowResult> = emptyList(), val error: String? = null,
     val warnings: List<String> = emptyList(), val skippedSummaries: Int = 0,
+    val restoredAttachments: Int = 0,
 )
 @Serializable data class WebImportConversationDto(
     val index: Int, val title: String, val totalNodes: Int, val messageCount: Int,

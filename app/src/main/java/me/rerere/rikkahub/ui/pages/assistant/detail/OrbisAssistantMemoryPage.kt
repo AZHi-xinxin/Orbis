@@ -84,7 +84,8 @@ internal fun OrbisAssistantMemoryPage(id: String) {
             } finally { exporting = false; if (finished) exportStarted = false }
         }
     }
-    fun update(mode: OrbisMemoryMode? = null, autoInject: Boolean? = null, semantic: Boolean? = null) {
+    fun update(mode: OrbisMemoryMode? = null, autoInject: Boolean? = null, semantic: Boolean? = null,
+        shared: Boolean? = null, history: Boolean? = null, acrossAssistants: Boolean? = null) {
         if (saving || assistant == null) return
         saving = true
         scope.launch {
@@ -97,6 +98,9 @@ internal fun OrbisAssistantMemoryPage(id: String) {
                                 orbisMemoryMode = mode ?: target.orbisMemoryMode,
                                 orbisMemoryAutoInject = autoInject ?: target.orbisMemoryAutoInject,
                                 orbisSemanticRecall = semantic ?: target.orbisSemanticRecall,
+                                orbisSharedMemory = shared ?: target.orbisSharedMemory,
+                                enableRecentChatsReference = history ?: target.enableRecentChatsReference,
+                                orbisHistoryAcrossAssistants = acrossAssistants ?: target.orbisHistoryAcrossAssistants,
                             ) else target
                         })
                     }
@@ -113,7 +117,7 @@ internal fun OrbisAssistantMemoryPage(id: String) {
     }
     OrbisSettingsScaffold(topBar = {
         OrbisSettingsTopBar(title = { Text("本机助手记忆") }, navigationIcon = { BackButton() },
-            subtitle = { Text("仅此 AI · 同一 AI 跨会话延续") })
+            subtitle = { Text(if (assistant?.orbisSharedMemory == true) "已开启跨助手记忆" else "同一 AI 跨会话延续") })
     }) { padding ->
         if (settings.init || assistant == null) {
             Text(if (settings.init) "正在读取 AI 配置…" else "此 AI 已不存在，未读取其他 AI 的记忆。",
@@ -123,6 +127,45 @@ internal fun OrbisAssistantMemoryPage(id: String) {
             OrbisAssistantMemorySettingsContent(assistant.orbisMemoryMode, assistant.orbisMemoryAutoInject,
                 stats, enabled = !saving, onMode = { update(mode = it) },
                 onAutoInject = { update(autoInject = it) })
+            HorizontalDivider()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("跨助手记忆", style = MaterialTheme.typography.titleSmall)
+                    Text("连通同样开启此项的助手记忆库，AI 可查阅和维护彼此的记忆。保留原归属和版本，关闭后恢复隔离。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = assistant.orbisSharedMemory, enabled = !saving,
+                    onCheckedChange = { update(shared = it) }, modifier = Modifier.testTag("local_memory_shared"))
+            }
+            if (assistant.orbisSharedMemory) {
+                val linked = settings.assistants.filter { it.id != assistant.id && it.orbisSharedMemory }
+                Text(if (linked.isEmpty()) "还没有其他助手开启；可到对方的本机助手记忆页开启。"
+                    else "已连通：" + linked.joinToString("、") { it.name }, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("参考历史聊天记录", style = MaterialTheme.typography.titleSmall)
+                    Text("让 AI 按需搜索聊天并分页读原文；选择所有助手可跨助手查找。独立于记忆库连通开关。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = assistant.enableRecentChatsReference, enabled = !saving,
+                    onCheckedChange = { update(history = it) },
+                    modifier = Modifier.testTag("local_memory_history"))
+            }
+            if (assistant.enableRecentChatsReference) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !assistant.orbisHistoryAcrossAssistants, enabled = !saving,
+                        onClick = { update(acrossAssistants = false) }, label = { Text("仅此助手") })
+                    FilterChip(selected = assistant.orbisHistoryAcrossAssistants, enabled = !saving,
+                        onClick = { update(acrossAssistants = true) }, label = { Text("所有助手") })
+                }
+                Text(if (assistant.orbisHistoryAcrossAssistants)
+                    "可搜索其他助手的普通聊天；咨询对话仍限本助手，私密工具内容不提供。读到聊天不代表获准对外发布。"
+                    else "可查同一助手的其他窗口。", style = MaterialTheme.typography.bodySmall)
+            }
+            Text("三档都能按需查询；自动带入仍按所选档位运行。记忆内容由 AI 自己整理。",
+                style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("按意思想起旧对话", style = MaterialTheme.typography.titleSmall)

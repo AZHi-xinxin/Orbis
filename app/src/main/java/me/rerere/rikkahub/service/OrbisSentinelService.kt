@@ -34,7 +34,7 @@ class OrbisSentinelService : Service() {
             val open = PendingIntent.getActivity(this, ID, Intent(this, RouteActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val pause = PendingIntent.getService(this, ID + 1, Intent(this, OrbisSentinelService::class.java).setAction(PAUSE), PendingIntent.FLAG_IMMUTABLE)
             val notification = NotificationCompat.Builder(this, CHANNEL)
-                .setSmallIcon(R.drawable.ic_stat_rikkahub).setContentTitle("Orbis 本地哨兵")
+                .setSmallIcon(R.drawable.ic_stat_orbis).setContentTitle("Orbis 本地哨兵")
                 .setContentText("按 AI 设置的规则观察与唤醒 · 可随时总暂停")
                 .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open)
                 .addAction(0, "总暂停", pause).build()

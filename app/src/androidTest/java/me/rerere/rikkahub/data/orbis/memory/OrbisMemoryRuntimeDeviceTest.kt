@@ -26,6 +26,25 @@ import kotlin.uuid.Uuid
 /** Real Room + request runtime; synthetic settings only, with no application jobs or network. */
 @RunWith(AndroidJUnit4::class)
 class OrbisMemoryRuntimeDeviceTest {
+    @Test fun sharedRecallHonorsBothSwitchesSourcesAndLiveRevocation() = runBlocking {
+        Fixture().use { f ->
+            f.store("synthetic foreign tea", "foreign summary", ownerId = f.other)
+            f.changeAssistant { it.copy(orbisSharedMemory = true) }
+            assertTrue(f.begin(UIMessage.user("tea")).selection.entries.isEmpty())
+            val before = f.settings.settingsFlow.value
+            f.settings.settingsFlow.value = before.copy(assistants = before.assistants.map { it.copy(orbisSharedMemory = true) })
+            val human = UIMessage.user("tea again")
+            val turn = f.begin(human)
+            assertEquals(f.other, turn.selection.entries.single().sourceAssistantId)
+            assertTrue(turn.project(listOf(human)).text().contains("foreign summary"))
+            assertTrue(turn.project(listOf(human)).text().contains("source_assistant_name"))
+            f.settings.settingsFlow.value = before
+            assertFalse(turn.project(listOf(human)).text().contains("foreign summary"))
+            assertEquals(1, f.repo.stats(f.other).total)
+            f.changeAssistant { it.copy(orbisMemoryMode = OrbisMemoryMode.LIGHT) }
+            assertTrue(f.begin(UIMessage.user("tea again light")).selection.entries.isEmpty())
+        }
+    }
     private class Fixture : AutoCloseable {
         private val instrumentation = InstrumentationRegistry.getInstrumentation().also {
             check(it is IsolatedGenerationLoopRunner)

@@ -209,7 +209,7 @@ internal fun orbisEventSourceLabel(source: String): String = when (source) {
     "lc_sentinel" -> "手机陪伴哨兵"
     "self_reminder" -> "自主提醒"
     "legacy_sentinel" -> "旧哨兵（归属待核实）"
-    else -> if (me.rerere.rikkahub.data.orbis.isNativeSentinelSource(source)) "本地自主哨兵" else "未识别来源：$source"
+    else -> if(me.rerere.rikkahub.data.orbis.isTabletopEventSource(source)) "剧本杀 · 本局提醒" else if (me.rerere.rikkahub.data.orbis.isNativeSentinelSource(source)) "本地自主哨兵" else "未识别来源：$source"
 }
 
 internal fun orbisEventReceivedTime(receivedAt: Long): String = runCatching {

@@ -4,7 +4,7 @@ package me.rerere.rikkahub.data.ai.tools
 internal val orbisDeploymentChapters = listOf(
     OrbisManualChapter("human_operations", "人类操作教学：从哪里点、填什么、怎么看成功", "聊天输入框上方 → 连接设置；右下角北斗导航 → 工具娱乐", listOf("orbis_help", "orbis_configure", "orbis_propose_connection"), listOf(
         OrbisManualSection("先查再教", "用户说不会、找不到、给我装ST时，不让用户解释技术名词。先查相应guide；每一步写‘在哪个页面→点哪个按钮→填什么→成功显示什么→怎么回聊天’。可以读取的配置先inspect，工作区先workspace_status，不重复向用户索要已有非秘密信息。不把整份教程每轮注入，也不为了查说明调用模型或联网。其它开源部署先查其官方安装文件和实际环境，再给相应步骤，不能把ST教程当所有软件通用脚本。"),
-        OrbisManualSection("常用入口", "有待办时，当前聊天输入框上方‘连接设置’可反复打开；收起或点×只回聊天。若想让入口也消失，点击‘关闭本助手的连接提示’，或调用orbis_propose_connection(action=dismiss_setup)，仅隐藏本助手全部提示，不删除或停用连接。右下角北斗导航→工具娱乐→AI连接建议也是入口。工作区：右下角北斗导航→工具娱乐→工作区→当前助手对应名称。撤回：自己消息下方三个点→撤回；AI撤回开关在会话侧栏→顶部三个点→当前会话配置→本地工具→允许AI撤回自己的消息，详情查guide/message_recall。外观：聊天侧栏→自定义美化，仍在侧栏返回会话列表；AI主题须用户启用。模型/MCP完整设置可从北斗导航→系统设置进入对应提供方或MCP页；不要把用户引到其它助手的连接。"),
+        OrbisManualSection("常用入口", "有待办时，当前聊天输入框上方‘连接设置’可反复打开；收起或点×只回聊天。若想让入口也消失，点击‘关闭建议列表’，或调用orbis_propose_connection(action=dismiss_setup)，仅隐藏本助手全部提示，不删除或停用连接。单条可点‘关闭这条建议’；右下角北斗导航→工具娱乐→AI连接建议→查看已关闭可找回和修改。界面‘密钥已保存’只说明本机保存成功，不表示已经验证连通。工作区：右下角北斗导航→工具娱乐→工作区→当前助手对应名称。撤回：自己消息下方三个点→撤回；AI撤回开关在会话侧栏→顶部三个点→当前会话配置→本地工具→允许AI撤回自己的消息，详情查guide/message_recall。外观：聊天侧栏→自定义美化，仍在侧栏返回会话列表；AI主题须用户启用。模型/MCP完整设置可从北斗导航→系统设置进入对应提供方或MCP页；不要把用户引到其它助手的连接。"),
         OrbisManualSection("权限和成功标准", "未安装Rootfs、工具没注册、等待本次审批、系统权限关闭是不同问题。先告诉人类当前缺哪一项，只打开所需项。‘允许一次’只放行这次；记住授权减少以后确认，但不自动安装环境或授予系统权限。‘已保存’不是‘已连通’，‘能列工具’不是‘工具实际执行成功’。收起窗口不会自动发送消息或提交未填内容。")
     )),
     OrbisManualChapter("workspace_setup", "工作区与 Rootfs：安装前的真实检查", "右下角北斗导航 → 工具娱乐 → 工作区 → 当前助手工作区 → 启用 Shell", listOf("orbis_configure", "workspace_shell"), listOf(

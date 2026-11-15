@@ -55,10 +55,12 @@ private data class TouchStatusDto(val protocol: Int = 1, val human_enabled: Bool
  * Probe and receipt endpoints never enqueue messages or call a model.
  */
 fun Route.orbisEventRoutes(service: ChatService, conversations: ConversationRepository, settings: SettingsStore) {
-    suspend fun ApplicationCall.authorized(): Boolean {
+    suspend fun ApplicationCall.authorized(touchOnly: Boolean = false): Boolean {
         val header = request.headers[HttpHeaders.Authorization]
         val token = header?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }?.substring(7)?.trim()
-        val allowed = withContext(Dispatchers.IO) { runCatching { service.orbisEvents.authenticate(token) }.getOrDefault(false) }
+        val allowed = withContext(Dispatchers.IO) { runCatching {
+            acceptsOrbisEventCredential(token, touchOnly, service.orbisEvents::authenticate, service.orbisEvents::authenticateTouch)
+        }.getOrDefault(false) }
         if (!allowed) respond(HttpStatusCode.Unauthorized, ErrorResponse("event_unauthorized", 401))
         return allowed
     }
@@ -79,20 +81,20 @@ fun Route.orbisEventRoutes(service: ChatService, conversations: ConversationRepo
     get("/orbis/events/status") { if (call.authorized()) call.status() }
     post("/orbis/events/probe") { if (call.authorized()) call.status() }
     // Physical-touch input has no text, arbitrary source or target fields. The AI-owned rule
-    // supplies the prompt and destination. Same credential as the existing event receiver.
+    // supplies the prompt and destination. Scoped touch credentials and legacy event keys work here.
     get("/orbis/sentinels/touch/status") {
-        if (!call.authorized()) return@get
+        if (!call.authorized(touchOnly = true)) return@get
         val (enabled, count) = service.orbisTouchStatus()
         call.respond(TouchStatusDto(human_enabled = enabled, enabled_rules = count))
     }
     get("/orbis/sentinels/touch/receipt") {
-        if (!call.authorized()) return@get
+        if (!call.authorized(touchOnly = true)) return@get
         val receipt = service.orbisTouchReceipt(call.request.queryParameters["event_id"].orEmpty())
         if (receipt == null) call.respond(HttpStatusCode.NotFound, ErrorResponse("event_not_found", 404))
         else call.respond(TouchReceiptDto(receipt.eventId, receipt.status, receipt.delivered, true))
     }
     post("/orbis/sentinels/touch") {
-        if (!call.authorized()) return@post
+        if (!call.authorized(touchOnly = true)) return@post
         try {
             val channel = call.receiveChannel()
             val bytes = ByteArrayOutputStream()

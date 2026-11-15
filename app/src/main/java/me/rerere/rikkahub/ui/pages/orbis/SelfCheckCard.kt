@@ -5,6 +5,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.rikkahub.data.ai.tools.local.LocalToolOption
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -26,11 +28,13 @@ import org.koin.compose.koinInject
     val mcp = koinInject<McpManager>()
     val workspace = koinInject<WorkspaceRepository>()
     val host = remember(context, settings, mcp, workspace) { SelfCheckHost(context, settings, mcp, workspace) }
-    SelfCheckCardContent(owner, enabled, onEnable, check = { host.check(owner, it) })
+    val live by settings.settingsFlow.collectAsStateWithLifecycle()
+    val included = live.assistants.firstOrNull { it.id.toString() == owner }?.localTools?.contains(LocalToolOption.AgentWork) == true
+    SelfCheckCardContent(owner, enabled, onEnable, check = { host.check(owner, it) }, includedInAgentWork = included)
 }
 
 @Composable internal fun SelfCheckCardContent(owner: String, enabled: Boolean, onEnable: (Boolean) -> Unit,
-    check: suspend (String) -> SelfCheckReport) {
+    includedInAgentWork: Boolean = false, check: suspend (String) -> SelfCheckReport) {
     var open by remember(owner) { mutableStateOf(false) }
     var focus by remember(owner) { mutableStateOf("overview") }
     var report by remember(owner) { mutableStateOf<SelfCheckReport?>(null) }
@@ -53,16 +57,20 @@ import org.koin.compose.koinInject
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) { Text("AI自检", style = MaterialTheme.typography.titleMedium)
                     Text("按需查看当前工具、配置和故障线索", style = MaterialTheme.typography.bodySmall) }
-                Switch(enabled, onEnable, modifier = Modifier.testTag("self-check-enable"))
+                if (includedInAgentWork) Text("已允许",style = MaterialTheme.typography.labelLarge)
+                else Switch(enabled, onEnable, modifier = Modifier.testTag("self-check-enable"))
             }
-            Text("你随时可以直接检查；开启后AI也能调用。详细结果仅在查询时返回。", style = MaterialTheme.typography.bodySmall)
+            Text(if (includedInAgentWork) "工具发现与任务卡已允许AI自检，可在任务与能力中关闭；详细结果仅在查询时返回。"
+                else "你随时可以直接检查；开启后AI也能调用。详细结果仅在查询时返回。", style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = { open = true; runCheck() }, modifier = Modifier.testTag("self-check-open")) { Text("检查当前助手") }
+            FaultDiagnosticsButton()
         }
     }
     if (open) AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text("当前助手自检") },
         text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("只读本机，不调用模型。检查结果可复制给AI或反馈给开发者。")
+                FaultDiagnosticsButton()
                 selfCheckFocus.chunked(2).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     row.forEach { item -> FilterChip(selected = focus == item, onClick = { focus = item; runCheck() }, enabled = !busy,
                         label = { Text(labels[selfCheckFocus.indexOf(item)]) }, modifier = Modifier.weight(1f).testTag("self-check-focus-$item")) }
@@ -83,8 +91,19 @@ import org.koin.compose.koinInject
                         Text("${java.text.DateFormat.getDateTimeInstance().format(java.util.Date(event.at))} · ${event.code}", style = MaterialTheme.typography.labelSmall)
                         Text(diagnosticCodes.getValue(event.code), style = MaterialTheme.typography.bodySmall)
                         val detail = listOfNotNull(
-                            event.phase?.let { if (it == "local_recovery") "阶段：本机恢复记录" else "阶段：收到HTTP响应" },
+                            event.phase?.let { when(it) {
+                                "local_recovery" -> "阶段：本机恢复记录"
+                                "local_storage" -> "阶段：本机保存"
+                                "mcp_tools_call" -> "阶段：MCP 工具调用"
+                                "image_lookup" -> "阶段：图片复用记录查询"
+                                "image_upload" -> "阶段：图片上传准备"
+                                "http_response" -> "阶段：收到 HTTP 响应"
+                                else -> "阶段：待核实"
+                            } },
                             event.httpStatus?.let { "HTTP $it" }, event.parameter?.let { "参数：$it" },
+                            event.elapsedMs?.let { "等待 ${it / 1000.0} 秒" },
+                            event.toolName?.let { "工具：$it" }, event.operation?.let { "操作：$it" },
+                            event.reference?.let { "关联号：$it" },
                         ).joinToString(" · ")
                         if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.labelSmall)
                     }

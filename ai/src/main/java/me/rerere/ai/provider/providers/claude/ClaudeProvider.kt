@@ -1,5 +1,7 @@
 package me.rerere.ai.provider.providers.claude
 
+import me.rerere.ai.util.deepSeekFileId
+import me.rerere.ai.util.deepSeekFileBlock
 import me.rerere.ai.core.validateToolSchemaReferences
 
 import android.content.Context
@@ -307,6 +309,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .apply { if (messages.any { m -> m.parts.any { it.deepSeekFileId() != null } }) addHeader("anthropic-beta", "files-api-2025-04-14") }
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
@@ -357,6 +360,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .apply { if (messages.any { m -> m.parts.any { it.deepSeekFileId() != null } }) addHeader("anthropic-beta", "files-api-2025-04-14") }
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
@@ -430,6 +434,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         params: TextGenerationParams,
         stream: Boolean = false
     ): JsonObject {
+        me.rerere.ai.util.checkDeepSeekFilesTarget(messages, providerSetting.baseUrl,
+            params.customBody.lastOrNull { it.key == "model" }?.value?.let { (it as? JsonPrimitive)?.contentOrNull } ?: params.model.modelId)
         return buildJsonObject {
             put("model", params.model.modelId)
             put(
@@ -723,6 +729,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
     }
 
     private fun UIMessagePart.toContentBlock(): JsonObject? = when (this) {
+        is UIMessagePart.Document -> deepSeekFileBlock("messages")
         is UIMessagePart.Text -> buildJsonObject {
             put("type", "text")
             put("text", text)

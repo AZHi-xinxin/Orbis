@@ -24,6 +24,12 @@ interface OrbisMemoryDAO {
     @Query("SELECT * FROM orbis_memory_note WHERE assistant_id=:assistantId AND (:deleted OR deleted=0) AND (:query='' OR instr(lower(body),lower(:query))>0 OR instr(lower(summary),lower(:query))>0 OR instr(lower(tags),lower(:query))>0 OR instr(lower(keywords),lower(:query))>0) ORDER BY updated_at DESC,id LIMIT :limit OFFSET :offset")
     suspend fun search(assistantId: String, query: String, deleted: Boolean, limit: Int, offset: Int): List<OrbisMemoryEntity>
 
+    @Query("SELECT * FROM orbis_memory_note WHERE assistant_id IN (:owners) AND (:deleted OR deleted=0) AND (:query='' OR instr(lower(body),lower(:query))>0 OR instr(lower(summary),lower(:query))>0 OR instr(lower(tags),lower(:query))>0 OR instr(lower(keywords),lower(:query))>0) ORDER BY updated_at DESC,assistant_id,id LIMIT :limit OFFSET :offset")
+    suspend fun searchShared(owners: List<String>, query: String, deleted: Boolean, limit: Int, offset: Int): List<OrbisMemoryEntity>
+
+    @Query("SELECT assistant_id FROM orbis_memory_note WHERE assistant_id IN (:owners) AND id=:id ORDER BY assistant_id")
+    suspend fun ownersOf(owners: List<String>, id: String): List<String>
+
     @Query("SELECT * FROM orbis_memory_revision WHERE assistant_id=:assistantId AND id=:id AND revision=:revision")
     suspend fun revision(assistantId: String, id: String, revision: Int): OrbisMemoryRevisionEntity?
 

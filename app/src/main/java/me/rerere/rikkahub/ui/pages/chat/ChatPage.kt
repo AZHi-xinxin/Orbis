@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import dev.chrisbanes.haze.hazeSource
+import me.rerere.rikkahub.data.orbis.theme.hasMaterial
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -140,8 +141,6 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.hooks.ChatInputState
-import me.rerere.rikkahub.ui.hooks.EditStateContent
-import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -423,6 +422,7 @@ private fun ChatPageContent(
     val workspaceRepository: WorkspaceRepository = koinInject()
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
+    val bubbleBackdrop = remember(conversation.assistantId) { dev.chrisbanes.haze.HazeState() }
     val batchVoiceState by vm.voiceSession.state.collectAsStateWithLifecycle()
     val eventInbox by vm.eventInbox.collectAsStateWithLifecycle()
     val assistant = setting.getCurrentAssistant()
@@ -433,6 +433,7 @@ private fun ChatPageContent(
 
     val startupAppearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val activeTheme = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current
+    val needsBubbleMaterial = activeTheme?.body?.hasMaterial() == true
     val startupInheritBackground = activeTheme == null && !startupAppearance.backgroundEnabled &&
         (assistant.background != null || assistant.useGradientBackground)
     val startupImage = when {
@@ -487,6 +488,7 @@ private fun ChatPageContent(
 
     TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
 
+    CompositionLocalProvider(me.rerere.rikkahub.ui.components.message.LocalBubbleBackdrop provides if (needsBubbleMaterial) bubbleBackdrop else null) {
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize().then(if (onStartupReady != null)
@@ -496,14 +498,14 @@ private fun ChatPageContent(
             val appearance = setting.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
             val inheritBackground = activeTheme == null && !appearance.backgroundEnabled &&
                 (assistant.background != null || assistant.useGradientBackground)
-            if (inheritBackground) AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState),
+            if (inheritBackground) AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState).then(if (needsBubbleMaterial) Modifier.hazeSource(bubbleBackdrop) else Modifier),
                 onImageSettled = imageSettled)
             OrbisChatBackdrop(appearance = appearance, drawBackground = !inheritBackground,
-                modifier = Modifier.fillMaxSize().hazeSource(hazeState), onImageSettled = imageSettled)
+                modifier = Modifier.fillMaxSize().hazeSource(hazeState).then(if (needsBubbleMaterial) Modifier.hazeSource(bubbleBackdrop) else Modifier), onImageSettled = imageSettled)
             // Let the wallpaper continue through the system status area without a
             // separate tinted strip. The top bar still reserves its existing insets;
             // RouteActivity/Theme own icon contrast, independently of debug labels.
-        } else AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState),
+        } else AssistantBackground(setting = setting, modifier = Modifier.hazeSource(hazeState).then(if (needsBubbleMaterial) Modifier.hazeSource(bubbleBackdrop) else Modifier),
             onImageSettled = imageSettled)
         Scaffold(
             topBar = {
@@ -842,6 +844,7 @@ private fun ChatPageContent(
             )
         }
     }
+    }
 }
 
 @Composable
@@ -950,12 +953,16 @@ private fun TopBar(
     previewMode: Boolean,
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
-    onUpdateTitle: (String) -> Unit
+    onUpdateTitle: suspend (String) -> Boolean
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
-    val titleState = useEditState<String> {
-        onUpdateTitle(it)
+    var titleDraft by remember(conversation.id) { mutableStateOf<String?>(null) }
+    var titleSaving by remember(conversation.id) { mutableStateOf(false) }
+    var titleError by remember(conversation.id) { mutableStateOf<String?>(null) }
+    fun openTitleEditor() {
+        titleDraft = conversation.title
+        titleError = null
     }
 
     if (BuildConfig.ORBIS_ENABLED) {
@@ -1011,7 +1018,7 @@ private fun TopBar(
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
                 .padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f, fill = false).clickable { titleState.open(conversation.title) }) {
+                    Box(Modifier.weight(1f, fill = false).clickable { openTitleEditor() }) {
                     OrbisHeaderControlSurface(headerOpacity) {
                         Column(Modifier.padding(horizontal = 10.dp, vertical = 5.dp)) {
                         Text(assistant.name.ifBlank { "AI" },
@@ -1027,6 +1034,7 @@ private fun TopBar(
                         me.rerere.rikkahub.ui.pages.orbis.OrbisBodyEntry(assistant.id.toString(), conversation.id.toString())
                     }
                 }
+                if (!conversation.isConsultation) me.rerere.rikkahub.ui.pages.orbis.community.CommunityEntry(assistant.id.toString())
                 me.rerere.rikkahub.ui.pages.orbis.music.MusicEntry()
                 OrbisHeaderControlSurface(headerOpacity, shape = CircleShape) {
                     OrbisContextBudgetButton(
@@ -1076,7 +1084,7 @@ private fun TopBar(
             Surface(
                 onClick = {
                     if (conversation.messageNodes.isNotEmpty()) {
-                        titleState.open(conversation.title)
+                        openTitleEditor()
                     } else {
                         toaster.show(editTitleWarning, type = ToastType.Warning)
                     }
@@ -1125,37 +1133,49 @@ private fun TopBar(
             }
         },
     )
-    titleState.EditStateContent { title, onUpdate ->
+    titleDraft?.let { title ->
         AlertDialog(
-            onDismissRequest = {
-                titleState.dismiss()
-            },
-            title = {
-                Text(stringResource(R.string.chat_page_edit_title))
-            },
+            onDismissRequest = { if (!titleSaving) titleDraft = null },
+            title = { Text(stringResource(R.string.chat_page_edit_title)) },
             text = {
                 OutlinedTextField(
                     value = title,
-                    onValueChange = onUpdate,
+                    onValueChange = { titleDraft = it; titleError = null },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
+                    enabled = !titleSaving,
+                    isError = titleError != null,
+                    supportingText = { Text(titleError ?: "标题为 1–60 个可见字符") },
                 )
             },
             confirmButton = {
                 TextButton(
+                    enabled = !titleSaving,
                     onClick = {
-                        titleState.confirm()
+                        val normalized = try {
+                            me.rerere.rikkahub.data.model.normalizeConversationTitle(title)
+                        } catch (_: IllegalArgumentException) {
+                            titleError = "标题为 1–60 个可见字符"
+                            return@TextButton
+                        }
+                        titleSaving = true
+                        scope.launch {
+                            try {
+                                if (onUpdateTitle(normalized)) titleDraft = null
+                                else titleError = "窗口尚未保存或不存在，未修改标题。"
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                titleError = "标题保存失败，输入已保留，请稍后再试。"
+                            } finally {
+                                titleSaving = false
+                            }
+                        }
                     }
-                ) {
-                    Text(stringResource(R.string.chat_page_save))
-                }
+                ) { Text(if (titleSaving) "保存中…" else stringResource(R.string.chat_page_save)) }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        titleState.dismiss()
-                    }
-                ) {
+                TextButton(enabled = !titleSaving, onClick = { titleDraft = null }) {
                     Text(stringResource(R.string.chat_page_cancel))
                 }
             }

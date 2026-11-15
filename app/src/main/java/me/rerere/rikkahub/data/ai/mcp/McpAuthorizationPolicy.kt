@@ -25,6 +25,7 @@ internal fun McpServerConfig.shouldRefreshOAuth(nowMillis: Long): Boolean {
 }
 
 internal fun mcpLooksUnauthorized(error: Throwable): Boolean {
+    if (error is McpToolCallFailure) return error.code == "mcp_auth_rejected"
     val message = generateSequence(error) { it.cause }
         .mapNotNull { it.message }.joinToString(" ").lowercase()
     return message.contains("401") || message.contains("unauthorized") ||

@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 283
-        versionName = "2.6.17"
+        versionCode = 312
+        versionName = "2.6.19"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
@@ -196,6 +196,7 @@ kotlin {
 }
 
 dependencies {
+    implementation("de.sciss:jump3r:1.0.5") // Offline MP3 export of existing voice attachments.
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.core.ktx)
@@ -236,6 +237,7 @@ dependencies {
     // Haze (background blur)
     implementation(libs.haze)
     implementation(libs.haze.blur)
+    implementation(libs.haze.glass)
     implementation(libs.haze.blur.material3)
 
     // koin

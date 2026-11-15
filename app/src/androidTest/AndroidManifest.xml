@@ -3,4 +3,7 @@
     <!-- The Android plugin generates the instrumentation declaration from Gradle.
          Build with -PorbisIsolatedTests=true and explicitly select the isolated runner
          plus the synthetic test classes. Normal builds retain AndroidJUnitRunner. -->
+    <application>
+        <activity android:name="me.rerere.rikkahub.data.orbis.agentwork.PhoneFixtureActivity" android:exported="true" />
+    </application>
 </manifest>

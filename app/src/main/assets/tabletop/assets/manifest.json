@@ -1,0 +1,3145 @@
+{
+  "revision": "pixel-20261109-expressions-v1",
+  "method": "built-in image_gen",
+  "complete": true,
+  "counts": {
+    "tops": 15,
+    "pants": 10,
+    "skirts": 10,
+    "shoes": 10,
+    "accessories": 20,
+    "hair": 20,
+    "skin": 5,
+    "faces": 40
+  },
+  "requested": {
+    "tops": 15,
+    "pants": 10,
+    "skirts": 10,
+    "shoes": 10,
+    "accessories": 20,
+    "hair": 20,
+    "skin": 5,
+    "faces": 40
+  },
+  "items": [
+    {
+      "id": "tops-01",
+      "category": "tops",
+      "name": "奶油衬衫",
+      "path": "/assets/avatar/tops-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        327,
+        494,
+        928,
+        903
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "cd8a24b4752341b213f3e8cc7ff337f90675310fc2056a59c270356944dfae95"
+    },
+    {
+      "id": "tops-02",
+      "category": "tops",
+      "name": "海军外套",
+      "path": "/assets/avatar/tops-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        323,
+        523,
+        931,
+        936
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d26f3700b363bc71272b4c0883ca350e3a3ba8cb466e1c3957a26ba66c3b457b"
+    },
+    {
+      "id": "tops-03",
+      "category": "tops",
+      "name": "莓红马甲",
+      "path": "/assets/avatar/tops-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        323,
+        475,
+        931,
+        853
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "8a8e052a3129501c2cfb9ddf0846c2960165a93edbaadc53f5df9477ad8490c6"
+    },
+    {
+      "id": "tops-04",
+      "category": "tops",
+      "name": "松绿披肩",
+      "path": "/assets/avatar/tops-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        359,
+        620,
+        894,
+        1008
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3802b95269f8943e25ee79b0adcec9f6330e539539a981fcaab588fc6b6f341b"
+    },
+    {
+      "id": "tops-05",
+      "category": "tops",
+      "name": "蜂蜜毛衣",
+      "path": "/assets/avatar/tops-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        340,
+        502,
+        915,
+        861
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e60702d9b7b0962f133a6a53faada9059d93020613d411f4567ed26041156611"
+    },
+    {
+      "id": "tops-06",
+      "category": "tops",
+      "name": "天蓝开衫",
+      "path": "/assets/avatar/tops-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        411,
+        616,
+        844,
+        906
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "fd610b25ad509fbe8327e06326081824b843edc4307122e4fdca629743dbf130"
+    },
+    {
+      "id": "tops-07",
+      "category": "tops",
+      "name": "丁香短袄",
+      "path": "/assets/avatar/tops-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        270,
+        423,
+        984,
+        900
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "17617a00dae7f4426e9b7269fa9e845f9f53afea2dee41787e2de77e21587308"
+    },
+    {
+      "id": "tops-08",
+      "category": "tops",
+      "name": "梅枝上衫",
+      "path": "/assets/avatar/tops-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        340,
+        449,
+        912,
+        842
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "2527c7cf71b4389ae162f116e08060161e640960554e2befd5e89f09817867e7"
+    },
+    {
+      "id": "tops-09",
+      "category": "tops",
+      "name": "侦探短风衣",
+      "path": "/assets/avatar/tops-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        273,
+        450,
+        982,
+        896
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "f498f88f7196f29ce2a8c853017ec9f93254e7c8509ec6be0f814e9546dc8ff3"
+    },
+    {
+      "id": "tops-10",
+      "category": "tops",
+      "name": "雨夜斗篷",
+      "path": "/assets/avatar/tops-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        330,
+        525,
+        924,
+        951
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "84803b7810a05ed69ddcb8abf069d1da06e1635bc54f174d8dc58cf4a65c0e06"
+    },
+    {
+      "id": "tops-11",
+      "category": "tops",
+      "name": "桃粉卫衣",
+      "path": "/assets/avatar/tops-11.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        290,
+        547,
+        965,
+        1028
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "5cc0e71736443915ac34927b420b841a5d31d8041c9cec43f309c28dad82e59b"
+    },
+    {
+      "id": "tops-12",
+      "category": "tops",
+      "name": "橘子背带衣",
+      "path": "/assets/avatar/tops-12.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        273,
+        471,
+        981,
+        915
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "208d8825e1e18c67ba1ac695aff462fe6a9ece364be96e27cc90774f12e1a619"
+    },
+    {
+      "id": "tops-13",
+      "category": "tops",
+      "name": "星夜礼服上衣",
+      "path": "/assets/avatar/tops-13.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        356,
+        603,
+        898,
+        924
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "0af7ade88a7bc9ba7d979edc5f41e9524af1fb4fcfd64734a48222bdfc228241"
+    },
+    {
+      "id": "tops-14",
+      "category": "tops",
+      "name": "月白水手衫",
+      "path": "/assets/avatar/tops-14.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        359,
+        574,
+        895,
+        927
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "8c704823c9a9eee64d39fb95da5184422057f18deec1ec5a1e6e1323c331729d"
+    },
+    {
+      "id": "tops-15",
+      "category": "tops",
+      "name": "黑咖学院服",
+      "path": "/assets/avatar/tops-15.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        362,
+        538,
+        891,
+        881
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "716ab22f054317650700e0598888ff1741dd6a1f05065aabb980dc9b670e883c"
+    },
+    {
+      "id": "pants-01",
+      "category": "pants",
+      "name": "炭灰长裤",
+      "path": "/assets/avatar/pants-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        382,
+        437,
+        873,
+        1044
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "9a70940dcf8d345b1d703a2893cfa554c76c0d411e2e03037f03bb295c00eae4"
+    },
+    {
+      "id": "pants-02",
+      "category": "pants",
+      "name": "棕色短裤",
+      "path": "/assets/avatar/pants-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        348,
+        470,
+        907,
+        851
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "a6e2d321f5d80811a4aaab4445012fd5759f5efc7dbf61c82e5e56de7026a383"
+    },
+    {
+      "id": "pants-03",
+      "category": "pants",
+      "name": "靛蓝牛仔",
+      "path": "/assets/avatar/pants-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        415,
+        531,
+        841,
+        998
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "143a48f81ba519e42b2471e26f8252fcc96b5b7a83244a10fd33513d4432c1ed"
+    },
+    {
+      "id": "pants-04",
+      "category": "pants",
+      "name": "奶油灯笼裤",
+      "path": "/assets/avatar/pants-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        335,
+        481,
+        918,
+        880
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "932a792b5131dc20c12e2f14a4f6b424b15db8108c9fc4bf8e6cd1535b4a2fc8"
+    },
+    {
+      "id": "pants-05",
+      "category": "pants",
+      "name": "森林背带裤",
+      "path": "/assets/avatar/pants-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        386,
+        417,
+        868,
+        971
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "6fbaea53dd207827ab49a2f82ff4fbef34744758a546729b34676f09394bb7db"
+    },
+    {
+      "id": "pants-06",
+      "category": "pants",
+      "name": "浅蓝长裤",
+      "path": "/assets/avatar/pants-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        437,
+        625,
+        817,
+        1059
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d924b5494888b139c6bf509d212a4f66fd752aa9ce1c3a43ece2f8b7d4cca99a"
+    },
+    {
+      "id": "pants-07",
+      "category": "pants",
+      "name": "格纹短裤",
+      "path": "/assets/avatar/pants-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        312,
+        470,
+        942,
+        898
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "35dec87744d25ea7962507e5e9413efa3e8f16f78b9d8dd45cec1e3559e5fefc"
+    },
+    {
+      "id": "pants-08",
+      "category": "pants",
+      "name": "酒红长裤",
+      "path": "/assets/avatar/pants-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        471,
+        642,
+        783,
+        1109
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3f245395e0c73a238bc9e48d6d04944046add49e8455891971e533becaad6533"
+    },
+    {
+      "id": "pants-09",
+      "category": "pants",
+      "name": "紫灰阔腿裤",
+      "path": "/assets/avatar/pants-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        398,
+        589,
+        856,
+        1131
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "83173e1be08034c51efc657a1f988d51365cc6b4107e7047bf5ed1dd50493ced"
+    },
+    {
+      "id": "pants-10",
+      "category": "pants",
+      "name": "米色工装裤",
+      "path": "/assets/avatar/pants-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        380,
+        405,
+        874,
+        1014
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "83b68f205d6665ce3489cf3c5501d2f082fcaca4ae81124ce1245feb0fc9b60c"
+    },
+    {
+      "id": "skirts-01",
+      "category": "skirts",
+      "name": "莓红百褶裙",
+      "path": "/assets/avatar/skirts-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        338,
+        489,
+        917,
+        860
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3e28953d3236969eb46548af902e020de3d1143df990fe1ad9aff649a1fe54b8"
+    },
+    {
+      "id": "skirts-02",
+      "category": "skirts",
+      "name": "月白长裙",
+      "path": "/assets/avatar/skirts-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        313,
+        442,
+        941,
+        1117
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "bc50fffb75b7e09765a28cb58b93b6c26372b0eac074e3ab372fded9997b0636"
+    },
+    {
+      "id": "skirts-03",
+      "category": "skirts",
+      "name": "湖蓝短裙",
+      "path": "/assets/avatar/skirts-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        317,
+        488,
+        937,
+        904
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "9fe8ca38ce2ad0193984089b2166d0da928bb3b343283cef2618f901b5738e70"
+    },
+    {
+      "id": "skirts-04",
+      "category": "skirts",
+      "name": "梅花襦裙",
+      "path": "/assets/avatar/skirts-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        259,
+        412,
+        995,
+        924
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "9920670a64c0424065f69ea2aca167e888a52ada6bedbc71f8223cb5f2d4e1a1"
+    },
+    {
+      "id": "skirts-05",
+      "category": "skirts",
+      "name": "深绿学院裙",
+      "path": "/assets/avatar/skirts-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        337,
+        599,
+        918,
+        954
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "87153ac237d48497057e17f10421d7570df18b409c1b1763ebece9b13d02c32d"
+    },
+    {
+      "id": "skirts-06",
+      "category": "skirts",
+      "name": "丁香纱裙",
+      "path": "/assets/avatar/skirts-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        298,
+        434,
+        956,
+        931
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "14e64639484dbb3aa4cd630d76a0ea09973285aed6b353435cfb768f2ca87936"
+    },
+    {
+      "id": "skirts-07",
+      "category": "skirts",
+      "name": "蜂蜜围裙",
+      "path": "/assets/avatar/skirts-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        295,
+        470,
+        959,
+        967
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "0b9c0e1c311d93bb4649d03b70b6ea30f170bea99d8b930da79e45cb9b8c32d1"
+    },
+    {
+      "id": "skirts-08",
+      "category": "skirts",
+      "name": "靛蓝牛仔裙",
+      "path": "/assets/avatar/skirts-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        286,
+        494,
+        968,
+        956
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "61eb5617ad35318868eb2607d60884c0984a1b428e77f86c94c85773a46ae1f8"
+    },
+    {
+      "id": "skirts-09",
+      "category": "skirts",
+      "name": "玫瑰蕾丝裙",
+      "path": "/assets/avatar/skirts-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        311,
+        536,
+        943,
+        975
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "efb75db7e9bf70cb2bff2302e3353fa076328bc3bece3833f839d4bfdac970df"
+    },
+    {
+      "id": "skirts-10",
+      "category": "skirts",
+      "name": "星夜裙",
+      "path": "/assets/avatar/skirts-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        378,
+        611,
+        877,
+        943
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "824497596c997401f17376e9174063924aef5090ff32f612cdc7f151ed6cec2f"
+    },
+    {
+      "id": "shoes-01",
+      "category": "shoes",
+      "name": "棕色短靴",
+      "path": "/assets/avatar/shoes-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        458,
+        969,
+        797,
+        1170
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "4106ec5a4ba803e616a1f169d5413f51e651db170d68771e52ceaa7f394d8f03"
+    },
+    {
+      "id": "shoes-02",
+      "category": "shoes",
+      "name": "奶白皮鞋",
+      "path": "/assets/avatar/shoes-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        340,
+        642,
+        914,
+        1002
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "4de4144e71b4523a16f99c459b2aca8593ccb126f6c7c5ccdf2cc602cef90145"
+    },
+    {
+      "id": "shoes-03",
+      "category": "shoes",
+      "name": "深灰系带鞋",
+      "path": "/assets/avatar/shoes-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        377,
+        585,
+        877,
+        885
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "bd5fe5af3a812b7c42fa9279b6b35b7b1871825c798ebab2398502e851bf2d89"
+    },
+    {
+      "id": "shoes-04",
+      "category": "shoes",
+      "name": "湖蓝运动鞋",
+      "path": "/assets/avatar/shoes-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        416,
+        942,
+        838,
+        1165
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "da43d25cb52d78f0b3a80724fe8528eaf7bafdaae454e21da14d2e00c650d94b"
+    },
+    {
+      "id": "shoes-05",
+      "category": "shoes",
+      "name": "酒红长靴",
+      "path": "/assets/avatar/shoes-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        320,
+        509,
+        935,
+        1030
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "2c30168da7e7a291df94f49ebac33ec722ec07092f07c3a0c635d8c8092fd9fe"
+    },
+    {
+      "id": "shoes-06",
+      "category": "shoes",
+      "name": "墨绿雨靴",
+      "path": "/assets/avatar/shoes-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        398,
+        681,
+        857,
+        1028
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "ad540e1d9c69a2b5b35922f8ef5cc8674883665776be08f2fc2be4561ce1677d"
+    },
+    {
+      "id": "shoes-07",
+      "category": "shoes",
+      "name": "木棕便鞋",
+      "path": "/assets/avatar/shoes-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        339,
+        620,
+        915,
+        894
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "f60448eaea57334dabef7371c346c3daf7f2f6d8058066e05b43826e8f998ae5"
+    },
+    {
+      "id": "shoes-08",
+      "category": "shoes",
+      "name": "粉色芭蕾鞋",
+      "path": "/assets/avatar/shoes-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        346,
+        578,
+        908,
+        894
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3bf03d5e48d1097f155c5f10ead1089d0c85aba95aa360ea284981825b7af8f9"
+    },
+    {
+      "id": "shoes-09",
+      "category": "shoes",
+      "name": "白色布鞋",
+      "path": "/assets/avatar/shoes-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        349,
+        534,
+        905,
+        845
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "0cef7a86463ed51bb3e3a1db2fc80a5969d1ce183205e41938318f5a73825944"
+    },
+    {
+      "id": "shoes-10",
+      "category": "shoes",
+      "name": "紫色高帮鞋",
+      "path": "/assets/avatar/shoes-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        388,
+        732,
+        867,
+        1027
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "f9847740d42ce6a60566019003e220ca2b4af1dc9d1d637aea7c6f9c67aec1be"
+    },
+    {
+      "id": "hair-01",
+      "category": "hair",
+      "name": "栗色短碎发",
+      "path": "/assets/avatar/hair-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        236,
+        169,
+        1018,
+        860
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "75a54c079233803e998f488b470b37f6af71c8614a19793c6c49efbeb87ef5cc"
+    },
+    {
+      "id": "hair-02",
+      "category": "hair",
+      "name": "乌黑齐短发",
+      "path": "/assets/avatar/hair-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        227,
+        195,
+        1025,
+        862
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "fec2d6f332956a63371153fde5167426206f47fbca8ae590b9e75f1cf84e8baf"
+    },
+    {
+      "id": "hair-03",
+      "category": "hair",
+      "name": "奶茶蘑菇头",
+      "path": "/assets/avatar/hair-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        244,
+        255,
+        1010,
+        880
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3a941c9d81b11f8cc35190b05391d74bbce1c9cbd46b52dd0240b03d8edf77a5"
+    },
+    {
+      "id": "hair-04",
+      "category": "hair",
+      "name": "银白微卷",
+      "path": "/assets/avatar/hair-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        278,
+        251,
+        969,
+        851
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "ab48affc97b7cce091cebc0dffbc7eff6eed878b2c8350035b2f4f052e7b7fb8"
+    },
+    {
+      "id": "hair-05",
+      "category": "hair",
+      "name": "亚麻偏分",
+      "path": "/assets/avatar/hair-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        275,
+        274,
+        976,
+        836
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "2742f4b0cb43ae4d9dbc072fac766c264275f9cf89f8230ef724359cfa41d745"
+    },
+    {
+      "id": "hair-06",
+      "category": "hair",
+      "name": "深棕中长卷",
+      "path": "/assets/avatar/hair-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        223,
+        209,
+        1030,
+        949
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e8462d0e467156d35f28792f4b32cdb833892ae878f62e18a64bf998936a0e5e"
+    },
+    {
+      "id": "hair-07",
+      "category": "hair",
+      "name": "红棕双辫",
+      "path": "/assets/avatar/hair-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        290,
+        111,
+        965,
+        1025
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "a86cdfd310edcc8f7bfacd7de29ec18eef7144f1f68993ec0238c097b8446785"
+    },
+    {
+      "id": "hair-08",
+      "category": "hair",
+      "name": "月白长发",
+      "path": "/assets/avatar/hair-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        328,
+        122,
+        926,
+        1021
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "552f307941fac6e753570a1d29414ed979d80e7430094c07764e51b1d26cb848"
+    },
+    {
+      "id": "hair-09",
+      "category": "hair",
+      "name": "墨黑高马尾",
+      "path": "/assets/avatar/hair-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        250,
+        127,
+        1028,
+        928
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "f400036e00e0478a1d6aee6456e1c6795d129aefeb0c50f1d2cd060968655ca6"
+    },
+    {
+      "id": "hair-10",
+      "category": "hair",
+      "name": "浅粉双马尾",
+      "path": "/assets/avatar/hair-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        123,
+        262,
+        1130,
+        960
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "91912a87789cd92bd2f6d0c5c765d13c593c43fbd508d7707c8441acb6d3a44e"
+    },
+    {
+      "id": "hair-11",
+      "category": "hair",
+      "name": "深蓝低马尾",
+      "path": "/assets/avatar/hair-11.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        257,
+        132,
+        997,
+        1126
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d5f52ca158ed5b9026765473f6df96e7a9ae30caf5a5403d41f858ef0d20f696"
+    },
+    {
+      "id": "hair-12",
+      "category": "hair",
+      "name": "紫灰短卷",
+      "path": "/assets/avatar/hair-12.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        231,
+        266,
+        1015,
+        922
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "f5ffb2b0f99aaad919a9c27fdca7b2849dc6b9328b7319dfbf15a32661c6f385"
+    },
+    {
+      "id": "hair-13",
+      "category": "hair",
+      "name": "金色长卷",
+      "path": "/assets/avatar/hair-13.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        257,
+        73,
+        1004,
+        998
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "0ef4388b2f12358403cc67b250775025496d5ec809f34f0a8d1b0b282e6449ab"
+    },
+    {
+      "id": "hair-14",
+      "category": "hair",
+      "name": "茶棕低盘发",
+      "path": "/assets/avatar/hair-14-v2.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        286,
+        261,
+        968,
+        772
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "bb4939af7677f9fae04b7a9a20bed60be238dcd4e4b9673446f6993b990a5e0f"
+    },
+    {
+      "id": "hair-15",
+      "category": "hair",
+      "name": "乌黑丸子头",
+      "path": "/assets/avatar/hair-15.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        310,
+        83,
+        944,
+        879
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3eaa1a4a7622a1fbeba720ede46d31409fe4572985814067adf7206a9bfb1c9c"
+    },
+    {
+      "id": "hair-16",
+      "category": "hair",
+      "name": "橘红狼尾",
+      "path": "/assets/avatar/hair-16.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        197,
+        143,
+        1058,
+        910
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "87a1771be9193f99453b236dcf731d7085834f213f8dcd80d250ef096ca8fa6f"
+    },
+    {
+      "id": "hair-17",
+      "category": "hair",
+      "name": "青灰侧辫",
+      "path": "/assets/avatar/hair-17.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        276,
+        108,
+        980,
+        1116
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "f9e1fcfb74aee38898217aae9ae62fe8ce2c52b19b65b1eb11fbec14187c1cfb"
+    },
+    {
+      "id": "hair-18",
+      "category": "hair",
+      "name": "玫瑰棕齐刘海",
+      "path": "/assets/avatar/hair-18.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        264,
+        218,
+        990,
+        946
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "9bfd8abc39be2a06ad08cb360a66cd41de3c39cf9194afc7af283421cd4dfcb5"
+    },
+    {
+      "id": "hair-19",
+      "category": "hair",
+      "name": "栗色双丸子",
+      "path": "/assets/avatar/hair-19.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        199,
+        267,
+        1055,
+        912
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "db4b68d4155de634515128fec6bb7098efe394c5ce50d901cda7820f58024419"
+    },
+    {
+      "id": "hair-20",
+      "category": "hair",
+      "name": "黑发半扎",
+      "path": "/assets/avatar/hair-20.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        226,
+        84,
+        1028,
+        1103
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e27ce1d2829517e13898cc0ec76f68e8d35aae47d7fff38d29066f12351fbed4"
+    },
+    {
+      "id": "accessories-01",
+      "category": "accessories",
+      "name": "金框眼镜",
+      "path": "/assets/avatar/accessories-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        258,
+        493,
+        996,
+        780
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "484895b56ca2985340c84cb9b38e48f75a330a1a501dee78aee97579306cbc21"
+    },
+    {
+      "id": "accessories-02",
+      "category": "accessories",
+      "name": "墨框眼镜",
+      "path": "/assets/avatar/accessories-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        209,
+        514,
+        1045,
+        801
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "53437786ffe053345c8899da23df63ec2d34c37ee25fe52f12eece98cacd9fe8"
+    },
+    {
+      "id": "accessories-03",
+      "category": "accessories",
+      "name": "单片镜",
+      "path": "/assets/avatar/accessories-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        452,
+        448,
+        817,
+        908
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3c89b80a97c1d2598b04a18dec64f432e952b91587915f610bf342d077c0ef67"
+    },
+    {
+      "id": "accessories-04",
+      "category": "accessories",
+      "name": "红蝴蝶结",
+      "path": "/assets/avatar/accessories-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        306,
+        392,
+        948,
+        870
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "3018ab7a489ed4b311b4992f9c844477a66297f4d0e4aa3251ca23fd4b49fc81"
+    },
+    {
+      "id": "accessories-05",
+      "category": "accessories",
+      "name": "梅花发簪",
+      "path": "/assets/avatar/accessories-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        444,
+        349,
+        868,
+        753
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "032c75bb935865cea543776357040845aa4910ce698fffd7bdd0f439c429b099"
+    },
+    {
+      "id": "accessories-06",
+      "category": "accessories",
+      "name": "星星发夹",
+      "path": "/assets/avatar/accessories-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        459,
+        520,
+        782,
+        725
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d5663d81f76d6094927367928d4671e6d353b34ed5c5958c798068ad6011cf77"
+    },
+    {
+      "id": "accessories-07",
+      "category": "accessories",
+      "name": "月牙发饰",
+      "path": "/assets/avatar/accessories-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        527,
+        346,
+        795,
+        725
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "0145f27b62d99c9f8128dfbf0d2b0bb1931066cbcd6fbf7ef6a6edb78ee9bd49"
+    },
+    {
+      "id": "accessories-08",
+      "category": "accessories",
+      "name": "奶油贝雷帽",
+      "path": "/assets/avatar/accessories-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        308,
+        408,
+        945,
+        821
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "255eb7ad68b4990970c229f5f02083c4a85995a212ddf7fe060eb4a64f6504ac"
+    },
+    {
+      "id": "accessories-09",
+      "category": "accessories",
+      "name": "侦探帽",
+      "path": "/assets/avatar/accessories-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        278,
+        290,
+        976,
+        777
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "a3853693c120a7d2a75f144ff40d966122bfe3520a00f1e3c16337b53494cbed"
+    },
+    {
+      "id": "accessories-10",
+      "category": "accessories",
+      "name": "小礼帽",
+      "path": "/assets/avatar/accessories-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        446,
+        77,
+        809,
+        396
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d80502ac6c5b03bc4cbd1bd4d739b6b5433509f2108905f416a9675d4022df02"
+    },
+    {
+      "id": "accessories-11",
+      "category": "accessories",
+      "name": "画家帽",
+      "path": "/assets/avatar/accessories-11.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        224,
+        268,
+        1030,
+        761
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "0b1ba8cc8e8031c5bb7da0a952589662a54a17b09caca73198b24f6570a3bd8d"
+    },
+    {
+      "id": "accessories-12",
+      "category": "accessories",
+      "name": "花环",
+      "path": "/assets/avatar/accessories-12.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        276,
+        310,
+        975,
+        671
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "5183fa8f8e4e1726bee2b387914399935fbe11670a3760af9b995b3c55ec590e"
+    },
+    {
+      "id": "accessories-13",
+      "category": "accessories",
+      "name": "松绿围巾",
+      "path": "/assets/avatar/accessories-13.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        385,
+        492,
+        867,
+        965
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "2bf7c3cdacd1fa9e2af32d2cd129fbee26a066331d14c02fd78c6694d9e5563e"
+    },
+    {
+      "id": "accessories-14",
+      "category": "accessories",
+      "name": "格纹围巾",
+      "path": "/assets/avatar/accessories-14.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        390,
+        440,
+        865,
+        989
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "b6e3d0ea73341e221be24ac9bd255ff04a471b7d4d9864bcd318f97a6b602bfb"
+    },
+    {
+      "id": "accessories-15",
+      "category": "accessories",
+      "name": "蓝色领结",
+      "path": "/assets/avatar/accessories-15.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        442,
+        560,
+        812,
+        751
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "eeffb044d6e1d39e219384d2c34da907cd29ac381e67dba6f7c98282f0ed2a55"
+    },
+    {
+      "id": "accessories-16",
+      "category": "accessories",
+      "name": "金色怀表",
+      "path": "/assets/avatar/accessories-16.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        269,
+        381,
+        952,
+        895
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "7d2c83f1aec5637514c81d808d434ace6f70e3215bebd70657853fe8db9f02d0"
+    },
+    {
+      "id": "accessories-17",
+      "category": "accessories",
+      "name": "斜挎书包",
+      "path": "/assets/avatar/accessories-17.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        496,
+        595,
+        802,
+        932
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "7f48b9af54cca27b92fe7ffd148ec32e818f31f6026373b202f62922dfae392e"
+    },
+    {
+      "id": "accessories-18",
+      "category": "accessories",
+      "name": "月亮胸针",
+      "path": "/assets/avatar/accessories-18.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        437,
+        468,
+        817,
+        807
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "66c573c599b44dd5b55e65e0fd0b0023c524c620ea9405ded9e71a4224257579"
+    },
+    {
+      "id": "accessories-19",
+      "category": "accessories",
+      "name": "玫瑰胸花",
+      "path": "/assets/avatar/accessories-19.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        470,
+        573,
+        768,
+        872
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d0b9e7267688a82e8e63d3c39762539ccc3e6b5d2569f1815934297f0da7f718"
+    },
+    {
+      "id": "accessories-20",
+      "category": "accessories",
+      "name": "星夜披领",
+      "path": "/assets/avatar/accessories-20.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        399,
+        571,
+        856,
+        803
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "9c00a47335367e8f83fca2268813f65a7fcd8bd972a513bffed406ed57f732ab"
+    },
+    {
+      "id": "skin-01",
+      "category": "skin",
+      "name": "瓷白",
+      "path": "/assets/avatar/skin-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        355,
+        103,
+        899,
+        1176
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "ed4645d8f6243afd21389c853a547c76617bde09a86e0869746a218a641ae5f1"
+    },
+    {
+      "id": "skin-02",
+      "category": "skin",
+      "name": "杏桃",
+      "path": "/assets/avatar/skin-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        354,
+        102,
+        900,
+        1176
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "d32363998674220e4c8f72b8553614afbe95a07d363e892677af34f6415d27af"
+    },
+    {
+      "id": "skin-03",
+      "category": "skin",
+      "name": "暖麦",
+      "path": "/assets/avatar/skin-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        354,
+        104,
+        900,
+        1175
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e845d48a630dbbdd70bf4db72cc94fb6a64011890eb552c210c9d28a39ea8bbf"
+    },
+    {
+      "id": "skin-04",
+      "category": "skin",
+      "name": "焦糖",
+      "path": "/assets/avatar/skin-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        355,
+        102,
+        900,
+        1176
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "2b317c155d0117d189338a88d71ef841d296b00dac3735edfe1201aec98fb2d1"
+    },
+    {
+      "id": "skin-05",
+      "category": "skin",
+      "name": "深可可",
+      "path": "/assets/avatar/skin-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        354,
+        102,
+        900,
+        1176
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "74d500eda9250bcdfec44411a18775aa95b0c92481b0c440699460f0bf606d32"
+    },
+    {
+      "id": "faces-01",
+      "category": "faces",
+      "name": "平静",
+      "path": "/assets/avatar/faces-01.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        466,
+        561,
+        789,
+        687
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "c365ceabf639f7f8609ce485cf568eaea13700551e3d8dadc00b80f1c1acae01"
+    },
+    {
+      "id": "faces-02",
+      "category": "faces",
+      "name": "微笑",
+      "path": "/assets/avatar/faces-02.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        391,
+        533,
+        864,
+        730
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "2dc237e1e311904311edacc83184bb92fcb6919d0bdfd6bedfe420c1df3ebd53"
+    },
+    {
+      "id": "faces-03",
+      "category": "faces",
+      "name": "开心",
+      "path": "/assets/avatar/faces-03.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        400,
+        631,
+        855,
+        799
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "32e4e7a1187575e088feabbd0a92c4df48d01bcab0a1d562ddbee9fecfc7fa72"
+    },
+    {
+      "id": "faces-04",
+      "category": "faces",
+      "name": "惊讶",
+      "path": "/assets/avatar/faces-04.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        443,
+        579,
+        811,
+        760
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "6efcd23a7bbaae91001c509b6d5cc2114e0af560f6635986c60c16071735ad56"
+    },
+    {
+      "id": "faces-05",
+      "category": "faces",
+      "name": "思考",
+      "path": "/assets/avatar/faces-05.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        399,
+        541,
+        852,
+        821
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "cea07562b31cad64da6de8670361d425be21f9bfc3689d40f8bc0cd1ee87aa33"
+    },
+    {
+      "id": "faces-06",
+      "category": "faces",
+      "name": "害羞",
+      "path": "/assets/avatar/faces-06.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        395,
+        556,
+        858,
+        767
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "895678f24700f77bbbf039efc8c652943d22e50f17768b37280d19b7e3a2badd"
+    },
+    {
+      "id": "faces-07",
+      "category": "faces",
+      "name": "委屈",
+      "path": "/assets/avatar/faces-07.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        409,
+        564,
+        845,
+        815
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "b00b119ca78804b7c7bd1911af04e9ac4ce31c418eefcdfff7b3991b7988a89f"
+    },
+    {
+      "id": "faces-08",
+      "category": "faces",
+      "name": "生气",
+      "path": "/assets/avatar/faces-08.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        446,
+        558,
+        809,
+        780
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "58aa21c86a5c8a84f58afa08deecee373c5d1f3cdaf72c3215053dddb877b8bd"
+    },
+    {
+      "id": "faces-09",
+      "category": "faces",
+      "name": "困困",
+      "path": "/assets/avatar/faces-09.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        396,
+        686,
+        857,
+        843
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "c029df1623a9b28dcbfba5e04ee300e784cfdd6161c3ef9cceaf40fdc067fd32"
+    },
+    {
+      "id": "faces-10",
+      "category": "faces",
+      "name": "眨眼",
+      "path": "/assets/avatar/faces-10.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        434,
+        531,
+        808,
+        802
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "617ce2d71a46013c1fd3a05e6fe8db92c145e465fdfc13bbf30ae8edd66f6e5b"
+    },
+    {
+      "id": "faces-11",
+      "category": "faces",
+      "name": "平静·清朗",
+      "emotion": "平静",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        146,
+        76,
+        295,
+        145
+      ],
+      "anchor": [
+        36.0,
+        42.36241610738255,
+        24,
+        11.114093959731543
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-12",
+      "category": "faces",
+      "name": "平静·猫系",
+      "emotion": "平静",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        90,
+        620,
+        146
+      ],
+      "anchor": [
+        36.0,
+        44.72727272727273,
+        24,
+        8.727272727272727
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-13",
+      "category": "faces",
+      "name": "平静·豆豆",
+      "emotion": "平静",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        809,
+        98,
+        925,
+        142
+      ],
+      "anchor": [
+        38.0,
+        45.758620689655174,
+        20,
+        7.586206896551724
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-14",
+      "category": "faces",
+      "name": "微笑·清朗",
+      "emotion": "微笑",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        147,
+        220,
+        295,
+        292
+      ],
+      "anchor": [
+        36.0,
+        42.32432432432432,
+        24,
+        11.675675675675677
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-15",
+      "category": "faces",
+      "name": "微笑·猫系",
+      "emotion": "微笑",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        234,
+        620,
+        291
+      ],
+      "anchor": [
+        36.0,
+        44.72727272727273,
+        24,
+        8.883116883116882
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-16",
+      "category": "faces",
+      "name": "微笑·豆豆",
+      "emotion": "微笑",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        809,
+        242,
+        925,
+        291
+      ],
+      "anchor": [
+        38.0,
+        45.758620689655174,
+        20,
+        8.448275862068966
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-17",
+      "category": "faces",
+      "name": "开心·清朗",
+      "emotion": "开心",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        149,
+        370,
+        292,
+        444
+      ],
+      "anchor": [
+        36.0,
+        43.46853146853147,
+        24,
+        12.41958041958042
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-18",
+      "category": "faces",
+      "name": "开心·猫系",
+      "emotion": "开心",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        469,
+        381,
+        617,
+        441
+      ],
+      "anchor": [
+        36.0,
+        45.4054054054054,
+        24,
+        9.72972972972973
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-19",
+      "category": "faces",
+      "name": "开心·豆豆",
+      "emotion": "开心",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        799,
+        385,
+        936,
+        441
+      ],
+      "anchor": [
+        38.0,
+        46.24817518248175,
+        20,
+        8.175182481751824
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-20",
+      "category": "faces",
+      "name": "惊讶·清朗",
+      "emotion": "惊讶",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        146,
+        509,
+        295,
+        586
+      ],
+      "anchor": [
+        36.0,
+        43.006711409395976,
+        24,
+        12.402684563758388
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-21",
+      "category": "faces",
+      "name": "惊讶·猫系",
+      "emotion": "惊讶",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        517,
+        620,
+        584
+      ],
+      "anchor": [
+        36.0,
+        44.41558441558442,
+        24,
+        10.441558441558442
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-22",
+      "category": "faces",
+      "name": "惊讶·豆豆",
+      "emotion": "惊讶",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        809,
+        528,
+        925,
+        580
+      ],
+      "anchor": [
+        38.0,
+        45.93103448275862,
+        20,
+        8.965517241379311
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-23",
+      "category": "faces",
+      "name": "思考·清朗",
+      "emotion": "思考",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        146,
+        643,
+        296,
+        716
+      ],
+      "anchor": [
+        36.0,
+        41.12,
+        24,
+        11.68
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-24",
+      "category": "faces",
+      "name": "思考·猫系",
+      "emotion": "思考",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        645,
+        620,
+        717
+      ],
+      "anchor": [
+        36.0,
+        41.61038961038961,
+        24,
+        11.220779220779221
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-25",
+      "category": "faces",
+      "name": "思考·豆豆",
+      "emotion": "思考",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        809,
+        646,
+        927,
+        713
+      ],
+      "anchor": [
+        38.0,
+        41.22033898305085,
+        20,
+        11.35593220338983
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-26",
+      "category": "faces",
+      "name": "害羞·清朗",
+      "emotion": "害羞",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        146,
+        776,
+        297,
+        854
+      ],
+      "anchor": [
+        36.0,
+        41.16556291390729,
+        24,
+        12.397350993377485
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-27",
+      "category": "faces",
+      "name": "害羞·猫系",
+      "emotion": "害羞",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        779,
+        621,
+        853
+      ],
+      "anchor": [
+        36.0,
+        41.806451612903224,
+        24,
+        11.458064516129033
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-28",
+      "category": "faces",
+      "name": "害羞·豆豆",
+      "emotion": "害羞",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        800,
+        802,
+        936,
+        850
+      ],
+      "anchor": [
+        38.0,
+        45.5,
+        20,
+        7.0588235294117645
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-29",
+      "category": "faces",
+      "name": "委屈·清朗",
+      "emotion": "委屈",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        145,
+        908,
+        297,
+        981
+      ],
+      "anchor": [
+        36.0,
+        42.1578947368421,
+        24,
+        11.526315789473683
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-30",
+      "category": "faces",
+      "name": "委屈·猫系",
+      "emotion": "委屈",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        912,
+        620,
+        981
+      ],
+      "anchor": [
+        36.0,
+        42.85714285714286,
+        24,
+        10.753246753246753
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-31",
+      "category": "faces",
+      "name": "委屈·豆豆",
+      "emotion": "委屈",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        810,
+        933,
+        925,
+        977
+      ],
+      "anchor": [
+        38.0,
+        45.91304347826087,
+        20,
+        7.6521739130434785
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-32",
+      "category": "faces",
+      "name": "生气·清朗",
+      "emotion": "生气",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        145,
+        1033,
+        297,
+        1105
+      ],
+      "anchor": [
+        36.0,
+        41.36842105263158,
+        24,
+        11.368421052631579
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-33",
+      "category": "faces",
+      "name": "生气·猫系",
+      "emotion": "生气",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        465,
+        1047,
+        622,
+        1103
+      ],
+      "anchor": [
+        36.0,
+        43.71974522292994,
+        24,
+        8.560509554140127
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-34",
+      "category": "faces",
+      "name": "生气·豆豆",
+      "emotion": "生气",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        810,
+        1032,
+        926,
+        1101
+      ],
+      "anchor": [
+        38.0,
+        40.58620689655172,
+        20,
+        11.896551724137932
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-35",
+      "category": "faces",
+      "name": "困困·清朗",
+      "emotion": "困困",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        145,
+        1168,
+        297,
+        1240
+      ],
+      "anchor": [
+        36.0,
+        42.94736842105263,
+        24,
+        11.368421052631579
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-36",
+      "category": "faces",
+      "name": "困困·猫系",
+      "emotion": "困困",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        463,
+        1186,
+        624,
+        1238
+      ],
+      "anchor": [
+        36.0,
+        45.91304347826087,
+        24,
+        7.751552795031056
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-37",
+      "category": "faces",
+      "name": "困困·豆豆",
+      "emotion": "困困",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        796,
+        1188,
+        936,
+        1235
+      ],
+      "anchor": [
+        38.0,
+        46.285714285714285,
+        20,
+        6.7142857142857135
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-38",
+      "category": "faces",
+      "name": "眨眼·清朗",
+      "emotion": "眨眼",
+      "style": "清朗",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        147,
+        1306,
+        295,
+        1378
+      ],
+      "anchor": [
+        36.0,
+        42.0,
+        24,
+        11.675675675675677
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-39",
+      "category": "faces",
+      "name": "眨眼·猫系",
+      "emotion": "眨眼",
+      "style": "猫系",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        466,
+        1317,
+        621,
+        1375
+      ],
+      "anchor": [
+        36.0,
+        43.9741935483871,
+        24,
+        8.980645161290322
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    },
+    {
+      "id": "faces-40",
+      "category": "faces",
+      "name": "眨眼·豆豆",
+      "emotion": "眨眼",
+      "style": "豆豆",
+      "path": "/assets/avatar/faces-variants-v1.png",
+      "size": [
+        1086,
+        1448
+      ],
+      "bounds": [
+        810,
+        1328,
+        936,
+        1375
+      ],
+      "anchor": [
+        38.0,
+        45.61904761904762,
+        20,
+        7.46031746031746
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "e868aded925b41edbeb1648a95801469bbcda5c73431b25927c4667fcee4a624"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "crane_hall",
+      "name": "鹤影朱阁",
+      "category": "emotion",
+      "path": "/assets/rooms/crane_hall.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "974450a78142ab5732c229f24509082137893ae901a8ca46ff45ff0fdda1f24f"
+    },
+    {
+      "id": "plum_lantern",
+      "name": "梅灯小院",
+      "category": "emotion",
+      "path": "/assets/rooms/plum_lantern.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "a9cd5375c93f62f8647c8b9482bc04ed66ef10e9849344d8fd04bac70d8db30a"
+    },
+    {
+      "id": "rain_tea",
+      "name": "雨夜茶室",
+      "category": "emotion",
+      "path": "/assets/rooms/rain_tea.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "4c02809b83e89bcd7b53174f3284bf1a7bb55ba838cb93a8031e68731497bf5b"
+    },
+    {
+      "id": "cream_lounge",
+      "name": "奶油会客厅",
+      "category": "joy",
+      "path": "/assets/rooms/cream_lounge.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "72e9b09c016e8ef6553537b0d1332f7636bc7c394548ab72362e0b64183de3b2"
+    },
+    {
+      "id": "orange_game",
+      "name": "橘子游戏屋",
+      "category": "joy",
+      "path": "/assets/rooms/orange_game.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "a1b473a9c4cd24b2edd2703da03d88d6e36dd0af903e3fbd3bd17bdd855ae57b"
+    },
+    {
+      "id": "star_party",
+      "name": "星星派对屋",
+      "category": "joy",
+      "path": "/assets/rooms/star_party.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "885f21deb2d329f66b0ab833503e6f56f5293ad735074885166e1b9c3bfbd063"
+    },
+    {
+      "id": "mist_manor",
+      "name": "雾林旧宅",
+      "category": "horror",
+      "path": "/assets/rooms/mist_manor.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "f10b8992868bcebf83151c28708f26f99707c4f849a3680d8e93b42c23f248bc"
+    },
+    {
+      "id": "crimson_banquet",
+      "name": "绯幕夜宴",
+      "category": "horror",
+      "path": "/assets/rooms/crimson_banquet.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "bf228c2a7c806197171b4b4e25041e77a491eeb892a9c7f126dac3c743e18cad"
+    },
+    {
+      "id": "green_cellar",
+      "name": "幽灯地窖",
+      "category": "horror",
+      "path": "/assets/rooms/green_cellar.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "ac24593e0cabe4c12770042ea1fe5691f302eec98d9c0ca40de446b6e542cf9b"
+    },
+    {
+      "id": "moon_library",
+      "name": "月下书房",
+      "category": "mystery",
+      "path": "/assets/rooms/moon_library.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "efa6d8010b12076bb8191038a85cfc161e41cb890a7a86e968687a6c81c4c0a0"
+    },
+    {
+      "id": "clock_detective",
+      "name": "钟表侦探社",
+      "category": "mystery",
+      "path": "/assets/rooms/clock_detective.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "78fafc9f3e1f68e28db3148043cb5494a2466f34c9c1dc61b7505894bf9f9b32"
+    },
+    {
+      "id": "emerald_mansion",
+      "name": "翡翠公馆",
+      "category": "mystery",
+      "path": "/assets/rooms/emerald_mansion.png",
+      "size": [
+        1536,
+        1024
+      ],
+      "bounds": [
+        0,
+        0,
+        1536,
+        1024
+      ],
+      "alpha_min": 255,
+      "alpha_max": 255,
+      "sha256": "d093de82040afda8ec0176a83716d75e7fb27d7420a5708c61de0e1721ad4c2d"
+    }
+  ],
+  "base": {
+    "id": "base",
+    "path": "/assets/avatar/base.png",
+    "category": "base",
+    "size": [
+      1254,
+      1254
+    ],
+    "bounds": [
+      356,
+      103,
+      898,
+      1175
+    ],
+    "alpha_min": 0,
+    "alpha_max": 255,
+    "sha256": "56ea37d82e1381f2fd329b46566aa71d25e6a3599974360f4803057b9f5b4301"
+  },
+  "heads": [
+    {
+      "id": "head-01",
+      "path": "/assets/avatar/skin-01-v2.png",
+      "category": "head",
+      "anchor": [
+        27,
+        20,
+        42,
+        45
+      ],
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        450,
+        206,
+        804,
+        590
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "801aa18ba23e745f57f075271342dbfcf298ca52c3b2f9b57cba8ace70e28db9"
+    },
+    {
+      "id": "head-02",
+      "path": "/assets/avatar/skin-02-v2.png",
+      "category": "head",
+      "anchor": [
+        27,
+        20,
+        42,
+        45
+      ],
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        450,
+        206,
+        804,
+        590
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "45e24563cae349a79278de6b8054dba1a8d10deb1bfb2ee5d1c93246b03aaa61"
+    },
+    {
+      "id": "head-03",
+      "path": "/assets/avatar/skin-03-v2.png",
+      "category": "head",
+      "anchor": [
+        27,
+        20,
+        42,
+        45
+      ],
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        450,
+        206,
+        804,
+        590
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "1369de4d128f727c2ab0fd78d4a98238571445f165b7c8190f3590a7e340690e"
+    },
+    {
+      "id": "head-04",
+      "path": "/assets/avatar/skin-04-v2.png",
+      "category": "head",
+      "anchor": [
+        27,
+        20,
+        42,
+        45
+      ],
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        450,
+        206,
+        804,
+        590
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "83544fddf5d07087260d80701e6b78d4945a1a61f4abf09d4e132cd53bbc5f96"
+    },
+    {
+      "id": "head-05",
+      "path": "/assets/avatar/skin-05-v2.png",
+      "category": "head",
+      "anchor": [
+        27,
+        20,
+        42,
+        45
+      ],
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        450,
+        206,
+        804,
+        590
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "cd90ba9f5d0a6f2310ca615e5dc3e8581fd4010c35c89f865eabc13c6e3a9798"
+    }
+  ],
+  "props": [
+    {
+      "id": "armchair",
+      "path": "/assets/armchair.png",
+      "category": "prop",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        270,
+        62,
+        984,
+        1179
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "ec5eed86cc99a2801eb0a30eb2ee59af455647d2c80c526137b10c0dc4a4072e"
+    },
+    {
+      "id": "round-table",
+      "path": "/assets/round-table.png",
+      "category": "prop",
+      "size": [
+        1254,
+        1254
+      ],
+      "bounds": [
+        121,
+        111,
+        1116,
+        1159
+      ],
+      "alpha_min": 0,
+      "alpha_max": 255,
+      "sha256": "ed19b102239cd774747361bfcce3c1650d6a4d4ae91bcb7845950aac34114971"
+    }
+  ]
+}

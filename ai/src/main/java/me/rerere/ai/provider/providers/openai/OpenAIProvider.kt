@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -32,6 +33,7 @@ import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.toHeaders
 import me.rerere.common.http.await
+import me.rerere.common.http.awaitAndUse
 import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -55,6 +57,15 @@ class OpenAIProvider(
     // Ordinary API connections do not need the separate account store (or its disk setup).
     private val planAccounts by lazy { context?.let { me.rerere.ai.provider.chatgpt.ChatGptPlanAccounts(it) } }
     private val planAPI by lazy { planAccounts?.let(::ChatGptPlanAPI) }
+    // Account reads must not queue behind long chat / image / tool requests.
+    // Preserve the configured proxy, TLS and interceptors; only isolate scheduling.
+    private val balanceClient by lazy {
+        client.newBuilder().dispatcher(okhttp3.Dispatcher().apply {
+            maxRequests = 4
+            maxRequestsPerHost = 2
+        }).followRedirects(false).followSslRedirects(false)
+            .callTimeout(20, java.util.concurrent.TimeUnit.SECONDS).build()
+    }
 
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
@@ -89,39 +100,41 @@ class OpenAIProvider(
             }
         }
 
-    override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
-        require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐用量请到 ChatGPT 设置 → Usage 查看。" }
-        providerSetting.retiredSiliconFlowBalanceNotice()?.let { error(it) }
-        require(providerSetting.apiKey.isNotBlank()) { "未配置此连接的密钥" }
-        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
-        val balanceClient = client.newBuilder().followRedirects(false).followSslRedirects(false)
-            .callTimeout(20, java.util.concurrent.TimeUnit.SECONDS).build()
-        var url = balanceUrl(providerSetting.baseUrl, providerSetting.balanceOption.apiPath)
-        var fallback = false
-        while (true) {
-            val request = Request.Builder().url(url).header("Authorization", "Bearer $key").get().build()
-            balanceClient.newCall(request).await().use { response ->
-                val next = if (!fallback) legacyBalanceFallback(providerSetting, response.code) else null
-                if (next != null) {
-                    // Only the historical default /credits 404 has this same-origin compatibility path.
-                    url = next
-                    fallback = true
-                } else {
-                    if (!response.isSuccessful) balanceHttpFailure(response.code)
-                    require(response.body.contentLength() <= 65_536) { "余额接口返回异常" }
-                    val source = response.body.source()
-                    require(!source.request(65_537)) { "余额接口返回异常" }
-                    val bytes = source.buffer.readByteArray()
-                    val bodyJson = try { json.parseToJsonElement(bytes.decodeToString()).jsonObject }
-                        catch (_: Exception) { error("余额接口返回格式不正确") }
-                    return@withContext try {
-                        formatProviderBalance(bodyJson, providerSetting.balanceOption.resultPath,
-                            fallback || providerSetting.balanceOption.resultPath == "balance_infos[0].total_balance")
-                    } catch (_: Exception) { error("余额接口未返回可用金额") }
+    override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withTimeout(20_000L) {
+        withContext(Dispatchers.IO) {
+            require(providerSetting.chatGptAccountId == null) { "ChatGPT 套餐用量请到 ChatGPT 设置 → Usage 查看。" }
+            providerSetting.retiredSiliconFlowBalanceNotice()?.let { error(it) }
+            require(providerSetting.apiKey.isNotBlank()) { "未配置此连接的密钥" }
+            val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+            var url = balanceUrl(providerSetting.baseUrl, providerSetting.balanceOption.apiPath)
+            var fallback = false
+            while (true) {
+                val request = Request.Builder().url(url).header("Authorization", "Bearer $key").get().build()
+                val balance = balanceClient.newCall(request).awaitAndUse { response ->
+                    val next = if (!fallback) legacyBalanceFallback(providerSetting, response.code) else null
+                    if (next != null) {
+                        // Only the historical default /credits 404 has this same-origin compatibility path.
+                        url = next
+                        fallback = true
+                        null
+                    } else {
+                        if (!response.isSuccessful) balanceHttpFailure(response.code)
+                        require(response.body.contentLength() <= 65_536) { "余额接口返回异常" }
+                        val source = response.body.source()
+                        require(!source.request(65_537)) { "余额接口返回异常" }
+                        val bytes = source.buffer.readByteArray()
+                        val bodyJson = try { json.parseToJsonElement(bytes.decodeToString()).jsonObject }
+                            catch (_: Exception) { error("余额接口返回格式不正确") }
+                        try {
+                            formatProviderBalance(bodyJson, providerSetting.balanceOption.resultPath,
+                                fallback || providerSetting.balanceOption.resultPath == "balance_infos[0].total_balance")
+                        } catch (_: Exception) { error("余额接口未返回可用金额") }
+                    }
                 }
+                if (balance != null) return@withContext balance
             }
+            @Suppress("UNREACHABLE_CODE") error("余额暂不可用")
         }
-        @Suppress("UNREACHABLE_CODE") error("余额暂不可用")
     }
 
     override suspend fun streamText(

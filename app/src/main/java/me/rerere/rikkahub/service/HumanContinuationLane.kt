@@ -81,7 +81,7 @@ internal fun prepareHumanContinuationRegeneration(
 
 /** A human send is a new turn, NOT an acknowledgement/replay of an interrupted turn.
  * This lane never waits for the old job, journal, queue pause file, or database writer.
- * Its separate snapshot prevents a late old producer/finalizer from replacing new input.
+ * A session writer fence prevents an old producer/finalizer from replacing new input.
  * Persistence is an independent best-effort observer, never a generation prerequisite.
  */
 internal class HumanContinuationLane(
@@ -94,8 +94,10 @@ internal class HumanContinuationLane(
     val checkpointId: kotlin.uuid.Uuid = kotlin.uuid.Uuid.random(),
     private val checkpoint: (suspend (Conversation) -> Boolean)? = null,
     val contextStore: HumanContinuationContextStore? = null,
+    sharedState: MutableStateFlow<Conversation>? = null,
 ) {
-    val state = MutableStateFlow(initial)
+    // Main chat, drawer and continuation share the same authoritative state.
+    val state = sharedState?.also { it.value = initial } ?: MutableStateFlow(initial)
     val job = MutableStateFlow<Job?>(null)
     val notice = MutableStateFlow("已启用独立续聊，旧错误不阻挡新消息。正在核对保存状态。")
     val contextNotice = MutableStateFlow("恢复通道保留角色设定和可读聊天；暂不自动整理历史或自动注入本机长期记忆。")
@@ -119,7 +121,16 @@ internal class HumanContinuationLane(
     private var manualContextInProgress = false
     private val streamEnrichments = mutableListOf<me.rerere.rikkahub.data.ai.checkpoint.ContinuationStreamEnrichment>()
     private val selectedBranches = mutableMapOf<kotlin.uuid.Uuid, kotlin.uuid.Uuid>()
+    private val inputReceipts = mutableMapOf<kotlin.uuid.Uuid, Pair<UIMessage, (Boolean) -> Unit>>()
     private var committedInjections: me.rerere.rikkahub.data.model.ConversationInjectionSelection? = null
+    private var committedPrompt: me.rerere.rikkahub.data.model.OrbisConversationPrompt? = null
+
+    @Synchronized fun acceptPrompt(prompt: me.rerere.rikkahub.data.model.OrbisConversationPrompt) {
+        committedPrompt = prompt
+        state.value = state.value.copy(orbisPrompt = prompt)
+        revision++
+        requestSave()
+    }
 
     /** Room committed only these columns; retain live messages and protect against old streams. */
     @Synchronized fun acceptInjectionSelection(selection: me.rerere.rikkahub.data.model.ConversationInjectionSelection) {
@@ -163,6 +174,7 @@ internal class HumanContinuationLane(
         }
         for (refresh in manualMetadataRefreshes) projected = refresh.project(projected)
         projected = committedInjections?.applyTo(projected) ?: projected
+        committedPrompt?.let { projected = projected.copy(orbisPrompt = it) }
         return projected.takeIf { it.compactionEpoch == state.value.compactionEpoch }?.let(::applyBranchSelection)
     }
 
@@ -383,6 +395,8 @@ internal class HumanContinuationLane(
     /** The caller separately verifies disk history, no journal and no old session job while
      * holding the history edit mutex. This is a CAS handoff, never a queue resume or replay.
      */
+    @Synchronized internal fun communityIdleAndSaved(): Boolean = idleAndSaved() && persistenceWarning.value == null
+
     private fun idleAndSaved(allowPendingApprovals: Boolean = false): Boolean = !retired && !manualContextInProgress && savedRevision == revision && persistenceJob == null && checkpointJob == null &&
         activeJobs.none { !it.isCompleted } && job.value == null && workshopReservation == null &&
         sentinelReservation == null && workshopReturns.isEmpty() &&
@@ -404,7 +418,10 @@ internal class HumanContinuationLane(
     @Synchronized fun acceptRecall(messageId: kotlin.uuid.Uuid, role: me.rerere.ai.core.MessageRole) {
         state.value = state.value.withMessageRecall(messageId, role)
         revision++
-        requestCheckpoint()
+        // Room already contains the recall flag, but this revision also needs a verified
+        // persistence receipt. A checkpoint alone leaves savedRevision behind forever
+        // when the lane is idle, preventing subsequent history edits until another send.
+        requestSave()
     }
 
     @Synchronized fun publish(owner: Long, conversation: Conversation) {
@@ -416,9 +433,15 @@ internal class HumanContinuationLane(
     }
 
     @Synchronized fun send(input: UIMessage?, answer: Boolean = true,
+        onInputPersisted: ((Boolean) -> Unit)? = null,
         generate: suspend (Conversation, Long, (Conversation) -> Unit) -> Unit,
     ): Job {
         check(!retired) { "续聊通道已交回历史管理，请重新发送。" }
+        if (onInputPersisted != null) {
+            requireNotNull(input)
+            check(input.id !in inputReceipts)
+            inputReceipts[input.id] = input to onInputPersisted
+        }
         val owner = ++turn // Fence BEFORE cancellation: cancellation cleanup may publish late.
         workshopReservation = null
         sentinelReservation = null
@@ -498,13 +521,26 @@ internal class HumanContinuationLane(
         val snapshot = state.value
         val savingRevision = revision
         val writer = scope.launch(start = CoroutineStart.LAZY) {
+            var failure: Exception? = null
             val saved = try { persist(snapshot) }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { false }
+            catch (error: Exception) { failure = error; false }
+            failure?.let(onFailure)
             synchronized(this@HumanContinuationLane) {
+                // A later stream revision does not invalidate a committed input receipt.
+                // Check the exact message, and never treat a checkpoint-only copy as Room.
+                val attempted = inputReceipts.filter { (id, receipt) ->
+                    snapshot.currentMessages.any { it.id == id && it.role == receipt.first.role && it.parts == receipt.first.parts }
+                }
+                // A busy writer is pending, not a failed send. Keep the receipt until a
+                // real commit or actual storage error; never resubmit the model request.
+                if (saved || failure != null) attempted.forEach { (id, receipt) ->
+                    if (saved) inputReceipts.remove(id)
+                    receipt.second(saved)
+                }
                 if (savingRevision == revision) {
                     savedRevision = if (saved) savingRevision else -1L
-                    failedRevision = if (saved) -1L else savingRevision
+                    failedRevision = if (failure != null) savingRevision else -1L
                     refreshPersistenceNotice()
                 }
             }

@@ -28,6 +28,7 @@ class OrbisCompanionSpacesStore internal constructor(
     // Android may expose the trusted app/cache root through /data/data or /data/user/0.
     // Resolve only that host-owned base. The namespace, owner and files below it must not be links.
     private val root = resolveCompanionOwnerRoot(root)
+    internal val ownerId: String get() = root.name
     private val lock = locks.computeIfAbsent(this.root.path) { Any() }
     private val changes = signals.computeIfAbsent(this.root.path) { MutableStateFlow(0L) }
     val revisions: StateFlow<Long> get() = changes
@@ -108,6 +109,17 @@ class OrbisCompanionSpacesStore internal constructor(
     }
 
     fun snapshot(): CompanionSpaceSnapshot = synchronized(lock) { read() }
+
+    /** Human-confirmed market delivery: stable ID makes an interrupted preparation recoverable. */
+    internal fun prepareMarketStory(id: String, title: String, prompt: String): SpaceStory = synchronized(lock) {
+        require(CompanionSpaceLimits.id(id) && title.isNotBlank() && prompt.isNotBlank())
+        val state = read()
+        state.stories.firstOrNull { it.id == id }?.let {
+            require(it.title == title && it.prompt == prompt) { "space_revision_changed" }; return@synchronized it
+        }
+        val item = SpaceStory(id, title, prompt, createdAt = now(), updatedAt = now())
+        commit(state.copy(stories = state.stories + item)); item
+    }
 
     /** Human owns the premise; an AI can only change the separate body. */
     fun saveHumanStory(title: String, prompt: String, paper: String, id: String? = null, expectedRevision: Int? = null): SpaceStory = synchronized(lock) {
@@ -214,6 +226,20 @@ class OrbisCompanionSpacesStore internal constructor(
         val state = read(); require(state.media.any { it.id == mediaId }) { "space_not_found" }
         val photo = SpacePhoto(uuid(), mediaId, note, createdAt = now())
         commit(state.copy(photos = state.photos + photo)); photo
+    }
+
+    /** Store an independent copy. Replaying the same selection never adds another photo or overwrites its note. */
+    internal fun importChatPhoto(bytes: ByteArray, imageCode: String, note: String): Pair<SpacePhoto, Boolean> = synchronized(lock) {
+        require(imageCode.matches(Regex("orbisimg_[0-9a-f]{64}"))) { "space_arguments_invalid" }
+        CompanionSpaceLimits.text(note, 10_000)
+        val state = read()
+        state.photos.firstOrNull { it.sourceImageCode == imageCode }?.let { return@synchronized it to true }
+        require(state.photos.size < CompanionSpaceLimits.ITEMS) { "space_media_full" }
+        val media = addMedia(bytes, spaceImageMime(bytes) ?: error("space_image_invalid"))
+        val photo = SpacePhoto(uuid(), media.id, note, createdAt = now(), sourceImageCode = imageCode)
+        val current = read()
+        commit(current.copy(photos = current.photos + photo))
+        photo to false
     }
 
     fun setPhotoNote(id: String, note: String, expectedRevision: Int): SpacePhoto = synchronized(lock) {
@@ -337,6 +363,10 @@ fun validateCompanionSpaceBackup(root: File) {
 }
 
 fun companionSpaceError(failure: Exception): String = when (failure.message) {
+    "space_chat_unavailable" -> "当前没有可用的聊天图片来源，请在所属助手的普通对话里使用。"
+    "space_chat_image_unknown" -> "这不是当前对话可收藏的图片码，请用 chat_images 重新选图；视频帧仍请用视频保留工具。"
+    "chat_image_scope_changed", "chat_image_source_changed", "chat_image_code_unknown" -> "对话分支或原图已变化，请在当前对话重新用 chat_images 选图。"
+    "space_chat_image_local_required" -> "这张原图未保存在本机或已经失效，暂时无法收藏；可请人类重新发送图片。"
     "space_revision_changed" -> "内容刚刚发生了更新，请重新打开后再保存；你的编辑没有覆盖新内容。"
     "space_not_found", "space_reply_not_found" -> "这条内容已不存在，或不属于当前助手。请刷新后重试。"
     "space_video_ten_photo_limit" -> "本次通话已经保留 10 张照片，删除照片不会重置此额度。"

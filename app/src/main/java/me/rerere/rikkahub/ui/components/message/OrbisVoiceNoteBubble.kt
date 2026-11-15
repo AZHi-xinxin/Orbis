@@ -6,6 +6,11 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.saveable.rememberSaveable
+import me.rerere.rikkahub.data.orbis.voice.VoiceNoteExport
+import me.rerere.rikkahub.data.orbis.voice.ExportedVoice
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -172,6 +177,25 @@ internal fun OrbisVoiceNoteBubble(
     var detailsVisible by remember(key) { mutableStateOf(false) }
     var transcriptVisible by remember(key) { mutableStateOf(false) }
     var error by remember(key) { mutableStateOf<String?>(null) }
+    val exportScope = rememberCoroutineScope()
+    var exporting by remember(key) { mutableStateOf(false) }
+    var exportPath by rememberSaveable(key) { mutableStateOf<String?>(null) }
+    var exportTemporary by rememberSaveable(key) { mutableStateOf(false) }
+    var saved by remember(key) { mutableStateOf(false) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/mpeg")) { uri ->
+        val path = exportPath
+        exportPath = null
+        if (path != null) {
+            val prepared = ExportedVoice(File(path), exportTemporary)
+            if (uri == null) { VoiceNoteExport.discard(context, prepared); exporting = false }
+            else exportScope.launch {
+                try { VoiceNoteExport.save(context, prepared, uri); saved = true }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (e: Exception) { error = "保存未完成：" + (e.message ?: "请重新选择保存位置") }
+                finally { VoiceNoteExport.discard(context, prepared); exporting = false }
+            }
+        } else exporting = false
+    }
     val active by VoiceNotePlayback.active.collectAsState()
     val duration = audio.voiceNoteDurationMs()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -211,12 +235,29 @@ internal fun OrbisVoiceNoteBubble(
                 }
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text(if (exporting) "正在准备 MP3…" else "保存为 MP3") }, enabled = !exporting,
+                    onClick = {
+                        menu = false; exporting = true; error = null; saved = false
+                        exportScope.launch {
+                            var prepared: ExportedVoice? = null
+                            try {
+                                prepared = VoiceNoteExport.prepare(context, audio.url)
+                                exportPath = prepared.file.path; exportTemporary = prepared.temporary
+                                exportLauncher.launch("Orbis-语音-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date()) + ".mp3")
+                                prepared = null // The document picker now owns cleanup.
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (e: Exception) { error = "暂时无法导出：" + (e.message ?: "请稍后再试"); exporting = false }
+                            finally { prepared?.let { VoiceNoteExport.discard(context,it) } }
+                        }
+                    })
                 DropdownMenuItem(text = { Text(if (transcriptVisible) "收起文字" else "转文字") },
                     onClick = { menu = false; transcriptVisible = !transcriptVisible })
                 if (details.isNotEmpty()) DropdownMenuItem(text = { Text("生成详情") },
                     onClick = { menu = false; detailsVisible = true })
             }
         }
+        if (exporting) Text("正在准备并保存原语音…", style = MaterialTheme.typography.bodySmall)
+        if (saved) Text("MP3 已保存到你选择的位置", style = MaterialTheme.typography.bodySmall)
         if (transcriptVisible) Text(audio.voiceNoteTranscript().ifBlank { "这条语音没有保存转写文字。" },
             style = MaterialTheme.typography.bodyMedium)
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }

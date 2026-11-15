@@ -173,6 +173,7 @@ private fun ModelSettingsPage(settings: Settings, vm: SettingVM, contentPadding:
                 onSelect = { vm.updateSettings(settings.copy(ocrModelId = it.id)) },
             )
         }
+        item { me.rerere.rikkahub.ui.pages.setting.components.DeepSeekAttachmentConfiguration(settings.deepSeekAttachments) { vm.updateSettings(settings.copy(deepSeekAttachments = it)) } }
         item {
             ModelSettingItem(
                 title = stringResource(R.string.setting_model_page_compress_model),

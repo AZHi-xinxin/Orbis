@@ -233,6 +233,31 @@ class FilesManager(
         return newUris
     }
 
+    /** Persist the original encoded bytes before a tool receipt reaches the history budget.
+     * No bitmap re-encoding: a local reference must identify exactly the image the tool returned.
+     */
+    suspend fun localizeInlineImages(parts: List<UIMessagePart>): List<UIMessagePart> =
+        withContext(Dispatchers.IO) {
+            localizeInlineImageParts(parts) { data ->
+                val match = Regex("^data:(image/(?:png|jpeg|webp|gif));base64,").find(data)
+                    ?: error("inline_image_format_invalid")
+                check(data.length <= 24 * 1024 * 1024) { "inline_image_size_limit" }
+                val bytes = java.util.Base64.getDecoder().decode(data.substring(match.value.length))
+                check(bytes.isNotEmpty() && bytes.size <= 16 * 1024 * 1024) { "inline_image_size_limit" }
+                val mime = match.groupValues[1]
+                val extension = if (mime == "image/jpeg") "jpg" else mime.substringAfter('/')
+                val saved = saveNewManagedFile(FileFolders.UPLOAD, "tool-image.$extension", mime) { target ->
+                    target.outputStream().use { output ->
+                        output.write(bytes)
+                        output.fd.sync()
+                    }
+                }
+                val file = context.filesDir.resolve(saved.relativePath)
+                check(file.readBytes().contentEquals(bytes)) { "inline_image_readback_failed" }
+                file.toUri().toString()
+            }
+        }
+
     @OptIn(ExperimentalEncodingApi::class)
     suspend fun convertBase64ImagePartToLocalFile(message: UIMessage): UIMessage =
         withContext(Dispatchers.IO) {

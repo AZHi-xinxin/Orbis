@@ -33,6 +33,7 @@ data class SpaceMedia(val id: String, val filename: String, val mime: String, va
 data class SpacePhoto(
     val id: String, val mediaId: String, val note: String = "", val revision: Int = 1,
     val createdAt: Long, val sourceCallId: String? = null, val sourceFrameId: String? = null,
+    val sourceImageCode: String? = null,
 )
 
 /** Retention receipts outlive deleting a photo: deleting must not reset the per-call allowance. */

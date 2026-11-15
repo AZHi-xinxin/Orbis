@@ -51,6 +51,14 @@ class HumanContinuationContextTest {
     }
 
     @Test fun `late durable four character chunk merges all continuation turns and permits compaction`() = runTest {
+        assertLateDurableChunkCanCompact(completed = false)
+    }
+
+    @Test fun `reopened old lane with final text and usage retains newer turns and permits compaction`() = runTest {
+        assertLateDurableChunkCanCompact(completed = true)
+    }
+
+    private suspend fun TestScope.assertLateDurableChunkCanCompact(completed: Boolean) {
         val oldStore = Store(); val continuationStore = Store()
         val old = GenerationCheckpointJournal(oldStore)
         val room = base().let { it.copy(messageNodes = it.messageNodes.take(1)) }
@@ -60,16 +68,20 @@ class HumanContinuationContextTest {
         val reply = UIMessage.assistant("").copy(parts = tools +
             me.rerere.ai.ui.UIMessagePart.Reasoning("reasoning before last chunk", finishedAt = null))
         val visible = room.copy(messageNodes = room.messageNodes + reply.toMessageNode())
+        val lastReasoning = (reply.parts.last() as me.rerere.ai.ui.UIMessagePart.Reasoning).copy(
+            reasoning = "reasoning before last chunktail")
         val full = visible.copy(messageNodes = room.messageNodes + visible.messageNodes.last().copy(messages = listOf(
-            reply.copy(parts = tools + (reply.parts.last() as me.rerere.ai.ui.UIMessagePart.Reasoning).copy(
-                reasoning = "reasoning before last chunktail")))))
+            reply.copy(parts = tools + lastReasoning + if (completed) listOf(me.rerere.ai.ui.UIMessagePart.Text("final answer")) else emptyList(),
+                finishedAt = if (completed) reply.createdAt else null,
+                usage = if (completed) me.rerere.ai.core.TokenUsage(promptTokens = 50, completionTokens = 12, totalTokens = 62) else null))))
         old.checkpoint(handle, room.assistantId, room.compactionEpoch, full.messageNodes)
         assertFalse(old.provesInFlightBaseline(room, visible)) // Reproduces the former exact-byte dead end.
         val latest = visible.copy(messageNodes = visible.messageNodes.map { node -> node.copy(messages = node.messages.map {
             it.finishReasoning()
         }) } + List(135) { UIMessage.user("synthetic later $it").toMessageNode() })
-        val journal = HumanContinuationJournal(continuationStore); val runId = Uuid.random()
-        journal.checkpoint(runId, visible, latest)
+        val runId = Uuid.random()
+        HumanContinuationJournal(continuationStore).checkpoint(runId, visible, latest)
+        val journal = HumanContinuationJournal(continuationStore) // App reopen with the old saved lane.
         val recovery = journal.recover(room, old::provesInFlightBaseline)!!
         assertNull(recovery.durableBaseline)
         var disk = room
@@ -85,7 +97,11 @@ class HumanContinuationContextTest {
             initial = recovery.snapshot, checkpointId = runId)
         assertTrue(storage.save(lane.state.value))
         assertEquals(137, disk.messageNodes.size)
-        assertEquals("reasoning before last chunktail", (disk.currentMessages[1].parts.last() as me.rerere.ai.ui.UIMessagePart.Reasoning).reasoning)
+        assertEquals("reasoning before last chunktail", disk.currentMessages[1].parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Reasoning>().single().reasoning)
+        if (completed) {
+            assertEquals("final answer", disk.currentMessages[1].parts.filterIsInstance<me.rerere.ai.ui.UIMessagePart.Text>().single().text)
+            assertEquals(full.currentMessages[1].usage, disk.currentMessages[1].usage)
+        }
         assertEquals(tools, disk.currentMessages[1].getTools())
         assertEquals(latest.messageNodes.drop(2), disk.messageNodes.drop(2))
         assertEquals(disk.messageNodes, lane.projectContext(latest)!!.messageNodes) // stale publishers keep the extra chunk
@@ -145,6 +161,25 @@ class HumanContinuationContextTest {
         runCurrent()
         assertEquals("three", f.lane.state.value.currentMessages.last().toText())
         assertEquals(listOf("one", "two", "three"), f.lane.state.value.messageNodes.last().messages.map { it.toText() })
+    }
+
+    @Test fun `live flush reads latest after lock and never compares full database history`() = runTest {
+        val source = base()
+        var current = source
+        var disk = source.copy(messageNodes = source.messageNodes.dropLast(1))
+        val mutex = Mutex(locked = true)
+        val store = HumanContinuationContextStore(source, source, Uuid.random(), mutex,
+            HumanContinuationJournal(Store()), read = { disk },
+            proveBaseline = { _, _ -> error("live saves do not need history proof") },
+            commit = { _, _ -> error("live saves do not use snapshot CAS") }, canWrite = { true },
+            project = { it }, latest = { current }, onStored = {}, onRebased = { _, _ -> }, retireOldJournal = {},
+            saveLatest = { disk = it; it })
+        val saving = async { store.save(source) }
+        runCurrent()
+        current = source.append("input arrived while waiting for disk lock")
+        mutex.unlock()
+        assertTrue(saving.await())
+        assertEquals(current.messageNodes, disk.messageNodes)
     }
 
     private class Store : GenerationCheckpointStore {

@@ -7,8 +7,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProviderRetryPolicyTest {
-    @Test fun partialTextReasoningOrToolChunkMustNeverReplay() {
-        assertFalse(canAutomaticallyRetryProvider(IOException("aborted"), true, 0, 3, receivedAnyChunk = true))
+    @Test fun partialModelStepMayRetryWithoutReexecutingCompletedTools() {
+        assertTrue(canAutomaticallyRetryProvider(IOException("aborted"), true, 0, 3, receivedAnyChunk = true))
     }
     @Test fun retryBudgetRemainsBoundedBeforeTheFirstChunk() {
         (0..2).forEach { assertTrue(canAutomaticallyRetryProvider(ConnectException(), true, it, 3)) }

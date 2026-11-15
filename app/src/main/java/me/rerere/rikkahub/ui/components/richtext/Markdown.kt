@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.components.richtext
 
 import android.content.ClipData
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -59,6 +58,7 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -264,28 +264,30 @@ fun MarkdownBlock(
         }
     }
 
-    if (data == null) {
-        Text(
-            text = if (parseFailed) "此段内容暂时无法显示。" else "…",
-            modifier = modifier.padding(horizontal = 4.dp),
-            style = style,
-        )
-    } else if (data.hasHtml) {
-        MarkdownNew(
-            content = content,
-            modifier = modifier,
-            style = style,
-            onClickCitation = onClickCitation,
-        )
-    } else {
-        ProvideTextStyle(style) {
-            Column(
-                modifier = modifier.padding(horizontal = 4.dp)
-            ) {
-                data.astTree.children.fastForEach { child ->
-                    MarkdownNode(
-                        node = child, content = data.preprocessed, onClickCitation = onClickCitation
-                    )
+    MarkdownLinkFeedback {
+        if (data == null) {
+            Text(
+                text = if (parseFailed) "此段内容暂时无法显示。" else "…",
+                modifier = modifier.padding(horizontal = 4.dp),
+                style = style,
+            )
+        } else if (data.hasHtml) {
+            MarkdownNew(
+                content = content,
+                modifier = modifier,
+                style = style,
+                onClickCitation = onClickCitation,
+            )
+        } else {
+            ProvideTextStyle(style) {
+                Column(
+                    modifier = modifier.padding(horizontal = 4.dp)
+                ) {
+                    data.astTree.children.fastForEach { child ->
+                        MarkdownNode(
+                            node = child, content = data.preprocessed, onClickCitation = onClickCitation
+                        )
+                    }
                 }
             }
         }
@@ -481,16 +483,14 @@ private fun MarkdownNode(
             val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)
                 ?.findChildOfTypeRecursive(GFMTokenTypes.GFM_AUTOLINK, MarkdownTokenTypes.TEXT)?.getTextInNode(content)
                 ?: ""
-            val linkDest =
-                node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
-            val context = LocalContext.current
+            val linkDest = node.markdownLinkDestination(content)
+            val uriHandler = LocalUriHandler.current
             Text(
                 text = linkText,
                 color = MaterialTheme.colorScheme.primary,
                 textDecoration = TextDecoration.Underline,
                 modifier = modifier.clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, linkDest.toUri())
-                    context.startActivity(intent)
+                    uriHandler.openUri(linkDest)
                 })
         }
 
@@ -1096,8 +1096,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         }
 
         node.type == MarkdownElementTypes.INLINE_LINK -> {
-            val linkDest =
-                node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_DESTINATION)?.getTextInNode(content) ?: ""
+            val linkDest = node.markdownLinkDestination(content)
             val linkText = node.findChildOfTypeRecursive(MarkdownElementTypes.LINK_TEXT)?.getTextInNode(content)
                 ?.trim { it == '[' || it == ']' } ?: linkDest
             if (linkText.startsWith("citation,")) {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelType
+import me.rerere.rikkahub.ui.components.ai.ModelSelector
+import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
+import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.pages.chat.conversationComposerWithModel
+import coil3.compose.AsyncImage
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.OrbisEventMetadata
@@ -72,24 +81,33 @@ import me.rerere.rikkahub.ui.components.richtext.isDeepSeekHistory
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalSettings
 import org.koin.compose.koinInject
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.uuid.Uuid
 
 /** Local AND self-hosted garden: native overlay, deliberately no JavaScript message bridge. */
 @Composable
-internal fun OrbisGardenQuickChat(visible: Boolean) {
+internal fun OrbisGardenQuickChat(visible: Boolean, ownerAssistantId: String? = null, openRequest: Int = 0, initialConversationId: String? = null, onConversationSelected: ((Conversation) -> Unit)? = null, tabletopPresentation: Boolean = false, onOpenChanged: ((Boolean) -> Unit)? = null) {
     val settingsStore = koinInject<SettingsStore>()
-    val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val storedSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val owner = if (ownerAssistantId == null) storedSettings.assistantId
+        else runCatching { Uuid.parse(ownerAssistantId) }.getOrNull() ?: return
+    val settings = storedSettings.copy(assistantId = owner)
     val assistant = settings.getAssistantById(settings.assistantId) ?: return
     val repository = koinInject<ConversationRepository>()
     // Survives closing/changing the inner drawer. A receipt can clear only its own unchanged draft.
     val submissionScope = rememberCoroutineScope()
     var open by rememberSaveable { mutableStateOf(false) }
+    val reportOpen by rememberUpdatedState(onOpenChanged)
+    LaunchedEffect(open,visible) { reportOpen?.invoke(open && visible) }
+    DisposableEffect(Unit) { onDispose { reportOpen?.invoke(false) } }
     var picking by rememberSaveable { mutableStateOf(true) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedOwner by rememberSaveable { mutableStateOf<String?>(null) }
     var title by rememberSaveable { mutableStateOf("") }
     // One bounded draft, not one full ChatVM/history per visited window. Closing never clears it.
     var draft by rememberSaveable { mutableStateOf("") }
+    var imageDraft by rememberSaveable { mutableStateOf(listOf<String>()) }
     var draftRevision by rememberSaveable { mutableIntStateOf(0) }
     var pendingSelection by remember { mutableStateOf<Conversation?>(null) }
     val focus = LocalFocusManager.current
@@ -97,23 +115,31 @@ internal fun OrbisGardenQuickChat(visible: Boolean) {
     fun close() { focus.clearFocus(); keyboard?.hide(); open = false }
     fun select(value: Conversation) {
         selected = value.id.toString(); selectedOwner = value.assistantId.toString()
-        title = value.title.ifBlank { "未命名聊天" }; draft = ""; draftRevision++; picking = false
+        title = value.title.ifBlank { "未命名聊天" }; draft = ""; imageDraft = emptyList(); draftRevision++; picking = false
+        onConversationSelected?.invoke(value)
     }
+    LaunchedEffect(initialConversationId, assistant.id) {
+        if(selected==null && initialConversationId!=null) {
+            repository.getConversationById(Uuid.parse(initialConversationId))?.takeIf { it.assistantId==assistant.id }?.let(::select)
+        }
+    }
+    LaunchedEffect(openRequest) { if (openRequest > 0 && visible) { picking = selected == null || selectedOwner != assistant.id.toString(); open = true } }
     LaunchedEffect(visible) { if (!visible) close() }
     BackHandler(visible && open) { close() }
     if (!visible) return
     Box(Modifier.fillMaxSize().zIndex(3f)) {
         if (!open) Surface(
-            modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(top = 110.dp, end = 12.dp),
-            shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .91f),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = .5f)), shadowElevation = 6.dp,
+            modifier = Modifier.align(Alignment.CenterEnd).safeDrawingPadding(),
+            shape = RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .91f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 2.dp,
         ) {
-            Column(Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                UIAvatar(assistant.name.ifBlank { "AI" }, assistant.avatar,
-                    modifier = Modifier.size(44.dp).testTag("garden-quick-chat-avatar")
-                        .semantics { contentDescription = "与当前 AI 快捷聊天" },
-                    onClick = { picking = selected == null || selectedOwner != assistant.id.toString(); open = true })
-                Text("聊聊", style = MaterialTheme.typography.labelSmall)
+            Box(Modifier.width(28.dp).height(48.dp).testTag("garden-quick-chat-handle")
+                .semantics { contentDescription = "展开与当前 AI 的快捷聊天" }
+                .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                    picking = selected == null || selectedOwner != assistant.id.toString(); open = true
+                }, contentAlignment = Alignment.Center) {
+                Text("‹", fontSize = 26.sp)
             }
         }
         AnimatedVisibility(open, enter = fadeIn(), exit = fadeOut()) {
@@ -122,6 +148,7 @@ internal fun OrbisGardenQuickChat(visible: Boolean) {
         }
         AnimatedVisibility(open, modifier = Modifier.align(Alignment.CenterEnd),
             enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut()) {
+            GardenQuickChatTheme(settings,assistant.id) {
             val shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
             Surface(onClick = {}, modifier = Modifier.fillMaxHeight().fillMaxWidth(.92f).widthIn(max = 600.dp)
                 .safeDrawingPadding().clip(shape)
@@ -148,7 +175,7 @@ internal fun OrbisGardenQuickChat(visible: Boolean) {
                         if (!picking) TextButton(onClick = { picking = true }) { Text("换窗口") }
                         TextButton(onClick = { close() }) { Text("收起") }
                     }
-                    Text("消息存回原窗口 · 不自动附带书页或汤底", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    Text("消息存回原窗口 · 只发送你输入的内容", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall)
                     HorizontalDivider()
                     }
@@ -157,16 +184,17 @@ internal fun OrbisGardenQuickChat(visible: Boolean) {
                         if (picking) GardenChatPicker(assistant.id, repository, selected,
                             onSelect = { item ->
                                 if (selected == item.id.toString()) picking = false
-                                else if (draft.isNotBlank()) pendingSelection = item else select(item)
+                                else if (draft.isNotBlank() || imageDraft.isNotEmpty()) pendingSelection = item else select(item)
                             }, onCancel = if (selectedOwner == assistant.id.toString() && selected != null) ({ picking = false }) else null)
                         else selected?.let { id -> key(id) {
                             val revision = draftRevision
                             GardenChatConversation(Uuid.parse(id), Uuid.parse(checkNotNull(selectedOwner)),
-                                settings, draft, submissionScope,
+                                settings, draft, imageDraft, submissionScope, tabletopPresentation,
+                                onImages = { if (selected == id) { imageDraft = it; draftRevision++ } },
                                 onDraft = { if (selected == id) { draft = it; draftRevision++ } },
-                                onCommitted = { text ->
-                                    if (canClearGardenQuickChatDraft(selected, id, draftRevision, revision, draft, text)) {
-                                        draft = ""; draftRevision++
+                                onCommitted = { text, sentImages ->
+                                    if (canClearGardenQuickChatDraft(selected, id, draftRevision, revision, draft, text, sentImages.isNotEmpty()) && imageDraft == sentImages) {
+                                        draft = ""; imageDraft = emptyList(); draftRevision++
                                     }
                                 })
                         } }
@@ -174,11 +202,12 @@ internal fun OrbisGardenQuickChat(visible: Boolean) {
                 }
                 }
             }
+            }
         }
     }
     pendingSelection?.let { item -> AlertDialog(
         onDismissRequest = { pendingSelection = null }, title = { Text("切换聊天窗口？") },
-        text = { Text("当前窗口有未发送的文字。切换会丢弃这份草稿，已发送的聊天不受影响。") },
+        text = { Text("当前窗口有未发送的文字或图片。切换会丢弃这份草稿，已发送的聊天不受影响。") },
         confirmButton = { TextButton(onClick = { select(item); pendingSelection = null }) { Text("丢弃草稿并切换") } },
         dismissButton = { TextButton(onClick = { pendingSelection = null }) { Text("保留草稿") } },
     ) }
@@ -217,7 +246,8 @@ private fun GardenChatPicker(owner: Uuid, repository: ConversationRepository, se
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = .65f) else Color.Transparent) {
                     Column(Modifier.padding(14.dp)) {
                         Text(item.title.ifBlank { "未命名聊天" }, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(item.updateAt.toString().replace('T', ' ').take(16), style = MaterialTheme.typography.labelSmall)
+                        Text(item.updateAt.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")),
+                            style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -231,14 +261,14 @@ private fun GardenChatPicker(owner: Uuid, repository: ConversationRepository, se
 }
 
 @Composable
-private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, draft: String,
-    submissionScope: CoroutineScope, onDraft: (String) -> Unit, onCommitted: (String) -> Unit) {
+private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, draft: String, images: List<String>,
+    submissionScope: CoroutineScope, tabletopPresentation:Boolean=false, onImages: (List<String>) -> Unit, onDraft: (String) -> Unit, onCommitted: (String, List<String>) -> Unit) {
     val service = koinInject<ChatService>()
     val settingsStore = koinInject<SettingsStore>()
     val repo = koinInject<ConversationRepository>()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val conversationFlow = remember(id) { service.getConversationFlow(id) }
+    val conversationFlow = remember(id) { service.getDisplayedConversationFlow(id) }
     val conversation by conversationFlow.collectAsStateWithLifecycle()
     val jobs = remember(id) { service.getGenerationJobStateFlow(id) }
     val job by jobs.collectAsStateWithLifecycle(null)
@@ -249,9 +279,9 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
     var ready by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var submitting by remember { mutableStateOf(false) }
+    var sendAttempt by remember { mutableIntStateOf(0) }
     var shown by rememberSaveable(id.toString()) { mutableIntStateOf(30) }
-    val list = rememberLazyListState()
-    var initiallyPositioned by remember(id) { mutableStateOf(false) }
+    var retrying by remember { mutableStateOf(false) }
     val assistant = settings.getAssistantById(owner)
     val deepSeek = LocalOrbisDeepSeekStyle.current
     val valid = ready && assistant != null && settings.assistantId == owner && conversation.assistantId == owner
@@ -260,6 +290,11 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
         conversation.currentMessages.any { m -> m.parts.any { it is UIMessagePart.Tool && it.isPending } }
     }
     val model = assistant?.let { settings.findModelById(it.chatModelId ?: settings.chatModelId) }
+    val attachmentInput = remember(id) { ChatInputState().also { input -> input.messageContent = images.map { UIMessagePart.Image(it) } } }
+    LaunchedEffect(images) { attachmentInput.messageContent = images.map { UIMessagePart.Image(it) } }
+    val picker = rememberChatAttachmentPickerActions(attachmentInput, settings) {
+        onImages(attachmentInput.messageContent.filterIsInstance<UIMessagePart.Image>().map { it.url })
+    }
     DisposableEffect(id) {
         service.addConversationReference(id)
         onDispose { service.removeConversationReference(id) } // Never stop the process-owned generation here.
@@ -267,7 +302,7 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
     LaunchedEffect(id, owner) {
         try {
             check(repo.getConversationSummaryOfAssistant(id, owner) != null)
-            service.initializeConversation(id, selectAssistant = false)
+            service.initializeDisplayedConversation(id)
             service.requireGardenQuickChatTarget(id, owner)
             ready = true
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -288,27 +323,14 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
         if (ready && !valid) Text("当前 AI 或窗口归属已改变，请重新选择。", Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error)
         if (valid) {
             val nodes = remember(conversation.messageNodes, shown) { conversation.messageNodes.takeLast(shown) }
-            val newest = nodes.lastOrNull()?.currentMessage
-            // Opening a drawer is navigation, independent of the streaming auto-scroll setting.
-            // Wait until Room has loaded the selected conversation, then position its last item.
-            LaunchedEffect(ready, nodes.size) {
-                if (!initiallyPositioned && ready && nodes.isNotEmpty()) {
-                    list.requestScrollToItem(nodes.size + 1)
-                    initiallyPositioned = true
-                }
-            }
-            // Follow new output only while already at the bottom, never pull a reader off older messages.
-            LaunchedEffect(newest, ready, settings.displaySetting.enableAutoScroll) {
-                if (settings.displaySetting.enableAutoScroll && !list.isScrollInProgress &&
-                    (!list.canScrollForward || list.layoutInfo.totalItemsCount == 0))
-                    list.scrollToItem((nodes.size + 1).coerceAtLeast(0))
-            }
             CompositionLocalProvider(LocalSettings provides settings.copy(assistantId = owner)) {
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("garden-quick-chat-messages"), state = list,
-                    contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { if (conversation.messageNodes.size > shown) TextButton(onClick = { shown += 30 }) { Text("查看更早的消息") } }
-                    items(nodes, key = { it.id.toString() }) { node ->
+                GardenQuickChatTimeline(Modifier.weight(1f).fillMaxWidth(),
+                    followOutput = settings.displaySetting.enableAutoScroll,
+                    output = nodes.lastOrNull()?.currentMessage) {
+                    item(key = "progress") { if (job != null) Text(processing ?: "正在回复…", style = MaterialTheme.typography.bodySmall) }
+                    items(nodes.asReversed(), key = { it.id.toString() }) { node ->
                         val message = node.currentMessage
+                        Column {
                         GardenQuickChatMessage(message, assistant, model,
                             loading = job != null && node == nodes.lastOrNull(),
                             onToolApproval = { tool, allowed, reason, remembered -> approve(tool, allowed, reason, remembered) },
@@ -331,9 +353,24 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
                                     read = metadata.read, collapsed = metadata.collapsed,
                                 ), expectedAssistantId = owner)
                             },
-                            onEventOpacityChange = { settingsStore.updateOrbisEventOpacity(it, deepSeek) })
+                            onEventOpacityChange = { settingsStore.updateOrbisEventOpacity(it, deepSeek) }, tabletopPresentation = tabletopPresentation)
+                        if (message.orbisEvent == null && message.role in listOf(MessageRole.USER, MessageRole.ASSISTANT)) {
+                            TextButton(enabled = !retrying && !submitting && job == null && queue.messages.isEmpty() && !pending && !voice.isActive,
+                                modifier = Modifier.testTag("garden-quick-chat-retry-${message.id}"),
+                                onClick = {
+                                    retrying = true; notice = null
+                                    submissionScope.launch {
+                                        try { service.regenerateGardenQuickChat(id, owner, message.id) }
+                                        catch (cancelled: CancellationException) { throw cancelled }
+                                        catch (failure: IllegalStateException) { notice = failure.message ?: "暂时无法重新生成，请回原窗口核对。" }
+                                        catch (_: Exception) { notice = "重新生成未确认，请先核对原窗口，不会自动重试。" }
+                                        finally { retrying = false }
+                                    }
+                                }) { Text(if (message.role == MessageRole.USER) "重说" else "重新生成") }
+                        }
+                        }
                     }
-                    item { if (job != null) Text(processing ?: "正在回复…", style = MaterialTheme.typography.bodySmall) }
+                    item(key = "history") { if (conversation.messageNodes.size > shown) TextButton(onClick = { shown += 30 }) { Text("查看更早的消息") } }
                 }
             }
         } else Spacer(Modifier.weight(1f))
@@ -343,29 +380,80 @@ private fun GardenChatConversation(id: Uuid, owner: Uuid, settings: Settings, dr
         notice?.let { Text(it, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         if (queue.messages.isNotEmpty()) Text("这个窗口有待处理队列，请回原聊天核对；这里不会自动继续旧消息。", Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
         if (voice.isActive) Text("通话期间暂停快捷发送，请先结束通话。", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
+        if (valid && !submitting && job == null && !voice.isActive) {
+            ModelSelector(modelId = model?.id, providers = settings.providers, type = ModelType.CHAT,
+                modifier = Modifier.padding(horizontal = 12.dp).testTag("garden-quick-chat-model")) { chosen ->
+                scope.launch {
+                    service.requireGardenQuickChatTarget(id, owner)
+                    settingsStore.update { current -> conversationComposerWithModel(current, owner, chosen.id) }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(enabled = valid && !submitting, onClick = picker.onPickImage,
+                modifier = Modifier.testTag("garden-quick-chat-gallery")) { Text("图片") }
+            TextButton(enabled = valid && !submitting, onClick = picker.onTakePicture,
+                modifier = Modifier.testTag("garden-quick-chat-camera")) { Text("拍照") }
+            if (images.isNotEmpty()) Text("已选 ${images.size} 张", style = MaterialTheme.typography.labelSmall)
+        }
+        if (images.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+            images.forEachIndexed { index, url ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    AsyncImage(model = url, contentDescription = "待发送图片 ${index + 1}", modifier = Modifier.size(64.dp))
+                    TextButton(enabled = !submitting, onClick = { onImages(images.filterIndexed { i, _ -> i != index }) }) { Text("移除") }
+                }
+            }
+        }
         GardenQuickChatInput(draft, { value ->
             if (value.toByteArray().size <= GARDEN_QUICK_CHAT_MAX_TEXT_BYTES) onDraft(value)
             else notice = "快捷消息最多 32 KiB，未接收超长输入。"
         }, enabled = !submitting)
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (job != null) "收起后仍会继续回复" else "仅发送你输入的文字", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+            Text(if (job != null) "收起后仍会继续回复" else "仅发送你输入的文字和所选图片", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
             if (job != null) TextButton(onClick = { service.stopGardenQuickChat(id) }) { Text("停止") }
-            Button(enabled = valid && model != null && !submitting && job == null && queue.messages.isEmpty() && !pending && !voice.isActive && draft.isNotBlank(),
+            Button(enabled = valid && model != null && !submitting && !retrying && job == null && queue.messages.isEmpty() && !pending && !voice.isActive && (draft.isNotBlank() || images.isNotEmpty()),
                 onClick = {
                     val text = draft
+                    val sentImages = images.toList()
                     submitting = true; notice = null
+                    val attempt = ++sendAttempt
                     submissionScope.launch {
                         try {
-                            if (service.trySendGardenQuickChat(id, owner, text)) onCommitted(text)
-                            else notice = "未确认写入。草稿保留，请先核对原窗口；不会自动重试。"
+                            if (service.trySendGardenQuickChat(id, owner, text, sentImages.map { UIMessagePart.Image(it) }, onSavedLater = {
+                                onCommitted(text, sentImages)
+                                if (sendAttempt == attempt) notice = null
+                            })) onCommitted(text, sentImages)
+                            else notice = "本次发送未完成，草稿已保留。可返回原聊天查看具体原因。"
                         } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (rejected: me.rerere.rikkahub.data.orbis.GardenQuickChatSendRejected) { notice = rejected.message }
                         catch (_: Exception) { notice = "未确认发送成功，草稿保留，请先核对原窗口，不会自动重试。" }
                         finally { submitting = false }
                     }
                 }, modifier = Modifier.testTag("garden-quick-chat-send")) { Text("发送") }
         }
-        if (ready && model == null) Text("请先在主聊天为这个 AI 选择模型。", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
+        if (ready && model == null) Text("请在上方为这个 AI 选择模型。", Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/** The bottom has a stable index even when markdown remeasures, history loads or the IME resizes.
+ * Only an actual scroll changes follow intent; growing output must not be mistaken for a reader
+ * scrolling away. Reverse layout also avoids estimating every earlier variable-height message.
+ */
+@Composable
+internal fun GardenQuickChatTimeline(modifier: Modifier = Modifier, followOutput: Boolean,
+    output: Any?, content: LazyListScope.() -> Unit) {
+    val list = rememberLazyListState()
+    var following by remember { mutableStateOf(true) }
+    LaunchedEffect(list) {
+        snapshotFlow { list.isScrollInProgress to list.canScrollBackward }.collect { (scrolling, away) ->
+            if (scrolling) following = !away
+        }
+    }
+    LaunchedEffect(output, followOutput) {
+        if (followOutput && following && !list.isScrollInProgress) list.requestScrollToItem(0)
+    }
+    LazyColumn(modifier.testTag("garden-quick-chat-messages"), state = list, reverseLayout = true,
+        contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
 }
 
 /** Same main-chat renderer/settings, without its destructive action menu or view-model effects. */
@@ -380,8 +468,17 @@ internal fun GardenQuickChatMessage(
     onEventPresentation: (suspend (OrbisEventMetadata) -> Unit)? = null,
     onEventOpacityChange: (suspend (Float) -> Unit)? = null,
     onVoiceNotePlayed: ((Int, Int?, String) -> Unit)? = null,
+    tabletopPresentation: Boolean = false,
 ) {
-    val message = message.privateRoomSafePresentation()
+    val original = message.privateRoomSafePresentation()
+    if(tabletopPresentation && original.orbisEvent?.let { me.rerere.rikkahub.data.orbis.isTabletopEventSource(it.source) }==true) {
+        Text("圆桌游戏哨兵已送达",style=MaterialTheme.typography.bodySmall)
+        return
+    }
+    // Display only: model/history retain the complete role materials and reasoning.
+    val message = if(tabletopPresentation) original.copy(parts=original.parts.filterNot {
+        it is UIMessagePart.Reasoning || it is UIMessagePart.Tool && (it.toolName.startsWith("script_") || it.toolName.startsWith("werewolf_"))
+    }) else original
     val appearance = LocalSettings.current.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current)
     val segmented = BuildConfig.ORBIS_ENABLED && message.role == MessageRole.ASSISTANT && appearance.chatFlow.enabled
     val textStyle = rememberChatMessageTextStyle(user = message.role == MessageRole.USER)
@@ -432,19 +529,28 @@ internal fun GardenQuickChatInput(value: String, onValueChange: (String) -> Unit
     val colors = OrbisTheme.colors
     val inputStyle = if (BuildConfig.ORBIS_ENABLED) MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 21.sp)
         else MaterialTheme.typography.bodyLarge
-    Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("garden-quick-chat-composer"),
+    val ink=LocalChatTheme.current?.body?.chrome?.onComposer?.let { Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(it)) } ?: colors.ink
+    me.rerere.rikkahub.ui.components.message.ThemeChromeSurface(role="composer",radius=23,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("garden-quick-chat-composer"),
         shape = RoundedCornerShape(23.dp), color = colors.raisedPanel.copy(alpha = appearance.composerOpacity),
-        contentColor = colors.ink,
+        contentColor = ink,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))) {
         BasicTextField(value, onValueChange,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)
                 .testTag("garden-quick-chat-input"),
             enabled = enabled, minLines = 1, maxLines = 4,
-            textStyle = inputStyle.copy(color = colors.ink),
+            textStyle = inputStyle.copy(color = ink),
             cursorBrush = SolidColor(colors.accent),
             decorationBox = { inner -> Box {
                 if (value.isEmpty()) Text("在这个窗口里聊聊…", color = colors.mutedInk, style = inputStyle)
                 inner()
             } })
+    }
+}
+
+/** The drawer resolves the same persisted assistant package as the main conversation. */
+@Composable internal fun GardenQuickChatTheme(settings: Settings, owner: Uuid, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalSettings provides settings.copy(assistantId=owner)) {
+        AssistantThemeProvider(owner.toString()) { OrbisVisualTheme(content=content) }
     }
 }

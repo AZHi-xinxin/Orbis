@@ -11,10 +11,45 @@ import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-/** No legacy/global memory lookup, migration, network, tool dispatch or human content browser. */
+/** Local notes retain their original owner and complete version history when linked. */
 class OrbisMemoryRepository(private val database: AppDatabase) {
     private val dao get() = database.orbisMemoryDao()
     private val noteJson = Json { encodeDefaults = true }
+
+    /** The host supplies the currently linked libraries, never model-supplied authority. */
+    suspend fun executeShared(currentOwner: String, owners: Set<String>, request: JsonObject, operationKey: String): JsonObject {
+        if (currentOwner !in owners) return errorResult("memory_owner_invalid")
+        return try {
+            owners.forEach(::owner)
+            database.withTransaction {
+                val action = request.string("action") ?: "read"
+                val target = request.string("library_id")
+                if (target != null && target !in owners) return@withTransaction errorResult("memory_note_not_found")
+                val id = request.string("id")
+                if (action == "read" && id == null && target == null && owners.size > 1) {
+                    val limit = request.optionalInt("limit") ?: 20
+                    val offset = request.optionalInt("offset") ?: 0
+                    page(limit, offset, 50)
+                    val query = request.string("query").orEmpty()
+                    if (query.length > 512) refuse("memory_query_limit")
+                    boundedPage(offset, limit) { position ->
+                        dao.searchShared(owners.toList(), query, request.optionalBoolean("includeDeleted") ?: false, 1, position)
+                            .firstOrNull()?.model()
+                    }
+                } else {
+                    val resolved = target ?: if (id != null && action != "store") {
+                        val matches = dao.ownersOf(owners.toList(), id)
+                        if (matches.size > 1) return@withTransaction buildJsonObject {
+                            put("ok", false); put("code", "memory_library_required")
+                            put("message", "此 ID 在多个已连通库中存在，请用查询结果的 assistantId 作为 library_id。")
+                        }
+                        matches.singleOrNull() ?: currentOwner
+                    } else currentOwner
+                    execute(resolved, JsonObject(request - "library_id"), operationKey)
+                }
+            }
+        } catch (failure: MemoryRequestFailure) { errorResult(failure.code, failure.field) }
+    }
 
     suspend fun execute(assistantId: String, request: JsonObject, operationKey: String): JsonObject {
         return try {

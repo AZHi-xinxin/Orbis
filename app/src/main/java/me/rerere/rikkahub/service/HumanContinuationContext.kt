@@ -7,6 +7,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import me.rerere.rikkahub.data.ai.checkpoint.HumanContinuationJournal
 import me.rerere.rikkahub.data.ai.checkpoint.ContinuationStreamEnrichment
+import me.rerere.rikkahub.data.ai.checkpoint.HistoryPersistenceException
+import me.rerere.rikkahub.data.ai.checkpoint.HistoryPersistenceStage
 import me.rerere.rikkahub.data.model.Conversation
 import kotlin.uuid.Uuid
 
@@ -71,6 +73,7 @@ internal class HumanContinuationContextStore(
     private val retireOldJournal: (Conversation) -> Unit,
     private val reconcileStream: (Conversation, Conversation) -> ContinuationStreamEnrichment? = { _, _ -> null },
     private val onEnriched: (ContinuationStreamEnrichment) -> Unit = {},
+    private val saveLatest: (suspend (Conversation) -> Conversation)? = null,
 ) {
     private var lastSaved = durableBaseline // writeMutex
     private var checkpointBaseline = baseline // checkpointMutex
@@ -78,11 +81,14 @@ internal class HumanContinuationContextStore(
 
     suspend fun save(snapshot: Conversation): Boolean = writeMutex.withLock {
         if (!canWrite()) return@withLock false
-        val current = project(snapshot) ?: return@withLock false
+        val current = if (saveLatest != null) latest() else project(snapshot) ?: return@withLock false
         saveLocked(current) != null
     }
 
     private suspend fun saveLocked(snapshot: Conversation): Conversation? {
+        saveLatest?.let { write ->
+            return write(snapshot).also { lastSaved = it; onStored(it) }
+        }
         val proof: suspend (Conversation, Conversation) -> Unit = { disk, candidate ->
             journal.prepareRoomCommit(runId, checkpointBaseline, disk, candidate)
         }
@@ -105,7 +111,7 @@ internal class HumanContinuationContextStore(
     }
 
     suspend fun checkpoint(snapshot: Conversation): Boolean = checkpointMutex.withLock {
-        val current = project(snapshot) ?: return@withLock false
+        val current = if (saveLatest != null) latest() else project(snapshot) ?: return@withLock false
         journal.checkpoint(runId, checkpointBaseline, current)
         true
     }
@@ -122,13 +128,15 @@ internal class HumanContinuationContextStore(
                 check(canWrite()) { "本次本地整理未提交，聊天可继续。" }
                 val before = capture() // Recheck turn ownership AFTER waiting for local writers.
                 return withContext(NonCancellable) {
-                    val stored = checkNotNull(saveLocked(before)) { "本次整理未提交，原消息保留。" }
+                    val stored = saveLocked(before)
+                        ?: throw HistoryPersistenceException(HistoryPersistenceStage.SNAPSHOT_MISMATCH)
                     val completeBefore = checkNotNull(project(before))
                     // The complete source is now in Room. Refresh the exact recovery tail before
                     // retiring it; never delete an unseen newer tail or leave an old epoch behind.
                     retireOldJournal(stored)
                     journal.checkpoint(runId, checkpointBaseline, completeBefore)
-                    check(journal.clearCommitted(runId, stored)) { "本次整理未提交，原消息保留。" }
+                    if (!journal.clearCommitted(runId, stored))
+                        throw HistoryPersistenceException(HistoryPersistenceStage.RECOVERY_COPY_PENDING)
                     try {
                         val after = rewrite(completeBefore, stored)
                         lastSaved = after

@@ -27,7 +27,7 @@ class OrbisOmbreRuntimeService : Service() {
                 NotificationChannel(CHANNEL, "手机 OmbreBrain 持续运行", NotificationManager.IMPORTANCE_LOW))
             val open = PendingIntent.getActivity(this, ID, Intent(this, RouteActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
             val stop = PendingIntent.getService(this, ID, Intent(this, OrbisOmbreRuntimeService::class.java).setAction(STOP), PendingIntent.FLAG_IMMUTABLE)
-            val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_stat_rikkahub)
+            val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_stat_orbis)
                 .setContentTitle("Orbis 正在托管手机 OmbreBrain").setContentText("可在工作区查看状态；点停止会停止本机托管实例")
                 .setContentIntent(open).setOngoing(true).addAction(0, "停止 OmbreBrain", stop).build()
             ServiceCompat.startForeground(this, ID, notification,

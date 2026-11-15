@@ -79,7 +79,7 @@ fun Application.configureWebApi(
 ) {
     val jwtEnabled = settingsStore.settingsFlow.value.webServerJwtEnabled
     val imports = WebDeepSeekImports(
-        File(context.cacheDir.canonicalFile, "orbis-web-imports/${UUID.randomUUID()}"), conversationRepo, this,
+        File(context.cacheDir.canonicalFile, "orbis-web-imports/${UUID.randomUUID()}"), conversationRepo, this, filesManager = filesManager,
         additionalFormats = mapOf("rikkahub" to WebRikkaArchiveFormat(RikkaChatImporter(context, conversationRepo, filesManager)),
             "codex" to WebCodexArchiveFormat(conversationRepo),
             "operit" to WebOperitArchiveFormat(conversationRepo),

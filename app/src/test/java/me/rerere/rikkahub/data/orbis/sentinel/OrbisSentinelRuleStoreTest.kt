@@ -12,6 +12,61 @@ import org.junit.Test
 
 /** In-memory synthetic storage only; never starts observation, delivery, or Android services. */
 class OrbisSentinelRuleStoreTest {
+    @Test fun `unavailable destination persists diagnosis without faking a fire or resetting schedule`() {
+        val disk = Storage(); val store = disk.open(); val original = store.create(rule())
+        store.recordTargetAvailability(original.id, binding, false)
+        val writes = disk.writes
+        repeat(10) { store.recordTargetAvailability(original.id, binding, false) }
+        assertEquals(writes, disk.writes)
+        assertEquals("target_conversation_unavailable", disk.open().get(original.id)!!.lastError)
+        assertEquals(original, store.get(original.id)!!.copy(lastError = null))
+        assertTrue(store.executions().isEmpty())
+        store.recordTargetAvailability(original.id, binding, true)
+        assertEquals(original, store.get(original.id))
+    }
+
+    @Test fun `rebind persists fixed target but keeps history cooldown and switches`() {
+        val disk = Storage(); val store = disk.open(); store.create(rule())
+        accepted(store, "rule-1", "accepted", 200)
+        store.pause("rule-1", binding, 300)
+        store.setHumanEnabled(false, 400)
+        val before = store.get("rule-1")!!
+        val receipts = store.executions()
+        val target = binding.copy(conversationId = other.conversationId)
+        val moved = store.rebind("rule-1", binding, target, 500)
+        assertEquals(moved, disk.open().get("rule-1"))
+        assertEquals(target, moved.binding)
+        assertEquals(before.prompt, moved.prompt)
+        assertEquals(before.lastFiredAtMs, moved.lastFiredAtMs)
+        assertEquals(before.armed, moved.armed)
+        assertFalse(moved.enabled); assertFalse(store.refresh().enabled)
+        assertEquals(receipts, store.executions())
+        val writes = disk.writes
+        assertEquals(moved, store.rebind("rule-1", target, target, 600))
+        assertEquals(writes, disk.writes)
+        fails("sentinel_target_mismatch") { store.rebind("rule-1", binding, target, 700) }
+    }
+
+    @Test fun `rebind cannot move pending occurrences or cross assistant identity`() {
+        val store = Storage().open(); store.create(rule())
+        store.reserveFire("rule-1", "pending", 200)
+        val before = store.refresh()
+        fails("sentinel_event_pending") { store.rebind("rule-1", binding, binding.copy(conversationId = other.conversationId), 300) }
+        fails("sentinel_target_mismatch") { store.rebind("rule-1", binding, other, 300) }
+        assertEquals(before, store.refresh())
+    }
+
+    @Test fun `moving expired or accepted once does not wake again`() {
+        for (delivered in listOf(false, true)) {
+            val store = Storage().open()
+            store.create(rule().copy(type = OrbisSentinelType.ONCE, intervalMs = null, dueAtMs = 200))
+            if (delivered) accepted(store, "rule-1", "once", 200)
+            val moved = store.rebind("rule-1", binding, binding.copy(conversationId = other.conversationId), 500)
+            assertEquals(if (delivered) 200L else null, moved.lastFiredAtMs)
+            assertNull(store.reserveFire("rule-1", "must-not-replay", 600))
+        }
+    }
+
     @Test fun `skipped wake finishes one occurrence and preserves next periodic wake`() {
         val disk = Storage(); val store = disk.open()
         store.create(rule())

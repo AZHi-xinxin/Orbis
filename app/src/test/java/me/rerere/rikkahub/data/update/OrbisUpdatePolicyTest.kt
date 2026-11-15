@@ -32,6 +32,22 @@ class OrbisUpdatePolicyTest {
         assertFalse(orbisReleaseIsNewer("v999999999999999999999.0.0", "2.6.0"))
     }
 
+    @Test fun signedAcceptanceBuildCanFollowNextStableReleaseWithoutOfferingTheOldRelease() {
+        assertTrue(orbisReleaseIsNewer("v2.6.18", "2.6.17-rc.1"))
+        assertFalse(orbisReleaseIsNewer("v2.6.17", "2.6.17-rc.1"))
+        assertFalse(orbisReleaseIsNewer("v2.6.16", "2.6.17-rc.1"))
+        assertFalse(orbisReleaseIsNewer("v2.6.18-rc.2", "2.6.17-rc.1"))
+        listOf("2.6.17-orbis-dev.173-rc.1", "2.6.17-rescue-rc.1", "2.6.17-rc.0",
+            "2.6.17-rc.01", "2.6.17-rc.1000000", "2.6.17-rc.1-extra").forEach {
+            assertFalse(it, orbisReleaseIsNewer("v2.6.18", it))
+        }
+        val current = OrbisApkIdentity(ORBIS_RELEASE_PACKAGE, 283, setOf(digest))
+        requireOrbisSafeUpgrade(current, current.copy(versionCode = 284), 26)
+        assertThrows(IllegalArgumentException::class.java) {
+            requireOrbisSafeUpgrade(current, current, 26)
+        }
+    }
+
     @Test fun publishedGithubResponseIsParsedWithoutCredentialsOrUnrelatedFields() {
         val json = """{"id":1,"tag_name":"v2.6.1","name":"Orbis","body":null,"html_url":"$ORBIS_RELEASES_PAGE/tag/v2.6.1","draft":false,"prerelease":false,"author":{"login":"unused"},"assets":[]}"""
         val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<OrbisPublishedRelease>(json)

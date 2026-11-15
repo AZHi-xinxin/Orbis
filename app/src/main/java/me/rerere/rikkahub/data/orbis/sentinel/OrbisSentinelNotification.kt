@@ -57,7 +57,7 @@ fun notifySentinelAccepted(context: Context, rule: OrbisSentinelRule, event: Orb
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(app, spec.channelId)
-            .setSmallIcon(R.drawable.ic_stat_rikkahub)
+            .setSmallIcon(R.drawable.ic_stat_orbis)
             .setContentTitle(spec.title)
             .setContentText(spec.content)
             .setContentIntent(openConversation)

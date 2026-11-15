@@ -61,17 +61,17 @@ object OrbisActivities {
 /** Explicit optional art-pack import. Never decode/download assets while the module is disabled. */
 internal object PetAssets {
     val names = setOf("cat.png", "tidy.png", "messy.png")
-    /** Deduplicated bundled artwork: 40 animals and 8 rooms, no download/import needed. */
+    /** Originals are optional downloads. An absent pack is rendered by the lightweight room. */
     fun model(appearance: String, name: String, imported: File?): Any {
         require(name in names)
-        if(imported != null) return File(imported, name)
-        val pet = PetCatalog.find(appearance)
-        val asset = when(name) {
-            "cat.png" -> "${pet.id}.png"
-            "messy.png" -> "${pet.family}-room-messy-${if(pet.family == "cat") "v2" else "v1"}.png"
-            else -> "${pet.family}-room-tidy-v1.png"
+        PetCatalog.find(appearance)
+        if(imported != null) {
+            val modern = File(imported, when(name) {
+                "cat.png" -> "cat.webp"; "messy.png" -> "room-sage-messy.webp"; else -> "room-sage-tidy.webp"
+            })
+            return if(modern.isFile) modern else File(imported, name)
         }
-        return "file:///android_asset/orbis-pets/$asset"
+        return "" // No network fallback in the image loader.
     }
     fun directory(context: Context, appearance: String): File {
         // Android may expose filesDir through an OS-owned alias. Normalize the trusted
@@ -86,6 +86,21 @@ internal object PetAssets {
         val root = directory(context, appearance)
         names.all { File(root, it).let { file -> file.canonicalFile == file.absoluteFile && file.isFile } }
     } catch (_: Exception) { false }
+    fun displayDirectory(context: Context, appearance: String): File? {
+        // A custom imported identity takes precedence; never replace it with a stock animal.
+        val store = PetArtDownloads.store(context)
+        if(ready(context, appearance) && (!store.ready(appearance) || !legacyIsOfficial(context,appearance))) return directory(context, appearance)
+        return store.availableDirectory(appearance)
+    }
+    fun legacyIsOfficial(context:Context, appearance:String):Boolean = runCatching {
+        val dir=directory(context,appearance)
+        val expected=PetArtDownloads.catalog(context).packages.getValue(appearance).legacy
+        dir.listFiles()?.map {it.name}?.toSet()==names && names.all { name ->
+            val file=File(dir,name)
+            file.canonicalFile==file.absoluteFile && file.isFile && file.length()<=8*1024*1024 &&
+                file.inputStream().use(::petArtSha256)==expected[name]
+        }
+    }.getOrDefault(false)
     fun import(context: Context, input: InputStream, appearance: String) {
         val entries = mutableMapOf<String, ByteArray>()
         ZipInputStream(input).use { zip ->

@@ -219,11 +219,17 @@ private fun SentinelRuleReadOnlyCard(
 ) {
     SentinelReadOnlyDisclosure("sentinel-rule-${rule.id}", rule.name.ifBlank { "未命名规则" },
         subtitle = when {
+            rule.lastError == "target_conversation_unavailable" -> "固定会话已失效 · 无法唤醒"
             !masterEnabled -> "总开关已暂停 · ${if (rule.enabled) "AI 已启用此规则" else "AI 已停用此规则"}"
             rule.enabled -> "AI 已启用此规则"
             else -> "AI 已停用此规则"
         }) {
         SentinelTarget(rule.assistantId, rule.conversationId, assistantNames, conversationNames)
+        if (rule.lastError == "target_conversation_unavailable") Text(
+            if (rule.plugin == null) "原会话已删除或不再属于该 AI。请在希望接收提醒的窗口，让 AI 将这条哨兵重新绑定到当前窗口；原文和历史会保留，旧通知不会补发。"
+            else "原会话已删除或不再属于该 AI。此规则由插件创建，请从插件设置重新绑定。",
+            style = MaterialTheme.typography.bodySmall,
+        )
         SentinelReadOnlyField("触发条件", orbisSentinelConditionLabel(rule))
         SentinelReadOnlyField("执行动作", orbisSentinelActionLabel(rule.action))
         SentinelReadOnlyField("通知级别", if (rule.notificationLevel == OrbisSentinelNotificationLevel.STRONG) "强提醒" else "轻提醒")
@@ -238,7 +244,8 @@ private fun SentinelRuleReadOnlyCard(
             SentinelReadOnlyField("连续唤醒次数", "${rule.policy.consecutiveCount} 次；人类新消息后重置")
             rule.escalationAfter?.let { SentinelReadOnlyField("连续提示升级", "超过 $it 次后：${rule.escalationPrompt.orEmpty()}") }
         }
-        SentinelReadOnlyField("下次计划", if (!masterEnabled || !rule.enabled) "已暂停，没有自动唤醒" else sentinelNextDueAtMs(rule, resumedAtMs)?.let { "${orbisEventReceivedTime(it)}（计划时间，非准时保证）" }
+        SentinelReadOnlyField("下次计划", if (rule.lastError == "target_conversation_unavailable") "固定会话已失效，请先重新绑定"
+            else if (!masterEnabled || !rule.enabled) "已暂停，没有自动唤醒" else sentinelNextDueAtMs(rule, resumedAtMs)?.let { "${orbisEventReceivedTime(it)}（计划时间，非准时保证）" }
             ?: if (rule.type == OrbisSentinelType.RITUAL) "等待调度器确定下一日历时刻" else "等待条件满足或外部真实事件")
         rule.lastFiredAtMs?.let { SentinelReadOnlyField("最近进入收件箱", orbisEventReceivedTime(it)) }
         latest?.let { SentinelReadOnlyField("最近执行结果", "${orbisSentinelExecutionStatusLabel(it.status)} · ${orbisEventReceivedTime(it.updatedAtMs)}") }

@@ -2,8 +2,6 @@ package me.rerere.rikkahub.data.orbis.activities
 
 import android.content.Context
 import java.io.File
-import java.io.InputStream
-import java.security.MessageDigest
 
 internal val BUNDLED_PET_POSE_APPEARANCES = setOf(
     "cat-black-v1", "dog-shiba-v1", "bird-budgie-v1", "reptile-leopard-gecko-v1",
@@ -17,25 +15,16 @@ internal val BUNDLED_PET_POSE_APPEARANCES = setOf(
  */
 internal fun canUseBundledPetPoses(context: Context, appearance: String, imported: File?): Boolean {
     if (appearance !in BUNDLED_PET_POSE_APPEARANCES) return false
-    if (imported == null) return true
+    if (imported == null) return false
     return runCatching {
+        val pack = PetArtDownloads.catalog(context).packages.getValue(appearance)
+        val modern = File(imported, "cat.webp")
+        if (modern.isFile) return@runCatching modern.canonicalFile == modern.absoluteFile &&
+            modern.inputStream().use(::petArtSha256) == pack.files.getValue("cat.webp").sha256 &&
+            File(imported, "pose.webp").isFile && File(imported, "pose.json").isFile
         val source = File(imported, "cat.png")
         require(source.isFile && source.canonicalFile == source.absoluteFile && source.length() <= 8 * 1024 * 1024)
-        source.inputStream().use(::petArtDigest).contentEquals(
-            context.assets.open("orbis-pets/$appearance.png").use(::petArtDigest),
-        )
+        source.inputStream().use(::petArtSha256) == pack.legacy["cat.png"] &&
+            PetArtDownloads.store(context).ready(appearance)
     }.getOrDefault(false)
-}
-
-private fun petArtDigest(input: InputStream): ByteArray {
-    val digest = MessageDigest.getInstance("SHA-256")
-    val buffer = ByteArray(8192)
-    var total = 0
-    while (true) {
-        val count = input.read(buffer)
-        if (count < 0) return digest.digest()
-        total += count
-        require(total <= 8 * 1024 * 1024)
-        digest.update(buffer, 0, count)
-    }
 }

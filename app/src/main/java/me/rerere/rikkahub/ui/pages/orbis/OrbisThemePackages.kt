@@ -16,12 +16,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.em
 import me.rerere.rikkahub.ui.components.message.ThemeMotionProvider
+import me.rerere.rikkahub.ui.components.message.LocalBubbleBackdrop
+import me.rerere.rikkahub.data.orbis.theme.hasMotion
+import dev.chrisbanes.haze.rememberHazeState
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -37,8 +42,15 @@ import me.rerere.rikkahub.data.orbis.theme.*
 import me.rerere.rikkahub.ui.components.message.OrbisMessageBubble
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 
-internal data class ChatTheme(val body: ThemePackage, val image: String?, val onImageError: (() -> Unit)? = null, val assets: Map<String, String> = emptyMap(), val followHumanFont: Boolean = true)
+internal data class ChatTheme(val body: ThemePackage, val image: String?, val onImageError: (() -> Unit)? = null, val assets: Map<String, String> = emptyMap(), val followHumanFont: Boolean = true, val followHumanAccent: Boolean = false, val followHumanChrome: Boolean = followHumanAccent)
 internal val LocalChatTheme = staticCompositionLocalOf<ChatTheme?> { null }
+/** Resolve interface ink at display time; published packages and chosen bubble text stay unchanged. */
+internal fun ChatTheme.withInterfaceColors(colors: OrbisColors): ChatTheme {
+    if (!followHumanAccent) return this
+    fun Color.hex() = "#%06X".format(java.util.Locale.ROOT, toArgb() and 0xFFFFFF)
+    return copy(body=body.copy(colors=body.colors.copy(text=colors.ink.hex(),textSecondary=colors.mutedInk.hex()),
+        chrome=if(followHumanChrome) body.chrome.copy(onComposer=colors.ink.hex(),onDock=colors.onDock.hex()) else body.chrome))
+}
 internal fun themeFont(name: String) = when (name) {
     "serif", "NotoSerifSC" -> FontFamily.Serif
     "monospace" -> FontFamily.Monospace
@@ -58,17 +70,21 @@ internal fun themeFont(name: String) = when (name) {
         value = if (!BuildConfig.ORBIS_ENABLED) null else withContext(Dispatchers.IO) {
             runCatching {
                 val state = store.snapshot()
-                val body = state.resolve() ?: return@runCatching null
+                val body = state.displayBody() ?: return@runCatching null
                 body.assets.forEach { check(store.asset(it).isFile) }
-                ChatTheme(body, body.background.asset?.let { store.asset(it).absolutePath }, followHumanFont = state.followHumanFont, assets = body.assets.associateWith { store.asset(it).absolutePath }, onImageError = {
+                ChatTheme(body, body.background.asset?.let { store.asset(it).absolutePath }, followHumanFont = state.followHumanFont,
+                    followHumanAccent = MaterialThemePreset.fromId(state.active?.id) != null,
+                    followHumanChrome = MaterialThemePreset.fromId(state.active?.id) != null && state.materialTextColors[state.active?.id]?.chrome == null,
+                    assets = body.assets.associateWith { store.asset(it).absolutePath }, onImageError = {
                     scope.launch(Dispatchers.IO) { runCatching { state.active?.let(store::renderFailed) } }
                 })
             }.getOrNull()
         }
     }
-    CompositionLocalProvider(LocalChatTheme provides theme,
+    val displayedTheme=theme?.withInterfaceColors(OrbisTheme.colors)
+    CompositionLocalProvider(LocalChatTheme provides displayedTheme,
         LocalChatFontFamily provides (theme?.takeUnless { it.followHumanFont }?.body?.typography?.fontFamily?.takeUnless { it == "default" }?.let(::themeFont) ?: LocalChatFontFamily.current)) {
-        ThemeMotionProvider(theme?.body?.let { listOf(it.bubbles.assistant,it.bubbles.user).any { b -> b.drawing?.layers.orEmpty().any { layer -> layer.motion != null } } } == true, content)
+        ThemeMotionProvider(theme?.body?.hasMotion() == true, content)
     }
 }
 
@@ -90,6 +106,7 @@ internal fun themeFont(name: String) = when (name) {
     var error by remember(store) { mutableStateOf<String?>(null) }
     var preview by remember(store) { mutableStateOf<ThemeRef?>(null) }
     var draftPreview by remember(store) { mutableStateOf<ThemeEntry?>(null) }
+    var textColorEdit by remember(store) { mutableStateOf<Pair<ThemeRef, MaterialTextTarget>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var page by rememberSaveable(store) { mutableIntStateOf(0) }
     var selectedId by rememberSaveable(store) { mutableStateOf<String?>(null) }
@@ -112,6 +129,22 @@ internal fun themeFont(name: String) = when (name) {
     }
     val colors = OrbisTheme.colors
     val context = LocalContext.current
+    var backgroundTarget by remember { mutableStateOf<ThemeRef?>(null) }
+    val wallpaperPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val target = backgroundTarget
+        backgroundTarget = null
+        if (uri != null && target != null) task {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.bounded(10 * 1024 * 1024) }
+                ?: error("theme_asset_invalid")
+            val asset = importThemeImage(store, bytes)
+            store.setMaterialBackground(target, asset)
+        }
+    }
+    fun defaultWallpaper(preset: MaterialThemePreset): String {
+        val resource = if (preset == MaterialThemePreset.ICE) me.rerere.rikkahub.R.drawable.market_cover_rain
+            else me.rerere.rikkahub.R.drawable.market_cover_cafe
+        return importThemeImage(store, context.resources.openRawResource(resource).use { it.readBytes() })
+    }
     var copied by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Column {
@@ -119,6 +152,45 @@ internal fun themeFont(name: String) = when (name) {
             Text("让伙伴布置你们的聊天空间", color = colors.mutedInk, style = MaterialTheme.typography.bodySmall)
         }
         val active = state.resolve()
+        Surface(color=colors.panel,shape=RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text("内置材质主题",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold)
+                Text("选一款预览，再换上你自己的背景图片。",color=colors.mutedInk,style=MaterialTheme.typography.bodySmall)
+                Text("按钮、辅助文字和默认输入字色跟随界面主题；手选字色会保留。",color=colors.mutedInk,style=MaterialTheme.typography.bodySmall)
+                MaterialThemePreset.entries.forEach { preset ->
+                    OutlinedButton(enabled=!busy,onClick={
+                        var ref: ThemeRef? = null
+                        task(after={preview=ref}) { ref=store.prepareMaterialPreset(preset,defaultWallpaper(preset)) }
+                    },modifier=Modifier.fillMaxWidth().testTag("material-preset-${preset.key}"),shape=RoundedCornerShape(14.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(vertical=4.dp)) {
+                            Text(preset.title,fontWeight=FontWeight.SemiBold)
+                            Text(preset.description,style=MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                val preset=MaterialThemePreset.fromId(state.active?.id)
+                Button(enabled=!busy && preset!=null,onClick={
+                    backgroundTarget=state.active
+                    wallpaperPicker.launch("image/*")
+                },modifier=Modifier.fillMaxWidth().testTag("material-wallpaper"),shape=RoundedCornerShape(14.dp)) {
+                    Text("选择我的背景图片")
+                }
+                if(preset==null) Text("应用上面任意一款后，即可直接更换背景。",color=colors.mutedInk,style=MaterialTheme.typography.bodySmall)
+                else TextButton(enabled=!busy,onClick={val ref=state.active ?: return@TextButton
+                    task { store.setMaterialBackground(ref,defaultWallpaper(preset)) }
+                },modifier=Modifier.testTag("material-wallpaper-reset")) { Text("使用自带背景") }
+                if (preset != null) {
+                    Text("文字颜色", style = MaterialTheme.typography.titleSmall)
+                    MaterialTextTarget.entries.forEach { target ->
+                        OutlinedButton(enabled = !busy, onClick = {
+                            state.active?.let { textColorEdit = it to target }
+                        }, modifier = Modifier.fillMaxWidth().testTag("material-text-${target.name.lowercase()}")) {
+                            Text(target.title)
+                        }
+                    }
+                }
+            }
+        }
         Surface(color = colors.panel, shape = RoundedCornerShape(18.dp)) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -173,7 +245,7 @@ internal fun themeFont(name: String) = when (name) {
               entries.drop(shownPage*6).take(6).chunked(columns).forEach { row ->
                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 row.forEach { entry ->
-                    val body=entry.draft ?: entry.versions.lastOrNull()?.body
+                    val body=entry.draft ?: entry.versions.lastOrNull()?.let { state.displayBody(ThemeRef(entry.id,it.revision)) }
                     Surface(Modifier.weight(1f).testTag("theme-tile-${entry.id}").clickable { selectedId=entry.id; if (entry.draft != null) draftPreview=entry },
                         color=colors.panel,shape=RoundedCornerShape(14.dp),
                         border=BorderStroke(if(selected?.id==entry.id) 1.5.dp else .5.dp,if(selected?.id==entry.id) colors.accent else colors.border)) {
@@ -233,10 +305,21 @@ internal fun themeFont(name: String) = when (name) {
                 }
             }) { Text("发布并预览") } }, dismissButton = { TextButton(enabled = !busy, onClick = { draftPreview = null }) { Text("返回") } })
     } }
-    preview?.let { ref -> state.resolve(ref)?.let { body ->
+    textColorEdit?.let { (ref, target) -> state.resolve(ref)?.let { body ->
+        key(ref, target) {
+            MaterialThemeTextColorDialog(body, state.materialTextColors[ref.id] ?: MaterialTextColors(), target,
+                body.background.asset?.let { store.asset(it).absolutePath }, body.assets.associateWith { store.asset(it).absolutePath },
+                busy, error, onDismiss = { textColorEdit = null }, onSave = { color ->
+                    task(after = { textColorEdit = null }) { store.setMaterialTextColor(ref, target, color) }
+                })
+        }
+    } }
+    preview?.let { ref -> state.displayBody(ref)?.let { body ->
         AlertDialog(onDismissRequest = { preview = null }, title = { Text(body.name) },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThemeChatPreview(body, body.background.asset?.let { store.asset(it).absolutePath }, assets = body.assets.associateWith { store.asset(it).absolutePath }, animate = true)
+                ThemeChatPreview(body, body.background.asset?.let { store.asset(it).absolutePath }, assets = body.assets.associateWith { store.asset(it).absolutePath }, animate = true,
+                    followHumanAccent = MaterialThemePreset.fromId(ref.id) != null,
+                    followHumanChrome = MaterialThemePreset.fromId(ref.id) != null && state.materialTextColors[ref.id]?.chrome == null)
                 Text("这只是示例对话。确认后用于当前助手，随时可回退。", style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = { Button(enabled = !busy, onClick = { task { store.confirm(ref) }; preview = null }) { Text("应用这个主题") } },
             dismissButton = { TextButton(onClick = { preview = null }) { Text("先不更换") } })
@@ -244,12 +327,14 @@ internal fun themeFont(name: String) = when (name) {
 }
 
 /** Uses the same background and bubble renderer as the real conversation, never an HTML mock. */
-@Composable internal fun ThemeChatPreview(body: ThemePackage, image: String? = null, compact: Boolean = false, assets: Map<String, String> = emptyMap(), animate: Boolean = false) {
+@Composable internal fun ThemeChatPreview(body: ThemePackage, image: String? = null, compact: Boolean = false, assets: Map<String, String> = emptyMap(), animate: Boolean = false, followHumanAccent: Boolean = false, followHumanChrome: Boolean = followHumanAccent) {
     val family = themeFont(body.typography.fontFamily)
-    CompositionLocalProvider(LocalChatTheme provides ChatTheme(body, image, assets = assets), LocalChatFontFamily provides family) {
-      ThemeMotionProvider(animate) {
+    val backdrop = rememberHazeState()
+    val displayed=ChatTheme(body, image, assets = assets, followHumanAccent = followHumanAccent,followHumanChrome=followHumanChrome).withInterfaceColors(OrbisTheme.colors)
+    CompositionLocalProvider(LocalBubbleBackdrop provides backdrop, LocalChatTheme provides displayed, LocalChatFontFamily provides family) {
+      ThemeMotionProvider(animate && body.hasMotion()) {
         Box(Modifier.fillMaxWidth().heightIn(min = if(compact) 155.dp else 220.dp).clip(RoundedCornerShape(20.dp)).background(Color(themeArgb(body.colors.background)), RoundedCornerShape(20.dp))) {
-            OrbisChatBackdrop(OrbisAppearance(backgroundEnabled = true, floatingStars = false), Modifier.matchParentSize(), isVisible = false)
+            OrbisChatBackdrop(OrbisAppearance(backgroundEnabled = true, floatingStars = false), Modifier.matchParentSize().hazeSource(backdrop), isVisible = false)
             Column(Modifier.fillMaxWidth().padding(if(compact) 10.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(if(compact) 10.dp else 18.dp)) {
                 if(!compact) Text("我们的小小宇宙", color = Color(themeArgb(body.colors.text)), fontFamily = family)
                 OrbisMessageBubble(false, OrbisAppearance(), Modifier.fillMaxWidth()) {
@@ -257,6 +342,17 @@ internal fun themeFont(name: String) = when (name) {
                 }
                 OrbisMessageBubble(true, OrbisAppearance(), Modifier.fillMaxWidth()) {
                     Text("嗯，慢慢说。", style=themePreviewTextStyle(body.bubbles.user.typography ?: body.typography))
+                }
+                if (!compact && listOf(body.chrome.surface,body.chrome.composerSurface,body.chrome.dockSurface,body.chrome.starSurface).any { it != null }) {
+                    me.rerere.rikkahub.ui.components.ai.ChatComposerSurface(Modifier.fillMaxWidth(),RoundedCornerShape(23.dp),
+                        Color(themeArgb(body.chrome.composer ?: body.colors.surface)),
+                        Color(themeArgb(displayed.body.chrome.onComposer ?: displayed.body.colors.text)),
+                        BorderStroke(1.dp,Color(themeArgb(body.colors.primary)).copy(alpha=.25f)),true) {
+                        Text("＋  输入消息…                 ↑",Modifier.padding(14.dp),fontSize=14.sp)
+                    }
+                    OrbisVisualTheme {
+                        OrbisBottomDock("预览",{}, {},windowInsets=WindowInsets(0,0,0,0))
+                    }
                 }
             }
         }

@@ -403,6 +403,9 @@ internal fun DeepSeekOptions(
     options: SearchServiceOptions.DeepSeekOptions,
     onUpdateOptions: (SearchServiceOptions.DeepSeekOptions) -> Unit,
 ) {
+    Text("允许深度检索：由 DeepSeek Flash 联网查证并附来源，结果交给当前助手回答。除搜索/网页费用外另有模型 Token 费用，可能多次联网。默认关闭。")
+    androidx.compose.material3.Switch(checked = options.allowDeepResearch, onCheckedChange = { onUpdateOptions(options.copy(allowDeepResearch = it)) })
+
     FormItem(label = { Text("DeepSeek 官方 API Key") }) {
         OutlinedTextField(
             value = options.apiKey,

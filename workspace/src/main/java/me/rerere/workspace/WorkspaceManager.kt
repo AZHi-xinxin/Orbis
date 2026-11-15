@@ -162,14 +162,33 @@ class WorkspaceManager(
 
     fun readNativeBytes(root: String, path: String): ByteArray = nativeFiles.readBytes(nativePath(root, path))
 
+    /** Lists the same host-backed mounts used by native reads, without requiring a Linux shell. */
+    fun listNativeFiles(root: String, path: String): List<WorkspaceFileEntry> {
+        if(path == "/skills" || path.startsWith("/skills/")) {
+            check(sortedBindMounts.any { mount ->
+                val target=mount.target.trimEnd('/')
+                path==target || path.startsWith("$target/")
+            }) { "Skill library is not mounted" }
+        }
+        nativePath(root, path) // Validate the absolute path and host anchor before mapping it.
+        val location = resolveRootfsPath(root, path)
+        return fileSystem.list(location.rootDir, location.relativePath)
+    }
+
     /** Only a bound workspace artifact, never an arbitrary app-private file or upload alias. */
     fun readNativeAudio(root: String, path: String): ByteArray {
         require(path.startsWith("/workspace/")) { "workspace_path_denied" }
         return nativeFiles.readBytes(nativePath(root, path), 32 * 1024 * 1024)
     }
 
-    fun writeNativeText(root: String, path: String, text: String, overwrite: Boolean): WorkspaceFileEntry {
-        val stat = nativeFiles.writeText(nativePath(root, path, write = true), text, overwrite)
+    fun copyNativeSubmission(root:String,path:String,output:java.io.OutputStream) {
+        require(path.startsWith("/workspace/") && path.endsWith(".zip",ignoreCase=true)) { "workspace_submission_path_denied" }
+        nativeFiles.copyBounded(nativePath(root,path),output,128L*1024*1024)
+    }
+
+    fun writeNativeText(root: String, path: String, text: String, overwrite: Boolean, trace: (String)->Unit = {}): WorkspaceFileEntry {
+        trace("path")
+        val stat = nativeFiles.writeText(nativePath(root, path, write = true), text, overwrite, trace)
         return WorkspaceFileEntry(path, path.substringAfterLast('/'), false, stat.size, stat.updatedAt)
     }
 

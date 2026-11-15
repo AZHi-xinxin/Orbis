@@ -34,6 +34,7 @@ class OrbisMemoryRuntime(
         if (conversationId == null) return null
         val human = latestMemoryHuman(messages) ?: return null
         val owner = assistant.id.toString()
+        val linked = sharedMemoryOwners(assistant.id, settingsStore.settingsFlow.value.assistants)
         val key = orbisCompactionSummaryHash("$conversationId:${human.id}:${human.toText()}")
         // Native inference is never inside a Room transaction or the chat/tool execution queue.
         // A persisted human turn (including an empty selection) must not be re-scored on retry.
@@ -87,9 +88,43 @@ class OrbisMemoryRuntime(
                 val semanticHits = semantic.filter { entry -> previous[entry.id]?.let {
                     ordinal - it >= entry.minIntervalTurns.coerceAtLeast(1)
                 } ?: true }
-                val selection = me.rerere.rikkahub.data.orbis.desire.attachLocalDesires(
+                val ownSelection = me.rerere.rikkahub.data.orbis.desire.attachLocalDesires(
                     limitFrozenMemory(OrbisMemorySelection(lexical.entries + semanticHits), assistant.orbisMemoryMode),
                     wants, assistant.orbisMemoryMode)
+                val shared = mutableListOf<OrbisMemorySelected>()
+                if (eligible && linked.size > 1) {
+                    // Read candidates only; no background model, rewriting or migration.
+                    var remaining = 2000
+                    for ((sourceOwner, name) in linked.filterKeys { it != owner }) {
+                        val candidates = mutableListOf<MemoryInjectionNote>()
+                        var offset = 0
+                        while (remaining > 0) {
+                            val page = repository.injectionCandidates(sourceOwner, minOf(50, remaining), offset)
+                            if (page.isEmpty()) break
+                            remaining -= page.size
+                            val previous = dao.lastSurfaced(owner, page.map { "$sourceOwner/${it.id}" })
+                                .associate { it.noteId to it.lastOrdinal }
+                            for (n in page) {
+                                val matches = (n.tags + n.keywords).asSequence().map { it.trim().lowercase(Locale.ROOT) }
+                                    .filter(String::isNotEmpty).distinct().count { normalizedQuery.contains(it) }
+                                val last = previous["$sourceOwner/${n.id}"]
+                                if (n.state != "pinned" && (matches == 0 || last != null &&
+                                        ordinal - last < n.minIntervalTurns.coerceAtLeast(1))) continue
+                                candidates += MemoryInjectionNote(n.id, n.state, n.summary, n.body, n.pinText,
+                                    emptyList(), emptyList(), n.important, n.minIntervalTurns, n.revision, matches)
+                            }
+                            candidates.sortWith(compareBy<MemoryInjectionNote> { if (it.state == "pinned") 0 else 1 }
+                                .thenByDescending { it.matchedTerms }.thenByDescending { it.important }.thenBy { it.id })
+                            if (candidates.size > 256) candidates.subList(256, candidates.size).clear()
+                            if (page.size < 50) break
+                            offset += page.size
+                        }
+                        shared += selectOrbisMemory(assistant.orbisMemoryMode, human.toText(), candidates, ordinal)
+                            .entries.map { sharedMemoryEntry(sourceOwner, name, it) }
+                        if (remaining <= 0) break
+                    }
+                }
+                val selection = sharedMemorySelection(assistant.orbisMemoryMode, ownSelection, shared)
                 if (!readOnly) {
                     dao.insert(OrbisMemoryTurnEntity(owner, key, ordinal, json.encodeToString(selection), System.currentTimeMillis()))
                     if (selection.entries.isNotEmpty()) dao.recordSurfacing(selection.entries.map {
@@ -113,7 +148,14 @@ class OrbisMemoryRuntime(
                 val ordinary = selected.entries.filter { it.kind != "compaction_excerpt" }.map {
                     if (!readOnly && me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.LocalDesire in current.localTools) it else it.copy(desire=null)
                 }
-                val ids = try { repository.eligibleInjectionIds(owner, ordinary.map { it.id })
+                val ids = try {
+                    val liveOwners = sharedMemoryOwners(assistant.id, settingsStore.settingsFlow.value.assistants).keys
+                    ordinary.groupBy { it.sourceAssistantId ?: owner }.flatMap { (source, entries) ->
+                        if (source !in liveOwners) emptyList() else {
+                            val eligibleIds = repository.eligibleInjectionIds(source, entries.map { it.sourceNoteId ?: it.id })
+                            entries.filter { (it.sourceNoteId ?: it.id) in eligibleIds }.map { it.id }
+                        }
+                    }.toSet()
                 } catch (cancel: CancellationException) { throw cancel
                 } catch (_: Exception) { emptySet() }
                 val recalled = try {

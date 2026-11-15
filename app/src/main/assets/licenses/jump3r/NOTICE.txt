@@ -1,0 +1,7 @@
+Jump3r 1.0.5 — Java port of LAME 3.98.4
+Copyright The LAME project, Ken Händel, Vadym Vikulin, Hanns Holger Rutz.
+License: LGPL 2.1 or later.
+https://git.iem.at/sciss/jump3r
+https://repo.maven.apache.org/maven2/de/sciss/jump3r/1.0.5/
+Unmodified corresponding source is included alongside this notice. Orbis uses the core MP3 encoder; desktop Java Sound APIs are not used.
+Source SHA256: bbd353fcb01d6192b7faf00939cbb4f65e31c6911de4972007af0dd9775614e9

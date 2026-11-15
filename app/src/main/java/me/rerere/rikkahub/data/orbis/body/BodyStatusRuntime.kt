@@ -134,7 +134,7 @@ internal fun formatBodyStatus(definition: BodyDefinition, values: Map<String, Do
     fun number(value: Double) = BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
     // Labels are assistant-defined data, not prompt instructions. Escape delimiters and controls.
     fun label(value: String) = kotlinx.serialization.json.JsonPrimitive(value).toString()
-    return "【当前身体状态：" + definition.dimensions.joinToString("；") {
+    return "【当前AI身体数据】\n【当前身体状态：" + definition.dimensions.joinToString("；") {
         "${label(it.label)}：${number(values.getValue(it.id))}${if (it.isPrivate) "（私密）" else ""}"
     } + "】" + if (definition.dimensions.any { it.isPrivate }) "（供你读取自身状态；私密指标不代表已向人类公开。）" else ""
 }

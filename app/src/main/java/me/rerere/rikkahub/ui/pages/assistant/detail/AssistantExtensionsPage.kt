@@ -105,6 +105,7 @@ fun AssistantExtensionsPage(id: String) {
                 )
             }
 
+            if (pagerState.currentPage == 3) WorkspaceSkillBindingsCard(assistant.id.toString(), assistant.workspaceId?.toString())
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier

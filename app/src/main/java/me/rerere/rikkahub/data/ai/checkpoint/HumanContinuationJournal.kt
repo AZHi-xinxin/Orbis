@@ -300,6 +300,21 @@ class HumanContinuationJournal(private val store: GenerationCheckpointStore) {
         true
     }
 
+    /** Live session already flushed its current state. Keep any older recovery bytes
+     * separately; they must not veto a later edit or replace current visible messages. */
+    @Synchronized
+    fun retireLive(runId: Uuid, persisted: Conversation) = guarded {
+        val bytes = store.read(persisted.id) ?: return@guarded
+        val record = read(persisted.id) ?: return@guarded
+        check(record.runId == runId && record.assistantId == persisted.assistantId)
+        val committed = runCatching {
+            requirePrefix(record, persisted)
+            contains(persisted, record, record.tail) || contains(persisted, record, settled(record))
+        }.getOrDefault(false)
+        if (!committed) store.preserveConflict(persisted.id, bytes)
+        store.delete(persisted.id)
+    }
+
     private fun contains(current: Conversation, record: Record, tail: List<MessageNode>): Boolean =
         current.messageNodes.size >= record.prefixCount + tail.size &&
             current.messageNodes.drop(record.prefixCount).take(tail.size).zip(tail).all { (a, b) ->

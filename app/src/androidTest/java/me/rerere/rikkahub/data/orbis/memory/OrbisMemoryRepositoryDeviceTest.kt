@@ -32,6 +32,36 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Synthetic in-memory Room only: no user settings, filesystem memory, model, audio or network. */
 @RunWith(AndroidJUnit4::class)
 class OrbisMemoryRepositoryDeviceTest {
+    @Test fun explicitlyLinkedLibrariesShareQueriesAndVersionedEditsWithoutMovingNotes() = runBlocking {
+        Fixture().use { f ->
+            val own = f.store("synthetic tea own")
+            val foreign = f.execute("store", ownerId = f.other) { put("body", "synthetic tea peer") }.id()
+            val outsider = UUID.randomUUID().toString()
+            f.execute("store", ownerId = outsider) { put("body", "synthetic tea outsider") }
+            val linked = setOf(f.owner, f.other)
+            suspend fun shared(action: String, fields: JsonObjectBuilder.() -> Unit = {}) =
+                f.repo.executeShared(f.owner, linked, buildJsonObject { put("action", action); fields() }, UUID.randomUUID().toString())
+            val first = shared("read") { put("query", "tea"); put("limit", 1) }
+            val second = shared("read") { put("query", "tea"); put("limit", 1); put("offset", first["nextOffset"]!!) }
+            val items = first["items"]!!.jsonArray + second["items"]!!.jsonArray
+            assertEquals(setOf(own, foreign), items.map { it.jsonObject["id"]!!.jsonPrimitive.content }.toSet())
+            assertEquals(linked, items.map { it.jsonObject["assistantId"]!!.jsonPrimitive.content }.toSet())
+            assertFalse(items.toString().contains("outsider"))
+            assertTrue(shared("update") { put("id", foreign); put("body", "peer revised") }.ok())
+            assertEquals(2, shared("history") { put("id", foreign) }["items"]!!.jsonArray.size)
+            assertTrue(shared("delete") { put("id", foreign) }.ok())
+            assertTrue(shared("restore") { put("id", foreign); put("revision", 1) }.ok())
+            assertEquals(1, f.repo.stats(f.owner).total); assertEquals(1, f.repo.stats(f.other).total)
+            val isolated = f.repo.executeShared(f.owner, setOf(f.owner),
+                buildJsonObject { put("action", "read"); put("id", foreign) }, "read")
+            assertFalse(isolated.ok()); assertFalse(isolated.toString().contains("peer"))
+            val forbidden = shared("read") { put("library_id", outsider) }
+            assertFalse(forbidden.ok())
+            val newId = shared("store") { put("body", "new own") }.id()
+            assertNotNull(f.db.orbisMemoryDao().get(f.owner, newId))
+            assertNull(f.db.orbisMemoryDao().get(f.other, newId))
+        }
+    }
     @Test fun optionalEmotionPersistsRevisionsAndNeverLeaksOtherOwners() = runBlocking {
         Fixture().use { f ->
             val old = f.store("synthetic untagged note")

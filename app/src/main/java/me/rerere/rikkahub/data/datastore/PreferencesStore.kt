@@ -103,6 +103,7 @@ class SettingsStore(
         val TRANSLATE_THINKING_BUDGET = intPreferencesKey("translate_thinking_budget")
         val SUGGESTION_PROMPT = stringPreferencesKey("suggestion_prompt")
         val OCR_MODEL = stringPreferencesKey("ocr_model")
+        val DEEPSEEK_ATTACHMENTS = stringPreferencesKey("deepseek_attachments")
         val OCR_PROMPT = stringPreferencesKey("ocr_prompt")
         val COMPRESS_MODEL = stringPreferencesKey("compress_model")
         val ORBIS_VOICE_ARCHIVE_MODEL = stringPreferencesKey("orbis_voice_archive_model")
@@ -231,6 +232,7 @@ class SettingsStore(
                 preferences[SUGGESTION_PROMPT] = settings.suggestionPrompt
                 preferences[OCR_MODEL] = settings.ocrModelId.toString()
                 preferences[OCR_PROMPT] = settings.ocrPrompt
+                preferences[DEEPSEEK_ATTACHMENTS] = JsonInstant.encodeToString(settings.deepSeekAttachments)
                 preferences[COMPRESS_MODEL] = settings.compressModelId.toString()
                 settings.orbisVoiceArchiveModelId?.let { preferences[ORBIS_VOICE_ARCHIVE_MODEL] = it.toString() }
                     ?: preferences.remove(ORBIS_VOICE_ARCHIVE_MODEL)
@@ -317,6 +319,7 @@ class SettingsStore(
                 suggestionPrompt = preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT,
                 ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
                 ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
+                deepSeekAttachments = preferences[DEEPSEEK_ATTACHMENTS]?.let { runCatching { JsonInstant.decodeFromString<me.rerere.rikkahub.data.ai.transformers.DeepSeekAttachmentSettings>(it) }.getOrNull() } ?: me.rerere.rikkahub.data.ai.transformers.DeepSeekAttachmentSettings(),
                 compressModelId = preferences[COMPRESS_MODEL]?.let { Uuid.parse(it) } ?: DEFAULT_AUTO_MODEL_ID,
                 orbisVoiceArchiveModelId = preferences[ORBIS_VOICE_ARCHIVE_MODEL]?.let { Uuid.parse(it) },
                 orbisVoiceArchiveFallbackModelId = preferences[ORBIS_VOICE_ARCHIVE_FALLBACK_MODEL]?.let { Uuid.parse(it) },
@@ -732,6 +735,7 @@ data class Settings(
     val suggestionPrompt: String = DEFAULT_SUGGESTION_PROMPT,
     val ocrModelId: Uuid = Uuid.random(),
     val ocrPrompt: String = DEFAULT_OCR_PROMPT,
+    val deepSeekAttachments: me.rerere.rikkahub.data.ai.transformers.DeepSeekAttachmentSettings = me.rerere.rikkahub.data.ai.transformers.DeepSeekAttachmentSettings(),
     val compressModelId: Uuid = Uuid.random(),
     // Explicit opt-in; never inherit the active chat or the generic fast model.
     val orbisVoiceArchiveModelId: Uuid? = null,

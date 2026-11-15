@@ -17,7 +17,17 @@ fun isImageWorkshopSource(source: String): Boolean = source.startsWith("image_wo
     Regex("[a-f0-9-]{36}").matches(source.removePrefix("image_workshop."))
 fun isPetEventSource(source: String) = source.startsWith("pet_room.") &&
     Regex("[a-f0-9-]{36}").matches(source.removePrefix("pet_room."))
-private fun validEventSource(source: String) = source in ORBIS_EVENT_SOURCES || isNativeSentinelSource(source) || isImageWorkshopSource(source) || isPetEventSource(source)
+fun isMarketEventSource(source: String) = source.startsWith("market.") && runCatching {
+    UUID.fromString(source.removePrefix("market.")).toString() == source.removePrefix("market.")
+}.getOrDefault(false)
+fun isGatheringEventSource(source: String) = source.startsWith("gathering.") && runCatching {
+    UUID.fromString(source.removePrefix("gathering.")).toString() == source.removePrefix("gathering.")
+}.getOrDefault(false)
+fun isTabletopEventSource(source:String)=source.startsWith("tabletop.") &&
+    source.removePrefix("tabletop.").split('.').let { ids -> ids.size==2 && ids.all { id ->
+        runCatching { UUID.fromString(id).toString()==id }.getOrDefault(false)
+    } }
+private fun validEventSource(source: String) = source in ORBIS_EVENT_SOURCES || isNativeSentinelSource(source) || isImageWorkshopSource(source) || isPetEventSource(source) || isMarketEventSource(source) || isTabletopEventSource(source) || isGatheringEventSource(source)
 
 @Serializable
 data class OrbisEventBinding(val assistantId: String, val conversationId: String, val enabled: Boolean = true)

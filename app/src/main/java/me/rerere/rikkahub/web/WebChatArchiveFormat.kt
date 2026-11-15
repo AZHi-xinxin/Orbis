@@ -15,10 +15,11 @@ internal interface WebChatArchiveFormat {
         expectedFingerprint: String, onProgress: (DeepSeekImportProgress) -> Unit): DeepSeekImportResult
 }
 
-internal class WebDeepSeekArchiveFormat(private val repository: ConversationRepository) : WebChatArchiveFormat {
+internal class WebDeepSeekArchiveFormat(private val repository: ConversationRepository,
+    private val files: me.rerere.rikkahub.data.files.FilesManager? = null, private val cache: File? = null) : WebChatArchiveFormat {
     override val maxArchiveBytes = DeepSeekArchive.MAX_ARCHIVE_BYTES
     override suspend fun inspect(file: File, checkCancelled: () -> Unit) = DeepSeekArchive.inspect(file, checkCancelled)
     override suspend fun import(file: File, assistantId: Uuid, selections: Map<String, String>,
         expectedFingerprint: String, onProgress: (DeepSeekImportProgress) -> Unit) =
-        DeepSeekChatImporter(repository).import(file, assistantId, selections, onProgress)
+        DeepSeekChatImporter(repository, files, cache).import(file, assistantId, selections, onProgress)
 }

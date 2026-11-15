@@ -16,6 +16,12 @@ internal suspend fun importCompanionSpaceImage(context: Context, store: OrbisCom
     require(uri.scheme in setOf("content", "file")) { "space_image_invalid" }
     val source = context.contentResolver.openInputStream(uri)?.use { it.spaceReadBounded(CompanionSpaceLimits.MEDIA_BYTES) }
         ?: error("space_image_invalid")
+    store.addMedia(normalizeCompanionSpaceImage(source), "image/jpeg")
+}
+
+/** Shared picker/chat normalization preserves orientation while dropping metadata. No storage writes here. */
+internal fun normalizeCompanionSpaceImage(source: ByteArray): ByteArray {
+    require(source.size in 1..CompanionSpaceLimits.MEDIA_BYTES) { "space_image_invalid" }
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
     require(bounds.outWidth in 1..32000 && bounds.outHeight in 1..32000) { "space_image_invalid" }
@@ -40,6 +46,6 @@ internal suspend fun importCompanionSpaceImage(context: Context, store: OrbisCom
         if (!matrix.isIdentity) upright = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         val output = ByteArrayOutputStream()
         require(upright.compress(Bitmap.CompressFormat.JPEG, 90, output)) { "space_image_invalid" }
-        store.addMedia(output.toByteArray(), "image/jpeg")
+        return output.toByteArray()
     } finally { if (upright !== bitmap) upright.recycle(); bitmap.recycle() }
 }

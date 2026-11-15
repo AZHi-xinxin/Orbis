@@ -16,6 +16,10 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.util.KeyRoulette
 import me.rerere.rikkahub.data.ai.GenerationInputSnapshot
+import me.rerere.rikkahub.data.ai.ModelContinuity
+import me.rerere.rikkahub.data.ai.transformers.applyOrbisUserMessageTimes
+import me.rerere.rikkahub.data.ai.transformers.captureOrbisUserMessageTime
+import me.rerere.ai.ui.ConfiguredModelReceipt
 import me.rerere.rikkahub.data.ai.compaction.COMPACTION_SUMMARY_MARKER
 import me.rerere.rikkahub.data.orbis.observation.projectObservation
 import okhttp3.OkHttpClient
@@ -49,15 +53,23 @@ class ObservationProviderWireTest(private val protocol: String) {
         val b = request(projectObservation(stored, "{\"count\":2}"))
         assertEquals(system(baseline), system(a))
         assertEquals(system(a), system(b))
-        val baselineMessages = wireMessages(baseline)
-        val aMessages = wireMessages(a)
-        val bMessages = wireMessages(b)
+        val baselineMessages = authoredMessages(baseline)
+        val aMessages = authoredMessages(a)
+        val bMessages = authoredMessages(b)
         assertEquals(baselineMessages.size, aMessages.size)
         assertEquals(JsonArray(baselineMessages.dropLast(1)).toString(), JsonArray(aMessages.dropLast(1)).toString())
         assertEquals(JsonArray(aMessages.dropLast(1)).toString(), JsonArray(bMessages.dropLast(1)).toString())
         assertTrue(aMessages.last().toString().contains("synthetic current question"))
-        assertTrue(aMessages.last().toString().contains(marker))
-        assertNotEquals(aMessages.last(), bMessages.last())
+        if (protocol == "chat") {
+            assertEquals(baselineMessages, aMessages)
+            assertEquals(aMessages, bMessages)
+            assertNotEquals(hostMessages(a), hostMessages(b))
+            assertEquals("system", hostMessages(a).single().jsonObject["role"]!!.jsonPrimitive.content)
+            assertEquals(hostMessages(a).single(), wireMessages(a)[wireMessages(a).lastIndex - 1])
+        } else {
+            assertTrue(aMessages.last().toString().contains(marker))
+            assertNotEquals(aMessages.last(), bMessages.last())
+        }
         assertEquals(1, marker.toRegex(RegexOption.LITERAL).findAll(a.toString()).count())
         assertFalse(system(a).contains(marker))
     }
@@ -76,7 +88,11 @@ class ObservationProviderWireTest(private val protocol: String) {
         assertEquals(currentHuman.parts, projected.last().parts.take(currentHuman.parts.size))
         assertEquals(before, stored)
         assertEquals(1, currentHuman.parts.size)
-        assertTrue(wireMessages(request(projected)).last().toString().contains(marker))
+        val wire = request(projected)
+        if (protocol == "chat") {
+            assertFalse(wireMessages(wire).last().toString().contains(marker))
+            assertTrue(hostMessages(wire).single().toString().contains(marker))
+        } else assertTrue(wireMessages(wire).last().toString().contains(marker))
     }
 
     @Test fun actualGenerationSnapshotKeepsFrozenWirePrefixThroughToolContinuation() = runTest {
@@ -106,8 +122,8 @@ class ObservationProviderWireTest(private val protocol: String) {
         val baseline = request(nextStored)
         val projected = request(projectObservation(nextStored, "{\"wake\":2}"))
         assertEquals(system(baseline), system(projected))
-        assertEquals(JsonArray(wireMessages(baseline).dropLast(1)).toString(),
-            JsonArray(wireMessages(projected).dropLast(1)).toString())
+        assertEquals(JsonArray(authoredMessages(baseline).dropLast(1)).toString(),
+            JsonArray(authoredMessages(projected).dropLast(1)).toString())
         assertEquals(1, marker.toRegex(RegexOption.LITERAL).findAll(projected.toString()).count())
         assertFalse(nextStored.any { it.toText().contains(marker) })
     }
@@ -124,7 +140,39 @@ class ObservationProviderWireTest(private val protocol: String) {
         assertEquals(system(original), system(projected))
         assertTrue(projected.toString().contains(marker))
         assertTrue(projected.toString().contains("synthetic compaction status"))
-        assertEquals(wireMessages(original).size, wireMessages(projected).size)
+        assertEquals(authoredMessages(original).size, authoredMessages(projected).size)
+    }
+
+    @Test fun modelClockAndObservationNeverBecomeChatGatewayRecallQuery() = runTest {
+        val raw = UIMessage.user("synthetic-topic").copy(orbisUserMessageTime =
+            captureOrbisUserMessageTime(true, 1_800_000_000_123, java.time.ZoneId.of("UTC")))
+        val receipt = ConfiguredModelReceipt("owner", "window", "provider", "synthetic-model", "OpenAI compatible")
+        val snapshot = GenerationInputSnapshot(modelNotice = ModelContinuity.notice(receipt, null),
+            observation = "{\"synthetic_observation\":1}")
+        val projected = snapshot.input { applyOrbisUserMessageTimes(listOf(main, raw), true) }
+        val wire = request(projected)
+        val baseline = request(listOf(main, raw))
+        assertEquals(system(baseline), system(wire))
+        assertEquals("synthetic-topic", raw.toText())
+        for (notice in listOf("configured_model", "orbis_user_message_time", "synthetic_observation")) {
+            assertTrue(wire.toString().contains(notice))
+            if (protocol == "chat") assertFalse(wireMessages(wire).last().toString().contains(notice))
+        }
+        if (protocol == "chat") {
+            assertEquals(wireMessages(baseline).last(), wireMessages(wire).last())
+            assertEquals(1, hostMessages(wire).size)
+            val directory = java.io.File("build/reports/host-notice-wire").apply { mkdirs() }
+            java.io.File(directory, "initial.json").writeText(wire.toString())
+            val call = UIMessagePart.Tool("synthetic-host-call", "synthetic_tool", "{}")
+            val reply = UIMessage.assistant("").copy(parts = listOf(call))
+            snapshot.appendCompletedResponse(reply, listOf(call.copy(
+                output = listOf(UIMessagePart.Text("synthetic result")), approvalState = ToolApprovalState.Auto)))
+            val continued = request(snapshot.input { error("No rerender") })
+            assertEquals(wireMessages(wire), JsonArray(wireMessages(continued).take(wireMessages(wire).size)))
+            java.io.File(directory, "continuation.json").writeText(continued.toString())
+        } else {
+            assertEquals(projected, snapshot.input { error("No reevaluation during tool continuation") })
+        }
     }
 
     @Test fun compactionWithoutHumanKeepsRealToolPairAndCarriesOneVisibleObservation() = runTest {
@@ -164,11 +212,11 @@ class ObservationProviderWireTest(private val protocol: String) {
 
     private fun request(messages: List<UIMessage>): JsonObject = when (protocol) {
         "chat" -> {
-            val method = ChatCompletionsAPI::class.java.getDeclaredMethod("buildMessages", List::class.java,
-                Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, List::class.java).apply { isAccessible = true }
-            val wire = method.invoke(ChatCompletionsAPI(client, KeyRoulette.default()), messages, true, false,
-                listOf(Modality.TEXT, Modality.IMAGE)) as JsonArray
-            buildJsonObject { put("messages", wire) }
+            val method = ChatCompletionsAPI::class.java.getDeclaredMethod("buildChatCompletionRequest", List::class.java,
+                TextGenerationParams::class.java, ProviderSetting.OpenAI::class.java,
+                Boolean::class.javaPrimitiveType).apply { isAccessible = true }
+            method.invoke(ChatCompletionsAPI(client, KeyRoulette.default()), messages, params,
+                ProviderSetting.OpenAI(baseUrl = "https://example.invalid/v1"), false) as JsonObject
         }
         "responses" -> ResponseAPI::class.java.declaredMethods.single { method ->
             // Internal JVM methods may include a module suffix; app tests do not bypass Kotlin visibility.
@@ -187,8 +235,12 @@ class ObservationProviderWireTest(private val protocol: String) {
     private fun wireMessages(body: JsonObject): JsonArray = body[when(protocol) {
         "responses" -> "input"; "google" -> "contents"; else -> "messages"
     }]!!.jsonArray
+    private fun hostMessages(body: JsonObject) = wireMessages(body).filter {
+        protocol == "chat" && it.jsonObject["name"]?.jsonPrimitive?.content == "orbis_host_data_v1"
+    }
+    private fun authoredMessages(body: JsonObject) = JsonArray(wireMessages(body) - hostMessages(body).toSet())
     private fun system(body: JsonObject): String = when(protocol) {
-        "chat" -> JsonArray(wireMessages(body).filter { it.jsonObject["role"]?.jsonPrimitive?.content == "system" }).toString()
+        "chat" -> JsonArray(authoredMessages(body).filter { it.jsonObject["role"]?.jsonPrimitive?.content == "system" }).toString()
         "responses" -> body["instructions"].toString()
         "claude" -> body["system"].toString()
         "google" -> body["systemInstruction"].toString()

@@ -10,11 +10,12 @@ import me.rerere.rikkahub.data.orbis.cloudtools.CloudToolInvocationContext
 
 const val ORBIS_MEMORY_TOOL = "orbis_memory"
 
-/** Owner and replay key are host-bound; model input cannot select another assistant's store. */
+/** Linked libraries and replay keys are host-bound; arbitrary owner input grants no access. */
 internal fun buildOrbisMemoryTool(
     assistantId: String,
     assistantExists: () -> Boolean,
     readOnly: Boolean = false,
+    libraries: () -> Map<String, String> = { mapOf(assistantId to "当前助手") },
     executeMemory: suspend (String, JsonObject, String) -> JsonObject,
 ) = Tool(
     name = ORBIS_MEMORY_TOOL,
@@ -23,8 +24,8 @@ internal fun buildOrbisMemoryTool(
         fun field(name: String, type: String, description: String) = put(name, buildJsonObject {
             put("type", type); put("description", description)
         })
-        field("action", "string", "store（默认）、read、update、delete、set_state、restore、history")
-        field("id", "string", "已有便签 ID；不能选择其他助手")
+        field("action", "string", "store、read（无正文时默认）、update、delete、set_state、restore、history、libraries（已连通库列表）")
+        field("id", "string", "已有便签 ID；范围由人类的跨助手记忆开关决定")
         field("body", "string", "完整正文；只有存入时必填，可长于300字")
         field("summary", "string", "可选，由你写的带入摘要，不影响完整正文")
         put("emotion", buildJsonObject { put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
@@ -40,6 +41,7 @@ internal fun buildOrbisMemoryTool(
         field("limit", "integer", "分页条数（有安全上限）")
         field("revision", "integer", "恢复到指定历史版本；不填只恢复软删/暂停")
         field("includeDeleted", "boolean", "读查询是否包括可恢复的软删记录")
+        field("library_id", "string", "可选：libraries 返回的已连通库 ID；不填时查询全部已连通库，新记忆存当前助手库")
     }) },
     execute = { input ->
         val response = try {
@@ -47,6 +49,14 @@ internal fun buildOrbisMemoryTool(
             val action = request["action"]?.jsonPrimitive?.content ?: "store"
             when {
                 !assistantExists() -> memoryToolError("assistant_unavailable", "助手已不存在，未改写。")
+                action == "libraries" -> buildJsonObject {
+                    put("ok", true)
+                    put("libraries", buildJsonArray {
+                        libraries().forEach { (id, name) ->
+                            add(buildJsonObject { put("assistantId", id); put("name", name) })
+                        }
+                    })
+                }
                 readOnly && action !in setOf("read", "history") ->
                     memoryToolError("reference_read_only", "本次仅供参考，未改写便签。")
                 else -> {

@@ -31,7 +31,7 @@ internal val orbisSentinelGuide = listOf(
         "长期接收手机围栏的离开、距离、到达、返回和报平安等真实事件，不接受 prompt。你可决定是否创建、暂停或删除本条规则，但围栏中心、范围与位置权限沿用人类在前端的配置，不能由 AI 偷改。没有围栏或定位授权时不假装检测到变化。已有旧位置事件配置时，还需先核对链路接管与投递目标；保存规则本身不会改投递地址。",
         """{"type":"geofence"}"""),
     OrbisSentinelGuideEntry("touch", "Stackchan 触屏反馈",
-        "长期等待已连接 Stackchan 的真实触摸事件；prompt 是你亲写的被触摸时唤醒内容，格式为【触摸唤醒】加原文。不主动轮询陌生设备，不在规则中填写凭证。必须先有机器人检测端到 Orbis 的已配置事件链路；规则保存不等于外部链路已连通。",
+        "长期等待已连接 Stackchan 的真实触摸事件；prompt 是你亲写的被触摸时唤醒内容，格式为【触摸唤醒】加原文。不主动轮询陌生设备，不在规则中填写凭证。人类在哨兵页的 StackChan 设备接入入口（Web 服务设置）启动服务并复制设备配置到可信转发程序；配置含仅供触摸上报的专用密钥，不要索要它进入聊天，不使用 Web 登录令牌替代。转发程序先 GET /api/orbis/sentinels/touch/status 核验，再于真实触摸时 POST /api/orbis/sentinels/touch，仅传 event_id 和 occurred_at（Unix毫秒整数），不传prompt或目标助手；重试保持同一ID并先查receipt。规则保存不等于链路连通，状态接口成功不等于触摸已唤醒。",
         """{"type":"touch","prompt":"她摸了摸屏幕，看看她想说什么。"}"""),
     OrbisSentinelGuideEntry("once", "一次性自我唤醒",
         "用 due_at_ms（Unix 毫秒）预约未来一次；prompt 是你亲写的唤醒内容。成功进入收件箱后自动停用，不是每天重复；下一次预约可更新原规则的时间，也可新建。",
@@ -50,4 +50,4 @@ internal val orbisSentinelGuide = listOf(
         """{"type":"app_usage","app_package":"com.example.app","duration_seconds":1800,"prompt":"这个应用已经连续使用半小时"}"""),
 )
 
-internal const val ORBIS_SENTINEL_COMMON_GUIDE = "选择需要的类别，一次 create 即可设置；全部可选，不需逐步确认，也不必先读说明才能创建。enabled=false 可只保存不启用。规则固定绑定创建时的 AI 与窗口，AI 可跨自己的窗口管理；规则长期保存，不需每天重设，once 例外。所有事件都由宿主附带真实日期、时间和时区，AI 不用填写时间戳文案。人类仅控制总开关，关闭不删除规则，恢复不补发暂停期间事件。新通知先持久进入固定对话，旧回复失败或仅人类输入状态不再封锁后续通知。本地回复或保存结束后独立尝试本条；单条失败不自动重试，后续继续，仍遵守冷却。accepted 不等于 AI 已回复或声音已播放。旧 skipped 表示当时未发送，原因保留，不排队或补发；不要为补发重建一次性规则。权限、后台、省电、网络和存储会影响执行，未知工具结果不自动重做。不会因打开说明自动创建任何规则；也不会自动关闭旧 VPS 链路。"
+internal const val ORBIS_SENTINEL_COMMON_GUIDE = "选择需要的类别，一次 create 即可设置；全部可选，不需逐步确认，也不必先读说明才能创建。enabled=false 可只保存不启用。规则固定绑定创建时的 AI 与窗口，AI 可跨自己的窗口管理；旧窗口删除或想换目标时，在目标窗口调用 orbis_sentinel_rebind(rule_id)，无需重建规则；宿主核验实际窗口，原文/启停/历史保持，旧通知不补发。list/read 返回 current_conversation_id 和各规则 target_status，勿把旧规则的 conversation_id 当作当前窗口；规则长期保存，不需每天重设，once 例外。所有事件都由宿主附带真实日期、时间和时区，AI 不用填写时间戳文案。人类仅控制总开关，关闭不删除规则，恢复不补发暂停期间事件。新通知先持久进入固定对话，旧回复失败或仅人类输入状态不再封锁后续通知。本地回复或保存结束后独立尝试本条；单条失败不自动重试，后续继续，仍遵守冷却。accepted 不等于 AI 已回复或声音已播放。旧 skipped 表示当时未发送，原因保留，不排队或补发；不要为补发重建一次性规则。权限、后台、省电、网络和存储会影响执行，未知工具结果不自动重做。不会因打开说明自动创建任何规则；也不会自动关闭旧 VPS 链路。"

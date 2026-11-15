@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import dev.chrisbanes.haze.hazeSource
+import me.rerere.rikkahub.data.orbis.theme.hasMaterial
+import me.rerere.rikkahub.ui.components.message.LocalBubbleBackdrop
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,11 +37,17 @@ internal fun OrbisCommunityBackdrop(
 ) {
     val appearance = settings.displaySetting.appearanceForStyle(LocalOrbisDeepSeekStyle.current).normalized()
     val assistant = settings.getCurrentAssistant()
-    val inherit = !appearance.backgroundEnabled && (assistant.background != null || assistant.useGradientBackground)
+    val theme = LocalChatTheme.current
+    val backdrop = remember(assistant.id) { dev.chrisbanes.haze.HazeState() }
+    val optical = theme?.body?.hasMaterial() == true
+    val source = if(optical) Modifier.hazeSource(backdrop) else Modifier
+    val inherit = theme == null && !appearance.backgroundEnabled && (assistant.background != null || assistant.useGradientBackground)
+    CompositionLocalProvider(LocalBubbleBackdrop provides if(optical) backdrop else null) {
     Box(Modifier.fillMaxSize()) {
-        if (inherit) AssistantBackground(settings, Modifier.fillMaxSize())
-        OrbisChatBackdrop(appearance, Modifier.fillMaxSize(), isVisible = hostVisible, drawBackground = !inherit)
+        if (inherit) AssistantBackground(settings, Modifier.fillMaxSize().then(source))
+        OrbisChatBackdrop(appearance, Modifier.fillMaxSize().then(source), isVisible = hostVisible, drawBackground = !inherit)
         content()
+    }
     }
 }
 

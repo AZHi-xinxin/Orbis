@@ -88,9 +88,12 @@ class ImageWorkshopWorker(context: Context, parameters: WorkerParameters) : Coro
                         live.providers.any { it.enabled && it.models.any { candidate -> candidate.id == liveModel.id } },
                     liveConfigHash = if (liveModel != null && liveProvider != null) ImageWorkshop.configurationHash(liveProvider, liveModel) else null,
                     allowAi = workshop.state.value.allowAi)
-                val prompt = if (job.widgetKit) widgetKitPrompt(job.prompt, variant) else job.prompt
+                workshop.ledger.validateReferences(job.assistantId, job.byAi, job.namedReferences)
                 val first = workshop.ledger.get(id)?.assets?.firstOrNull()?.file
-                val refs = (listOfNotNull(first.takeIf { job.widgetKit }) + job.references).distinct().take(4)
+                // Retain every selected person; only the optional kit anchor may be omitted.
+                val refs = (listOfNotNull(first.takeIf { job.widgetKit && job.references.size < 4 }) + job.references).distinct()
+                val prompt = workshopReferencePrompt(
+                    if (job.widgetKit) widgetKitPrompt(job.prompt, variant) else job.prompt, refs, job.namedReferences)
                 var received = false
                 fun save(data: String) {
                     val asset = workshop.saveBase64(data, label)

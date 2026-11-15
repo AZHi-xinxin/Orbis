@@ -9,6 +9,10 @@ import java.util.UUID
 
 @Serializable enum class WorkshopStatus { QUEUED, RUNNING, COMPLETE, FAILED, INTERRUPTED, CANCELLED }
 @Serializable data class WorkshopAsset(val file: String, val label: String, val mime: String, val transparent: Boolean)
+@Serializable data class WorkshopReference(
+    val id: String = UUID.randomUUID().toString(), val assistantId: String,
+    val name: String, val asset: WorkshopAsset, val allowAi: Boolean = false, val revision: Long = 1,
+)
 @Serializable data class WorkshopJob(
     val id: String = UUID.randomUUID().toString(), val requestId: String,
     val assistantId: String, val conversationId: String? = null, val byAi: Boolean,
@@ -21,10 +25,12 @@ import java.util.UUID
     val notifyConversation: Boolean = byAi,
     val referenceMode: String = "img2img", val referenceStrength: Double = 0.6,
     val deleted: Boolean = false,
+    val namedReferences: List<WorkshopReference> = emptyList(),
 )
 @Serializable data class WorkshopState(val version: Int = 1, val allowAi: Boolean = true,
     val defaultModel: String? = null, val jobs: List<WorkshopJob> = emptyList(),
-    val pendingFileDeletes: Set<String> = emptySet(), val sharedOriginals: Set<String> = emptySet())
+    val pendingFileDeletes: Set<String> = emptySet(), val sharedOriginals: Set<String> = emptySet(),
+    val referenceLibrary: List<WorkshopReference> = emptyList())
 
 /** A deleted receipt reserves this request key, not the workshop or reference image. */
 class WorkshopRequestDeletedException(val requestId: String) : IllegalArgumentException("workshop_request_deleted")
@@ -53,12 +59,44 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
     val state = mutable.asStateFlow()
     @Synchronized fun preferences(allowAi: Boolean = state.value.allowAi, defaultModel: String? = state.value.defaultModel) =
         commit(state.value.copy(allowAi = allowAi, defaultModel = defaultModel))
+    /** Only the human UI writes this library; tools receive scoped, explicitly shared entries. */
+    @Synchronized fun saveReference(reference: WorkshopReference, expectedRevision: Long? = null): WorkshopReference {
+        UUID.fromString(reference.id); UUID.fromString(reference.assistantId)
+        val name = reference.name.trim()
+        require(name.length in 1..32 && name.none { it.isISOControl() }) { "workshop_reference_name" }
+        require(validWorkshopFile(reference.asset.file)) { "workshop_reference" }
+        val old = state.value.referenceLibrary.firstOrNull { it.id == reference.id }
+        require(old?.revision == expectedRevision && (old == null || old.assistantId == reference.assistantId)) { "workshop_reference_changed" }
+        require(state.value.referenceLibrary.none { it.id != reference.id && it.assistantId == reference.assistantId && it.name.equals(name, true) }) { "workshop_reference_name_duplicate" }
+        require(old != null || state.value.referenceLibrary.count { it.assistantId == reference.assistantId } < 32) { "workshop_reference_library_full" }
+        val saved = reference.copy(name = name, revision = (old?.revision ?: 0) + 1)
+        commit(state.value.copy(referenceLibrary = state.value.referenceLibrary.filterNot { it.id == reference.id } + saved,
+            pendingFileDeletes = state.value.pendingFileDeletes + listOfNotNull(old?.asset?.file).filter { it != saved.asset.file }))
+        return saved
+    }
+    @Synchronized fun deleteReference(id: String, assistant: String) {
+        val old = state.value.referenceLibrary.firstOrNull { it.id == id && it.assistantId == assistant } ?: error("workshop_reference_missing")
+        commit(state.value.copy(referenceLibrary = state.value.referenceLibrary.filterNot { it.id == id },
+            pendingFileDeletes = state.value.pendingFileDeletes + old.asset.file))
+    }
+    @Synchronized fun visibleReferences(assistant: String, byAi: Boolean) =
+        state.value.referenceLibrary.filter { it.assistantId == assistant && (!byAi || state.value.allowAi && it.allowAi) }
+    @Synchronized fun resolveReferences(assistant: String, byAi: Boolean, ids: List<String>): List<WorkshopReference> {
+        require(ids.size <= 4 && ids.distinct().size == ids.size) { "workshop_reference" }
+        val visible = visibleReferences(assistant, byAi)
+        return ids.map { id -> visible.firstOrNull { it.id == id } ?: error("workshop_reference_missing") }
+    }
+    @Synchronized fun validateReferences(assistant: String, byAi: Boolean, snapshots: List<WorkshopReference>) {
+        require(resolveReferences(assistant, byAi, snapshots.map { it.id }) == snapshots) { "workshop_reference_changed" }
+    }
     @Synchronized fun submit(job: WorkshopJob): WorkshopJob {
         UUID.fromString(job.assistantId); job.conversationId?.let(UUID::fromString); UUID.fromString(job.modelId)
         require(job.requestId.matches(Regex("[A-Za-z0-9_.-]{1,100}"))) { "workshop_request_id" }
         require(job.prompt.isNotBlank() && job.prompt.length <= 12000) { "workshop_prompt" }
         require(job.referenceMode in setOf("img2img", "character&style") && job.referenceStrength.isFinite() && job.referenceStrength in 0.0..1.0) { "workshop_reference_mode" }
         require(job.references.size <= 4 && job.references.all(::validWorkshopFile)) { "workshop_reference" }
+        validateReferences(job.assistantId, job.byAi, job.namedReferences)
+        require(job.namedReferences.all { it.asset.file in job.references }) { "workshop_reference" }
         require(!job.byAi || job.conversationId != null && state.value.allowAi) { "workshop_ai_disabled" }
         require(!job.notifyConversation || job.conversationId != null) { "workshop_target_changed" }
         require(job.byAi || !job.notifyConversation) { "workshop_human_private" }
@@ -68,7 +106,7 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
             if (it.deleted) throw WorkshopRequestDeletedException(job.requestId)
             require(it.modelId == job.modelId && it.prompt == job.prompt && it.references == job.references &&
                 it.widgetKit == job.widgetKit && it.byAi == job.byAi && it.referenceMode == job.referenceMode && it.referenceStrength == job.referenceStrength &&
-                it.notifyConversation == job.notifyConversation) { "workshop_request_conflict" }
+                it.notifyConversation == job.notifyConversation && it.namedReferences == job.namedReferences) { "workshop_request_conflict" }
             return it
         }
         require(job.status == WorkshopStatus.QUEUED && job.assets.isEmpty())
@@ -102,7 +140,7 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
         val shared = state.value.sharedOriginals + state.value.jobs.filter { it.canNotifyConversation() || it.delivered && it.notifyConversation }
             .flatMap { it.assets.map(WorkshopAsset::file) }
         val next = if (file == null) old.copy(deleted = true, prompt = "", references = emptyList(),
-            assets = emptyList(), error = null, notifyConversation = false, delivered = true)
+            assets = emptyList(), error = null, notifyConversation = false, delivered = true, namedReferences = emptyList())
         else old.copy(assets = old.assets.filterNot { it.file == file }, notifyConversation = false)
         commit(state.value.copy(jobs = state.value.jobs.map { if (it.id == id) next else it },
             pendingFileDeletes = state.value.pendingFileDeletes + removed, sharedOriginals = shared))
@@ -110,7 +148,7 @@ class WorkshopLedger(private val read: () -> String?, private val write: (String
 
     /** Under the same lock as submit: never unlink a concurrently accepted reference. */
     @Synchronized fun cleanDeletedFiles(remove: (String) -> Boolean) {
-        val inUse = state.value.sharedOriginals + state.value.jobs.filterNot { it.deleted }
+        val inUse = state.value.sharedOriginals + state.value.referenceLibrary.map { it.asset.file } + state.value.jobs.filterNot { it.deleted }
             .flatMap { it.assets.map(WorkshopAsset::file) + it.references }
         val removed = state.value.pendingFileDeletes.filter { validWorkshopFile(it) && it !in inUse && remove(it) }.toSet()
         if (removed.isNotEmpty()) commit(state.value.copy(pendingFileDeletes = state.value.pendingFileDeletes - removed))

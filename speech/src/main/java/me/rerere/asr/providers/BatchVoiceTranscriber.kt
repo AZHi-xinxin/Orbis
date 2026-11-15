@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
 
 /** Dedicated call transport. A failed/cancelled segment is never automatically replayed. */
 internal class BatchVoiceTranscriber(client: OkHttpClient, private val provider: ASRProviderSetting) {
-    private val http = client.newBuilder()
+    private val http = (if (provider is ASRProviderSetting.DeepSeek) me.rerere.common.deepseek.DeepSeekTools.client(client, 18) else client).newBuilder()
         .callTimeout(18, TimeUnit.SECONDS).readTimeout(18, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build()
 
@@ -38,7 +38,7 @@ internal class BatchVoiceTranscriber(client: OkHttpClient, private val provider:
                     if (source.request(MAX_RESPONSE_BYTES + 1)) invalidResponse()
                     parseMiMoVoiceResponse(source.readUtf8())
                 }
-                is ASRProviderSetting.SiliconFlow -> {
+                is ASRProviderSetting.SiliconFlow, is ASRProviderSetting.DeepSeek -> {
                     val source = response.body.source()
                     if (source.request(MAX_RESPONSE_BYTES + 1)) invalidResponse()
                     parseSiliconFlowResponse(source.readUtf8())
@@ -52,6 +52,12 @@ internal class BatchVoiceTranscriber(client: OkHttpClient, private val provider:
 
 internal fun batchVoiceRequest(provider: ASRProviderSetting, pcm: ByteArray): Request {
     require(pcm.isNotEmpty() && pcm.size % 2 == 0 && pcm.size <= 1_440_000)
+    if (provider is ASRProviderSetting.DeepSeek) {
+        return me.rerere.common.deepseek.DeepSeekTools.request("/v1/tools/asr", provider.apiKey)
+            .post(okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+                .addFormDataPart("file", "speech.wav", pcmVoiceWav(pcm, 16000).toRequestBody("audio/wav".toMediaType()))
+                .build()).build()
+    }
     if (provider is ASRProviderSetting.SiliconFlow) {
         require(provider.sampleRate == 16000 && provider.model.isNotBlank())
         return Request.Builder().url("${provider.baseUrl.trim().trimEnd('/')}/audio/transcriptions")

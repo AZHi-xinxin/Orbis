@@ -80,7 +80,7 @@ internal fun createConnectionProposalTool(owner: String, snapshot: () -> Setting
                 put("ok", true)
                 put("ui_requested", action in setOf("open_setup", "show_guide"))
                 put("ui_dismiss_requested", action == "dismiss_setup")
-                put("human_entry", "有待办时：当前聊天输入框上方 → 连接设置；关闭提示后：右下角北斗导航 → 工具娱乐 → AI 连接建议，或用 open_setup 重开")
+                put("human_entry", "有待办时：当前聊天输入框上方 → 连接设置；关闭提示后：右下角北斗导航 → 工具娱乐 → AI 连接建议 → 查看已关闭，或用 open_setup 重开")
                 put("proposals", JsonArray(receipt.filter { it.owner == owner }.map { p -> buildJsonObject {
                     put("id", p.id); put("name", p.draft.name); put("kind", p.draft.kind); put("status", p.status)
                     put("always_allowed", p.alwaysAllow); put("verified", verified(p)); put("setup_completed", p.setupCompleted)
@@ -89,7 +89,7 @@ internal fun createConnectionProposalTool(owner: String, snapshot: () -> Setting
                     if (p.draft.kind.startsWith("mcp_")) put("enabled", snapshot().mcpServers
                         .firstOrNull { it.id.toString() == p.id }?.commonOptions?.enable == true)
                 } }))
-                put("completion_help", "确认连通：check/check_status 后 verified=true 才能 complete(id)。只关闭提示（包括已删测试服务、离线或未验证）：dismiss_setup(id)；省略 id 关闭本助手全部连接提示，不影响其他助手。它不删除/停用连接、不切模型、不保存输入密钥，也不表示验证成功。后台设置保留，open_setup 可再打开。")
+                put("completion_help", "确认连通：check/check_status 后 verified=true 才能 complete(id)。只关闭提示（包括已删测试服务、离线或未验证）：dismiss_setup(id)；省略 id 关闭本助手全部连接提示，不影响其他助手。它不删除/停用连接、不切模型、不保存输入密钥，也不表示验证成功。人类可点‘关闭这条建议’或‘关闭建议列表’；后台设置保留，‘查看已关闭’或 open_setup 可再打开。界面‘密钥已保存’不等于已验证连通。")
                 put("note", "配置建议已处理；pending仅在设置页待确认，不用等候。已保存也不代表连接测试成功。可以继续当前回复。")
             }
         } } } catch(e: TimeoutCancellationException) { buildJsonObject { put("ok", false); put("status", "save_unconfirmed"); put("note", "本次保存未及时确认；不要重复创建，稍后在原生配置页查看，继续正常对话。") } }

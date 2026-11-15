@@ -38,6 +38,7 @@ internal class AtlasBootstrapException(val code: String) : IOException(when (cod
     "storage" -> "本机授权未能安全读取或保存；原文件保留，未自动重试。"
     "managed" -> "请先撤销当前授权，或明确仅忘记本机记录，再修改连接。"
     "revoked" -> "这次登记已经撤销，未启用星图；不会自动创建新授权。"
+    "not_registered" -> "未能确认所选服务的星图连接，尚未申请新的授权。请检查所选地址及网络，修正后再点「连接星图」；现有设置仍保留。"
     else -> "连接结果尚未确认；凭据已保留，请手动重试确认，不会自动重新登记。"
 })
 

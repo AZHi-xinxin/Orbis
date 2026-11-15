@@ -6,6 +6,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <linux/fs.h>
+#include <fcntl.h>
 
 namespace {
 void fail(JNIEnv* env, const char* type, const char* message) {
@@ -38,6 +39,52 @@ bool component(JNIEnv* env, jbyteArray value, std::string& name) {
     }
     return true;
 }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_me_rerere_workspace_WorkspaceNativeDescriptors_nativeOpen(
+        JNIEnv* env, jobject, jbyteArray pathBytes, jboolean directory) {
+    try {
+        if (pathBytes == nullptr) {
+            fail(env, "java/lang/IllegalArgumentException", "workspace_path_denied");
+            return -1;
+        }
+        const jsize length = env->GetArrayLength(pathBytes);
+        if (length < 1 || length > 4096) {
+            fail(env, "java/lang/IllegalArgumentException", "workspace_path_denied");
+            return -1;
+        }
+        std::string path(static_cast<size_t>(length), '\0');
+        env->GetByteArrayRegion(pathBytes, 0, length, reinterpret_cast<jbyte*>(&path[0]));
+        if (env->ExceptionCheck()) return -1;
+        if (path[0] != '/' || path.find('\0') != std::string::npos) {
+            fail(env, "java/lang/IllegalArgumentException", "workspace_path_denied");
+            return -1;
+        }
+        int fd;
+        do {
+            fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        } while (fd < 0 && errno == EINTR);
+        if (fd < 0) {
+            fail(env, "java/io/IOException", "workspace_native_open_failed");
+            return -1;
+        }
+        struct stat info{};
+        if (fstat(fd, &info) != 0) {
+            close(fd);
+            fail(env, "java/io/IOException", "workspace_native_stat_failed");
+            return -1;
+        }
+        if (directory ? !S_ISDIR(info.st_mode) : !S_ISREG(info.st_mode)) {
+            close(fd);
+            fail(env, "java/lang/IllegalStateException", "workspace_target_not_regular");
+            return -1;
+        }
+        return fd; // Owned by ParcelFileDescriptor.adoptFd from here.
+    } catch (const std::bad_alloc&) {
+        fail(env, "java/lang/OutOfMemoryError", "workspace_native_open_allocation_failed");
+        return -1;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL

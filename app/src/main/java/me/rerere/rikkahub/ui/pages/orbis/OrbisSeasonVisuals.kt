@@ -49,11 +49,24 @@ fun orbisSeasonColors(season: OrbisSeason, dark: Boolean): OrbisColors {
         OrbisSeason.AUTUMN -> if (dark) Color(0xFF433226) else Color(0xFFF3E3CD)
         else -> if (dark) Color(0xFF2B3B52) else Color(0xFFDFEAF5)
     }
+    val ink = when (season) {
+        OrbisSeason.SPRING -> if (dark) Color(0xFFF6E5ED) else Color(0xFF51343F)
+        OrbisSeason.SUMMER -> if (dark) Color(0xFFDAEEE6) else Color(0xFF254B40)
+        OrbisSeason.AUTUMN -> if (dark) Color(0xFFF5E8D8) else Color(0xFF513B28)
+        else -> if (dark) Color(0xFFE2ECF7) else Color(0xFF30475B)
+    }
+    val mutedInk = when (season) {
+        OrbisSeason.SPRING -> if (dark) Color(0xFFCAB2BD) else Color(0xFF806473)
+        OrbisSeason.SUMMER -> if (dark) Color(0xFFA9C6B9) else Color(0xFF527264)
+        OrbisSeason.AUTUMN -> if (dark) Color(0xFFC9B6A0) else Color(0xFF80674E)
+        else -> if (dark) Color(0xFFADBFD0) else Color(0xFF596F83)
+    }
     return base.copy(page = page, pageTop = tint, panel = page, tintedPanel = tint,
+        ink = ink, mutedInk = mutedInk,
         raisedPanel = if (dark) tint else Color.White, accent = accent,
         onAccent = if (dark) Color(0xFF20242B) else Color.White,
         border = accent.copy(alpha = .25f), indigo = accent, homeButton = tint,
-        dock = if (dark) tint else page, onDock = base.ink,
+        dock = if (dark) tint else page, onDock = ink,
         star = if (dark) Color(0xFFFFE3AE) else accent)
 }
 

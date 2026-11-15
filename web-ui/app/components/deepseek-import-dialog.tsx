@@ -235,7 +235,7 @@ function SourceImportDialog({ open, onOpenChange, onImported, source, onSourceCh
           {status.state === "ready" && <p className="text-sm">发现 {status.conversationCount} 个窗口。{info.preview}</p>}
           {status.warnings?.map((warning, index) => <p key={index} className="text-xs text-muted-foreground">{warning}</p>)}
           {["complete", "failed", "cancelled"].includes(status.state) && <p className="text-sm">导入 {status.imported} · 已有内容跳过 {status.skipped} · 未导入 {status.failed} · 消息 {status.messages}</p>}
-          {status.attachmentReferences > 0 && <p className="text-xs text-muted-foreground">有 {status.attachmentReferences} 个未还原附件 / 媒体引用，消息中保留说明；不会自动下载外部内容。</p>}
+          {status.attachmentReferences > 0 && <p className="text-xs text-muted-foreground">有 {status.attachmentReferences} 个附件引用，已恢复 {status.restoredAttachments ?? 0} 处本地附件；其余保留说明，不会自动下载外部内容。</p>}
           {(status.skippedSummaries ?? 0) > 0 && <p className="text-xs text-muted-foreground">本次新增会话跳过 {status.skippedSummaries} 条内部摘要；未作为聊天或系统提示导入，原件不变。</p>}
           {status.rows.map((row) => <p key={row.conversation} className="text-xs">窗口 {row.conversation + 1}：{row.state === "imported" ? "已导入" : row.state === "skipped" ? "已有路径，已跳过" : "单条消息过大，该窗口未导入，原文未截断"}</p>)}
         </section>}

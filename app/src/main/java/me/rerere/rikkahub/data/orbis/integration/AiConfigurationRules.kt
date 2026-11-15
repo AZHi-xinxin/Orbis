@@ -158,6 +158,7 @@ internal object AiConfigurationRules {
             is TTSProviderSetting.Step -> old.copy(model = model ?: old.model, voice = voice ?: old.voice)
             is TTSProviderSetting.FishAudio -> old.copy(model = model ?: old.model, referenceId = voice ?: old.referenceId)
             is TTSProviderSetting.Volcengine -> old.copy(resourceId = model ?: old.resourceId, speaker = voice ?: old.speaker)
+            is TTSProviderSetting.DeepSeek -> { require(model == null) { "tts_has_no_model_field" }; require(voice == null || voice in setOf("stella", "tide")) { "invalid_deepseek_voice" }; old.copy(voice = voice ?: old.voice) }
             is TTSProviderSetting.XAI -> { require(model == null) { "tts_has_no_model_field" }; old.copy(voiceId = voice ?: old.voiceId) }
             is TTSProviderSetting.SystemTTS -> error("system_tts_uses_system_voice")
         }
@@ -185,6 +186,7 @@ internal object AiConfigurationRules {
             is TTSProviderSetting.Step -> Triple("step", value.model, value.voice)
             is TTSProviderSetting.FishAudio -> Triple("fish_audio", value.model, value.referenceId)
             is TTSProviderSetting.Volcengine -> Triple("volcengine", value.resourceId, value.speaker)
+            is TTSProviderSetting.DeepSeek -> Triple("deepseek", "", value.voice)
             is TTSProviderSetting.XAI -> Triple("xai", "", value.voiceId)
             is TTSProviderSetting.SystemTTS -> Triple("system", "", "")
         }

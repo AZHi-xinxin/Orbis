@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.rikkahub.data.ai.mcp.matchesMcpModelName
+import me.rerere.rikkahub.data.ai.mcp.withMcpModelNames
+
 import me.rerere.ai.ui.projectHumanThoughts
 
 import me.rerere.ai.ui.recallModelInput
@@ -25,6 +28,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.Tool
 import me.rerere.rikkahub.data.ai.approval.awaitHostApproval
@@ -57,6 +62,7 @@ import me.rerere.rikkahub.data.ai.transformers.InputMessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.MessageTransformer
 import me.rerere.rikkahub.data.ai.transformers.OutputMessageTransformer
 import me.rerere.rikkahub.data.files.FileFolders
+import me.rerere.rikkahub.data.files.hasInlineImageParts
 import me.rerere.rikkahub.data.ai.transformers.onGenerationFinish
 import me.rerere.rikkahub.data.ai.transformers.transforms
 import me.rerere.rikkahub.data.ai.transformers.visualTransforms
@@ -89,8 +95,8 @@ private class StreamChunkHandlingException(cause: Throwable) : RuntimeException(
 internal class GenerationDurabilityException(cause: Throwable) :
     IllegalStateException("本轮记录未能安全保存，已停止继续调用；请勿重复执行结果未知的工具。", cause)
 
-internal class GenerationToolOutcomeUnknownException :
-    IllegalStateException("工具已开始但未收到可靠结果，后续调用已暂停；请核对外部结果，不要直接重试。")
+internal class GenerationToolOutcomeUnknownException(failure: me.rerere.rikkahub.data.ai.mcp.McpToolCallFailure? = null) :
+    IllegalStateException(failure?.message ?: "工具已开始但未收到可靠结果，后续调用已暂停；请核对外部结果，不要直接重试。", failure)
 
 /**
  * A tool-owned, side-effect-free preflight rejected the request before its mutation callback.
@@ -115,6 +121,26 @@ internal fun rejectedToolPayload(failure: ToolRejectedBeforeExecutionException) 
     put("message", JsonPrimitive(failure.publicReason.ifBlank {
         "工具在写入前拒绝了请求；请核对当前参数后再试。"
     }.take(300)))
+}
+
+/** Keep sanitized MCP diagnostics on the non-checkpoint tool-result path too.
+ * Other exception messages may contain upstream bodies or credentials. */
+internal fun generationToolFailurePayload(failure: Throwable): JsonObject {
+    if (failure is ToolRejectedBeforeExecutionException) return rejectedToolPayload(failure)
+    return buildJsonObject {
+        if (failure is me.rerere.rikkahub.data.ai.mcp.McpToolCallFailure) {
+            put("error", JsonPrimitive(failure.message))
+            put("status", JsonPrimitive("failed"))
+            put("reason_code", JsonPrimitive(failure.code))
+            put("phase", JsonPrimitive("mcp_tools_call"))
+            put("http_status", failure.httpStatus?.let(::JsonPrimitive) ?: JsonNull)
+            put("elapsed_ms", JsonPrimitive(failure.elapsedMs))
+            put("execution_performed", JsonNull)
+            put("automatic_retry", JsonPrimitive(false))
+        } else {
+            put("error", JsonPrimitive("工具未完成 [${failure.javaClass.simpleName}]。目标、权限或参数可能已变化；请检查工具设置。若结果不确定，不要自动重试。"))
+        }
+    }
 }
 
 @Serializable
@@ -153,6 +179,10 @@ class GenerationLoop(
     private val observation: me.rerere.rikkahub.data.orbis.observation.AiObservationRuntime? = null,
     private val bodyStatus: me.rerere.rikkahub.data.orbis.body.BodyStatusRuntime? = null,
     private val readRecallState: (suspend (Uuid, Uuid) -> List<UIMessage>)? = null,
+    private val persistToolImages: suspend (List<UIMessagePart>) -> List<UIMessagePart> = { parts ->
+        org.koin.java.KoinJavaComponent.getKoin()
+            .get<me.rerere.rikkahub.data.files.FilesManager>().localizeInlineImages(parts)
+    },
 ) {
     fun generateText(
         settings: Settings,
@@ -195,8 +225,8 @@ class GenerationLoop(
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerManager.getProviderByType(provider)
 
-        // One snapshot per collected generation, not per conversation. A new human wake (or the
-        // existing approval-resume path) reevaluates current settings, memory and input transforms.
+        // Input transforms are collected anew; the advertised catalog also survives approval
+        // pauses. Current tool dispatch guards still apply after every human decision.
         val modelReceipt = if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && (assistant.orbisModelContinuityEnabled || settings.aiGlobalObservation) &&
             conversationId != null && allowObservation && !readOnlyLocalMemory) {
             ModelContinuity.safeModelId(model.modelId)?.let { nativeId ->
@@ -215,9 +245,14 @@ class GenerationLoop(
         val bodyStatusTurn = if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && allowObservation &&
             !readOnlyLocalMemory && conversationId != null)
             bodyStatus?.begin(assistant.id.toString(), conversationId.toString(), messages) else null
+        val communityTurn = if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && allowObservation && !readOnlyLocalMemory &&
+            conversationId != null && tools.any { it.name == "orbis_community" && it.isSelected() })
+            me.rerere.rikkahub.data.orbis.community.CommunityRuntime.begin(context,assistant.id.toString()) else null
+        var communityCompleted = false
+        val gatewayImageTurn = me.rerere.ai.util.GatewayImageTurn()
         val inputSnapshot = GenerationInputSnapshot(enableUserMessageTime = assistant.enableUserMessageTime,
             modelNotice = if (settings.aiGlobalObservation) null else ModelContinuity.notice(modelReceipt, previousModel),
-            observation = observationReport, bodyStatus = bodyStatusTurn?.report)
+            observation = observationReport, bodyStatus = bodyStatusTurn?.report, communityHint = communityTurn?.report)
         val screenShareTurn = if (allowLocalMemory && !readOnlyLocalMemory) me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn.bind(
             me.rerere.rikkahub.service.OrbisScreenShareRuntime.getIfInitialized()?.state?.value,
             assistant.id.toString(), conversationId?.toString()) else null
@@ -226,7 +261,18 @@ class GenerationLoop(
         try {
         val localMemoryTurn = if (allowLocalMemory && me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED)
             localMemory?.begin(assistant, conversationId, messages, readOnly = readOnlyLocalMemory) else null
-        val tools = me.rerere.rikkahub.data.ai.tools.refreshOrbisHelpForTools(snapshotGenerationTools(tools))
+        val approvalCatalog = ApprovalCatalogScope(assistant.id.toString(), conversationId?.toString(),
+            provider.id.toString(), model.id.toString(), model.modelId)
+        val tools = me.rerere.rikkahub.data.orbis.agentwork.refreshDiscovery(
+            me.rerere.rikkahub.data.ai.tools.refreshOrbisHelpForTools(
+                approvalCatalog.restore(messages, snapshotGenerationTools(tools))))
+        val pluginChecks = if(me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED && !readOnlyLocalMemory && allowObservation && conversationId!=null)
+            me.rerere.rikkahub.data.orbis.plugins.PluginResponseChecks.open(context,assistant.id.toString(),conversationId.toString()) else null
+        val agentTrace = if (tools.any { it.name == me.rerere.rikkahub.data.orbis.agentwork.TASK_TOOL } && conversationId != null)
+            me.rerere.rikkahub.data.orbis.agentwork.AgentRunTrace(
+                me.rerere.rikkahub.data.orbis.agentwork.agentTasks(context, assistant.id.toString()), conversationId.toString()) else null
+        if (tools.any { it.name == me.rerere.rikkahub.data.orbis.agentwork.DISCOVERY_TOOL } && conversationId != null)
+            me.rerere.rikkahub.data.orbis.agentwork.recordAgentCatalog(context, assistant.id.toString(), conversationId.toString(), tools)
         val requestModel = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()
             ?.state(assistant.id.toString())?.selectModelTools(model) ?: model
         val privatePresentation = PrivateRoomGenerationPresentation(
@@ -277,6 +323,7 @@ class GenerationLoop(
 
         for (stepIndex in 0 until maxSteps) {
             requireActiveTurn()
+            agentTrace?.check()
             val boundary = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()
             val owner = assistant.id.toString()
             val target = conversationId?.toString()
@@ -314,6 +361,7 @@ class GenerationLoop(
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
                 responseForContinuation = generateInternal(
+                    gatewayImageTurn = gatewayImageTurn,
                     readOnlyPreflight = readOnlyLocalMemory,
                     onPreparedUsage = { preparedUsage = it to System.currentTimeMillis() },
                     screenShareTurn = screenShareTurn,
@@ -336,8 +384,8 @@ class GenerationLoop(
                         // Persisted UI publication is bounded to 10Hz. The working stream still
                         // merges every token; final/provider and tool boundaries are never skipped.
                         val nowNanos = System.nanoTime()
-                        if (!durableCheckpoints || lastVisualEmissionNanos == 0L ||
-                            nowNanos - lastVisualEmissionNanos >= 100_000_000L) {
+                        if (pluginChecks==null && (!durableCheckpoints || lastVisualEmissionNanos == 0L ||
+                            nowNanos - lastVisualEmissionNanos >= 100_000_000L)) {
                         lastVisualEmissionNanos = nowNanos
                         val visible = transformOutput(candidate) { active -> active.visualTransforms(
                                     transformers = outputTransformers,
@@ -370,6 +418,7 @@ class GenerationLoop(
                     includeCompactionReminder = includeCompactionReminder,
                     localMemoryTurn = localMemoryTurn,
                     bodyStatusTurn = bodyStatusTurn,
+                    communityTurn = communityTurn,
                     maxAutomaticContinuations = maxAutomaticContinuations,
                     consultationBusyWaitUntilMillis = consultationBusyWaitUntilMillis.takeIf {
                         stepIndex == 0 && messages.lastOrNull()?.role == MessageRole.USER
@@ -394,6 +443,9 @@ class GenerationLoop(
                         .toLocalDateTime(TimeZone.currentSystemDefault())
                 )
                 messages = privatePresentation.classify(messages, completed = true)
+                if(pluginChecks!=null && messages.last().getTools().none { !it.isExecuted }) {
+                    messages=messages.dropLast(1)+pluginChecks.apply(messages.last())
+                }
                 messages = ModelContinuity.attachSuccess(messages, modelReceipt,
                     responseForContinuation != null && !generationResponseHasToolParts(responseForContinuation))
                 preparedUsage?.let { (tokens, preparedAt) ->
@@ -405,6 +457,11 @@ class GenerationLoop(
 
                 val toolCalls = messages.last().getTools().filter { !it.isExecuted }
                 if (toolCalls.isEmpty()) {
+                    if (messages.last().orbisApprovalToolCatalog != null) {
+                        messages = messages.dropLast(1) + messages.last().copy(orbisApprovalToolCatalog = null)
+                        admit(messages)
+                        emit(GenerationChunk.Messages(messages, contextEpoch))
+                    }
                     val rawTerminalResponse = responseForContinuation
                     if (emitTerminalEvidence && rawTerminalResponse != null &&
                         !generationResponseHasToolParts(rawTerminalResponse)) {
@@ -420,6 +477,7 @@ class GenerationLoop(
                                 ?.let { emit(GenerationChunk.TerminalResponse(it)) }
                         }
                     }
+                    communityCompleted = rawTerminalResponse != null
                     // no tool calls, break
                     break
                 }
@@ -428,7 +486,7 @@ class GenerationLoop(
                 var hasPendingApproval = false
                 val updatedTools = toolCalls.map { tool ->
                     val protected = privatePresentation.protectTool(tool)
-                    val toolDef = tools.find { it.name == tool.toolName }
+                    val toolDef = tools.find { it.matchesMcpModelName(tool.toolName) }
                     when {
                         protected !== tool -> protected
                         tool.isExecuted -> tool
@@ -450,7 +508,7 @@ class GenerationLoop(
                 }
 
                 // If any tools were updated to Pending, update the message and break
-                if (updatedTools != toolCalls) {
+                if (updatedTools != toolCalls || hasPendingApproval) {
                     val lastMessage = messages.last()
                     val updatedParts = lastMessage.parts.map { part ->
                         if (part is UIMessagePart.Tool) {
@@ -459,7 +517,9 @@ class GenerationLoop(
                             part
                         }
                     }
-                    messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
+                    messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts,
+                        orbisApprovalToolCatalog = if (hasPendingApproval) approvalCatalog.capture(messages, tools)
+                            else lastMessage.orbisApprovalToolCatalog)
                     admit(messages)
                     emit(GenerationChunk.Messages(messages, contextEpoch))
                 }
@@ -562,8 +622,15 @@ class GenerationLoop(
                                 durableBoundary(withCurrentToolResults(), tool, completed = false)
                                 requireActiveTurn()
                                 executionStarted = true
-                                val result = executeGenerationTool(toolDef, args, tool.toolCallId,
+                                suspend fun dispatch() = executeGenerationTool(toolDef, args, tool.toolCallId,
                                     messages.last().id.toString(), conversationId?.toString())
+                                val traceCallId = java.security.MessageDigest.getInstance("SHA-256")
+                                    .digest("${messages.last().id}/${tool.toolCallId}".toByteArray())
+                                    .joinToString("") { "%02x".format(it) }
+                                val rawResult = agentTrace?.execute(traceCallId, toolDef.name) { dispatch() } ?: dispatch()
+                                val result = if (rawResult.hasInlineImageParts()) {
+                                    persistToolImages(rawResult)
+                                } else rawResult
                                 val hasShellAccess = tools.any { it.name == "workspace_shell" }
                                 val completed = tool.withGenerationToolOutput(
                                     // Private results must not spill; native paged reads must retain
@@ -585,24 +652,14 @@ class GenerationLoop(
                                 // A transport/implementation exception after dispatch is not proof
                                 // that the external effect failed. Keep STARTED, never synthesize
                                 // a completed receipt or advance to another external action.
-                                throw GenerationToolOutcomeUnknownException()
+                                throw GenerationToolOutcomeUnknownException(it as? me.rerere.rikkahub.data.ai.mcp.McpToolCallFailure)
                             }
                             if (it is MessageNodeCapacityException) throw it
                             Log.w(TAG, "Tool failed (${it.javaClass.simpleName}); private details withheld")
                             executedTools += tool.copy(
                                 output = listOf(
                                     UIMessagePart.Text(
-                                        if (it is ToolRejectedBeforeExecutionException) rejectedToolPayload(it).toString() else json.encodeToString(
-                                            buildJsonObject {
-                                                put(
-                                                    "error",
-                                                    JsonPrimitive(buildString {
-                                                        append("工具未完成 [${it.javaClass.simpleName}]。")
-                                                        append("目标、权限或参数可能已变化；请检查工具设置。若结果不确定，不要自动重试。")
-                                                    })
-                                                )
-                                            }
-                                        )
+                                        generationToolFailurePayload(it).toString()
                                     )
                                 )
                             )
@@ -613,6 +670,9 @@ class GenerationLoop(
                 // continuation request. Unknown remote effects remain unknown on interruption.
                 val receipt = executedTools.lastOrNull { it.toolCallId == tool.toolCallId }
                 if (receipt != null) {
+                    // Rikka-style live history: publish each tool result before
+                    // the next tool/request, independently of disk checkpoints.
+                    emit(GenerationChunk.Messages(withCurrentToolResults(), contextEpoch))
                     durableBoundary(withCurrentToolResults(),
                         tool = tool.takeIf { executionStarted },
                         completed = true.takeIf { executionStarted })
@@ -640,7 +700,9 @@ class GenerationLoop(
                     executedTools.find { it.toolCallId == part.toolCallId } ?: part
                 } else part
             }
-            messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts)
+            messages = messages.dropLast(1) + lastMessage.copy(parts = updatedParts,
+                orbisApprovalToolCatalog = if (executedTools.any { it.isPending }) approvalCatalog.capture(messages, tools)
+                    else lastMessage.orbisApprovalToolCatalog)
             // Publish actual completed results before continuation validation can refuse another
             // request. In particular, an empty-content invocation must not hide its batch peers.
             messages = transformOutput(messages) { active -> active.transforms(
@@ -705,11 +767,18 @@ class GenerationLoop(
             if (stepIndex == maxSteps - 1) emit(GenerationChunk.ToolStepLimitStop)
         }
 
-        } finally { if (screenLease != null) screenRuntime?.releaseTurn(screenLease) }
+        } finally {
+            if (screenLease != null) screenRuntime?.releaseTurn(screenLease)
+            communityTurn?.finish(communityCompleted)
+        }
+        if (communityCompleted && conversationId != null && allowObservation && !readOnlyLocalMemory &&
+            tools.any { it.name == "orbis_community" && it.isSelected() })
+            me.rerere.rikkahub.data.orbis.community.CommunityRuntime.afterTurn(context,assistant.id.toString(),conversationId.toString(),this@GenerationLoop)
     }.orderedGenerationFlow(Dispatchers.IO + (me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.getIfInitialized()
         ?.requestContext(assistant.id.toString(), conversationId?.toString(), boundaryRecoveryRevision, boundaryWakePermit) ?: kotlin.coroutines.EmptyCoroutineContext))
 
     private suspend fun generateInternal(
+        gatewayImageTurn: me.rerere.ai.util.GatewayImageTurn,
         inputSnapshot: GenerationInputSnapshot,
         assistant: Assistant,
         settings: Settings,
@@ -734,6 +803,7 @@ class GenerationLoop(
         includeCompactionReminder: Boolean = false,
         localMemoryTurn: me.rerere.rikkahub.data.orbis.memory.OrbisMemoryTurn? = null,
         bodyStatusTurn: me.rerere.rikkahub.data.orbis.body.BodyStatusTurn? = null,
+        communityTurn: me.rerere.rikkahub.data.orbis.community.CommunityRuntime.CommunityHintTurn? = null,
         screenShareTurn: me.rerere.rikkahub.data.ai.transformers.ScreenShareTurn? = null,
         maxAutomaticContinuations: Int = 5,
         consultationBusyWaitUntilMillis: Long? = null,
@@ -828,15 +898,15 @@ class GenerationLoop(
         suspend fun providerMessages(): List<UIMessage> {
             // Host-bound identity survives in-turn compaction and message-count projection.
             requireActiveTurn()
-            if (readOnlyPreflight) return localMemoryTurn?.project(internalMessages) ?: internalMessages
+            if (readOnlyPreflight) return (localMemoryTurn?.project(internalMessages) ?: internalMessages).withMcpModelNames()
             val withMemory = localMemoryTurn?.project(internalMessages) ?: internalMessages
-            val withBody = bodyStatusTurn?.project(withMemory) ?: withMemory
+            val withBody = (bodyStatusTurn?.project(withMemory) ?: withMemory).let { communityTurn?.project(it) ?: it }
             return me.rerere.rikkahub.data.ai.transformers.projectOrbisVideoRequestImages(
                 context, assistant.id.toString(), withBody,
                 modelSupportsImages = model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE)).let { projected ->
                 me.rerere.rikkahub.data.ai.transformers.projectOrbisScreenShareImages(screenShareTurn, projected,
                     model.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE))
-            }
+            }.withMcpModelNames()
         }
         // Publish once per new invocation, not on tool continuations. Counts remain local, never
         // alter prompts/cache keys, and deliberately do not claim upstream delivery or recall.
@@ -847,6 +917,7 @@ class GenerationLoop(
 
         var messages: List<UIMessage> = messages
         val params = TextGenerationParams(
+            gatewayImageTurn = gatewayImageTurn,
             model = model,
             temperature = assistant.temperature,
             topP = assistant.topP,
@@ -890,6 +961,7 @@ class GenerationLoop(
                 var screenRequestOutcomeUnknown = false
 
                 while (true) {
+                    sawAnyChunk = false
                     val streamChunkHandler = StreamChunkHandler(model)
                     val responseChunkHandler = StreamChunkHandler(model)
                     var attemptResponse = listOf(UIMessage(
@@ -923,7 +995,8 @@ class GenerationLoop(
                             }
                         }
                         // Only the successful attempt becomes a continuation segment.
-                        // A failed partial stream is never automatically replayed.
+                        // A failed partial step is replaced on retry; completed prior
+                        // messages and tool results remain in responseBaseMessages.
                         // Also publish an assistant boundary when a clean stream contains no
                         // chunks: silence must not mark the preceding human message as a reply.
                         if (!sawAnyChunk) onUpdateMessages(attemptMessages)

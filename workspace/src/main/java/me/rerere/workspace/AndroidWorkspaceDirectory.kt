@@ -110,21 +110,13 @@ internal class AndroidWorkspaceDirectory private constructor(private val descrip
 
     companion object {
         private const val O_CLOEXEC = 0x80000
-        // Linux UAPI fcntl.h, verified against bundled NDK 28.2; usable on minSdk 26.
-        private const val F_DUPFD_CLOEXEC = 1030
         fun openRoot(anchor: File): WorkspaceNativeDirectory {
             return AndroidWorkspaceDirectory(openDescriptor(anchor.absolutePath, true))
         }
         private fun openDescriptor(path: String, directory: Boolean): ParcelFileDescriptor {
-            val raw = Os.open(path, OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW or O_CLOEXEC or OsConstants.O_NONBLOCK, 0)
-            try {
-                val stat = Os.fstat(raw)
-                check(if (directory) OsConstants.S_ISDIR(stat.st_mode) else OsConstants.S_ISREG(stat.st_mode)) {
-                    "workspace_target_not_regular"
-                }
-                // Do not use pre-29 PFD.dup, which may leave a process-spawn race.
-                return ParcelFileDescriptor.adoptFd(Os.fcntlInt(raw, F_DUPFD_CLOEXEC, 0))
-            } finally { runCatching { Os.close(raw) } }
+            // Os.fcntlInt is public only from API 30. Open with CLOEXEC atomically
+            // in the existing native library, including Android 8–10, then transfer ownership.
+            return WorkspaceNativeDescriptors.open(path, directory)
         }
         private fun StructStat.snapshot(): WorkspaceNativeStat {
             val nanos = if (Build.VERSION.SDK_INT >= 27) ":${st_mtim.tv_nsec}:${st_ctim.tv_nsec}" else ""

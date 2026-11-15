@@ -137,13 +137,19 @@ class OrbisAtlasBootstrapStore internal constructor(private val persistence: Orb
         mutableState.value = state.value.copy(busy = true, error = null)
         try { action(); publish(); true }
         catch (cancelled: CancellationException) {
-            publish(AtlasBootstrapException("unknown").message)
+            publish(unknownFailureMessage())
             throw cancelled
         } catch (error: OrbisConnectionInputException) {
             publish(AtlasBootstrapException(error.code).message); false
-        } catch (error: AtlasBootstrapException) { publish(error.message); false
+        } catch (error: AtlasBootstrapException) {
+            publish(if (error.code == "unknown") unknownFailureMessage() else error.message); false
         } catch (_: Exception) { publish(AtlasBootstrapException("storage").message); false }
     }
+
+    /** Capability GET happens before durable enrollment; only a saved intent can be retried. */
+    private fun unknownFailureMessage(): String? = AtlasBootstrapException(
+        if (intent == null) "not_registered" else "unknown"
+    ).message
 
     private fun source(id: String, providers: () -> List<ProviderSetting>): AtlasBootstrapSource =
         atlasBootstrapSource(providers().singleOrNull { it.id.toString() == id })

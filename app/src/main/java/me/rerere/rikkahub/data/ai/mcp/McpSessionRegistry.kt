@@ -152,12 +152,12 @@ internal class McpSessionRegistry(
         val config = session.connectedConfig ?: session.config
         Log.i(TAG, "Calling tool $toolName on $serverId (${config.commonOptions.name})")
         return try {
-            sdkClient.callTool(
+            callMcpToolOnce { sdkClient.callTool(
                 request = CallToolRequest(
                     params = CallToolRequestParams(name = toolName, arguments = args),
                 ),
                 options = RequestOptions(timeout = 120.seconds),
-            )
+            ) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

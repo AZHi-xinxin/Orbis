@@ -129,6 +129,8 @@ class OrbisAtlasBootstrapStoreTest {
             f.store.connect(p.id.toString()) { listOf(p) }
             val intent = f.storage.saved
             assertEquals(OrbisAtlasBootstrapPhase.PENDING, f.store.state.value.phase)
+            assertTrue(f.store.state.value.error!!.contains("凭据已保留"))
+            assertFalse(f.store.state.value.error!!.contains("尚未申请新的授权"))
             assertEquals(old, f.atlasStorage.saved)
             assertNull(f.atlas.readCredential())
             f.restart()
@@ -139,6 +141,44 @@ class OrbisAtlasBootstrapStoreTest {
             assertEquals(1, f.transport.capabilities)
             assertEquals(f.transport.requests[0], f.transport.requests[1])
             assertEquals(OrbisAtlasBootstrapPhase.ACTIVE, f.store.state.value.phase)
+        }
+    }
+
+    @Test fun capabilityFailureDoesNotClaimPendingCredentialsOrOfferRetryOfUnsentRegistration() = runBlocking {
+        Fixture().use { f ->
+            val p = provider()
+            f.atlas.save("https://manual.example", oldToken, true)
+            val prior = f.atlasStorage.saved
+            f.transport.afterCapability = { throw AtlasBootstrapException("unknown") }
+            assertFalse(f.store.connect(p.id.toString()) { listOf(p) })
+            assertEquals(OrbisAtlasBootstrapPhase.NONE, f.store.state.value.phase)
+            assertFalse(f.store.state.value.busy)
+            assertNull(f.storage.saved)
+            assertEquals(0, f.transport.registers)
+            assertEquals(prior, f.atlasStorage.saved)
+            assertEquals(oldToken, f.atlas.readCredential()?.token)
+            assertTrue(f.store.state.value.error!!.contains("尚未申请新的授权"))
+            assertFalse(f.store.state.value.error!!.contains("凭据已保留"))
+            f.transport.afterCapability = {}
+            assertTrue(f.store.connect(p.id.toString()) { listOf(p) })
+            assertEquals(OrbisAtlasBootstrapPhase.ACTIVE, f.store.state.value.phase)
+            assertEquals(1, f.transport.registers)
+        }
+    }
+
+    @Test fun cancelledCapabilityDoesNotInventAnEnrollmentToConfirm() = runBlocking {
+        Fixture().use { f ->
+            val p = provider()
+            f.transport.afterCapability = { throw CancellationException("synthetic cancellation") }
+            try {
+                f.store.connect(p.id.toString()) { listOf(p) }
+                fail("cancellation must propagate")
+            } catch (_: CancellationException) { }
+            assertEquals(OrbisAtlasBootstrapPhase.NONE, f.store.state.value.phase)
+            assertFalse(f.store.state.value.busy)
+            assertNull(f.storage.saved)
+            assertEquals(0, f.transport.registers)
+            assertTrue(f.store.state.value.error!!.contains("尚未申请新的授权"))
         }
     }
 

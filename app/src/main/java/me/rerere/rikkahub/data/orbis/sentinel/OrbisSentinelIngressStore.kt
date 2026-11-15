@@ -28,6 +28,9 @@ class OrbisSentinelIngressStore(private val read: () -> String?, private val wri
     @Synchronized fun receipt(source: String, id: String): SentinelIngressReceipt? =
         load().receipts.firstOrNull { it.source == source && it.eventId == id }
 
+    @Synchronized fun latest(source: String): SentinelIngressReceipt? =
+        load().receipts.filter { it.source == source }.maxByOrNull { it.receivedAtMs }
+
     /** Returns existing receipts unchanged. Only duplicate=false authorizes first dispatch. */
     @Synchronized fun begin(source: String, id: String, payload: String, occurredAtMs: Long, nowMs: Long): Pair<SentinelIngressReceipt, Boolean> {
         require(source in setOf("touch", "lc_location", "lc_visual", "lc_rest", "lc_manual_test")) { "invalid_sentinel_ingress_source" }

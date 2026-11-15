@@ -64,7 +64,7 @@ class OrbisCharacterActivity : ComponentActivity() {
             }
             val resolvedOwner = resolveCharacterOwner(owner, settings.assistants.map { it.id.toString() }, resolved && !settings.init)
             val assistant = settings.assistants.firstOrNull { it.id.toString() == resolvedOwner }
-            MaterialTheme { OrbisVisualTheme {
+            me.rerere.rikkahub.ui.theme.RikkahubTheme { OrbisVisualTheme {
                 if (assistant != null) key(owner) {
                     if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                         val repository = koinInject<ConversationRepository>()

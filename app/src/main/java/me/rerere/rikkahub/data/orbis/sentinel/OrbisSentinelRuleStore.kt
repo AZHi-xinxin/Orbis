@@ -119,6 +119,38 @@ class OrbisSentinelRuleStore(
     fun pause(id: String, expected: OrbisSentinelBinding, now: Long): OrbisSentinelRule =
         setRuleEnabled(id, expected, now, false)
 
+    /** Host-verified explicit move within one assistant. Never moves an outstanding occurrence. */
+    fun rebind(id: String, expected: OrbisSentinelBinding, target: OrbisSentinelBinding, now: Long): OrbisSentinelRule = synchronized(lock) {
+        validateTime(now)
+        validateBinding(target)
+        val before = current()
+        val old = owned(before, id, expected)
+        require(old.assistantId == target.assistantId) { "sentinel_target_mismatch" }
+        require(old.plugin == null) { "sentinel_plugin_target_fixed" }
+        if (old.binding == target) return@synchronized old
+        require(old.pendingEventId == null) { "sentinel_event_pending" }
+        val updated = old.copy(conversationId = target.conversationId, updatedAtMs = now,
+            scheduleSinceMs = now, lastError = null,
+            policy = old.policy.copy(lastHumanMessageMs = null, consecutiveCount = 0, pendingOrdinal = null))
+        // Keep enabled/armed, accepted one-shots, cooldown and daily occurrence identities.
+        // Moving a rule is not permission to replay already accepted or overdue notifications.
+        validateRule(updated)
+        replace(before, updated)
+        updated
+    }
+
+    /** A missing destination is a binding diagnostic, not a fabricated timer execution. */
+    fun recordTargetAvailability(id: String, expected: OrbisSentinelBinding, available: Boolean): OrbisSentinelRule = synchronized(lock) {
+        val before = current()
+        val old = owned(before, id, expected)
+        val error = if (!available) "target_conversation_unavailable"
+            else old.lastError.takeUnless { it == "target_conversation_unavailable" }
+        if (error == old.lastError) return@synchronized old
+        val updated = old.copy(lastError = error)
+        replace(before, updated)
+        updated
+    }
+
     /** Resuming does not cancel/reassign pending work or clear the last accepted occurrence. */
     fun resume(id: String, expected: OrbisSentinelBinding, now: Long): OrbisSentinelRule =
         setRuleEnabled(id, expected, now, true)

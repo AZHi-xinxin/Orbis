@@ -185,7 +185,7 @@ internal class AccessibilityHealthMonitor private constructor(private val app: A
                 app, NOTIFICATION_ID, settingsIntent(), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val notification = NotificationCompat.Builder(app, CHANNEL)
-                .setSmallIcon(R.drawable.small_icon)
+                .setSmallIcon(R.drawable.ic_stat_orbis)
                 .setContentTitle("Orbis 无障碍连接暂不可用")
                 .setContentText("点此检查「屏幕观察与已授权操作」，需要时重新开启")
                 .setStyle(NotificationCompat.BigTextStyle().bigText(message()))

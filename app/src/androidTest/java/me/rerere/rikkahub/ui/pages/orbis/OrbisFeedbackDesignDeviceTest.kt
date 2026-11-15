@@ -111,7 +111,8 @@ class OrbisFeedbackDesignDeviceTest {
         compose.onNodeWithTag("connection-key").performTextInput("synthetic-key-not-a-secret")
         compose.onNodeWithText("保存并开启连接").assertIsEnabled()
         val bounds=compose.onNodeWithTag("connection-proposals").fetchSemanticsNode().boundsInWindow
-        assertTrue("Sheet must leave a substantial portion of chat above it",bounds.top>bounds.height*.16f)
+        screenshot("connection-sheet-keyboard-dev238.png")
+        assertTrue("Sheet must leave a substantial portion of chat above it: $bounds",bounds.top>bounds.height*.16f)
         screenshot("connection-sheet-dev124.png")
         compose.onNodeWithText("回到聊天").performClick()
         compose.onNodeWithTag("connection-proposals").assertDoesNotExist()

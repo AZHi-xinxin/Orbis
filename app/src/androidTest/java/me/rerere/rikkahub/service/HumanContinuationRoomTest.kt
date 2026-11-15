@@ -44,6 +44,27 @@ import kotlin.uuid.Uuid
 /** Real Room transactions and AtomicFile journals, synthetic messages only. No Koin or tools. */
 @RunWith(AndroidJUnit4::class)
 class HumanContinuationRoomTest {
+    @Test fun liveVisibleStateCanReplaceStaleDurableToolMetadataWithoutHistoryAlignmentGate() = runBlocking {
+        Fixture().use { f ->
+            f.seed()
+            val saved = f.repo.commitLiveConversation(f.continued)
+            assertEquals(f.continued.messageNodes, saved.messageNodes)
+            val edited = saved.copy(messageNodes = saved.messageNodes.filterNot { it.id == f.tool.id })
+            f.repo.commitLiveConversation(edited)
+            assertEquals(edited.messageNodes, f.load().messageNodes)
+            assertFalse(f.load().messageNodes.any { it.id == f.tool.id })
+        }
+    }
+
+    @Test fun liveSaveStillRejectsChangedOwnerAndCompactionEpoch() = runBlocking {
+        Fixture().use { f ->
+            f.seed()
+            assertTrue(runCatching { f.repo.commitLiveConversation(f.continued.copy(assistantId = Uuid.random())) }.isFailure)
+            assertTrue(runCatching { f.repo.commitLiveConversation(f.continued.copy(compactionEpoch = 9)) }.isFailure)
+            assertEquals(f.baseline.messageNodes, f.load().messageNodes)
+        }
+    }
+
     private class Fixture : AutoCloseable {
         private val instrumentation = InstrumentationRegistry.getInstrumentation().also {
             check(it is IsolatedGenerationLoopRunner)
@@ -105,6 +126,37 @@ class HumanContinuationRoomTest {
             }
             owned.forEach { check(it.delete()) }
             check(!LcExternalRecoveryGate.isAllowed())
+        }
+    }
+
+    @Test fun longHistorySlowStorageCanSettleWithoutDiscardingConcurrentInput() = runBlocking {
+        Fixture().use { f ->
+            val source = f.baseline.copy(messageNodes = List(1800) {
+                UIMessage.user("synthetic history $it").toMessageNode()
+            })
+            f.repo.insertConversation(source)
+            val journal = HumanContinuationJournal(f.humanStore)
+            val id = Uuid.random()
+            val next = source.copy(messageNodes = source.messageNodes + UIMessage.user("fresh input").toMessageNode())
+            val store = HumanContinuationContextStore(source, source, id, Mutex(), journal,
+                read = { kotlinx.coroutines.delay(1_700); f.repo.getConversationById(source.id) },
+                proveBaseline = { _, _ -> false }, commit = f.repo::commitHumanContinuation,
+                canWrite = { true }, project = { it }, latest = { next }, onStored = {},
+                onRebased = { _, _ -> }, retireOldJournal = {})
+            assertTrue(store.checkpoint(next))
+            // Reproduce the old admission deadline against real Room + AtomicFile storage.
+            assertNull(kotlinx.coroutines.withTimeoutOrNull(1_500) { store.save(next) })
+            assertEquals(source.messageNodes, f.load().messageNodes)
+            assertEquals(next.messageNodes, journal.recover(f.load())!!.snapshot.messageNodes)
+            assertTrue(store.save(next))
+            assertEquals(next.messageNodes, f.load().messageNodes)
+            assertTrue(journal.clearCommitted(id, f.load()))
+            // A concurrent durable edit must still reject a stale writer; a longer wait
+            // does not bypass ownership or snapshot comparison.
+            val changed = next.copy(messageNodes = next.messageNodes.dropLast(1) + UIMessage.user("edited input").toMessageNode())
+            f.repo.updateConversation(changed)
+            assertFalse(store.save(next))
+            assertEquals(changed.messageNodes, f.load().messageNodes)
         }
     }
 

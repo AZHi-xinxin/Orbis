@@ -56,6 +56,7 @@ fun TTSProviderConfigure(
                     is TTSProviderSetting.XAI -> "xAI"
                     is TTSProviderSetting.MiMo -> "MiMo"
                     is TTSProviderSetting.Step -> "Step"
+                            is TTSProviderSetting.DeepSeek -> "DeepSeek"
                     is TTSProviderSetting.ElevenLabs -> "ElevenLabs"
                     is TTSProviderSetting.FishAudio -> "Fish Audio"
                     is TTSProviderSetting.Volcengine -> "豆包 TTS 2.0"
@@ -76,6 +77,7 @@ fun TTSProviderConfigure(
                         TTSProviderSetting.ElevenLabs::class -> "ElevenLabs"
                         TTSProviderSetting.FishAudio::class -> "Fish Audio"
                         TTSProviderSetting.Step::class -> "Step"
+                        TTSProviderSetting.DeepSeek::class -> "DeepSeek"
                         TTSProviderSetting.Volcengine::class -> "豆包 TTS 2.0"
                         else -> providerClass.simpleName ?: "Unknown"
                     }
@@ -132,6 +134,7 @@ fun TTSProviderConfigure(
                             name = "Fish Audio TTS"
                         )
 
+                        TTSProviderSetting.DeepSeek::class -> TTSProviderSetting.DeepSeek(id = setting.id)
                         TTSProviderSetting.Step::class -> TTSProviderSetting.Step(
                             id = setting.id,
                             name = "Step TTS"
@@ -173,6 +176,7 @@ fun TTSProviderConfigure(
             is TTSProviderSetting.ElevenLabs -> ElevenLabsTTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.FishAudio -> FishAudioTTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.Step -> StepTTSConfiguration(setting, onValueChange)
+            is TTSProviderSetting.DeepSeek -> DeepSeekTTSConfiguration(setting, onValueChange)
             is TTSProviderSetting.Volcengine -> VolcengineTTSConfiguration(setting, onValueChange)
         }
     }
@@ -1309,4 +1313,18 @@ private fun StepTTSConfiguration(
             maxLines = 4,
         )
     }
+}
+
+@Composable
+private fun DeepSeekTTSConfiguration(setting: TTSProviderSetting.DeepSeek, onValueChange: (TTSProviderSetting) -> Unit) {
+    Text("DeepSeek 官方语音合成，支持流式播放。当前优惠价 1.5 元/万字符，汉字按 2 字符计费；以官方最新价格为准。")
+    OutlinedTextField(setting.apiKey, { onValueChange(setting.copy(apiKey = it)) },
+        label = { Text("DeepSeek 官方 API Key") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth(), singleLine = true)
+    listOf("stella" to "Stella · 女声", "tide" to "Tide · 男声").forEach { (voice, label) ->
+        androidx.compose.material3.TextButton(onClick = { onValueChange(setting.copy(voice = voice)) }) {
+            Text((if (setting.voice == voice) "✓ " else "") + label)
+        }
+    }
+    Text("语言自动识别；官方暂不支持调速或自定义克隆音色。")
 }

@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,6 +37,7 @@ import me.rerere.rikkahub.ui.context.LocalOrbisChatTextColor
 @Composable internal fun OrbisThemedBubble(user: Boolean, custom: ThemeBubble, modifier: Modifier,
     content: @Composable ColumnScope.() -> Unit) {
     val theme = LocalChatTheme.current
+    val glassDetails = rememberLiquidGlassDetails(custom.material?.type == "liquid")
     val drawing = custom.drawing
     val outline = remember(drawing?.outline) { drawing?.outline?.let(::parseThemePath) }
     val layers = remember(drawing?.layers) { drawing?.layers.orEmpty().map { parseThemePath(it.path).asThemePath() } }
@@ -106,11 +109,20 @@ import me.rerere.rikkahub.ui.context.LocalOrbisChatTextColor
         }
     }
     val foreground = Color(themeArgb(custom.text))
+    val texture = themeTextureModifier(custom.texture, theme, custom.bg, custom.opacity,
+        optical = custom.material != null && LocalBubbleBackdrop.current != null && android.os.Build.VERSION.SDK_INT >= 33)
+    val topBand = (custom.stickers.filter { it.anchor.startsWith("top") }.maxOfOrNull { it.size } ?: 0).dp / 2
+    val bottomBand = (custom.stickers.filter { it.anchor.startsWith("bottom") }.maxOfOrNull { it.size } ?: 0).dp / 2
+    CompositionLocalProvider(LocalLiquidGlassDetails provides glassDetails) {
     BoxWithConstraints(modifier, contentAlignment = if(user) Alignment.TopEnd else Alignment.TopStart) {
         Box(Modifier.widthIn(max = maxWidth * custom.maxWidthRatio)) {
+          Box(Modifier.padding(top = topBand, bottom = bottomBand).onGloballyPositioned {
+              glassDetails?.laidOut(it.size, it.positionInWindow())
+          }) {
+            ThemeBubbleMaterialBackground(custom, shape)
             Box(Modifier.clip(shape).drawBehind {
-                if(drawing?.gradient!=null) drawRect(drawing.gradient.brush(custom.opacity,size.width/100,size.height/100))
-                else drawRect(Color(themeArgb(custom.bg)).copy(alpha=custom.opacity))
+                if(custom.material == null && drawing?.gradient!=null) drawRect(drawing.gradient.brush(custom.opacity,size.width/100,size.height/100))
+                else if(custom.material == null) drawRect(Color(themeArgb(custom.bg)).copy(alpha=custom.opacity))
                 val tint = foreground.copy(alpha = .075f * custom.opacity)
                 val step = 22.dp.toPx()
                 if(custom.pattern != "none") {
@@ -132,19 +144,22 @@ import me.rerere.rikkahub.ui.context.LocalOrbisChatTextColor
                     }
                 }
                 if(drawing!=null) drawThemeLayers(drawing,layers,clock?.value ?: 0,custom.opacity)
-            }.then(if(drawing?.stroke!=null && drawing.strokeWidth>0) Modifier.border(drawing.strokeWidth.dp,
+            }.then(texture).then(if(drawing?.stroke!=null && drawing.strokeWidth>0) Modifier.border(drawing.strokeWidth.dp,
                 Color(themeArgb(drawing.stroke)).copy(alpha=custom.opacity),shape) else Modifier)) {
                 CompositionLocalProvider(LocalContentColor provides foreground, LocalOrbisChatTextColor provides foreground) {
-                    Column(Modifier.padding(start = custom.padding.dp, end = custom.padding.dp,
-                        top = custom.padding.dp + top, bottom = custom.padding.dp + tailHeight + if(custom.decoration != "none" || custom.decorationAsset != null) 8.dp else 0.dp),
+                    Column(Modifier.widthIn(min = if(custom.stickers.isEmpty()) 0.dp else 112.dp).padding(start = custom.padding.dp, end = custom.padding.dp,
+                        top = custom.padding.dp + top + topBand, bottom = custom.padding.dp + tailHeight + bottomBand + (if(custom.decoration != "none" || custom.decorationAsset != null) 8.dp else 0.dp)),
                         verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
                 }
             }
+          }
+            custom.stickers.forEach { sticker -> ThemeBubbleSticker(sticker, theme, clock) }
             val asset = custom.decorationAsset?.let { theme?.assets?.get(it) }
             if(asset != null) AsyncImage(model = asset, contentDescription = null,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = tailHeight).size(28.dp), onError = { theme?.onImageError?.invoke() })
             else if(custom.decoration != "none") Text(when(custom.decoration) { "paw" -> "🐾"; "heart" -> "♥"; else -> "✦" },
                 color = foreground.copy(alpha = .65f), fontSize = 17.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 3.dp + tailHeight))
         }
+    }
     }
 }

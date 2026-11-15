@@ -27,6 +27,7 @@ class TTSManager(private val context: Context) {
     private val xaiProvider = XAITTSProvider()
     private val miMoProvider = MiMoTTSProvider()
     private val stepProvider = StepTTSProvider()
+    private val deepSeekProvider = me.rerere.tts.provider.providers.DeepSeekTTSProvider()
     private val elevenLabsProvider = ElevenLabsTTSProvider()
     private val fishAudioProvider = FishAudioTTSProvider()
     private val volcengineProvider = VolcengineTTSProvider()
@@ -47,6 +48,7 @@ class TTSManager(private val context: Context) {
             is TTSProviderSetting.ElevenLabs -> elevenLabsProvider.generateSpeech(context, providerSetting, request)
             is TTSProviderSetting.FishAudio -> fishAudioProvider.generateSpeech(context, providerSetting, request)
             is TTSProviderSetting.Step -> stepProvider.generateSpeech(context, providerSetting, request)
+            is TTSProviderSetting.DeepSeek -> deepSeekProvider.generateSpeech(context, providerSetting, request)
             is TTSProviderSetting.Volcengine -> volcengineProvider.generateSpeech(context, providerSetting, request)
         }
     }
@@ -68,6 +70,7 @@ class TTSManager(private val context: Context) {
             is TTSProviderSetting.ElevenLabs -> elevenLabsProvider.promptGuidance
             is TTSProviderSetting.FishAudio -> fishAudioProvider.promptGuidance
             is TTSProviderSetting.Step -> stepProvider.promptGuidance
+            is TTSProviderSetting.DeepSeek -> deepSeekProvider.promptGuidance
             is TTSProviderSetting.Volcengine -> volcengineProvider.promptGuidance
         }
     }

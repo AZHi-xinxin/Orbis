@@ -23,12 +23,18 @@ internal object DiagnosticJournal {
         append(context, owner, DiagnosticEvent(System.currentTimeMillis(), source, code))
 
     fun recordFailure(context: Context, owner: String, error: Throwable) =
-        append(context, owner, diagnosticFailure(error))
+        append(context, owner, diagnosticFailure(error),error)
 
-    @Synchronized private fun append(context: Context, owner: String, event: DiagnosticEvent) {
+    fun recordSkillFailure(context: Context, owner: String, code: String, toolName: String,
+        operation: String?, reference: String?) = append(context, owner,
+        DiagnosticEvent(System.currentTimeMillis(), "tool", code, toolName=toolName,
+            operation=operation, reference=reference).sanitized())
+
+    @Synchronized private fun append(context: Context, owner: String, event: DiagnosticEvent, error:Throwable?=null) {
         // Diagnostics must never change success/failure of the original operation.
         runCatching {
             require(event.source in setOf("model", "tool", "theme", "stickers") && event.code in diagnosticCodes)
+            OrbisFaultDiagnostics.record(context,FaultStage.OPERATION_FAILURE,error,event)
             val items = (read(context, owner) + event.sanitized()).takeLast(5)
             val f = file(context, owner)
             f.baseFile.parentFile!!.mkdirs()

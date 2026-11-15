@@ -189,8 +189,9 @@ private class CustomAsrStateImpl(
                 MiMoASRController(context, httpClient, provider)
             }
 
-            is ASRProviderSetting.SiliconFlow -> {
-                if (provider.apiKey.isBlank()) return null
+            is ASRProviderSetting.SiliconFlow, is ASRProviderSetting.DeepSeek -> {
+                val key = when (provider) { is ASRProviderSetting.DeepSeek -> provider.apiKey; is ASRProviderSetting.SiliconFlow -> provider.apiKey; else -> "" }
+                if (key.isBlank()) return null
                 me.rerere.asr.providers.BatchVoiceASRController(context, httpClient, provider, dictationMode = true)
             }
             is ASRProviderSetting.Step -> {

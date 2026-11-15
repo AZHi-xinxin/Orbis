@@ -16,8 +16,7 @@ class WorkspaceFileSystem(
         val dir = resolvePath(root, path)
         require(dir.exists()) { "Path does not exist: $path" }
         require(dir.isDirectory) { "Path is not a directory: $path" }
-        return dir.listFiles()
-            .orEmpty()
+        return (dir.listFiles() ?: throw java.io.IOException("Directory listing failed: $path"))
             .filter { !it.name.startsWith(".l2s.") }
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
             .take(config.maxListEntries)

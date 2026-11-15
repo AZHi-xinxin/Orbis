@@ -50,11 +50,14 @@ import me.rerere.hugeicons.stroke.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, ownerName:String="",onClose:()->Unit={},onSettings:()->Unit={},onAi:()->Unit={},onAction: (String, String?) -> Unit) {
+internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, ownerName:String="",onClose:()->Unit={},onSettings:()->Unit={},onAi:()->Unit={},
+    onArtwork:(Boolean)->Unit={},onGetArtwork:()->Unit={},onCleanArtwork:()->Unit={},onImportArtwork:()->Unit={},onAction: (String, String?) -> Unit) {
     val pet=state.pet ?: return
     val appearance=PetCatalog.find(pet.appearance)
     var pane by rememberSaveable(pet.id) { mutableStateOf("home") }
-    var original by rememberSaveable(pet.id) { mutableStateOf(true) }
+    var originalPreference by rememberSaveable(pet.id) { mutableStateOf(state.originalArtwork) }
+    LaunchedEffect(state.originalArtwork) { originalPreference=state.originalArtwork }
+    val original=originalPreference && artRoot!=null
     var reduceMotion by rememberSaveable(pet.id) { mutableStateOf(false) }
     var action by remember(pet.id) { mutableStateOf("") }
     var handled by remember(pet.id) { mutableStateOf(state.events.lastOrNull()?.id) }
@@ -97,7 +100,7 @@ internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, 
     val targetY=when { sleeping -> .55f;action in setOf("feed","water","approach_food","approach_water") -> .88f;action=="play" -> .78f;else -> .82f }
     val x by animateFloatAsState(targetX,if(active) tween(650) else snap(),label="pet-walk-x")
     val y by animateFloatAsState(targetY,if(active) tween(650) else snap(),label="pet-walk-y")
-    val dynamic=appearance.family=="cat" && !original
+    val dynamic=!original
     val scheme=MaterialTheme.colorScheme
     val dark=scheme.background.luminance()<.35f
     val wall=if(dark) Color(0xff3b4032) else Color(0xffe9e4ce)
@@ -115,10 +118,18 @@ internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, 
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).testTag("pet-room-scene").background(wall)) {
+        if(original && File(artRoot!!,"room-sage-tidy.webp").isFile) {
+            PetOriginalCatRoom(state,artRoot,action,sleeping,active,busy,phase,idleCycle,onAction)
+        } else {
         val roomW=maxWidth;val roomH=maxHeight
         if(original) Crossfade(state.messy, Modifier.fillMaxSize(),
             animationSpec=if(active) tween(1800) else snap(), label="room-tidy-crossfade") { messy ->
-            AsyncImage(PetAssets.model(pet.appearance,if(messy) "messy.png" else "tidy.png",artRoot),null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+            AsyncImage(PetAssets.model(pet.appearance,if(messy) "messy.png" else "tidy.png",artRoot),null,Modifier.fillMaxSize(),contentScale=ContentScale.Crop,
+                colorFilter=when(state.decoration) {
+                    "rose" -> androidx.compose.ui.graphics.ColorFilter.tint(Color(0xffdba3b4),androidx.compose.ui.graphics.BlendMode.Softlight)
+                    "sky" -> androidx.compose.ui.graphics.ColorFilter.tint(Color(0xff92bad5),androidx.compose.ui.graphics.BlendMode.Softlight)
+                    else -> null
+                })
         }
         else Canvas(Modifier.fillMaxSize()) {
             val scale=size.width/600f
@@ -187,7 +198,8 @@ internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, 
                 enabled=!busy,role=Role.Button) {onAction("pet",null)}
         if(dynamic) Canvas(actor) {
             withTransform({scale(size.width/120f,size.height/130f,Offset.Zero)}) {
-                drawCat(pet.appearance,phase,sleeping,action,abs(x-targetX)>.008f)
+                if(appearance.family=="cat") drawCat(pet.appearance,phase,sleeping,action,abs(x-targetX)>.008f)
+                else drawSimpleAnimal(appearance.family,sleeping,phase)
             }
         } else PetPoseSprite(pet.appearance,
             if(action.isEmpty() && !sleeping && active) petIdlePose(phase,idleCycle) else petPose(action, sleeping, phase),
@@ -233,6 +245,7 @@ internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, 
         if(state.messy) hotspot("收拾","tidy",.09f,.75f)
         hotspot("添粮","feed",.26f,.94f)
         hotspot("换水","water",.74f,.94f)
+        }
     }
     Row(Modifier.fillMaxWidth().padding(start=18.dp,end=18.dp,top=10.dp,bottom=2.dp),horizontalArrangement=Arrangement.SpaceBetween) {
         Text("已经一起照料 ${state.careDays.size} 天",style=MaterialTheme.typography.bodySmall,color=scheme.onSurfaceVariant)
@@ -256,15 +269,23 @@ internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, 
             if(state.events.size>count) TextButton(onClick={count+=20}) {Text("显示更早的记录")}
         }
         "decorate" -> {
-            Text("同一间小窝，换一种颜色",style=MaterialTheme.typography.titleMedium)
+            Text("小窝的颜色与画风",style=MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 listOf("sage" to "草绿","rose" to "暖粉","sky" to "雾蓝").forEach { (id,label) ->
                     FilterChip(enabled=!busy,selected=state.decoration==id,onClick={onAction("decorate",id)},label={Text(label)})
                 }
             }
-            if(appearance.family=="cat") Row(verticalAlignment=Alignment.CenterVertically) {
-                Text("原画形象与房间",Modifier.weight(1f));Switch(original,{original=it})
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("原画形象与房间",Modifier.weight(1f));Switch(original,{ use ->
+                    if(use && artRoot==null) onGetArtwork() else { originalPreference=use;onArtwork(use) }
+                },enabled=!busy)
             }
+            Text("轻量画风无需下载。原画只获取这只宠物的素材，多个助手共用一份；聊天和照料记录不受切换影响。",style=MaterialTheme.typography.bodySmall)
+            if(artRoot==null) FilledTonalButton(enabled=!busy,onClick=onGetArtwork) { Text(if(busy) "正在获取原画…" else "下载并使用这只宠物的原画") }
+            else if(File(artRoot,".complete").isFile && pet.appearance!="cat-black-v1" && !File(artRoot,"care.webp").isFile)
+                FilledTonalButton(enabled=!busy,onClick=onGetArtwork) { Text(if(busy) "正在更新原画…" else "更新这只宠物的睡眠与吃喝画面") }
+            TextButton(enabled=!busy,onClick=onImportArtwork) { Text("从文件导入这只宠物的原画包") }
+            TextButton(enabled=!busy,onClick=onCleanArtwork) { Text("清理未领养宠物的原画") }
             Row(verticalAlignment=Alignment.CenterVertically) {Text("减少动态效果",Modifier.weight(1f));Switch(reduceMotion,{reduceMotion=it})}
         }
         "care" -> {
@@ -279,6 +300,18 @@ internal fun PetInteractiveHome(state: PetState, busy: Boolean, artRoot: File?, 
     }
       }
     }
+}
+
+private fun DrawScope.drawSimpleAnimal(family:String,sleep:Boolean,phase:Float) {
+    val ink=Color(0xff544a3d)
+    val coat=when(family) { "dog" -> Color(0xffccaa78);"bird" -> Color(0xff99b88a);else -> Color(0xff9ba67a) }
+    drawOval(coat,Offset(25f,55f),Size(75f,60f))
+    drawCircle(coat,25f,Offset(56f,48f))
+    if(family=="dog") { drawOval(ink,Offset(27f,25f),Size(17f,36f));drawOval(ink,Offset(70f,25f),Size(17f,36f)) }
+    if(family=="bird") { drawOval(Color(0xff6b9274),Offset(66f,67f),Size(29f,34f));drawLine(Color(0xffb89955),Offset(43f,112f),Offset(43f,122f),5f);drawLine(Color(0xffb89955),Offset(74f,112f),Offset(74f,122f),5f) }
+    if(family=="reptile") { drawLine(coat,Offset(91f,91f),Offset(116f,108f),9f);drawOval(coat,Offset(16f,94f),Size(30f,12f)) }
+    for(x in listOf(47f,65f)) if(sleep || phase>.9f) drawLine(ink,Offset(x-4f,45f),Offset(x+4f,45f),2f) else drawCircle(ink,2.5f,Offset(x,45f))
+    drawCircle(if(family=="bird") Color(0xffc9a15d) else ink,4f,Offset(56f,57f))
 }
 
 @Composable

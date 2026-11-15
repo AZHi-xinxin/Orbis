@@ -153,6 +153,20 @@ internal object ConnectionProposalRules {
                         options.headers.single().second.startsWith("Bearer "))
         }
     }
+    /** UI-only presence check against the current native record; never returns credential text. */
+    fun hasSavedCredential(settings: Settings, p: ConnectionProposal): Boolean {
+        if (p.draft.auth != "bearer" || !matchesInstalled(settings, p)) return false
+        return when (p.draft.kind) {
+            "tts_openai" -> settings.ttsProviders.filterIsInstance<TTSProviderSetting.OpenAI>()
+                .any { it.id.toString() == p.id && it.apiKey.isNotBlank() }
+            "model_openai" -> settings.providers.filterIsInstance<ProviderSetting.OpenAI>()
+                .any { it.id.toString() == p.id && it.apiKey.isNotBlank() }
+            else -> settings.mcpServers.firstOrNull { it.id.toString() == p.id }?.commonOptions?.headers
+                ?.any { (name, value) -> name.equals("Authorization", true) &&
+                    value.startsWith("Bearer ") && value.removePrefix("Bearer ").isNotBlank() } == true
+        }
+    }
+
     /** Only a proposal-owned MCP title changes; transport, credentials, tool namespace stay intact. */
     fun renameMcp(settings: Settings, owner: String, id: String, name: String): Settings {
         AiConfigurationRules.requireOwner(settings, owner)

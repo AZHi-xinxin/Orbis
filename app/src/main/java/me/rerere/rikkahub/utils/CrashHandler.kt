@@ -18,6 +18,8 @@ object CrashHandler {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
+                me.rerere.rikkahub.data.orbis.diagnostics.OrbisFaultDiagnostics.record(appContext,
+                    me.rerere.rikkahub.data.orbis.diagnostics.FaultStage.UNCAUGHT_EXCEPTION,throwable)
                 Log.e(TAG, "Uncaught exception on thread ${thread.name}", throwable)
                 markCrashed(appContext, thread, throwable)
             } catch (_: Throwable) {

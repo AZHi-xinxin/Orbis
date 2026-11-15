@@ -7,6 +7,10 @@ import io.ktor.client.plugins.sse.SSE
 import io.ktor.serialization.kotlinx.json.json
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
+import io.modelcontextprotocol.kotlin.sdk.shared.RequestOptions
+import kotlin.time.Duration.Companion.milliseconds
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -38,6 +42,30 @@ import kotlin.concurrent.thread
  * no SettingsStore, application, private database, real credential or external endpoint.
  * This tests serialization/save/readback + reconnect wire, not the Compose Save button. */
 class McpStaticAuthorizationWireTest {
+    @Test(timeout = 15_000)
+    fun `model alias dispatch sends canonical dotted Tencent name to real MCP transport once`() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.expectedAuthorization.set("Bearer synthetic-alias")
+            val client = Client(Implementation("synthetic-alias", "1.0"))
+            try {
+                client.connect(createMcpTransport(config(fixture.url, "Authorization", "Bearer synthetic-alias"), fixture.httpClient))
+                val remoteName = "sheet.get_cell_data"
+                val tool = me.rerere.ai.core.Tool("mcp__TencentDocs__$remoteName", "Synthetic read", execute = { arguments ->
+                    val result = callMcpToolOnce {
+                        client.callTool(CallToolRequest(CallToolRequestParams(name = remoteName, arguments = arguments.jsonObject)))
+                    }
+                    result.content.map { me.rerere.ai.ui.UIMessagePart.Text((it as io.modelcontextprotocol.kotlin.sdk.types.TextContent).text) }
+                }).withMcpModelName()
+                val args = buildJsonObject { put("file_id", "synthetic-file"); put("cell", "A1") }
+                assertTrue(tool.name.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
+                assertEquals("ok", (tool.execute(args).single() as me.rerere.ai.ui.UIMessagePart.Text).text)
+                val call = fixture.requests.single { it.rpcMethod == "tools/call" }
+                assertEquals(remoteName, call.params!!.getValue("name").jsonPrimitive.content)
+                assertEquals(args, call.params.getValue("arguments"))
+                fixture.assertHealthy()
+            } finally { client.close() }
+        }
+    }
     companion object {
         private const val LOGGING_PROVIDER_PROPERTY = "slf4j.provider"
         private var previousLoggingProvider: String? = null
@@ -177,6 +205,34 @@ class McpStaticAuthorizationWireTest {
         }
     }
 
+    @Test(timeout = 30_000)
+    fun `list works then call returns JSON SSE HTTP error malformed JSON or missing result exactly once`() = runBlocking {
+        for (mode in listOf("json", "sse", "http502", "invalid", "missing")) {
+            Fixture(callReply = mode).use { fixture ->
+                fixture.expectedAuthorization.set("Bearer synthetic-call")
+                val client = Client(Implementation("synthetic-call", "1.0"))
+                try {
+                    client.connect(createMcpTransport(config(fixture.url, "Authorization", "Bearer synthetic-call"), fixture.httpClient))
+                    assertTrue(client.listTools().tools.isEmpty())
+                    val result = runCatching { callMcpToolOnce {
+                        client.callTool(CallToolRequest(CallToolRequestParams(name = "read_status", arguments = buildJsonObject {})),
+                            options = RequestOptions(timeout = 300.milliseconds))
+                    } }
+                    if (mode in listOf("json", "sse")) {
+                        assertEquals("ok", (result.getOrThrow().content.single() as io.modelcontextprotocol.kotlin.sdk.types.TextContent).text)
+                    } else {
+                        val failure = result.exceptionOrNull() as McpToolCallFailure
+                        val expected = mapOf("http502" to "mcp_http_failed", "invalid" to "mcp_response_invalid", "missing" to "mcp_call_timeout")
+                        assertEquals(mode, expected[mode], failure.code)
+                        assertEquals(if (mode == "http502") 502 else null, failure.httpStatus)
+                    }
+                    assertEquals(1, fixture.requests.count { it.rpcMethod == "tools/call" })
+                    fixture.assertHealthy()
+                } finally { client.close() }
+            }
+        }
+    }
+
     private fun config(url: String, name: String, value: String): McpServerConfig =
         McpServerConfig.StreamableHTTPServer(
             url = url,
@@ -210,9 +266,9 @@ class McpStaticAuthorizationWireTest {
         }
     }
 
-    private data class Request(val method: String, val rpcMethod: String?, val authorization: List<String>, val extraHeader: String?)
+    private data class Request(val method: String, val rpcMethod: String?, val authorization: List<String>, val extraHeader: String?, val params: JsonObject?)
 
-    private class Fixture(private val loopingSse: Boolean = false) : Closeable {
+    private class Fixture(private val loopingSse: Boolean = false, private val callReply: String = "json") : Closeable {
         private val loopback = InetAddress.getByName("127.0.0.1")
         private val listener = ServerSocket().apply { bind(InetSocketAddress(loopback, 0)); soTimeout = 200 }
         val url = "http://127.0.0.1:${listener.localPort}/mcp"
@@ -292,14 +348,14 @@ class McpStaticAuthorizationWireTest {
             val method = body?.get("method")?.jsonPrimitive?.content
             val auth = headers["authorization"].orEmpty().toList()
             synchronized(captured) {
-                captured += Request(requestLine[0], method, auth, headers["x-synthetic-probe"]?.single())
+                captured += Request(requestLine[0], method, auth, headers["x-synthetic-probe"]?.single(), body?.get("params") as? JsonObject)
                 check(captured.size <= 24)
             }
             val (code, response) = when {
                 auth != listOf(expectedAuthorization.get()) -> 401 to """{"error":"invalid_token","error_description":"Authentication required"}"""
                 requestLine[0] == "GET" -> if (loopingSse) 200 to "id: synthetic-stuck-id\nretry: 1\n\n" else 405 to ""
                 requestLine[0] == "DELETE" -> 204 to ""
-                method == "notifications/initialized" -> 202 to ""
+                method in listOf("notifications/initialized", "notifications/cancelled") -> 202 to ""
                 method == "initialize" -> 200 to buildJsonObject {
                     put("jsonrpc", "2.0"); put("id", checkNotNull(body)["id"]!!)
                     put("result", buildJsonObject {
@@ -309,12 +365,21 @@ class McpStaticAuthorizationWireTest {
                     })
                 }.toString()
                 method == "tools/list" -> 200 to """{"jsonrpc":"2.0","id":${checkNotNull(body)["id"]},"result":{"tools":[]}}"""
+                method == "tools/call" -> when(callReply) {
+                    "http502" -> 502 to "PRIVATE_UPSTREAM_BODY"
+                    "invalid" -> 200 to "{broken"
+                    "missing" -> 200 to ": keepalive\n\n"
+                    else -> {
+                        val result = """{"jsonrpc":"2.0","id":${checkNotNull(body)["id"]},"result":{"content":[{"type":"text","text":"ok"}]}}"""
+                        200 to if (callReply == "sse") "event: message\ndata: $result\n\n" else result
+                    }
+                }
                 else -> error("Unexpected synthetic RPC")
             }
             val bytes = response.toByteArray(Charsets.UTF_8)
             val extra = if (method == "initialize" && code == 200) "Mcp-Session-Id: synthetic-session\r\n" else ""
             val output = socket.getOutputStream()
-            val type = if (loopingSse && requestLine[0] == "GET") "text/event-stream" else "application/json"
+            val type = if ((loopingSse && requestLine[0] == "GET") || (method == "tools/call" && callReply in listOf("sse", "missing"))) "text/event-stream" else "application/json"
             output.write(("HTTP/1.1 $code Synthetic\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\n" +
                 "Connection: close\r\n$extra\r\n").toByteArray(Charsets.US_ASCII))
             output.write(bytes)

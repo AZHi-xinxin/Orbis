@@ -12,7 +12,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Baked-in assets and disposable fixtures only; never adopts or changes a real pet. */
+/** Optional packs and disposable fixtures only; never adopts or changes a real pet. */
 @RunWith(AndroidJUnit4::class)
 class PetPoseAssetsDeviceTest {
     private fun context(): android.content.Context {
@@ -23,17 +23,18 @@ class PetPoseAssetsDeviceTest {
         }
     }
 
-    @Test fun allFourBundledAtlasFamiliesHaveSixDistinctDecodablePoses() {
+    @Test fun allFourOptionalAtlasFamiliesHaveSixDistinctDecodablePoses() {
         val context = context()
         assertEquals(4, BUNDLED_PET_POSE_APPEARANCES.size)
         BUNDLED_PET_POSE_APPEARANCES.forEach { appearance ->
-            assertTrue(canUseBundledPetPoses(context, appearance, null))
-            val base = "orbis-pets/poses/$appearance"
-            val regions = context.assets.open("$base.json").bufferedReader().use {
+            assertFalse(canUseBundledPetPoses(context, appearance, null))
+            val base=PetArtDownloads.store(context).install(appearance,File(context.filesDir,"pet-art-fixtures/$appearance.zip"))
+            assertTrue(canUseBundledPetPoses(context, appearance, base))
+            val regions = File(base,"pose.json").bufferedReader().use {
                 JSONObject(it.readText()).getJSONArray("regions")
             }
             assertEquals(6, regions.length())
-            val bitmap = context.assets.open("$base.png").use { BitmapFactory.decodeStream(it) }
+            val bitmap = File(base,"pose.webp").inputStream().use { BitmapFactory.decodeStream(it) }
             assertNotNull(bitmap)
             try {
                 val fingerprints = (0 until regions.length()).map { index ->
@@ -55,7 +56,8 @@ class PetPoseAssetsDeviceTest {
         val fixture = File(context.cacheDir.canonicalFile, "pose-import-${UUID.randomUUID()}").apply { mkdirs() }
         try {
             BUNDLED_PET_POSE_APPEARANCES.forEach { appearance ->
-                context.assets.open("orbis-pets/$appearance.png").use { input ->
+                PetArtDownloads.store(context).install(appearance,File(context.filesDir,"pet-art-fixtures/$appearance.zip"))
+                File(context.filesDir,"pet-art-fixtures/$appearance.png").inputStream().use { input ->
                     File(fixture, "cat.png").outputStream().use { input.copyTo(it) }
                 }
                 assertTrue("$appearance official import should upgrade", canUseBundledPetPoses(context, appearance, fixture))

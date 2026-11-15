@@ -2,6 +2,9 @@ package me.rerere.rikkahub.ui.pages.orbis
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.context.LocalNavController
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,6 +30,7 @@ import kotlin.uuid.Uuid
 /** Opening this host reads state only. Only an explicit human master click can change configuration. */
 @Composable
 internal fun OrbisSentinelSettingsPanel() {
+    val navigator = LocalNavController.current
     val context = LocalContext.current.applicationContext
     val opened = remember(context) { runCatching { OrbisSentinels.open(context) } }
     val sentinels = opened.getOrNull()
@@ -121,5 +125,6 @@ internal fun OrbisSentinelSettingsPanel() {
             }
         },
     )
+    TextButton(onClick = { navigator.navigate(Screen.SettingWeb) }) { Text("StackChan 设备接入与接收状态") }
     OrbisSentinelHistoryPanel(state, inbox, sentinels, chat)
 }

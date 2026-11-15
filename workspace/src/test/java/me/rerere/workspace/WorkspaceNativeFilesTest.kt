@@ -9,6 +9,15 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class WorkspaceNativeFilesTest {
+    @Test fun submissionCopyUsesBoundedReadsAndRejectsChangedSource() {
+        val disk=MemoryDisk();val body=ByteArray(190000) { (it % 251).toByte() };disk.put("script.zip",body)
+        val out=java.io.ByteArrayOutputStream()
+        disk.engine().copyBounded(listOf("script.zip"),out,200000)
+        assertArrayEquals(body,out.toByteArray());assertTrue(disk.maxRead<=65536)
+        assertThrows(IllegalArgumentException::class.java) { disk.engine().copyBounded(listOf("script.zip"),java.io.ByteArrayOutputStream(),100) }
+        disk.changeAfterRead=true
+        assertThrows(IllegalStateException::class.java) { disk.engine().copyBounded(listOf("script.zip"),java.io.ByteArrayOutputStream(),200000) }
+    }
     private class MemoryDisk {
         val files = mutableMapOf<String, ByteArray>()
         val revisions = mutableMapOf<String, Long>()

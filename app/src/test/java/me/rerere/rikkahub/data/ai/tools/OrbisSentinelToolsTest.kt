@@ -20,6 +20,99 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisSentinelToolsTest {
+    @Test fun `new window create uses live host ID while old rule remains explicitly unavailable`() = runTest {
+        val fixture = Fixture()
+        fixture.existing()
+        val tools = fixture.tools(targetAvailable = { it.conversationId == CURRENT })
+        val before = fixture.writes
+        val list = call(tools, "list")
+        assertEquals(CURRENT, list["current_conversation_id"]!!.jsonPrimitive.content)
+        val old = list["rules"]!!.jsonArray.single().jsonObject
+        assertEquals(OLD, old["conversation_id"]!!.jsonPrimitive.content)
+        assertEquals("unavailable", old["target_status"]!!.jsonPrimitive.content)
+        assertEquals(JsonNull, old["next_due_at_ms"])
+        assertFalse(old["bound_to_current_conversation"]!!.jsonPrimitive.boolean)
+        assertEquals(before, fixture.writes)
+        val created = call(tools, "create", createArgs("once"))["rule"]!!.jsonObject
+        assertEquals(CURRENT, created["conversation_id"]!!.jsonPrimitive.content)
+        assertEquals("available", created["target_status"]!!.jsonPrimitive.content)
+        assertEquals(OLD, fixture.store.get("own-rule")!!.conversationId)
+    }
+
+    @Test fun `deleted or unreadable invoking window rejects writes before scheduling`() = runTest {
+        for (unreadable in listOf(false, true)) {
+            val fixture = Fixture(); fixture.existing()
+            val before = fixture.writes
+            val tools = fixture.tools(targetAvailable = { if (unreadable) error("storage unavailable") else false })
+            for ((name, args) in listOf("create" to createArgs("once"), "rebind" to id("own-rule"))) {
+                assertTrue(failed { call(tools, name, args) } is ToolRejectedBeforeExecutionException)
+            }
+            val read = call(tools, "read", id("own-rule"))["rule"]!!.jsonObject
+            assertEquals(if (unreadable) "unknown" else "unavailable", read["target_status"]!!.jsonPrimitive.content)
+            assertEquals(before, fixture.writes)
+            assertEquals(0, fixture.scheduleRequests)
+        }
+    }
+
+    @Test fun `explicit rebind settles old pending work and preserves prompt history and human master`() = runTest {
+        val fixture = Fixture(); val original = fixture.existing()
+        fixture.store.reserveFire(original.id, "old-pending", 2_000)
+        fixture.store.setHumanEnabled(false, 3_000)
+        var settled = 0
+        val tools = fixture.tools(targetAvailable = { it.conversationId == CURRENT }, editRule = { id, expected, edit ->
+            assertEquals(original.binding, expected)
+            fixture.store.abandonPending(id, "old-pending", 4_000, "pending_cancelled_without_replay")
+            settled++; edit()
+        })
+        val result = call(tools, "rebind", id(original.id))
+        val rebound = fixture.store.get(original.id)!!
+        assertEquals(1, settled)
+        assertEquals(original.prompt, rebound.prompt)
+        assertEquals(original.enabled, rebound.enabled)
+        assertEquals(CURRENT, rebound.conversationId)
+        assertEquals(fixture.now, rebound.scheduleSinceMs)
+        assertNull(rebound.pendingEventId)
+        assertFalse(result["human_master_enabled"]!!.jsonPrimitive.boolean)
+        assertEquals(OLD, fixture.store.executions().single().conversationId)
+        assertEquals(OrbisSentinelExecutionStatus.CANCELLED, fixture.store.executions().single().status)
+    }
+
+    @Test fun `same target rebind is idempotent and never settles an existing pending event`() = runTest {
+        val fixture = Fixture(); val original = fixture.existing(window = CURRENT)
+        fixture.store.reserveFire(original.id, "pending", 2_000)
+        val before = fixture.store.refresh(); val writes = fixture.writes
+        call(fixture.tools(editRule = { _, _, _ -> error("must not settle same binding") }), "rebind", id(original.id))
+        assertEquals(before, fixture.store.refresh())
+        assertEquals(writes, fixture.writes)
+    }
+
+    @Test fun `rebind cannot target another assistant arbitrary window or plugin rule`() = runTest {
+        val fixture = Fixture()
+        fixture.existing(assistant = OTHER)
+        val pluginRule = fixture.store.create(OrbisSentinelRule(id = "plugin", assistantId = AI,
+            conversationId = OLD, type = OrbisSentinelType.ONCE, dueAtMs = 20_000,
+            prompt = "private plugin", plugin = OrbisSentinelPlugin("plugin", "hash", "wake")))
+        val before = fixture.store.refresh()
+        val tools = fixture.tools(editRule = { _, _, _ -> error("must reject before edit") })
+        for (args in listOf(id("own-rule"), id(pluginRule.id), buildJsonObject {
+            put("rule_id", "own-rule"); put("conversation_id", CURRENT)
+        })) assertTrue(failed { call(tools, "rebind", args) } is ToolRejectedBeforeExecutionException)
+        assertEquals(before, fixture.store.refresh())
+        assertEquals(0, fixture.scheduleRequests)
+    }
+
+    @Test fun `repeated creates and updates do not mutate the sentinel catalog`() = runTest {
+        val fixture = Fixture()
+        fun catalog() = fixture.tools().map { Triple(it.name, it.description, it.parameters()) }
+        val initial = catalog()
+        repeat(12) { step ->
+            val created = call(fixture.tools(), "create", createArgs("once", "synthetic $step"))
+            val id = created.getValue("rule").jsonObject.getValue("rule_id").jsonPrimitive.content
+            call(fixture.tools(), "update", buildJsonObject { put("rule_id", id); put("prompt", "updated $step") })
+            assertEquals(initial, catalog())
+        }
+        assertEquals(12, fixture.store.list().size)
+    }
     @Test fun `invalid once union fields reject before execution but saved rules are never labelled unexecuted`() = runTest {
         val fixture = Fixture()
         for (extra in listOf("\"duration_seconds\":1", "\"duration_seconds\":0.001", "\"quiet_enabled\":false", "\"app_package\":\"\"")) {
@@ -53,9 +146,10 @@ class OrbisSentinelToolsTest {
         fun tools(assistant: String = AI, conversation: String = CURRENT,
             onChanged: () -> Unit = { scheduleRequests++ },
             editRule: suspend (String, OrbisSentinelBinding, () -> OrbisSentinelRule?) -> OrbisSentinelRule? = { _, _, edit -> edit() },
-            runtimeStatus: () -> OrbisSentinelRuntimeState? = { null }) =
+            runtimeStatus: () -> OrbisSentinelRuntimeState? = { null },
+            targetAvailable: suspend (OrbisSentinelBinding) -> Boolean = { true }) =
             createOrbisSentinelTools(store, assistant, conversation, onChanged = onChanged, now = { now },
-                editRule = editRule, runtimeStatus = runtimeStatus)
+                editRule = editRule, runtimeStatus = runtimeStatus, targetAvailable = targetAvailable)
         fun existing(id: String = "own-rule", assistant: String = AI, window: String = OLD) =
             store.create(OrbisSentinelRule(id = id, assistantId = assistant, conversationId = window,
                 type = OrbisSentinelType.CHAT_IDLE, prompt = "private raw $id", enabled = true,
@@ -77,10 +171,10 @@ class OrbisSentinelToolsTest {
         if (type == "app_usage") put("app_package", "test.synthetic.app")
     }
 
-    @Test fun `factory exposes seven rule tools plus readonly guide and opening causes no writes or runtime request`() {
+    @Test fun `factory exposes rule tools and explicit rebind without opening side effects`() {
         val fixture = Fixture()
         val tools = fixture.tools()
-        assertEquals(setOf("guide", "list", "read", "create", "update", "pause", "resume", "delete"),
+        assertEquals(setOf("guide", "list", "read", "create", "update", "pause", "resume", "delete", "rebind"),
             tools.map { it.name.removePrefix("orbis_sentinel_") }.toSet())
         tools.forEach {
             assertFalse(it.needsApproval(buildJsonObject {}))

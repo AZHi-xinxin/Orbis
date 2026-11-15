@@ -63,6 +63,30 @@ internal class GalleryRepository(
         durable("index.json", bytes)
     }
     fun snapshot(): GalleryIndex = synchronized(lock) { index() }
+
+    /** A market reservation is a private draft, never a published placeholder artwork. */
+    internal fun prepareMarketDraft(id: String, title: String): GalleryDraft = synchronized(lock) {
+        require(GalleryLimits.id(id) && GalleryLimits.title(title))
+        if (file("draft-$id.json").exists()) return@synchronized draft(id).also {
+            require(it.itemId == id && it.actor == "ai" && it.title == title && it.expectedRevision == 0)
+        }
+        val current = index()
+        require(current.items.none { it.id == id }) { "gallery_revision_changed" }
+        require(current.items.size < GalleryLimits.ITEMS && drafts().size < 50) { "gallery_catalog_full" }
+        if (!file("index.json").exists()) commit(current)
+        val entry = GalleryDraft(id, id, title, "text", 0, "ai", now())
+        durable("draft-$id.json", galleryJson.encodeToString(entry).toByteArray())
+        durable("draft-$id.txt", byteArrayOf()); entry
+    }
+    internal fun formatMarketDraft(id: String, kind: String) = synchronized(lock) {
+        require(kind in GalleryLimits.kinds)
+        val entry = draft(id)
+        require(entry.itemId == id && entry.expectedRevision == 0 && entry.actor == "ai")
+        if (entry.kind != kind) {
+            require(read("draft-$id.txt", GalleryLimits.BODY_BYTES).isEmpty()) { "gallery_revision_changed" }
+            durable("draft-$id.json", galleryJson.encodeToString(entry.copy(kind = kind)).toByteArray())
+        }
+    }
     fun rename(name: String) = synchronized(lock) {
         require(name.length <= 40 && name.none(Char::isISOControl)); commit(index().copy(customName = name.trim()))
     }

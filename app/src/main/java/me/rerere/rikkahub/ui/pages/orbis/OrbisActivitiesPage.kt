@@ -65,6 +65,7 @@ private fun PetHome(owner: String, ownerName:String, onClose:()->Unit, onSetting
     var tick by remember { mutableLongStateOf(0L) }
     var ai by remember(owner) { mutableStateOf(false) }
     var packReady by remember(owner, appearance) { mutableStateOf(false) }
+    var artworkRoot by remember(owner,appearance) { mutableStateOf<File?>(null) }
     LaunchedEffect(owner) {
         try { repository = withContext(Dispatchers.IO) { OrbisActivities.pet(context, owner).also { it.reload() } } }
         catch (e: CancellationException) { throw e }
@@ -76,7 +77,18 @@ private fun PetHome(owner: String, ownerName:String, onClose:()->Unit, onSetting
     val saved = repo?.state?.collectAsStateWithLifecycle()?.value
     val current = remember(saved, tick) { saved?.let { PetRules.advance(it, System.currentTimeMillis()) } }
     val selected = current?.pet?.appearance ?: appearance
-    LaunchedEffect(selected, tick) { packReady = withContext(Dispatchers.IO) { PetAssets.ready(context, selected) } }
+    val artRevision by PetArtDownloads.revision.collectAsStateWithLifecycle()
+    LaunchedEffect(selected, tick, artRevision) {
+        artworkRoot=withContext(Dispatchers.IO) {PetAssets.displayDirectory(context,selected)}
+        packReady=artworkRoot!=null
+    }
+    fun downloadArt() { if(!busy) scope.launch {
+        busy=true;message=null
+        try { PetArtDownloads.download(context,selected);withContext(Dispatchers.IO) {repo?.configureArtwork(true)};tick++ }
+        catch(e:CancellationException) {throw e}
+        catch(_:Exception) {message="原画暂未下载成功，仍可使用轻量画风；也可在布置里导入对应原画包。"}
+        finally {busy=false}
+    } }
     fun action(block: () -> Unit) { if (!busy) scope.launch {
         busy = true; message = null
         try { withContext(Dispatchers.IO) { block() }; tick++ }
@@ -94,7 +106,7 @@ private fun PetHome(owner: String, ownerName:String, onClose:()->Unit, onSetting
             scope.launch {
                 try {
                     withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.use { PetAssets.import(context, it, target) }
+                        context.contentResolver.openInputStream(uri)?.use { PetArtDownloads.importPack(context, it, target) }
                             ?: error("pack_unavailable")
                     }
                     tick++
@@ -115,7 +127,10 @@ private fun PetHome(owner: String, ownerName:String, onClose:()->Unit, onSetting
     if (repo == null || current == null) { if(message == null) Text("正在读取宠物档案…"); return }
     if (current.pet != null) {
         if (ai) OrbisPetAi(owner, repo, { ai = false }, conversationId)
-        PetInteractiveHome(current, busy, if(packReady) PetAssets.directory(context,selected) else null, ownerName, onClose, onSettings, onAi = { ai = true }) { id, decoration ->
+        PetInteractiveHome(current, busy, artworkRoot, ownerName, onClose, onSettings, onAi = { ai = true },
+            onArtwork={original -> action {repo.configureArtwork(original)}},onGetArtwork={downloadArt()},
+            onCleanArtwork={action {PetArtDownloads.cleanUnused(context,setOf(selected))}},
+            onImportArtwork={pendingAppearance=selected;packPicker.launch(arrayOf("application/zip","application/octet-stream"))}) { id, decoration ->
             action { repo.act(id,UUID.randomUUID().toString(),decoration); PetAiRuntime.enqueue(context, owner, id) }
         }
         return
@@ -136,15 +151,22 @@ private fun PetHome(owner: String, ownerName:String, onClose:()->Unit, onSetting
     }
     run {
         Box(Modifier.fillMaxWidth().aspectRatio(.75f), contentAlignment = Alignment.BottomCenter) {
-            val root = if(packReady) PetAssets.directory(context, selected) else null
+            val root = artworkRoot
+            if(root!=null) {
             AsyncImage(PetAssets.model(selected, if (current.messy) "messy.png" else "tidy.png", root), "宠物房间", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             AsyncImage(PetAssets.model(selected, "cat.png", root), PetCatalog.find(selected).label,
                 Modifier.fillMaxWidth(.58f).fillMaxHeight(.56f).padding(bottom = 32.dp), contentScale = ContentScale.Fit)
+            } else Column(Modifier.align(Alignment.Center).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                Text(when(PetCatalog.find(selected).family) {"cat"->"🐈";"dog"->"🐕";"bird"->"🐦";else->"🦎"},style=MaterialTheme.typography.displayLarge)
+                Text(PetCatalog.find(selected).label,style=MaterialTheme.typography.titleLarge)
+                Text("可以直接领养，原画按需下载。")
+            }
             if (current.sleepingUntil > System.currentTimeMillis()) Text("休息中 · 仍可照料", Modifier.align(Alignment.TopCenter).background(MaterialTheme.colorScheme.surface.copy(alpha=.8f)).padding(8.dp))
         }
     }
     run {
-        Text("已内置全部宠物与房间图片，可直接领养；原来导入的图片仍会优先使用。")
+        Text("轻量画风直接可用。原画按宠物单独下载，不再占用所有宠物的大图空间；自己导入的图片会保留。")
+        if(!packReady) FilledTonalButton(enabled=!busy,onClick={downloadArt()}) {Text(if(busy) "正在下载原画…" else "下载所选宠物的原画")}
         OutlinedButton(enabled = !busy, onClick = {
             pendingAppearance = selected; packMessage = null
             packPicker.launch(arrayOf("application/zip", "application/octet-stream"))
@@ -157,7 +179,10 @@ private fun PetHome(owner: String, ownerName:String, onClose:()->Unit, onSetting
     if (current.pet == null) {
         OutlinedTextField(name, { name = it.take(40) }, label = { Text("给它取个名字") }, modifier = Modifier.fillMaxWidth())
         Text("确认领养后，这位助手不再更换宠物。备份会保留名字、身份和照料记录。")
-        Button(enabled = !busy && name.isNotBlank(), onClick = { action { repo.adopt(name, selected) } }) { Text("确认领养") }
+        Button(enabled = !busy && name.isNotBlank(), onClick = { action {
+            repo.adopt(name, selected)
+            runCatching {PetArtDownloads.cleanUnused(context,setOf(selected))}
+        } }) { Text("确认领养") }
     }
     }
 }

@@ -160,7 +160,7 @@ fun OrbisChatDock(currentLabel: String = "当前 聊天", ownerAssistantId: Stri
         homeDescription = "返回当前聊天",
         onOpenNavigation = { menuOpen = true },
     )
-    if (menuOpen) OrbisVisualTheme {
+    if (menuOpen) OrbisInterfaceTheme {
         val sheetState = rememberBottomSheetState(
             initialValue = SheetValue.Hidden,
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),

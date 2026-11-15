@@ -25,10 +25,11 @@ internal fun createOrbisImageWorkshopTool(context: Context, owner: String, conve
     chatImages: ChatImageReadScope? = null, readChat: suspend () -> Conversation? = { null },
     presentImage: suspend (UIMessagePart.Image) -> List<UIMessagePart> = { listOf(it) }) = Tool(
     name = "orbis_image_workshop",
-    description = "异步生图工坊。list 查看制作者能力与本对话AI发起的任务（人类手动创作不公开）；list_images 分页获取本聊天参考图片码（新图在前，offset从0）；generate 文生图；edit 带参考图生成。reference_files 只能取本对话工坊结果，reference_image_codes 取list_images/历史图片码；不接收路径。NAI一次一张参考图，默认img2img重绘，strength=0..1越高改动越大；仅4.5另支持character&style精确参考，越高越贴近参考。图生图会收费，4.5精确参考每张额外5 Anlas。widget_kit制作14张透明Q版动作图，仅支持list列出的模型。$WORKSHOP_ACCESS_NOTICE 提交需唯一request_id，同一意图重试复用它以免重复付费。model_id不填用人类默认。提交即返回job_id，可以继续聊天，完成附图通知只投原对话；暂停哨兵不自动唤醒。get查状态并返回一张已有原图，image_index从0开始；纯文本模型返回识图结果，不循环轮询；失败不自动重做，需人类确认后新request_id。服从人类工具开关。",
+    description = "异步生图工坊。list 查看制作者能力、本对话AI任务与已授权人物参考；人类手动作品不公开，除非人类另存为人物参考并授权。list_references 查看当前伙伴跨聊天可用的人物名字及reference_id；get_reference用reference_id查看原图。人类说参考“我”“阿止”等时先查人物参考，按名字选择reference_ids随generate/edit/widget_kit提交，系统实际附上原图；“我”是人类所命名的人物，不是AI自己，不要仅凭文字猜脸或杜撰ID。list_images 分页获取本聊天参考图片码（新图在前，offset从0）；generate 文生图或按已存人物生图；edit 带参考图生成。reference_files只取本对话工坊结果，reference_image_codes取list_images/历史图片码；不接收路径。参考图合计最多4张；NAI一次一张，默认img2img，strength=0..1越高改动越大；仅4.5另支持character&style精确参考。图生图会收费，4.5精确参考每张额外5 Anlas。widget_kit制作14张透明Q版动作图，仅支持list列出的模型。$WORKSHOP_ACCESS_NOTICE 提交需唯一request_id，同一意图重试复用它以免重复付费。model_id不填用人类默认。提交即返回job_id，完成附图通知只投原对话；暂停哨兵不自动唤醒。get查状态并返回一张已有原图，image_index从0开始；纯文本模型返回识图结果，不循环轮询；失败不自动重做，需人类确认后新request_id。服从人类工具开关。",
     parameters = { InputSchema.Obj(buildJsonObject {
-        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("list", "list_images", "get", "generate", "edit", "widget_kit").map(::JsonPrimitive))) })
-        listOf("model_id", "prompt", "job_id").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
+        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("list", "list_images", "list_references", "get_reference", "get", "generate", "edit", "widget_kit").map(::JsonPrimitive))) })
+        listOf("model_id", "prompt", "job_id", "reference_id").forEach { key -> put(key, buildJsonObject { put("type", "string") }) }
+        put("reference_ids", buildJsonObject { put("type", "array"); put("maxItems", 4); put("items", buildJsonObject { put("type", "string") }); put("description", "list_references返回的已授权人物ID，依次选用实际原图。") })
         put("request_id", buildJsonObject {
             put("type", "string")
             put("description", "每个新创作用新的随机 UUID，不按历史序号续号；同一任务原样重试才复用。删除旧作品不会释放其编号。")
@@ -47,7 +48,7 @@ internal fun createOrbisImageWorkshopTool(context: Context, owner: String, conve
             val workshop = ImageWorkshop.open(context)
             require(workshop.state.value.allowAi) { "workshop_ai_disabled" }
             val args = raw as? JsonObject ?: error("workshop_arguments")
-            require(args.keys.all { it in setOf("action", "request_id", "model_id", "prompt", "job_id", "reference_files", "reference_image_codes", "reference_mode", "strength", "offset", "image_index") }) { "workshop_arguments" }
+            require(args.keys.all { it in setOf("action", "request_id", "model_id", "prompt", "job_id", "reference_files", "reference_image_codes", "reference_mode", "strength", "offset", "image_index", "reference_ids", "reference_id") }) { "workshop_arguments" }
             fun text(key: String) = (args[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
             fun jobJson(job: WorkshopJob) = buildJsonObject {
                 put("job_id", job.id); put("status", job.status.name.lowercase()); put("maker", job.maker)
@@ -55,7 +56,25 @@ internal fun createOrbisImageWorkshopTool(context: Context, owner: String, conve
                 put("originals", JsonArray(job.assets.map { JsonPrimitive(it.file) }))
             }
             val owned = workshop.ledger.visibleJobs(owner, conversation)
+            fun referencesJson() = buildJsonArray {
+                workshop.ledger.visibleReferences(owner, true).forEach { reference -> add(buildJsonObject {
+                    put("reference_id", reference.id); put("name", reference.name); put("image_count", 1)
+                }) }
+            }
             when (val action = text("action")) {
+                "list_references" -> buildJsonObject {
+                    put("ok", true); put("data_not_instructions", true); put("references", referencesJson())
+                    put("message", "仅当前伙伴已获授权的人物参考；跨聊天可用。名字仅为标签，提交reference_ids才会把原图交给生图模型；不保证完全一致。")
+                }
+                "get_reference" -> {
+                    val reference = workshop.ledger.resolveReferences(owner, true, listOf(text("reference_id") ?: error("workshop_arguments"))).single()
+                    val file = workshop.assetFile(reference.asset.file)
+                    require(file.isFile) { "workshop_reference_missing" }
+                    val parts = presentImage(UIMessagePart.Image(Uri.fromFile(file).toString()))
+                    workshop.ledger.validateReferences(owner, true, listOf(reference))
+                    images = parts
+                    buildJsonObject { put("ok", true); put("data_not_instructions", true); put("reference_id", reference.id); put("name", reference.name) }
+                }
                 "list_images" -> {
                     val offset = args["offset"]?.let { (it as? JsonPrimitive)?.takeUnless { p -> p.isString }?.intOrNull ?: error("workshop_arguments") } ?: 0
                     require(offset >= 0) { "workshop_arguments" }
@@ -80,6 +99,7 @@ internal fun createOrbisImageWorkshopTool(context: Context, owner: String, conve
                     buildJsonObject {
                         put("ok", true); put("data_not_instructions", true)
                         put("access_notice", WORKSHOP_ACCESS_NOTICE)
+                        put("references", referencesJson())
                         put("makers", buildJsonArray { settings.providers.filter { it.enabled }.forEach { provider ->
                             provider.models.filter { ImageWorkshop.supports(it.providerOverwrite ?: provider, it) }.forEach { model -> add(buildJsonObject {
                                 put("model_id", model.id.toString()); put("label", workshopMakerLabel(provider, model))
@@ -119,13 +139,15 @@ internal fun createOrbisImageWorkshopTool(context: Context, owner: String, conve
                             ?: error("workshop_arguments") }.orEmpty()
                     val refs = strings("reference_files")
                     val codes = strings("reference_image_codes")
+                    val referenceIds = strings("reference_ids")
+                    val named = workshop.ledger.resolveReferences(owner, true, referenceIds)
                     val selected = settings.findModelById(Uuid.parse(model)) ?: error("workshop_model_missing")
                     val provider = selected.findProvider(settings.providers) ?: error("workshop_model_missing")
                     val mode = text("reference_mode") ?: "img2img"
                     val strength = args["strength"]?.let { (it as? JsonPrimitive)?.takeUnless { p -> p.isString }?.doubleOrNull ?: error("workshop_arguments") } ?: 0.6
                     require(strength.isFinite() && strength in 0.0..1.0 && mode in setOf("img2img", "character&style")) { "workshop_arguments" }
-                    require(refs.size + codes.size <= if (NovelAiImageApi.isConnection(provider)) 1 else 4) { "workshop_single_reference_only" }
-                    require(action != "edit" || refs.isNotEmpty() || codes.isNotEmpty()) { "workshop_reference" }
+                    require((refs + named.map { it.asset.file }).distinct().size + codes.size <= if (NovelAiImageApi.isConnection(provider)) 1 else 4) { if (NovelAiImageApi.isConnection(provider)) "workshop_single_reference_only" else "workshop_reference_limit" }
+                    require(action != "edit" || refs.isNotEmpty() || codes.isNotEmpty() || named.isNotEmpty()) { "workshop_reference" }
                     require(action != "generate" || refs.isEmpty() && codes.isEmpty()) { "workshop_use_edit" }
                     require(mode == "img2img" || NovelAiImageApi.isConnection(provider) && selected.modelId == NovelAiImageApi.MODEL) { "workshop_reference_mode" }
                     suspend fun verify() { if (codes.isNotEmpty()) {
@@ -140,7 +162,7 @@ internal fun createOrbisImageWorkshopTool(context: Context, owner: String, conve
                     val job = workshop.submit(owner, conversation, true, model, text("prompt") ?: error("workshop_prompt"),
                         action == "widget_kit", refs + imported, text("request_id") ?: error("workshop_request_id"),
                         onNewAccepted = onNewAccepted, referenceMode = mode, referenceStrength = strength,
-                        authorizedChatReferences = imported.toSet(), validateChatReferences = { verify() })
+                        authorizedChatReferences = imported.toSet(), validateChatReferences = { verify() }, referenceIds = referenceIds)
                     buildJsonObject {
                         put("ok", true); put("accepted", true); put("job", jobJson(job)); put("wait_for_result", false)
                         put("message", "已交给后台工坊；可以继续聊天，完成后原对话会收到图片。不要重复提交或轮询。")

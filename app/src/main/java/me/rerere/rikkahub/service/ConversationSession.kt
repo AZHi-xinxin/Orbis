@@ -33,9 +33,10 @@ class ConversationSession(
 ) {
     // 会话状态
     val state = MutableStateFlow(initial)
-    // Independent human continuation is retained even when old recovery cannot finish.
+    internal val writeFence = ConversationWriteFence()
+    // Continuation owns turn orchestration; its state is this same live conversation.
     internal val humanContinuation = MutableStateFlow<HumanContinuationLane?>(null)
-    // Phone and Web observe the same current producer, including before Room catches up.
+    // Phone and Web observe the same state, including before Room catches up.
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     internal val displayedState = humanContinuation.flatMapLatest { it?.state ?: state }
         .stateIn(scope, SharingStarted.Eagerly, initial)
@@ -66,6 +67,10 @@ class ConversationSession(
     var submittingMessage: QueuedMessage? = null
         internal set
 
+    // Survives closing/reopening the drawer while Room is saving an accepted input.
+    // Guarded by synchronized(this); completion does not resume any old queue.
+    internal var gardenInputReceipt: kotlinx.coroutines.Deferred<Boolean>? = null
+
     // Captured/cleared with synchronized(this). A continuation may retain the immutable
     // value after the ordinary writer ends, including a commit with a lost callback.
     @Volatile
@@ -79,8 +84,17 @@ class ConversationSession(
 
     // 生成任务（内聚在 session 中）
     private val _generationJob = MutableStateFlow<Job?>(null)
+    // Cancellation may leave a tool/Room finalizer alive. Retain that internal owner,
+    // but never show it as a new reply when an idle continuation hands the page back.
+    private val _displayedGenerationJob = MutableStateFlow<Job?>(null)
     private val activeJobs = mutableSetOf<Job>()
-    val generationJob: StateFlow<Job?> = _generationJob.asStateFlow()
+    val generationJob: StateFlow<Job?> = _displayedGenerationJob.asStateFlow()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    internal val displayedGenerationJob = humanContinuation.flatMapLatest { it?.job ?: generationJob }
+    internal fun displayedJobSnapshot(): Job? = when (val lane = humanContinuation.value) {
+        null -> _displayedGenerationJob.value
+        else -> lane.job.value
+    }
     val isGenerating: Boolean get() = _generationJob.value?.isActive == true
     val isInUse: Boolean
         get() = humanContinuation.value != null || refCount.get() > 0 || hasUnfinishedJobs() || gatewayRecoveryBlocked ||
@@ -123,6 +137,7 @@ class ConversationSession(
     fun setJob(job: Job?, cancelPrevious: Boolean = true) {
         val previous = _generationJob.value
         _generationJob.value = job
+        _displayedGenerationJob.value = job
         if (cancelPrevious) previous?.cancel()
         if (job != null) activeJobs.add(job)
         job?.invokeOnCompletion { cause ->
@@ -130,6 +145,7 @@ class ConversationSession(
                 activeJobs.remove(job)
                 // Also propagate cancellation when a queued coroutine never entered its body.
                 if (!cancelPrevious && cause is CancellationException) previous?.cancel()
+                _displayedGenerationJob.compareAndSet(job, null)
                 // A replaced job must not clear or advance its successor.
                 if (_generationJob.compareAndSet(job, null)) {
                     onGenerationFinished(id, cause)
@@ -148,6 +164,7 @@ class ConversationSession(
 
     @Synchronized
     fun cancelJobs(): List<Job> = activeJobs.toList().also { jobs ->
+        _displayedGenerationJob.value = null
         // Cancel waiters first so a predecessor finishing cannot start the next approval.
         jobs.asReversed().forEach { it.cancel() }
     }
@@ -170,6 +187,7 @@ class ConversationSession(
     @Synchronized
     fun cleanup() {
         _generationJob.value = null
+        _displayedGenerationJob.value = null
         cancelJobs()
         idleCheckJob?.cancel()
         idleCheckJob = null

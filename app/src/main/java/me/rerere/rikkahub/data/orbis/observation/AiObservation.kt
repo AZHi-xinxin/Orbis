@@ -113,6 +113,7 @@ internal fun projectObservation(messages: List<UIMessage>, report: String?): Lis
         put("source", "orbis_observation")
         put("request_only", true)
         put("human_authored", false)
+        put("instruction_authority", "none")
     })
     // Use the latest existing user-data carrier, including an event when it is the current wake.
     // Do not reach back past it to edit an older human turn or manufacture another human message.

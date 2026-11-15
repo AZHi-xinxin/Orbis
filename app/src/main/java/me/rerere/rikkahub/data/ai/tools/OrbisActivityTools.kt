@@ -9,10 +9,12 @@ import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.orbis.activities.*
 
-internal fun petTool(enabled: () -> Boolean, react: (String, String) -> Unit = { _, _ -> }, open: () -> PetRepository) = Tool(
-    name = "orbis_pet", description = "照料当前助手名下宠物（不含其他助手）。status读状态；feed/water/pet/play/tidy/board/return/sleep/decorate。talk带text向独立宠物模型说话，立即返回，不等待、不阻塞本轮；之后status读动物语。translate带saying_id消耗1次已积累翻译机会，同一句不重复扣除。领养由人类在宠物区完成，一助手一只不换养。寄养维持饱腹水分、心情缓慢下降；不死亡、不货币。关闭模块不调用。动作operation_id用本次唯一短标识，重试沿用；不自动重复操作。",
+internal fun petTool(enabled: () -> Boolean, react: (String, String) -> Unit = { _, _ -> },
+    artwork: suspend (String,PetState)->JsonElement = { _,_ -> buildJsonObject {put("status","artwork_host_unavailable")} },
+    open: () -> PetRepository) = Tool(
+    name = "orbis_pet", description = "照料当前助手名下宠物（不含其他助手）。status读状态；feed/water/pet/play/tidy/board/return/sleep/decorate。decorate的decoration为sage草绿、rose暖粉、sky雾蓝，原画也支持配色。原画现在按需下载，不再内置全部大图。人类入口：工具与娱乐→宠物区→布置→下载并使用这只宠物的原画；也可导入对应ZIP。art_info读取当前宠物的官方包地址、大小和安装状态；人类明确希望使用原画时可install_art，宿主只下载当前宠物并验哈希安装，不需要工作区中转或用户写系统提示词；不自行安装别人的宠物。talk带text向独立宠物模型说话，立即返回；之后status读动物语。translate带saying_id消耗已积累机会，同一句不重复扣除。人类领养，一助手一只不换养；不死亡、不货币。模块关闭不调用。动作operation_id本次唯一，重试沿用；不自动重复操作。",
     parameters = { InputSchema.Obj(properties = buildJsonObject {
-        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray((listOf("status", "talk", "translate") + PetRules.actions).map(::JsonPrimitive))) })
+        put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray((listOf("status", "talk", "translate","art_info","install_art") + PetRules.actions).map(::JsonPrimitive))) })
         put("operation_id", buildJsonObject { put("type", "string") })
         put("text", buildJsonObject { put("type", "string"); put("maxLength", 1000) })
         put("saying_id", buildJsonObject { put("type", "string") })
@@ -21,6 +23,12 @@ internal fun petTool(enabled: () -> Boolean, react: (String, String) -> Unit = {
         check(enabled()) { "module_disabled" }
         val a = args.jsonObject; val repo = open(); val action = a.string("action")
         when(action) {
+            "art_info","install_art" -> {
+                val state=repo.snapshot();check(state.pet!=null) {"adopt_first"}
+                val result=artwork(action,state)
+                if(action=="install_art" && result.jsonObject["installed"]?.jsonPrimitive?.booleanOrNull==true) repo.configureArtwork(true)
+                result
+            }
             "talk" -> {
                 val text = a.string("text"); require(text.isNotBlank() && text.length <= 1000) { "invalid_text" }
                 if (!repo.snapshot().aiConsent) buildJsonObject { put("status", "pet_ai_not_enabled"); put("note", "请先在小窝设置选择并开启宠物模型，本地照料仍可用。") }
@@ -128,7 +136,7 @@ private fun <T> activityPage(items: List<T>, args: JsonObject, encode: (T) -> Js
         put("has_more", next < items.size); put("next_offset", if (next < items.size) JsonPrimitive(next) else JsonNull)
     }
 }
-private suspend fun activityResult(action: () -> JsonElement): List<UIMessagePart> = withContext(Dispatchers.IO) {
+private suspend fun activityResult(action: suspend () -> JsonElement): List<UIMessagePart> = withContext(Dispatchers.IO) {
     val result = try { buildJsonObject { put("ok", true); put("result", action()) } }
     catch (e: CancellationException) { throw e }
     catch (e: Exception) { buildJsonObject { put("ok", false)

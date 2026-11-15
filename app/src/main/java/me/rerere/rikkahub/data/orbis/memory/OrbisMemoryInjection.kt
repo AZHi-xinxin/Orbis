@@ -22,6 +22,9 @@ data class OrbisMemorySelected(
     val id: String, val text: String, val revision: Int, val kind: String,
     val sourceEventId: String? = null, val sourceCreatedAt: Long? = null, val minIntervalTurns: Int = 0,
     val desire: String? = null,
+    val sourceAssistantId: String? = null,
+    val sourceAssistantName: String? = null,
+    val sourceNoteId: String? = null,
 )
 
 @Serializable
@@ -82,7 +85,9 @@ internal fun selectOrbisMemory(
 
 private fun renderMemoryEntry(entry: OrbisMemorySelected): String = buildJsonObject {
     entry.desire?.let { put("desire",it) }
-    put("id", entry.id); put("kind", entry.kind); put("text", entry.text)
+    put("id", entry.sourceNoteId ?: entry.id); put("kind", entry.kind); put("text", entry.text)
+    entry.sourceAssistantId?.let { put("source_assistant_id", it) }
+    entry.sourceAssistantName?.let { put("source_assistant_name", it) }
     if (entry.kind == "compaction_excerpt") {
         put("source", "压缩摘要片段，不是当年逐字原话")
         put("event_id", entry.sourceEventId); put("revision", entry.revision)

@@ -1,0 +1,42 @@
+/* Artwork occupies the full viewport. Only interactive content avoids system bars. */
+:root{--edge-top:var(--orbis-safe-top,env(safe-area-inset-top,0px));--edge-right:var(--orbis-safe-right,env(safe-area-inset-right,0px));--edge-bottom:var(--orbis-safe-bottom,env(safe-area-inset-bottom,0px));--edge-left:var(--orbis-safe-left,env(safe-area-inset-left,0px))}
+html[data-tabletop=heartprison] .phone{padding:var(--edge-top) var(--edge-right) var(--edge-bottom) var(--edge-left)}
+html[data-tabletop=heartprison] .top{background:transparent}
+html[data-tabletop=drawguess] #app{background:linear-gradient(#22142666,#24152b22 40%,#24152b88),url('party-floor-v2.png') center/100% 100%}
+html[data-tabletop=drawguess] #app>.header{height:auto;min-height:calc(88px + var(--edge-top));padding:calc(10px + var(--edge-top)) calc(13px + var(--edge-right)) 10px calc(13px + var(--edge-left));background:transparent}
+html[data-tabletop=drawguess] #app>.board{background:transparent;margin-left:var(--edge-left);margin-right:var(--edge-right)}
+html[data-tabletop=drawguess] #app>.footer{padding-bottom:calc(10px + var(--edge-bottom));padding-left:calc(13px + var(--edge-left));padding-right:calc(13px + var(--edge-right))}
+html[data-tabletop=drawguess] .full-header{padding-top:calc(10px + var(--edge-top));padding-left:calc(12px + var(--edge-left));padding-right:calc(12px + var(--edge-right))}
+html[data-tabletop=drawguess] #full-footer .footer{padding-bottom:calc(12px + var(--edge-bottom))}
+html[data-tabletop=werewolf] .ww-root{background:linear-gradient(#16251e99,transparent 50%,#16251e55),url('/assets/rooms/green_cellar.png') center/cover}
+html[data-tabletop=werewolf] .ww-header{padding:calc(12px + var(--edge-top)) calc(12px + var(--edge-right)) 12px calc(12px + var(--edge-left));background:transparent;color:#fff3d6}
+html[data-tabletop=werewolf] .ww-header p{color:#e3d5b7}
+html[data-tabletop=werewolf] .ww-board:not(.ww-night){background:transparent;margin-left:var(--edge-left);margin-right:var(--edge-right)}
+html[data-tabletop=werewolf] .ww-footer{padding-bottom:calc(12px + var(--edge-bottom));padding-left:calc(12px + var(--edge-left));padding-right:calc(12px + var(--edge-right))}
+/* The illustrated header grows with its text, including font scaling and safe areas. */
+html[data-tabletop=tabletop]{--lobby-gutter:clamp(16px,3vw,36px)}
+html[data-tabletop=tabletop] body:not(.tabletop-fullscreen){background:var(--paper)}
+html[data-tabletop=tabletop] .lobby-masthead{background:linear-gradient(#101c16a6,#101c1666 35%,#101c16c4),url('/assets/rooms/moon_library.png') center/cover;color:#fff;padding-inline:var(--edge-left) var(--edge-right)}
+html[data-tabletop=tabletop] body.tabletop-fullscreen>.lobby-masthead{display:none}
+html[data-tabletop=tabletop] .topbar{padding:calc(24px + var(--edge-top)) var(--lobby-gutter) 20px;color:#fff;min-width:0}
+html[data-tabletop=tabletop] .brand{min-width:0;line-height:1.4}
+html[data-tabletop=tabletop] .brand small,html[data-tabletop=tabletop] .edition{color:#eee8d7}
+html[data-tabletop=tabletop] .main-nav{color:#fff;width:calc(100% - 2 * var(--lobby-gutter));max-width:1168px;margin:0 auto;padding:0;border-color:#efe2bf88;gap:clamp(18px,3vw,30px)}
+html[data-tabletop=tabletop] .main-nav a.active{color:#ffe1a3;border-color:#ffe1a3}
+html[data-tabletop=tabletop] #page-heading>.intro{max-width:1240px;margin:0 auto;padding:24px var(--lobby-gutter) 28px;text-align:left}
+html[data-tabletop=tabletop] #page-heading h1{color:#fff;line-height:1.4;letter-spacing:.04em;overflow-wrap:anywhere;text-shadow:0 2px 6px #0008}
+html[data-tabletop=tabletop] #page-heading .eyebrow{color:#efdaab;line-height:1.6;margin-bottom:8px;overflow-wrap:anywhere}
+html[data-tabletop=tabletop] #page-heading p{color:#f5f1e8;line-height:1.8;margin-top:12px;max-width:760px;overflow-wrap:anywhere;text-shadow:0 1px 4px #0008}
+html[data-tabletop=tabletop] body:not(.tabletop-fullscreen)>#app{padding-inline:calc(var(--lobby-gutter) + var(--edge-left)) calc(var(--lobby-gutter) + var(--edge-right))}
+html[data-tabletop=tabletop] footer{padding-bottom:calc(30px + var(--edge-bottom))}
+html[data-tabletop=tabletop] .fs-top{padding-top:calc(14px + var(--edge-top));padding-left:calc(16px + var(--edge-left));padding-right:calc(16px + var(--edge-right))}
+html[data-tabletop=tabletop] .fs-table::before{background:linear-gradient(#17241b99,transparent 25%,transparent 72%,#17241b99)}
+html[data-tabletop=tabletop] .fs-table>.fs-top{color:#fff3d6}
+html[data-tabletop=tabletop] .fs-table-tools{top:calc(11% + var(--edge-top))}
+html[data-tabletop=tabletop] .fs-ring{top:calc(18% + var(--edge-top));height:calc(59% - var(--edge-top))}
+html[data-tabletop=tabletop] .fs-bottom{bottom:calc(1% + var(--edge-bottom))}
+html[data-tabletop=tabletop] .fs-page{background:linear-gradient(#17241b99,transparent 220px),url('/assets/rooms/moon_library.png') center/cover}
+html[data-tabletop=tabletop] .fs-page>.fs-top{color:#fff3d6}
+html[data-tabletop=tabletop] .fs-body{background:var(--paper);padding-bottom:calc(26px + var(--edge-bottom))}
+html[data-tabletop] dialog:not(#fullscreen):not(.cinema-dialog){max-height:calc(100dvh - var(--edge-top) - var(--edge-bottom) - 24px)}
+html[data-tabletop] #toast,html[data-tabletop] .toast{bottom:calc(30px + var(--edge-bottom))}

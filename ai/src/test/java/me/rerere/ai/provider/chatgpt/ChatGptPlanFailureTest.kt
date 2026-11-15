@@ -13,6 +13,33 @@ import java.io.IOException
 
 class ChatGptPlanFailureTest {
     private val requestId = "req_0123456789abcdef0123456789abcdef"
+    @Test fun reasoningContentRejectionKeepsItsCodeAndStructuralFieldWithoutPrivateMessage() {
+        val error = ChatGptPlanFailure.fromBody(400, """{"error":{
+            "code":"array_above_max_length","type":"invalid_request_error",
+            "param":"input[0].content","message":"private upstream content"}}""")
+        assertEquals(ChatGptFailureKind.REQUEST, error.kind)
+        assertEquals("array_above_max_length", error.errorCode)
+        assertEquals("input[0].content", error.parameter)
+        assertTrue(error.message!!.contains("input[0].content"))
+        assertFalse(error.message!!.contains("private upstream"))
+    }
+    @Test fun absentOrUnknownCodeCanFallBackOnlyToKnownErrorType() {
+        for (code in listOf("null", "\"private-code\"")) {
+            val error = ChatGptPlanFailure.fromBody(400,
+                """{"error":{"code":$code,"type":"invalid_request_error","param":"tools[0].tools[419].name"}}""")
+            assertEquals("invalid_request_error", error.errorCode)
+            assertEquals("tools[0].tools[419].name", error.parameter)
+            assertFalse(error.message!!.contains("private-code"))
+        }
+    }
+    @Test fun nestedParametersRejectArbitraryNamesOverlongPathsAndSecretValues() {
+        listOf("input[0].private_secret", "tools[0].parameters.properties.private_field",
+            "input[100000].content", "input[0].content\n", "input[0].content.Bearer_token",
+            "input" + ".content".repeat(6), "input[0].user@example.com").forEach {
+            assertNull(it, ChatGptPlanFailure.safeParameter(it))
+        }
+        assertEquals("input[42].content[0].type", ChatGptPlanFailure.safeParameter("input[42].content[0].type"))
+    }
     @Test fun localUnsupportedCapabilityDoesNotClaimServerRejectedOrBannedAccount() {
         val error = ChatGptPlanFailure.from(IllegalArgumentException("siwc_capability"))
         assertEquals(ChatGptFailureKind.CAPABILITY, error.kind)

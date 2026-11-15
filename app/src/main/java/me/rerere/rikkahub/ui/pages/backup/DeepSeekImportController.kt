@@ -42,6 +42,7 @@ class DeepSeekImportController(
     private val scope: CoroutineScope,
     private val repository: ConversationRepository,
     val source: ChatArchiveSource = ChatArchiveSource.DEEPSEEK,
+    private val filesManager: me.rerere.rikkahub.data.files.FilesManager? = null,
     private val assistantName: (Uuid) -> String?,
     private val assistantId: () -> Uuid,
 ) {
@@ -169,7 +170,7 @@ class DeepSeekImportController(
                         selected.keys, requireNotNull(fingerprint), progress)
                     ChatArchiveSource.POLARIS -> PolarisChatImporter(repository).importSelected(file, target,
                         selected.keys, requireNotNull(fingerprint), progress)
-                    ChatArchiveSource.DEEPSEEK -> DeepSeekChatImporter(repository).import(file, target, selected, progress)
+                    ChatArchiveSource.DEEPSEEK -> DeepSeekChatImporter(repository, filesManager, context.cacheDir).import(file, target, selected, progress)
                 }
                 mutableState.value = DeepSeekImportUiState(result = summary(result))
             } catch (cancelled: DeepSeekImportCancelledException) {
@@ -215,7 +216,7 @@ class DeepSeekImportController(
 
     private fun summary(result: DeepSeekImportResult): String = buildString {
         append("已导入 ${result.imported} 个会话路径、${result.messages} 条消息；跳过 ${result.skipped} 个已有路径；${result.failed} 个未导入。")
-        if (result.attachmentReferences > 0) append("\n有 ${result.attachmentReferences} 个附件引用；未导入文件本体，只保留说明，不自动联网下载。")
+        if (result.attachmentReferences > 0) append("\n有 ${result.attachmentReferences} 个附件引用；恢复 ${result.restoredAttachments} 处本地附件，其余只保留说明，未联网下载。")
         if (result.skippedSummaries > 0) append("\n本次新增会话跳过 ${result.skippedSummaries} 条内部摘要；没有把摘要当作聊天或系统提示，原导出文件未改动。")
         if (source == ChatArchiveSource.CLAUDE) append("\n按完整路径分别保存；公共前文可能重复。相同内容版本跳过，源会话内容变化则另建窗口，旧记录未更新或覆盖。")
         if (source == ChatArchiveSource.CHATGPT) append("\n按所选可见完整路径分别保存；公共前文可能重复。系统及隐藏消息未导入，附件未恢复。相同内容版本跳过，变化则另建窗口。请保管全部原始 JSON 与附件。")

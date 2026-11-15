@@ -135,7 +135,7 @@ fun ChatDrawerContent(
     current: Conversation,
     onClose: (() -> Unit)? = null,
     drawerOpen: Boolean? = null,
-) = OrbisVisualTheme {
+) = me.rerere.rikkahub.ui.pages.orbis.OrbisInterfaceTheme {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val toaster = LocalToaster.current

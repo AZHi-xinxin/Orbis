@@ -549,29 +549,29 @@
   }
 
   function showBackupGuide() {
-    const overlay = element("div", "reading-cards-overlay reading-cards-overlay--open");
-    overlay.dataset.libraryOverlay = "true";
-    overlay.setAttribute("role", "dialog");
-    overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", "藏书阁备份");
-    const sheet = element("section", "reading-cards-sheet");
+    // Keep backup controls in the page flow. A nested fixed/backdrop sheet can
+    // collapse to a border on some Android WebViews, leaving only a blurred page.
+    document.querySelectorAll('[data-library-backup="true"]').forEach((node) => node.remove());
+    const sheet = element("section", "local-section reading-backup-guide");
+    sheet.dataset.libraryBackup = "true";
+    sheet.setAttribute("aria-label", "藏书阁备份");
     const head = element("div", "reading-cards-sheet__head");
     const title = element("div", "");
     title.append(element("span", "reading-cards-sheet__eyebrow", "LOCAL LIBRARY BACKUP"));
     title.append(element("span", "reading-cards-sheet__title", "藏书阁自己的备份"));
-    const close = button("×", "reading-cards-close", () => overlay.remove(), "关闭");
+    const close = button("×", "reading-cards-close", () => sheet.remove(), "关闭备份说明");
     head.append(title, close);
-    const body = element("div", "reading-cards-body");
+    const body = element("div", "reading-backup-body");
     body.append(element("div", "reading-moment-card", "导出文件只包含本机藏书阁的书籍、阅读进度、书签和批注，不包含聊天、模型配置、凭据或旧 VPS 数据。"));
     body.append(element("div", "reading-moment-card", "导入只做合并：新书可加入；相同书籍会跳过；同一标识却内容不同会整次拒绝，绝不覆盖本机书籍。确认前不会写入。"));
     const actions = element("div", "reading-compose-actions");
-    actions.append(button("导出备份", "reading-small-btn", async () => { overlay.remove(); await exportLibrary(); }));
-    actions.append(button("合并导入", "reading-small-btn reading-small-btn--primary", async () => { overlay.remove(); await importLibraryBackup(); }));
+    actions.append(button("导出备份", "reading-small-btn", async () => { sheet.remove(); await exportLibrary(); }));
+    actions.append(button("合并导入", "reading-small-btn reading-small-btn--primary", async () => { sheet.remove(); await importLibraryBackup(); }));
     body.append(actions);
     sheet.append(head, body);
-    overlay.append(sheet);
-    overlay.addEventListener("click", (event) => { if (event.target === overlay) overlay.remove(); });
-    document.body.append(overlay);
+    const header = document.querySelector("#garden-main .reading-header");
+    if (header) header.after(sheet); else document.getElementById("garden-main").prepend(sheet);
+    sheet.scrollIntoView({ block: "start" });
     close.focus();
   }
 

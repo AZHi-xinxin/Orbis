@@ -2,6 +2,7 @@ package me.rerere.ai.provider.providers.openai
 
 import java.util.Locale
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.jsonObject
 import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.ProviderSetting
@@ -186,6 +187,73 @@ class ProviderBalanceTest {
         }.build())
         assertEquals("3.25", provider.getBalance(setting().copy(balanceOption = BalanceOption(true, "/user/info", "data.totalBalance"))))
         assertEquals(1, calls)
+    }
+    @Test fun balanceDoesNotWaitBehindChatDispatcher() = runBlocking {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val dispatcher = okhttp3.Dispatcher().apply { maxRequests = 1; maxRequestsPerHost = 1 }
+        val client = OkHttpClient.Builder().dispatcher(dispatcher).addInterceptor { chain ->
+            if (chain.request().url.encodedPath == "/chat") {
+                entered.countDown()
+                check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            response(chain.request(), 200, official)
+        }.build()
+        client.newCall(okhttp3.Request.Builder().url("https://gateway.example.org/chat").build())
+            .enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) = Unit
+                override fun onResponse(call: okhttp3.Call, response: Response) { response.close() }
+            })
+        try {
+            assertTrue(entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            val provider = OpenAIProvider(client)
+            val result = kotlinx.coroutines.withTimeout(1_500) {
+                provider.getBalance(setting().copy(balanceOption = BalanceOption(true, "/user/balance", "balance_infos[0].total_balance")))
+            }
+            assertEquals("12.35 CNY", result)
+            assertEquals(1L, release.count) // Chat is still blocked when the account read completes.
+        } finally {
+            release.countDown()
+            dispatcher.executorService.shutdown()
+        }
+    }
+
+    @Test fun cancellationAfterBalanceHeadersClosesStalledBody() = runBlocking {
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val headersSent = java.util.concurrent.CountDownLatch(1)
+        val peerClosed = java.util.concurrent.CountDownLatch(1)
+        val accepted = java.util.concurrent.atomic.AtomicReference<java.net.Socket>()
+        val worker = Thread {
+            try {
+                server.accept().use { socket ->
+                    accepted.set(socket)
+                    socket.soTimeout = 3_000
+                    val reader = socket.getInputStream().bufferedReader()
+                    while (reader.readLine()?.isNotEmpty() == true) { }
+                    socket.getOutputStream().apply {
+                        write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{".toByteArray())
+                        flush()
+                    }
+                    headersSent.countDown()
+                    if (socket.getInputStream().read() == -1) peerClosed.countDown()
+                }
+            } catch (_: java.io.IOException) { }
+        }.apply { isDaemon = true; start() }
+        val client = OkHttpClient.Builder().build()
+        val provider = OpenAIProvider(client)
+        val job = launch(kotlinx.coroutines.Dispatchers.IO) {
+            provider.getBalance(setting().copy(baseUrl = "http://127.0.0.1:${server.localPort}"))
+        }
+        try {
+            assertTrue(headersSent.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            kotlinx.coroutines.delay(50) // Allow the reader to start consuming the deliberately incomplete body.
+            job.cancel()
+            kotlinx.coroutines.withTimeout(1_500) { job.join() }
+            assertTrue(peerClosed.await(1, java.util.concurrent.TimeUnit.SECONDS))
+        } finally {
+            accepted.get()?.close(); server.close(); worker.join(1_000)
+            job.cancel()
+        }
     }
     private fun response(request: okhttp3.Request, code: Int, body: String) = Response.Builder()
         .request(request).protocol(Protocol.HTTP_1_1).code(code).message("synthetic")

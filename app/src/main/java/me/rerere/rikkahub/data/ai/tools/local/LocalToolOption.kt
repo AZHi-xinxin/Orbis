@@ -6,12 +6,52 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed class LocalToolOption {
     @Serializable
+    @SerialName("orbis_heartprison")
+    data object HeartPrison : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_drawguess")
+    data object DrawGuess : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_werewolf")
+    data object Werewolf : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_tabletop_submit")
+    data object TabletopSubmission : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_skill_register")
+    data object SkillBinding : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_community")
+    data object Community : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_agent_work")
+    data object AgentWork : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_phone_control")
+    data object PhoneControl : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_personal_plugins")
+    data object PersonalPlugins : LocalToolOption()
+
+    @Serializable
     @SerialName("orbis_self_check")
     data object SelfCheck : LocalToolOption()
 
     @Serializable
     @SerialName("orbis_message_recall")
     data object MessageRecall : LocalToolOption()
+
+    @Serializable
+    @SerialName("orbis_conversation_settings")
+    data object ConversationSettings : LocalToolOption()
 
     @Serializable
     @SerialName("javascript_engine")

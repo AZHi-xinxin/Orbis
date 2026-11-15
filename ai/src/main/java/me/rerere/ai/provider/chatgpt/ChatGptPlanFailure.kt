@@ -33,6 +33,7 @@ class ChatGptPlanFailure private constructor(
             "insufficient_permissions", "rate_limit_exceeded", "service_unavailable", "server_error",
             "invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired",
             "refresh_token_invalidated", "refresh_token_reused", "invalid_client",
+            "array_above_max_length",
         )
         private val parameters = setOf("model", "input", "instructions", "tools", "tool_choice", "service_tier",
             "store", "stream", "reasoning", "text", "include", "background", "conversation", "max_output_tokens",
@@ -40,6 +41,13 @@ class ChatGptPlanFailure private constructor(
             "safety_identifier", "temperature", "top_logprobs", "top_p", "truncation", "user", "previous_response_id")
         private val requestIdPattern = Regex("(?:req_[a-fA-F0-9]{16,64}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})")
         fun safeRequestId(value: String?): String? = value?.takeIf { it.length <= 68 && requestIdPattern.matches(it) }
+        // Only fixed protocol field names and bounded array indices; never arbitrary schema keys.
+        private val nestedParameterPattern = Regex(
+            "(?:input|tools)(?:\\[[0-9]{1,5}\\])?(?:\\.(?:content|summary|encrypted_content|type|role|name|namespace|arguments|call_id|output|tools|parameters|strict)(?:\\[[0-9]{1,5}\\])?){0,5}"
+        )
+        fun safeParameter(value: String?): String? = value?.takeIf {
+            it in parameters || it.length <= 150 && nestedParameterPattern.matches(it)
+        }
 
         private fun create(status: Int? = null, code: String? = null, parameter: String? = null,
             requestId: String? = null, shape: ChatGptBodyShape? = null,
@@ -64,7 +72,7 @@ class ChatGptPlanFailure private constructor(
                 safeStatus != null && safeStatus in 400..499 -> ChatGptFailureKind.REQUEST
                 else -> fallback
             }
-            return ChatGptPlanFailure(kind, safeStatus, safeCode, parameter?.takeIf { it in parameters }, safeRequestId(requestId), shape, stage)
+            return ChatGptPlanFailure(kind, safeStatus, safeCode, safeParameter(parameter), safeRequestId(requestId), shape, stage)
         }
 
         fun from(error: Throwable, status: Int? = null, requestId: String? = null,
@@ -117,7 +125,9 @@ class ChatGptPlanFailure private constructor(
                 else -> ChatGptBodyShape.TEXT
             }
             // Token endpoints use top-level OAuth error codes; never interpret detail/message prose.
-            val code = error?.string("code") ?: if (stage in setOf(ChatGptRequestStage.TOKEN_EXCHANGE, ChatGptRequestStage.TOKEN_REFRESH)) root?.string("error") else null
+            val code = error?.string("code")?.takeIf { it in codes }
+                ?: error?.string("type")?.takeIf { it in codes }
+                ?: if (stage in setOf(ChatGptRequestStage.TOKEN_EXCHANGE, ChatGptRequestStage.TOKEN_REFRESH)) root?.string("error") else null
             return create(status, code, error?.string("param"), requestId, shape, stage)
         }
 

@@ -52,6 +52,14 @@ private fun UIMessagePart.isRequestHostData(): Boolean =
                     (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_local_memory") ||
                     ((tag["orbis_body_status_projection"] as? JsonPrimitive)?.contentOrNull == "v1" &&
                     (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_body_status") ||
+                    ((tag["orbis_community_projection"] as? JsonPrimitive)?.contentOrNull == "v1" &&
+                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_community_hint") ||
+                    ((tag["orbis_model_continuity_projection"] as? JsonPrimitive)?.contentOrNull == "v1" &&
+                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_model_continuity") ||
+                    ((tag["orbis_user_message_time_projection"] as? JsonPrimitive)?.booleanOrNull == true &&
+                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_user_message_time") ||
+                    ((tag["orbis_observation_projection"] as? JsonPrimitive)?.contentOrNull == "report_v1" &&
+                    (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_observation") ||
                     ((tag["orbis_compaction_reminder"] as? JsonPrimitive)?.booleanOrNull == true &&
                     (tag["source"] as? JsonPrimitive)?.contentOrNull == "orbis_host")) &&
                     (tag["human_authored"] as? JsonPrimitive)?.booleanOrNull == false &&

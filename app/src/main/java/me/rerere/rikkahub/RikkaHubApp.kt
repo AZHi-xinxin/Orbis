@@ -59,6 +59,8 @@ class RikkaHubApp : Application() {
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
+        // Personal plugins run under an isolated UID: no settings, providers, recovery writers or DI.
+        if (android.os.Process.myUid() != base.applicationInfo.uid) return
         if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isLightweightProcess(base)) return
         // This runs before providers, settings, migrations and any automatic event recovery.
         CrashHandler.install(base)
@@ -83,6 +85,7 @@ class RikkaHubApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (android.os.Process.myUid() != applicationInfo.uid) return
         if (me.rerere.rikkahub.data.recovery.EmergencyAndroidRuntime.isLightweightProcess(this)) return
         // Restore files and settings before eager Koin singletons or workers can access them.
         try {

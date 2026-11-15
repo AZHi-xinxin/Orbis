@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.orbis
 
+import me.rerere.rikkahub.data.orbis.theme.surfaceFor
+import me.rerere.rikkahub.ui.components.message.ThemeChromeSurface
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
@@ -205,10 +207,12 @@ object OrbisTheme {
                     fun color(hex: String) = Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(hex))
                     val chrome = LocalChatTheme.current!!.body.chrome
                     original.copy(dock = color(chrome.dock ?: c.surface), onDock = color(chrome.onDock ?: c.text),
-                        star = color(chrome.star ?: c.primary), homeButton = color(c.surface),
+                        star = if (LocalChatTheme.current!!.followHumanAccent) original.star else color(chrome.star ?: c.primary), homeButton = color(c.surface),
                         page = color(c.background), pageTop = color(c.background), panel = color(c.surface),
                         raisedPanel = color(chrome.composer ?: c.surface), tintedPanel = color(c.surface), ink = color(c.text), mutedInk = color(c.textSecondary),
-                        accent = color(c.primary), onAccent = color(c.onPrimary), border = color(c.textSecondary).copy(alpha = .3f))
+                        accent = if (LocalChatTheme.current!!.followHumanAccent) original.accent else color(c.primary),
+                        onAccent = if (LocalChatTheme.current!!.followHumanAccent) original.onAccent else color(c.onPrimary),
+                        border = color(c.textSecondary).copy(alpha = .3f))
                 } ?: original
             }
 }
@@ -218,6 +222,13 @@ object OrbisTheme {
  * The host decides when this preset applies; set [useOrbisMaterialColors] to false to retain
  * its current Material color scheme. Existing typography, font scaling and shapes survive.
  */
+@Composable
+internal fun OrbisInterfaceTheme(content: @Composable () -> Unit) {
+    // Settings and navigation are interface chrome. A chat material may have a pale
+    // fixed surface with night-adapted ink; that pair must not paint these panels.
+    CompositionLocalProvider(LocalChatTheme provides null) { OrbisVisualTheme(content = content) }
+}
+
 @Composable
 fun OrbisVisualTheme(
     darkTheme: Boolean = LocalDarkMode.current,
@@ -535,12 +546,13 @@ fun OrbisBottomDock(
     val colors = OrbisTheme.colors
     val deepSeekStyle = LocalOrbisDeepSeekStyle.current
     val themedDock = LocalChatTheme.current != null || deepSeekStyle || LocalOrbisSeason.current != OrbisSeason.NONE
+    val starSurface = LocalChatTheme.current?.body?.chrome?.surfaceFor("star")
     val starColor = if (themedDock) colors.star else Color(0xFFFFE3A7)
     Box(modifier.fillMaxWidth().windowInsetsPadding(windowInsets)
         .padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
         // Reserve the protruding star inside layout bounds, so all 66 dp remain tappable.
         Box(Modifier.fillMaxWidth().height(72.dp)) {
-            Surface(modifier = Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter),
+            ThemeChromeSurface(role = "dock", radius = 22, modifier = Modifier.fillMaxWidth().height(58.dp).align(Alignment.BottomCenter),
                 shape = RoundedCornerShape(22.dp),
                 color = if (themedDock || LocalDarkMode.current) colors.dock else Color(0xE81F283D),
                 contentColor = if (themedDock) colors.onDock else Color.White.copy(alpha = .76f),
@@ -567,11 +579,16 @@ fun OrbisBottomDock(
             }
             Surface(onClick = onHome, shape = CircleShape,
                 color = Color.Transparent, contentColor = starColor,
-                border = BorderStroke(5.dp, colors.page),
+                border = if (starSurface == null) BorderStroke(5.dp, colors.page) else BorderStroke(1.dp, colors.star.copy(alpha=.35f)),
                 shadowElevation = if (deepSeekStyle) 0.dp else 10.dp,
                 modifier = Modifier.align(Alignment.TopCenter).size(66.dp)
                     .semantics { contentDescription = homeDescription }) {
-                Box(Modifier.fillMaxSize().background(Brush.linearGradient(
+                if (starSurface != null) ThemeChromeSurface(role="star",modifier=Modifier.fillMaxSize(),
+                    shape=CircleShape,radius=33,color=colors.homeButton,contentColor=starColor) {
+                    Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
+                        OrbisStar(Modifier.size(36.dp),color=starColor)
+                    }
+                } else Box(Modifier.fillMaxSize().background(Brush.linearGradient(
                     if (themedDock) listOf(colors.homeButton, colors.homeButton)
                     else listOf(Color(0xFF6982BA), Color(0xFF344B7C)))),
                     contentAlignment = Alignment.Center) {

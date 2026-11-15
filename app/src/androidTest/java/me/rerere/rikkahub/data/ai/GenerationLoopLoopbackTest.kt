@@ -31,6 +31,8 @@ import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.core.Tool
+import me.rerere.rikkahub.data.ai.mcp.mcpModelName
+import me.rerere.rikkahub.data.ai.mcp.withMcpModelName
 import me.rerere.ai.core.HostToolApproval
 import me.rerere.ai.ui.ToolApprovalState
 import me.rerere.ai.ui.UIMessage
@@ -91,6 +93,164 @@ import kotlin.uuid.Uuid
  */
 @RunWith(AndroidJUnit4::class)
 class GenerationLoopLoopbackTest {
+    @Test(timeout = 60_000)
+    fun dottedMcpToolsSurviveModelWireHistoryAndThreeContinuations() = runBlocking<Unit> {
+        for (stream in listOf(true, false)) fixture(streaming = stream, approval = false, expectedRequests = 4) { f ->
+            val raw = "mcp__TencentDocs__sheet.get_cell_data"
+            val alias = mcpModelName(raw)
+            f.toolAdapter = { it.copy(name = raw).withMcpModelName() }
+            f.server.responseToolName = alias
+            val old = UIMessagePart.Tool("synthetic-old-call", raw, "{}", listOf(UIMessagePart.Text("synthetic old receipt")))
+            val from = listOf(f.initial.first(), UIMessage(role = MessageRole.ASSISTANT, parts = listOf(old)), f.initial.last())
+            f.collect(from = from, contextLimit = 20)
+            assertEquals(listOf(1, 2, 3), f.executions.toList())
+            for (request in f.server.requests) {
+                val names = request.json.getValue("tools").jsonArray.map { it.jsonObject.getValue("function").jsonObject.getValue("name").jsonPrimitive.content }
+                assertTrue(names.contains(alias))
+                assertTrue(names.all { it.matches(Regex("[a-zA-Z0-9_-]{1,64}")) })
+                assertFalse(request.encodedMessages.contains(raw))
+                assertTrue(request.encodedMessages.contains(alias))
+            }
+            assertEquals(raw, (from[1].parts.single() as UIMessagePart.Tool).toolName)
+            assertTrue(f.server.requests.last().encodedMessages.contains("synthetic tool result 3"))
+        }
+    }
+    @Test(timeout = 30_000)
+    fun returnedToolImagesAreLocalizedBeforeTheReceiptIsSaved() = runBlocking<Unit> {
+        fixture(streaming = true, approval = false, expectedRequests = 1) { f ->
+            val image = UIMessagePart.Image("data:image/png;base64," + "A".repeat(900_000))
+            val events = mutableListOf<String>()
+            f.toolResultOverride = { listOf(UIMessagePart.Text("keep original receipt"), image) }
+            f.imageWriter = { parts ->
+                events += "image-saved"
+                me.rerere.rikkahub.data.files.localizeInlineImageParts(parts) { "file:///synthetic/verified.png" }
+            }
+            val final = f.collect(maxSteps = 1, durableCheckpoints = true, onDurableBoundary = { chunk ->
+                if (chunk.toolCompleted == true) {
+                    events += "receipt-saved"
+                    val output = chunk.messages.last().getTools().single().output
+                    assertEquals(listOf(UIMessagePart.Text("keep original receipt"),
+                        image.copy(url = "file:///synthetic/verified.png")), output)
+                }
+                chunk.result.complete(Unit)
+            })
+            assertEquals(listOf("image-saved", "receipt-saved"), events)
+            assertEquals(listOf(1), f.executions.toList())
+            assertEquals("file:///synthetic/verified.png", (final.last().getTools().single().output[1] as UIMessagePart.Image).url)
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun taskReceiptsComeFromActualGenerationDispatchAndSurviveReopen() = runBlocking<Unit> {
+        fixture(streaming = true, approval = false, expectedRequests = 4) { f ->
+            val root = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "task-loop-${Uuid.random()}").apply { mkdirs() }
+            f.context.syntheticFilesDir = root
+            try {
+                val conversation = Uuid.random()
+                val taskStore = me.rerere.rikkahub.data.orbis.agentwork.agentTasks(f.context, f.assistantId.toString())
+                taskStore.create(conversation.toString(), "合成任务", listOf(me.rerere.rikkahub.data.orbis.agentwork.AgentStep("合成计数")))
+                f.additionalTools = listOf(me.rerere.rikkahub.data.orbis.agentwork.taskTool(taskStore,conversation.toString()) { true })
+                f.collect(conversationId = conversation)
+                val reopened = me.rerere.rikkahub.data.orbis.agentwork.agentTasks(f.context, f.assistantId.toString()).list().single()
+                assertEquals(listOf(1,2,3), f.executions.toList())
+                assertEquals(3, reopened.receipts.size)
+                assertTrue(reopened.receipts.all { it.state == "returned" && it.tool == "synthetic_tool" })
+                assertEquals("active",reopened.state) // A returned tool is not an AI completion declaration.
+            } finally { f.context.syntheticFilesDir = null; root.deleteRecursively() }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun humanPauseStopsNextModelRequestAndTaskToolInRealLoop() = runBlocking<Unit> {
+        fixture(streaming = true, approval = false, expectedRequests = 1) { f ->
+            val root = File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "task-pause-${Uuid.random()}").apply { mkdirs() }
+            f.context.syntheticFilesDir = root
+            try {
+                val conversation = Uuid.random()
+                val taskStore = me.rerere.rikkahub.data.orbis.agentwork.agentTasks(f.context, f.assistantId.toString())
+                val task = taskStore.create(conversation.toString(), "合成暂停任务", listOf(me.rerere.rikkahub.data.orbis.agentwork.AgentStep("合成计数")))
+                f.additionalTools = listOf(me.rerere.rikkahub.data.orbis.agentwork.taskTool(taskStore,conversation.toString()) { true })
+                f.afterToolExecution = { taskStore.control(task.id,1,"pause") }
+                var cancelled = false
+                try { f.collect(conversationId = conversation) } catch (_: CancellationException) { cancelled = true }
+                assertTrue(cancelled)
+                assertEquals(listOf(1), f.executions.toList())
+                assertEquals("paused", taskStore.list().single().state)
+                assertEquals("returned", taskStore.list().single().receipts.single().state)
+            } finally { f.context.syntheticFilesDir = null; root.deleteRecursively() }
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun approvalResumeKeepsWireCatalogWhenToolsArriveDuringTheDialog() = runBlocking<Unit> {
+        for (streaming in listOf(false, true)) for (remember in listOf(false, true)) {
+            fixture(streaming, approval = true, expectedRequests = 4) { f ->
+                var grants: String? = null
+                val store = me.rerere.rikkahub.data.ai.approval.ToolApprovalStore({ grants }, { grants = it })
+                f.toolAdapter = { me.rerere.rikkahub.data.ai.approval.bindToolApproval(it, f.assistantId.toString(), store) }
+                var result = f.collect()
+                assertTrue(result.last().getTools().single().isPending)
+                val originalCatalog = f.server.requests.single().json.getValue("tools")
+                // MCP discovery/host tools finish loading while the human is deciding.
+                f.additionalTools = (1..3).map { index -> Tool("late_tool_$index", "Late discovered tool", execute = { error("must not execute") }) }
+                repeat(3) {
+                    val pending = result.last().getTools().firstOrNull { it.isPending }
+                    if (pending != null) {
+                        if (remember) store.allow(f.assistantId.toString(), checkNotNull(pending.hostApproval))
+                        result = result.dropLast(1) + result.last().copy(parts = result.last().parts.map { part ->
+                            if (part is UIMessagePart.Tool && part.isPending) part.copy(approvalState = ToolApprovalState.Approved) else part
+                        })
+                        // Approval cards survive process recreation through normal message serialization.
+                        result = Json.decodeFromString<List<UIMessage>>(Json.encodeToString(result))
+                        result = f.collect(result)
+                    }
+                }
+                assertEquals(listOf(1, 2, 3), f.executions.toList())
+                assertEquals(4, f.server.requests.size)
+                f.server.requests.forEach { assertEquals(originalCatalog, it.json.getValue("tools")) }
+                assertTrue(result.last().toText().contains("synthetic final answer"))
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun changedAndRemovedToolsAfterApprovalKeepWireSchemasButNeverExecute() = runBlocking<Unit> {
+        for (streaming in listOf(false, true)) fixture(streaming, approval = true, expectedRequests = 4) { f ->
+            f.additionalTools = listOf(Tool("removed_tool", "Removed during approval", execute = { error("removed") }))
+            val pending = f.collect()
+            val catalog = f.server.requests.single().json.getValue("tools")
+            f.additionalTools = emptyList()
+            f.toolAdapter = { it.copy(parameters = { null }) }
+            val approved = pending.dropLast(1) + pending.last().copy(parts = pending.last().parts.map {
+                if (it is UIMessagePart.Tool) it.copy(approvalState = ToolApprovalState.Approved) else it
+            })
+            val result = f.collect(approved)
+            assertTrue(f.executions.isEmpty())
+            assertTrue(result.last().getTools().all { it.isExecuted && it.hostToolFailure() == HostToolFailure.APPROVAL_CHANGED })
+            f.server.requests.forEach { assertEquals(catalog, it.json.getValue("tools")) }
+            assertEquals(null, result.last().orbisApprovalToolCatalog)
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun catalog409AfterThreeToolWritesPreservesReceiptsAndDoesNotReplay() = runBlocking<Unit> {
+        for (streaming in listOf(false, true)) fixture(streaming, approval = false, expectedRequests = 4,
+            catalogConflictStep = 4, enableAutoRetry = true) { f ->
+            var durable: List<UIMessage> = emptyList()
+            val failure = runCatching { f.collect(durableCheckpoints = true, onDurableBoundary = { boundary ->
+                durable = Json.decodeFromString<List<UIMessage>>(Json.encodeToString(boundary.messages))
+                boundary.result.complete(Unit)
+            }) }.exceptionOrNull()
+            assertTrue(failure is me.rerere.ai.util.HttpException)
+            assertEquals("tool_continuation_catalog_mismatch", (failure as me.rerere.ai.util.HttpException).code)
+            assertEquals(409, failure.httpStatus)
+            assertEquals(listOf(1, 2, 3), f.executions.toList())
+            assertEquals(3, durable.last().getTools().count { it.isExecuted })
+            assertEquals(3, f.lastPublished.last().getTools().count { it.isExecuted })
+            assertEquals(4, f.server.requests.size)
+        }
+    }
+
     @Test(timeout = 30_000)
     fun rememberedApprovalResumesHumanLaneWhileOldProducerIsStillFinalizing() = runBlocking<Unit> {
         fixture(streaming = true, approval = true, expectedRequests = 4) { fixture ->
@@ -654,6 +814,39 @@ class GenerationLoopLoopbackTest {
     }
 
     @Test(timeout = 30_000)
+    fun partialStreamRetriesOnlyModelStepAndPreservesToolResults() = runBlocking<Unit> {
+        fixture(streaming = true, approval = false, expectedRequests = 3,
+            batchWithEmptyResult = true, enableAutoRetry = true, disconnectStep = 2) { f ->
+            val published = mutableListOf<List<UIMessage>>()
+            val final = f.collect(onMessages = { published += it })
+            assertEquals(listOf(1, 2), f.executions.toList())
+            assertEquals(f.server.requests[1].encodedMessages, f.server.requests[2].encodedMessages)
+            assertTrue(final.last().parts.filterIsInstance<UIMessagePart.Text>().any { it.text.contains("synthetic final answer") })
+            assertFalse(final.last().parts.filterIsInstance<UIMessagePart.Text>().any { it.text.contains("synthetic discarded partial") })
+            assertTrue(published.any { messages ->
+                val tools = messages.last().getTools()
+                tools.size == 2 && tools[0].isExecuted && !tools[1].isExecuted
+            })
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun ordinaryToolErrorReturnsResultAndContinuesWithoutDiskAcknowledgement() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 2,
+                batchWithEmptyResult = true, enableAutoRetry = true) { f ->
+                f.toolAdapter = { tool -> tool.copy(execute = { throw IllegalArgumentException("synthetic tool error") }) }
+                val final = f.collect(onDurableBoundary = { error("Ordinary chat must not wait for a disk acknowledgement") })
+                assertTrue(final.last().getTools().all { it.isExecuted })
+                assertTrue(final.last().parts.filterIsInstance<UIMessagePart.Text>().any { it.text.contains("synthetic final answer") })
+                assertEquals(2, f.server.requests.last().json.getValue("messages").jsonArray.count {
+                    it.jsonObject["role"] == JsonPrimitive("tool")
+                })
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
     fun hostTurnGateRevocationStopsActualProviderRetryForBothTransportModes() = runBlocking<Unit> {
         for (streaming in listOf(true, false)) {
             fixture(streaming, approval = false, expectedRequests = 1, busyFirst = true,
@@ -891,6 +1084,34 @@ class GenerationLoopLoopbackTest {
     @Test(timeout = 30_000)
     fun transportFailureAfterToolStartedLeavesUnknownWithoutReceiptContinuationOrRetry() = runBlocking<Unit> {
         interruptedToolResult(IOException("synthetic transport failed after external effect"))
+    }
+
+    @Test(timeout = 30_000)
+    fun skillValidationFailureReturnsReceiptAndAllowsModelContinuation() = runBlocking<Unit> {
+        for (streaming in listOf(true, false)) {
+            fixture(streaming, approval = false, expectedRequests = 2,
+                batchWithEmptyResult = true, enableAutoRetry = true) { fixture ->
+                fixture.beforeToolExecution = { throw IllegalArgumentException("Path does not exist: data") }
+                fixture.toolAdapter = { tool -> tool.copy(execute = { args ->
+                    me.rerere.rikkahub.data.ai.tools.workspaceSkillReceipt { tool.execute(args) }
+                }) }
+                val boundaries = mutableListOf<Pair<String?, Boolean?>>()
+                val final = fixture.collect(durableCheckpoints = true, onDurableBoundary = { chunk ->
+                    boundaries += chunk.toolCallId to chunk.toolCompleted
+                    chunk.result.complete(Unit)
+                })
+                assertEquals(listOf("synthetic-call-1" to false, "synthetic-call-1" to true,
+                    "synthetic-call-2" to false, "synthetic-call-2" to true), boundaries)
+                assertTrue(fixture.executions.isEmpty())
+                final.last().getTools().forEach { tool ->
+                    val receipt=Json.parseToJsonElement((tool.output.single() as UIMessagePart.Text).text).jsonObject
+                    assertEquals("skill_invalid_arguments_or_path",receipt["reason_code"]!!.jsonPrimitive.content)
+                    assertEquals("unchanged",receipt["binding_state"]!!.jsonPrimitive.content)
+                }
+                assertTrue(final.last().parts.filterIsInstance<UIMessagePart.Text>().any { it.text.contains("synthetic final answer") })
+                assertEquals(2,fixture.server.requests.size)
+            }
+        }
     }
 
     @Test(timeout = 30_000)
@@ -1310,6 +1531,8 @@ class GenerationLoopLoopbackTest {
         finalText: String = "synthetic final answer",
         privateMode: Boolean = false,
         memoryMode: Boolean = false,
+        catalogConflictStep: Int? = null,
+        disconnectStep: Int? = null,
         nativeTools: Set<me.rerere.ai.provider.BuiltInTools> = emptySet(),
         block: suspend (Fixture) -> Unit,
     ) {
@@ -1318,8 +1541,8 @@ class GenerationLoopLoopbackTest {
         check(instrumentation.targetContext.applicationContext.javaClass == Application::class.java) {
             "Synthetic fixture must not start the real application."
         }
-        val context = NoPrivateStorageContext(instrumentation.context)
-        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, continuationFailureCode, busyFirst, finalText, privateMode, memoryMode)
+        val context = NoPrivateStorageContext(instrumentation.targetContext)
+        val server = LoopbackFixture(expectedRequests, batchWithEmptyResult, mixedApprovalBatch, compactionMode, reminderOnly, emptyContinuation, continuationFailureCode, busyFirst, finalText, privateMode, memoryMode, catalogConflictStep, disconnectStep)
         val requestBudget = AtomicInteger()
         val client = OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
@@ -1424,8 +1647,12 @@ class GenerationLoopLoopbackTest {
             private set
         private val manager = ProviderManager(client, context)
         var bodyStatusRuntime: BodyStatusRuntime? = null
+        var toolResultOverride: ((Int) -> List<UIMessagePart>)? = null
+        var imageWriter: (suspend (List<UIMessagePart>) -> List<UIMessagePart>)? = null
         val assistantId get() = assistant.id
-        private val loop get() = GenerationLoop(context, manager, Json, bodyStatus = bodyStatusRuntime)
+        private val defaultConversationId = Uuid.random()
+        private val loop get() = GenerationLoop(context, manager, Json, bodyStatus = bodyStatusRuntime,
+            persistToolImages = { checkNotNull(imageWriter) { "Unexpected synthetic inline image" }(it) })
         private val tool = Tool(
             name = if (privateMode) "orbis_private_room_write" else if (memoryMode) "orbis_memory" else "synthetic_tool", description = "Synthetic local counter only.",
             parameters = {
@@ -1445,7 +1672,8 @@ class GenerationLoopLoopbackTest {
                 beforeToolExecution(step)
                 executions.add(step)
                 afterToolExecution(step)
-                if (batchWithEmptyResult && step == 2) emptyList()
+                if (toolResultOverride != null) checkNotNull(toolResultOverride)(step)
+                else if (batchWithEmptyResult && step == 2) emptyList()
                 else listOf(UIMessagePart.Text("synthetic tool result $step"))
             },
         )
@@ -1461,7 +1689,7 @@ class GenerationLoopLoopbackTest {
         suspend fun collect(
             from: List<UIMessage> = initial,
             contextLimit: Int = assistant.contextMessageLimit,
-            conversationId: Uuid = Uuid.random(),
+            conversationId: Uuid = defaultConversationId,
             collectorDelayMs: Long = 0,
             durableCheckpoints: Boolean = false,
             consultationBusyWaitUntilMillis: Long? = null,
@@ -1536,13 +1764,14 @@ class GenerationLoopLoopbackTest {
 
     private class NoPrivateStorageContext(base: Context) : ContextWrapper(base) {
         val privateStorageAccesses = AtomicInteger()
+        var syntheticFilesDir: File? = null
         private fun forbidden(): Nothing {
             privateStorageAccesses.incrementAndGet()
             throw AssertionError("Synthetic GenerationLoop fixture attempted private storage access.")
         }
         override fun getApplicationContext(): Context = this
         override fun getCacheDir(): File = forbidden()
-        override fun getFilesDir(): File = forbidden()
+        override fun getFilesDir(): File = syntheticFilesDir ?: forbidden()
         override fun getNoBackupFilesDir(): File = forbidden()
         override fun getDatabasePath(name: String): File = forbidden()
         override fun getDir(name: String, mode: Int): File = forbidden()
@@ -1564,6 +1793,8 @@ class GenerationLoopLoopbackTest {
         private val finalText: String,
         private val privateMode: Boolean,
         private val memoryMode: Boolean,
+        private val catalogConflictStep: Int?,
+        private val disconnectStep: Int?,
     ) : Closeable {
         private val listener = ServerSocket().apply {
             bind(InetSocketAddress(LOOPBACK, 0), 4)
@@ -1571,6 +1802,7 @@ class GenerationLoopLoopbackTest {
         }
         val port: Int = listener.localPort
         val requests = Collections.synchronizedList(mutableListOf<CapturedRequest>())
+        var responseToolName: String? = null
         private val closed = AtomicBoolean()
         private val active = AtomicReference<Socket?>()
         private val failure = AtomicReference<Throwable?>()
@@ -1613,10 +1845,17 @@ class GenerationLoopLoopbackTest {
                         val request = Json.parseToJsonElement(raw).jsonObject
                         requests.add(CapturedRequest(request, messagesArray(raw)))
                         val busy = busyFirst && requests.size == 1
-                        val response = if (busy) "application/json" to """{"error":{"message":"synthetic busy","type":"stiller_gateway_error","code":"human_turn_in_progress","retry_class":"busy_before_generation","generation_started":false}}"""
-                            else response(requests.size - if (busyFirst) 1 else 0, request["stream"] == JsonPrimitive(true))
+                        val catalogConflict = requests.size == catalogConflictStep
+                        val disconnected = requests.size == disconnectStep
+                        val response = if (disconnected) "text/event-stream" to
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"synthetic discarded partial\"},\"finish_reason\":null}]}\n\n"
+                            else if (catalogConflict) "application/json" to """{"error":{"message":"synthetic catalog mismatch","type":"stiller_gateway_error","code":"tool_continuation_catalog_mismatch"}}"""
+                            else if (busy) "application/json" to """{"error":{"message":"synthetic busy","type":"stiller_gateway_error","code":"human_turn_in_progress","retry_class":"busy_before_generation","generation_started":false}}"""
+                            else response(requests.size - (if (busyFirst) 1 else 0) -
+                                (if (disconnectStep != null && requests.size > disconnectStep) 1 else 0),
+                                request["stream"] == JsonPrimitive(true))
                         val bytes = response.second.toByteArray(Charsets.UTF_8)
-                        val header = "HTTP/1.1 ${if (busy) "409 Conflict" else "200 OK"}\r\nContent-Type: ${response.first}\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+                        val header = "HTTP/1.1 ${if (busy || catalogConflict) "409 Conflict" else "200 OK"}\r\nContent-Type: ${response.first}\r\nContent-Length: ${bytes.size + if (disconnected) 100 else 0}\r\nConnection: close\r\n\r\n"
                         it.getOutputStream().apply { write(header.toByteArray(Charsets.US_ASCII)); write(bytes); flush() }
                     }
                     active.set(null)
@@ -1689,7 +1928,7 @@ class GenerationLoopLoopbackTest {
                             put("id", "synthetic-call-$toolStep")
                             put("type", "function")
                             put("function", buildJsonObject {
-                                put("name", if (privateMode) "orbis_private_room_write" else if (memoryMode) "orbis_memory" else "synthetic_tool")
+                                put("name", responseToolName ?: if (privateMode) "orbis_private_room_write" else if (memoryMode) "orbis_memory" else "synthetic_tool")
                                 put("arguments", "{\"step\":$toolStep}")
                             })
                         }

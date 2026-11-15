@@ -152,9 +152,10 @@ internal fun OrbisContextBudgetSheet(
         saveThreshold()
         onDismiss()
     }
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(onDismissRequest = dismiss, containerColor = colors.panel,
+            modifier = Modifier.testTag("orbis-context-budget-sheet"),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden,
                 enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded))) {

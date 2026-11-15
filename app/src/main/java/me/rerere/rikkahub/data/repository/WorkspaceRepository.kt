@@ -92,14 +92,25 @@ class WorkspaceRepository(
         manager.readNativeBytes(workspace.root, path)
     }
 
+    suspend fun listNativeFiles(id: String, path: String): List<WorkspaceFileEntry> = withContext(Dispatchers.IO) {
+        val workspace = dao.getById(id) ?: error("workspace_missing")
+        manager.listNativeFiles(workspace.root, path)
+    }
+
     suspend fun readNativeAudio(id: String, path: String): ByteArray = withContext(Dispatchers.IO) {
         val workspace = dao.getById(id) ?: error("workspace_missing")
         manager.readNativeAudio(workspace.root, path)
     }
 
-    suspend fun writeNativeText(id: String, path: String, text: String, overwrite: Boolean): WorkspaceFileEntry = withContext(Dispatchers.IO) {
+    suspend fun copyNativeSubmission(id:String,path:String,output:java.io.OutputStream)=withContext(Dispatchers.IO) {
+        val workspace=dao.getById(id) ?: error("workspace_missing")
+        manager.copyNativeSubmission(workspace.root,path,output)
+    }
+
+    suspend fun writeNativeText(id: String, path: String, text: String, overwrite: Boolean, trace: (String)->Unit = {}): WorkspaceFileEntry = withContext(Dispatchers.IO) {
+        trace("lookup")
         val workspace = dao.getById(id) ?: error("workspace_missing")
-        manager.writeNativeText(workspace.root, path, text, overwrite)
+        manager.writeNativeText(workspace.root, path, text, overwrite, trace)
     }
 
     suspend fun updateNativeText(id: String, path: String, update: (String) -> String): WorkspaceTextUpdate = withContext(Dispatchers.IO) {

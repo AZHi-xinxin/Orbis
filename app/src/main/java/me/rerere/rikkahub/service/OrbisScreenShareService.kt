@@ -65,7 +65,7 @@ class OrbisScreenShareService : Service() {
                 OrbisScreenShareActivity.intent(this@OrbisScreenShareService, owner, conversation).putExtra("reconnect", true),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val notification = NotificationCompat.Builder(this@OrbisScreenShareService, "orbis_screen_share")
-                .setSmallIcon(R.drawable.ic_stat_rikkahub).setContentTitle("Orbis 屏幕共享已断开")
+                .setSmallIcon(R.drawable.ic_stat_orbis).setContentTitle("Orbis 屏幕共享已断开")
                 .setContentText("画面、麦克风和朗读已停止；点击重新授权，不会自动续用旧授权。")
                 .setContentIntent(open).setAutoCancel(true).build()
             // The stopped grant no longer owns a foreground capture service.
@@ -96,7 +96,7 @@ class OrbisScreenShareService : Service() {
             check(Settings.canDrawOverlays(this)) { "请先允许显示悬浮窗。" }
             val action = PendingIntent.getService(this, 2089, Intent(this, javaClass).setAction("stop"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val open = PendingIntent.getActivity(this, 2090, OrbisScreenShareActivity.intent(this, owner, conversation), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val notification = NotificationCompat.Builder(this, "orbis_screen_share").setSmallIcon(R.drawable.ic_stat_rikkahub)
+            val notification = NotificationCompat.Builder(this, "orbis_screen_share").setSmallIcon(R.drawable.ic_stat_orbis)
                 .setContentTitle("Orbis 正在共享屏幕").setContentText("仅按设置频率抽帧；可随时关闭画面或停止。")
                 .setContentIntent(open).setOngoing(true).addAction(0, "停止共享", action).build()
             ServiceCompat.startForeground(this, 2089, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)

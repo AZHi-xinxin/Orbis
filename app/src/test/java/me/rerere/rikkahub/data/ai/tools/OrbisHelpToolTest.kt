@@ -24,6 +24,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisHelpToolTest {
+    @Test fun communityHelpExplainsDirectRequestsGroupSendAndDeletion()=runBlocking {
+        val tool=createOrbisHelpTool(listOf("orbis_community"),build)
+        val result=tool.execute(buildJsonObject { put("topic","tool");put("tool_name","orbis_community") })
+        val raw=(result.single() as UIMessagePart.Text).text
+        assertFalse(raw.contains("orbis_help_unknown_tool"))
+        listOf("contacts","send_message","delete_comment","request_processed","不保证执行").forEach { assertTrue(it,raw.contains(it)) }
+        assertFalse(content(tool,"tools").getValue("other_native_tool_names").jsonArray.any { it.jsonPrimitive.content=="orbis_community" })
+    }
+
     @Test fun deploymentNamesAreUnambiguousAndHiddenRuntimeIsNotDiscoverable() {
         val help = createOrbisHelpTool(emptyList(), build)
         assertTrue(help.description.contains("ST指StillerBrain"))
@@ -170,7 +179,7 @@ class OrbisHelpToolTest {
         val result = run(createOrbisHelpTool(emptyList(), build))
         assertTrue(result.getValue("ok").jsonPrimitive.boolean)
         assertEquals("overview", result.getValue("topic").jsonPrimitive.content)
-        assertEquals("orbis-help/38", result.getValue("manual_version").jsonPrimitive.content)
+        assertEquals("orbis-help/43", result.getValue("manual_version").jsonPrimitive.content)
         val host = result.getValue("host").jsonObject
         assertEquals(build.applicationId, host.getValue("application_id").jsonPrimitive.content)
         assertEquals("not_observed", host.getValue("presentation").jsonPrimitive.content)

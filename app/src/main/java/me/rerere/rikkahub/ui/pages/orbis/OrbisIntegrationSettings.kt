@@ -137,6 +137,9 @@ private fun OrbisAtlasBootstrapSettingsDialog(onDismiss: () -> Unit) {
                             }
                         }
                     }
+                    selectedSource?.let { source ->
+                        Text("准备连接：${source.root}", style = MaterialTheme.typography.bodySmall)
+                    }
                     Button(onClick = { confirm = true }, enabled = idle && selectedSource != null && connection.canEdit) {
                         Text("连接星图")
                     }

@@ -22,6 +22,8 @@ data class Tool(
     val isApprovalCurrent: () -> Boolean = { true },
     /** Host selection, re-evaluated at each provider request; never serialized to the model. */
     val isSelected: () -> Boolean = { true },
+    /** Host-only provenance for a model alias; never inferred from a model-supplied name. */
+    @kotlinx.serialization.Transient val originalMcpName: String? = null,
 )
 
 /** Host-only identity. Never supplied by the model or sent as a tool parameter. */

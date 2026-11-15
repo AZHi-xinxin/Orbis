@@ -64,7 +64,7 @@ private data class SpaceReply(val post: SpacePost, val comment: SpaceComment? = 
 /** A native page, scoped to one assistant; never sends a model request on open. */
 @Composable
 fun OrbisCompanionSpacesPage(assistantId: String, assistantName: String, section: CompanionSpaceSection, onClose: () -> Unit) {
-    OrbisVisualTheme { CompanionSpacesContent(assistantId, assistantName, section, onClose) }
+    OrbisInterfaceTheme { CompanionSpacesContent(assistantId, assistantName, section, onClose) }
 }
 
 @Composable

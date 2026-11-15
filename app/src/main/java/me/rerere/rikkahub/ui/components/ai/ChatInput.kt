@@ -554,6 +554,7 @@ fun ChatInput(
                         }
                     }
                     if (orbis && composerExpanded) {
+                        OrbisComposerControls {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -608,7 +609,7 @@ fun ChatInput(
                                 canStartVideo = videoUnavailableReason == null,
                                 videoUnavailableReason = videoUnavailableReason,
                                 batchVoiceMode = settings.getSelectedASRProvider().let {
-                                    it is ASRProviderSetting.MiMo || it is ASRProviderSetting.Step || it is ASRProviderSetting.SiliconFlow
+                                    it is ASRProviderSetting.MiMo || it is ASRProviderSetting.Step || it is ASRProviderSetting.SiliconFlow || it is ASRProviderSetting.DeepSeek
                                 },
                                 canSpeak = ttsAvailable,
                                 speaking = ttsSpeaking,
@@ -641,6 +642,7 @@ fun ChatInput(
                             )
                             null -> Unit
                         }
+                        }
                     }
                 }
             }
@@ -657,7 +659,7 @@ fun ChatInput(
 }
 
 @Composable
-private fun SendButton(
+internal fun SendButton(
     loading: Boolean,
     empty: Boolean,
     onClick: () -> Unit,

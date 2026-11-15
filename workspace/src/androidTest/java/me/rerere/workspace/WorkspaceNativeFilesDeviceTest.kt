@@ -15,6 +15,22 @@ import java.util.concurrent.TimeUnit
 /** Synthetic app-cache subtree only. No user workspace, network, shell, or PRoot execution. */
 @RunWith(AndroidJUnit4::class)
 class WorkspaceNativeFilesDeviceTest {
+    @Test(timeout = 30_000) fun nativeDescriptorsAreCloseOnExecAndCloseWithoutLeaking() = isolated { anchor ->
+        val file = File(anchor, "描述符😀.txt").apply { writeText("safe") }
+        repeat(32) {
+            val descriptor = WorkspaceNativeDescriptors.open(file.absolutePath, false)
+            val fd = descriptor.fd
+            val flags = File("/proc/self/fdinfo/$fd").readLines()
+                .single { it.startsWith("flags:") }.substringAfter(':').trim().toLong(8)
+            assertTrue("CLOEXEC must be set at open", flags and 0x80000L != 0L)
+            assertEquals(4L, android.system.Os.fstat(descriptor.fileDescriptor).st_size)
+            descriptor.close()
+            assertFalse(File("/proc/self/fd/$fd").exists())
+        }
+        assertThrows(Exception::class.java) { WorkspaceNativeDescriptors.open(anchor.absolutePath, false) }
+        assertThrows(Exception::class.java) { WorkspaceNativeDescriptors.open(file.absolutePath, true) }
+    }
+
     @Test(timeout = 30_000) fun nativeChineseReadWriteAndEditWorkWithoutRootfsOrShell() = isolated { anchor ->
         val manager = manager(anchor)
         val entry = manager.writeNativeText("owner", "/workspace/资料/中文😀.md", "你好😀\n", false)

@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.orbis.activities.PetAssets
 import me.rerere.rikkahub.data.orbis.activities.PetPose
+import me.rerere.rikkahub.data.orbis.activities.PetArtDownloads
 import me.rerere.rikkahub.data.orbis.activities.canUseBundledPetPoses
 import org.json.JSONObject
 import java.io.File
@@ -38,13 +39,14 @@ internal fun PetPoseSprite(appearance: String, pose: PetPose, imported: File?, a
             // Reuse poses for byte-identical early official imports, never for a
             // different custom drawing merely bearing the same appearance ID.
             if(!canUseBundledPetPoses(context, appearance, imported)) null else runCatching {
-                val base = "orbis-pets/poses/$appearance"
-                val regions = context.assets.open("$base.json").bufferedReader().use {
+                val root = imported?.takeIf { File(it,"pose.json").isFile }
+                    ?: PetArtDownloads.store(context).directory(appearance)
+                val regions = File(root,"pose.json").bufferedReader().use {
                     val list = JSONObject(it.readText()).getJSONArray("regions")
                     require(list.length() == 6)
                     (0..5).map { i -> (0..3).map { j -> list.getJSONArray(i).getInt(j) } }
                 }
-                val bitmap = context.assets.open("$base.png").use { requireNotNull(BitmapFactory.decodeStream(it)) }
+                val bitmap = File(root,"pose.webp").inputStream().use { requireNotNull(BitmapFactory.decodeStream(it)) }
                 require(bitmap.width <= 2048 && bitmap.height <= 2048)
                 regions.forEach { (x,y,w,h) -> require(x >= 0 && y >= 0 && w > 0 && h > 0 && x+w <= bitmap.width && y+h <= bitmap.height) }
                 PoseAtlas(bitmap.asImageBitmap(), regions)

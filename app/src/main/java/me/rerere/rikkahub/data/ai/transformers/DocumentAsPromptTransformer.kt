@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai.transformers
 
+import me.rerere.ai.util.deepSeekFileId
 import androidx.core.net.toFile
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                         }
                         if (documents.isNotEmpty()) {
                             documents.forEach { (index, document) ->
+                                if (document.deepSeekFileId() != null) return@forEach
                                 if (ZipAttachmentArchive.isZip(document.fileName, document.mime)) {
                                     // Persisted UI attachment stays intact. Only this provider projection changes:
                                     // never decode binary ZIP as text or upload its complete bytes automatically.

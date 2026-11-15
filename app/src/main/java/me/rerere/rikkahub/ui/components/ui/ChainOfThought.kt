@@ -48,6 +48,7 @@ import me.rerere.hugeicons.stroke.ArrowUp01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.ui.components.message.ReportLiquidGlassDetail
 
 private val LocalCardColor = staticCompositionLocalOf { Color.White }
 
@@ -83,6 +84,7 @@ fun <T> ChainOfThought(
     val collapsedSteps = collapsedChainOfThoughtSteps(steps, collapsedVisibleCount, retainWhenCollapsed)
     val hiddenCount = steps.size - collapsedSteps.size
     val canCollapse = hiddenCount > 0
+    ReportLiquidGlassDetail(canCollapse && expanded)
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
 
     CompositionLocalProvider(
@@ -296,6 +298,8 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
         content: @Composable (() -> Unit)?
     ) {
         val hasContent = content != null
+        // A result sheet does not expand the bubble. Only inline details participate.
+        ReportLiquidGlassDetail(hasContent && contentVisible && onClick == null)
         val shouldFillMaxWidth = !collapsedAdaptiveWidth || contentVisible
 
         Column(

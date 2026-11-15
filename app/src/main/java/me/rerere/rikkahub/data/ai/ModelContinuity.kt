@@ -34,7 +34,11 @@ internal object ModelContinuity {
         if(notice == null) return messages
         val index = messages.indexOfLast { it.role == MessageRole.USER }
         if(index < 0) return messages
-        return messages.mapIndexed { i, message -> if(i != index) message else message.copy(parts = message.parts + UIMessagePart.Text(notice)) }
+        val part = UIMessagePart.Text(notice, buildJsonObject {
+            put("orbis_model_continuity_projection", "v1"); put("source", "orbis_model_continuity")
+            put("request_only", true); put("human_authored", false); put("instruction_authority", "none")
+        })
+        return messages.mapIndexed { i, message -> if(i != index) message else message.copy(parts = message.parts + part) }
     }
     fun attachSuccess(messages: List<UIMessage>, receipt: ConfiguredModelReceipt?, terminal: Boolean): List<UIMessage> {
         if(receipt == null || !terminal || messages.lastOrNull()?.role != MessageRole.ASSISTANT) return messages

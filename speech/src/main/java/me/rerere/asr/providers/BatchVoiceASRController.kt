@@ -44,6 +44,7 @@ class BatchVoiceASRController(
         is ASRProviderSetting.MiMo -> provider.sampleRate
         is ASRProviderSetting.Step -> provider.sampleRate
         is ASRProviderSetting.SiliconFlow -> provider.sampleRate
+        is ASRProviderSetting.DeepSeek -> 16000
         else -> error("Not a batch voice provider")
     }
     // At most two queued segments plus the in-flight request, each bounded to 18 seconds.

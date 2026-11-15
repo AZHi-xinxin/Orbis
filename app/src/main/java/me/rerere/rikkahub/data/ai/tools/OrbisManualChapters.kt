@@ -14,6 +14,16 @@ internal data class OrbisManualChapter(
 )
 
 internal val orbisManualChapters = listOf(
+    OrbisManualChapter("agent_work", "工具发现、任务卡与手机操作", "北斗导航 → 工具与娱乐 → 任务与能力", listOf("orbis_tool_discover", "orbis_task", "orbis_phone"), listOf(
+        OrbisManualSection("先查真实能力", "工具发现与任务卡默认关闭，开启后orbis_tool_discover按用途或精确名称查询本轮真实宿主工具，name可取完整参数。不是凭聊天记忆猜能力，也不会替人类开启权限；关闭、不在目录里的工具不可调用。orbis_self_check按需检查当前助手配置和最近故障，不会自动把诊断塞进每轮聊天。人类可直接打开自检，不依赖模型可用。目录快照只证明本机准备，不代表云端接收、授权成功或远程健康；超过提供商工具上限仍需调整目录。"),
+        OrbisManualSection("连续任务", "多步工作可以用orbis_task先建卡，按真实进展更新步骤。AI填写标题、步骤和完成说明，宿主另外记录实际工具调用是否返回；返回不证明外部目标已验证。卡片按助手和原窗口保存，AI不能取消人类暂停或改造回执。人类可以暂停、取消或恢复记录；恢复后回原窗口发继续，先读取记录核对，不能重放结果未知的动作。应用关闭后保留卡片，不承诺后台永远在线。任务卡不是人类原创市场的许愿需求。"),
+        OrbisManualSection("手机授权与操作", "手机操作需单独为当前助手开启、选择允许的应用，并由人类在Android系统启用Orbis手机操作无障碍服务。与旧陪伴服务和Operit接口服务独立，不需要Root/Shizuku。status只读状态，launch打开选定应用，read返回当前页面元素，click/input/scroll_forward/scroll_backward/back必须带最新token；动作后重读核验。页面变化或30秒过期就拒绝旧票据。每次操作沿用宿主工具确认设置；系统设置、权限授予、锁屏和密码不提供代操作。读取内容会交给用户当前配置的模型，只按需读取，不后台采集屏幕。系统接受动作不等于已发消息或完成目标，不盲目重试。"),
+    )),
+    OrbisManualChapter("personal_plugins", "个人插件：AI 写给自己用的小工具", "北斗导航 → 工具与娱乐 → 插件区", listOf("orbis_personal_plugins"), listOf(
+        OrbisManualSection("看懂插件", "每个助手有独立的插件区，没有插件市场。卡片名称、简介和详情介绍由AI填写；Orbis负责展示状态和真实使用记录。按使用频率以近30天成功完成次数排序，累计次数另行保留；按更新时间看内容版本更新，运行一次不会顶到最新。插件区可随时停用、查看新版本、回退旧版本或删除。代码在次级入口，不要求人类读代码才能看懂用途。"),
+        OrbisManualSection("编写与启用", "个人插件默认关闭。人类在插件区或助手本地工具中开启后，AI用orbis_personal_plugins(action=guide)读取契约，propose提交脚本和介绍。新版本不会自行启用，人类逐项确认所需能力后才可运行；AI不能修改授权或虚构使用次数。新建expected_revision=0，修改先read取得revision。更新保留原来运行的版本；新增命名工具下一轮进入目录，也可通过run调用已批准的确切版本。"),
+        OrbisManualSection("执行与文件", "脚本在独立进程使用QuickJS执行，同步函数体以args取得参数并return结果。无DOM/Node或后台常驻；5秒超时、24MiB内存、输出与日志合计32KiB。文件权限仅限当前插件自己的小文件；网络权限限声明并获准的公开HTTPS网站；剪贴板和终端单独确认，终端还必须遵守当前工作区已有授权。失败和中断不自动重试，回退代码不会撤销已执行的外部操作。声音分析与定时唤起不因此自动开启。"),
+    )),
     OrbisManualChapter("human_thought", "人类思考链", "当前助手设置 → 本地工具 → 允许 AI 开启人类思考链", listOf("orbis_human_thought"), listOf(
         OrbisManualSection("开启与发送", "人类授权后，AI通过orbis_human_thought的enable、disable、status开启、关闭或查看当前助手的输入模式。手机输入框分为思考链和正文，思考链可留空。点击发送后两部分作为同一条人类消息送达，分别标为【人类思考链】与【正文回复】，空思考链标为为空。"),
         OrbisManualSection("阅读与编辑", "人类消息上方显示‘思考链’，默认折叠，点击展开；下方正文沿用聊天字号。历史消息保留当时发送的两部分，编辑时分别修改。关闭输入模式后继续正常聊天，未发出的思考链草稿保留在输入页。"),
@@ -30,6 +40,7 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("修改结果与历史", "配置成功回执只含本次动作、目标、作用范围及实际保存值，不附整套目录；saved表示保存完成，连接是否可用仍按check/check_status实测。历史聊天与旧工具回执保留，新格式用于后续调用。精简后的费用和调用效果需结合实际使用评估。"),
     )),
     OrbisManualChapter("self_check", "AI自检与常见故障排查", "侧栏 → 当前助手设置 → 本地工具 → AI自检 → 检查当前助手", listOf("orbis_self_check", "orbis_configure"), listOf(
+        OrbisManualSection("闪退与故障报告", "配置自检recent不是Android崩溃堆栈，不能把source=model的unclassified_failure当成本机闪退根因。请指导人类在自检→故障记录与导出开启30分钟记录，回原位置复现一次，重开Orbis后导出并自行分享。设置→关于和ST准备凭据按钮旁也有入口，无需电脑、Root或开发者选项。功能默认关闭、自动到期；报告只含本应用退出摘要、异常类型和调用位置、关键步骤，不读取聊天或密钥。AI不能代开记录或自动上传；系统未保留、旧Android不支持、开启前的详细故障不能补录。没有记录不代表没有故障。"),
         OrbisManualSection("先查事实", "遇到功能不可用、发布失败或连接报错时，可按需调用orbis_self_check，focus选择overview/tools/model/theme/mcp/workspace/stickers/permissions。此工具默认关闭，人类在本地工具打开；同页检查按钮无需AI或工具开关，模型400或无法工具调用时仍能用。查询只读当前助手的本机状态，不发送网络测试，不取聊天、系统提示或密钥。结果和教学全文不常驻注入。"),
         OrbisManualSection("读懂检查结果", "ok只表示列出的本机检查通过，不代表上游、远端设备或全部功能验收。info可能只是没启用的可选功能；blocked需处理；unknown必须说明尚未查明。最近五条故障是带时间的历史摘要，可能已修复；新版本安装前不补录。不要仅看到旧错误就认定仍故障。不要让人类重复开已经开启的权限。"),
         OrbisManualSection("按已有权限修复", "依据next步骤使用现有工具：主题read查版本→patch→publish(expected_revision)→apply(revision)；连接用orbis_configure inspect/check/check_status（check会发真实短请求，沿用审批）；工作区先workspace_status。人类授权、系统权限、API密钥由人类在对应设置填写；自检不能自己开权、改密钥或解除AI暂停。不能判断的问题请人类复制报告和错误卡反馈，不重放可能已经完成的写操作。"),
@@ -98,7 +109,7 @@ internal val orbisManualChapters = listOf(
     OrbisManualChapter("voice", "语音条、转写与通话", "系统设置 → 语音与朗读；聊天语音消息 / 通话页", listOf("orbis_voice_note", "orbis_send_audio", "text_to_speech", "start_voice_call", "end_voice_call", "orbis_call_records", "orbis_call_read", "orbis_incoming_call_records"), listOf(
         OrbisManualSection("可点击的语音条", "orbis_voice_note(text) 使用用户已选 TTS/音色生成原生可点击音频，text 为 1–2000 字符，沿用宿主批准；不是立即朗读，不自动播放。成功音频已在本次工具结果，无需复制文件路径或重复发送。远程 TTS 可能接收文本并消耗语音额度。orbis_send_audio 直接发送绑定工作区 /workspace/ 下已有 WAV/MP3/OGG，最大32MiB，不调用TTS、不接收网址，不猜转写。text_to_speech 是另一种朗读能力，不要混用。"),
         OrbisManualSection("语音台和声学提示", "语音台有全屏和通话内小窗，调语速、音高和播放音量，随时恢复原声，不更换模型或重新合成。可用本机音频试听；通话中不另开试听播放器。声学提示默认关闭，仅分析有效收音的持续未发声、相对音量和可选粗估音高，非情绪推测；静音、播放和重连时暂停。提示只随下一条真实发言发送，通话详情可查看，不触发额外模型请求。"),
-        OrbisManualSection("ASR 与纠正", "ASR 不保证逐字准确，不凭转写猜测原始音色或情绪。称呼纠正设置在：系统设置 → 语音与朗读 → 语音服务与音色·高级 → 语音识别 → 语音称呼纠正。仅用户启用的规则作用于新语音，覆盖语音输入、语音条、外呼和来电通话；通话显示与保存纠正后的文字，详情保留原始转写供核对原识别，不改手打或旧历史。完整中文称呼的同音匹配按组可选，需 Android 10 以上，不依赖联网；忽略声调但不模糊猜名，同音普通词和多音字可能有误，保存前用本地预览让人类确认，也可只填精确别名。语音条可长按转文字；服务配置或音色错误先核对设置，不自动重试计费请求。"),
+        OrbisManualSection("ASR 与纠正", "ASR 不保证逐字准确，不凭转写猜测原始音色或情绪。称呼纠正设置在：系统设置 → 语音与朗读 → 语音服务与音色·高级 → 语音识别 → 语音称呼纠正。仅用户启用的规则作用于新语音，覆盖语音输入、语音条、外呼和来电通话；通话显示与保存纠正后的文字，详情保留原始转写供核对原识别，不改手打或旧历史。完整中文称呼的同音匹配按组可选，需 Android 10 以上，不依赖联网；忽略声调但不模糊猜名，同音普通词和多音字可能有误，保存前用本地预览让人类确认，也可只填精确别名。语音条可长按转文字或选择“保存为 MP3”，人类选择本机位置即可保存原语音，转换在本机完成、不重新调用TTS。无需AI访问应用内部缓存；服务配置或音色错误先核对设置，不自动重试计费请求。"),
         OrbisManualSection("通话", "start_voice_call 须说明原因，用户接听前不开麦。关麦只停收音，关喇叭只静音当前播放，时间轴继续。支持 ASR、可靠回声控制或耳机路由时才有条件打断，否则半双工；真机声学效果需实测。end_voice_call 只结束本轮绑定通话，不控制其它 App。records/read 查本 AI 已归档通话，摘要失败不等于原文丢失。"),
     )),
     OrbisManualChapter("expressions", "颜文字与图片表情包", "聊天输入区 → 表情 / 颜文字", listOf("orbis_kaomoji_list", "orbis_kaomoji_add", "orbis_kaomoji_update", "orbis_stickers"), listOf(
@@ -126,7 +137,8 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("本地优先排错", "先核对名称：orbis_schedule_*、orbis_reading_*、orbis_soup_* 等为本机资料；cloud_orbis_*、cloud_reading_*、cloud_turtlesoup_* 才需相应云端授权。本地空库不需要网关。未注册检查当前 AI 工具选用；待批准让人类看工具确认；系统权限缺失只引导开启所需项目，不要求全开。"),
         OrbisManualSection("网络错误", "HTTP 401/403 常需核对服务授权或访问范围，429 可能是限流/额度，502/503 可能是网关或上游不可用，不能仅凭状态码确定根因。只收集脱敏错误码、时间、服务类型和重现步骤，先查状态再决定下一次请求。写操作超时可能已执行，不能直接重放。"),
     )),
-    OrbisManualChapter("memory", "后花园、离线记忆、ST 与会话参考", "手机与陪伴 → 给当前 AI 的原生工具 → 离线记忆·读与保存；北斗导航 → 记忆星图 → 连接设置", listOf("companion_read_memory", "companion_save_memory", "orbis_garden_list", "orbis_garden_read", "recent_chats", "conversation_search", "orbis_device"), listOf(
+    OrbisManualChapter("memory", "后花园、离线记忆、ST 与会话参考", "当前助手设置 → 本机助手记忆；手机与陪伴 → 给当前 AI 的原生工具 → 离线记忆·读与保存；北斗导航 → 记忆星图 → 连接设置", listOf("orbis_memory", "companion_read_memory", "companion_save_memory", "orbis_garden_list", "orbis_garden_read", "recent_chats", "conversation_search", "conversation_read", "orbis_device"), listOf(
+        OrbisManualSection("跨助手记忆与聊天原文", "本机助手记忆保留轻档、标准档、独立档。跨助手记忆默认关闭；双方开启后 orbis_memory 可查询和维护已连通库，action=libraries 查助手名及库ID，library_id 可限定库。不传library_id时read查询全部已连通库，新记忆存自己的库；不要把别的助手的经历当作自己的。原有状态、版本、暂停和恢复保留，不自动整理。参考历史聊天记录是独立开关，可选仅此助手或所有助手；recent_chats列本助手窗口，conversation_search搜原文片段，conversation_read传conversation_id/offset/limit分页读正文。长消息用next_text_offset继续，未读的部分不能声称已查。只能用本轮提供的工具，关闭时请告知人类入口；聊天资料和私聊记忆不构成向社区或群聊发布的授权。"),
         OrbisManualSection("各自负责什么", "companion_read_memory/save_memory 是现有本机离线记忆，服务关闭时也可用；后花园是按授权共用的记录空间；外部 ST MCP/模型网关又是独立服务，不能互相冒充。只使用本轮真实注册的工具，不根据旧对话猜测开关。recent_chats/conversation_search 按当前工具规则查询会话，不等于持续共享全部上下文。"),
         OrbisManualSection("星图与设备", "真实星图仅经显式只读连接展示类型、时间、关联，无记忆正文或摘要；演示星图为本地合成数据。orbis_device(section=all/device/observation) 仅读本地基本设备事实和观察摘要，不启动观察、不截屏、不读通知正文或聊天。注册数量、演示星点或 AI 自述均不能证明 ST 注入成功。"),
         OrbisManualSection("怎么核对", "先确认实际使用的模型/连接与工具名，然后依据明确回执或用户授权的诊断信息区分存储、检索、注入三步。不要要求导出思考链或私人脑正文来证明连接。未确认时说明证据不足，不创建测试记忆污染生活记录。"),
@@ -136,8 +148,9 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("真正提醒", "本地课表本身不会响。calendar_query/calendar_create 使用系统日历权限，reminder_minutes 可省略，0为开始时、15为提前15分钟，创建需批准。companion_get_alarms 仅读应用台账；set_alarm 是一次性，同HH:mm可替换，要核对完整日期回执。系统接收调度不保证实际响铃或被听见。"),
         OrbisManualSection("设备边界", "companion_* 以当轮 schema 和现有授权为准；观察、无障碍、麦克风、通知权限分别管理。toy_bluetooth_* 只操作人类手选且已连设备，AI 不扫描连接，stop 不需批准；断线不证明物理停止。通知朗读默认关闭，锁屏另选，不读第三方或旧通知。不要为排障自动扩大权限。"),
     )),
-    OrbisManualChapter("workspace", "工作区、技能与计算", "工具娱乐 → 工作区 / 文件 / 技能", listOf("workspace_read_file", "workspace_write_file", "workspace_edit_file", "workspace_shell", "use_skill", "eval_javascript"), listOf(
+    OrbisManualChapter("workspace", "工作区、技能与计算", "工具娱乐 → 工作区 / 文件 / 技能", listOf("workspace_read_file", "workspace_write_file", "workspace_edit_file", "workspace_shell", "use_skill", "orbis_skill_register", "eval_javascript"), listOf(
         OrbisManualSection("工具顺序", "read_file 先读准确目标，write_file/edit_file 只改请求范围，shell 遵守当前隔离与审批；不能据此获得整个手机或电脑访问权。use_skill 按需加载已启用技能，并按技能内容决定操作，不反复把全部技能注入上下文。eval_javascript 用于本地 QuickJS 计算，不提供 DOM 或 Node.js。"),
+        OrbisManualSection("AI 自己绑定技能", "人类在当前 AI 的本地工具中开启「AI 自己绑定工作区技能」并选择工作区后，orbis_skill_register(register,path) 可登记 /workspace 或宿主挂载 /skills 内已有 SKILL.md，只绑定自己，直接引用原文件，无需复制两份。list 核对名称和路径，read 按需读取正文和相对参考文件，unbind 只移除绑定、不删除原文件。下一条新消息才提示新绑定，本轮工具目录保持。无需搬走参考文件，不会自动执行脚本。"),
         OrbisManualSection("不可用时", "确认当前 AI 选择了对应工作区/技能，工作区准备完成且工具在本轮注册；如需系统安装组件，指导人类在已有入口完成。缺文件先看实际目录或备份是否包含，不能根据历史命令凭空重建原始内容。操作系统/网络失败与模型生成失败分开报告。"),
         OrbisManualSection("小游戏", "orbis_games_library 查现有作品及 include_template=true 起手模板；orbis_games_install 新建省略 game_id/expected_sha256，更新用库中 ID 和 sha256。人类在游戏机打开。HTML 沙箱禁网/私有文件，OrbisGame.finish 回执 ok 才证明保存；records 是游戏上报加宿主计时，不等于独立验证。未结算记录不表示仍在玩。"),
     )),
@@ -164,6 +177,7 @@ internal val orbisManualChapters = listOf(
     OrbisManualChapter("photo_wall", "照片墙：照片正面，心事背面", "北斗导航 → 工具与娱乐 → 照片墙", listOf("orbis_photo_wall", "orbis_video_frame_keep"), listOf(
         OrbisManualSection("摆放与备注", "提供 4 种布局：拍立得、相册、悬挂、拼贴。点击空白照片位或‘＋ 照片’从本地选择图片；轻触照片翻到背面写备注，保存后双方可读。可前移、后移调整顺序、放大原图或确认删除。图片作为当前助手空间的本地副本保存，不修改手机原图；删除照片不删除原相册图片。"),
         OrbisManualSection("AI 怎么用", "orbis_photo_wall 的 list 分页取照片 id、image_id、note、revision 和顺序；read 用 id 或 image_id 读取一张真实图片，会产生图片输入和相应模型用量，需要支持图片的模型。note 用 id、text、expected_revision 改备注；move 用 id、position（从 0 开始）调顺序，delete 用 id 删除。不能用任意路径或网址导入，不能读取其他助手的空间。"),
+        OrbisManualSection("收藏对话图片", "AI 可用 orbis_photo_wall 的 chat_images 分页查找当前对话中的人类图片与 AI 图片，再用 read_chat + image_code 看图，save_chat + image_code 收藏，可用 text 写备注。不需要人类重新上传到照片墙；同一张聊天图片重复收藏不会增加副本或覆盖已有备注。收藏是本地独立副本，原聊天删除后仍保留；不自动公开或发动态。不支持跨助手、任意路径、外部网址或临时视频/屏幕画面。"),
         OrbisManualSection("从视频留下照片", "AI 可用 orbis_video_frame_keep 从本次或尚在临时保留期内的通话中选择画面存入照片墙，并写备注。每次通话最多保留 10 张不同画面；同一帧重复保留不会重复入库，删除已保存照片不会重置该通话额度。永久照片不随临时画面到期清理，备份仍需人类主动完成。"),
     )),
     OrbisManualChapter("video", "视频通话：连续语音与按需看图", "聊天输入区 → 视频通话；视频通话页 → 频率", listOf("start_video_call", "end_voice_call", "orbis_video_frame_now", "orbis_video_frames", "orbis_video_frame_read", "orbis_video_frame_keep"), listOf(
@@ -209,7 +223,7 @@ internal val orbisManualChapters = listOf(
         OrbisManualSection("公开版本边界", "咨询室显示‘正在开发，暂未开放’。不要指导公开版用户配对、开启待命、重试旧场或调用内部咨询工具，也不要用哨兵或普通私聊替代内部协议。已保留的历史数据不代表功能已验收；其它本地功能不依赖咨询室。"),
         OrbisManualSection("如看到旧记录", "保留记录供后续明确授权的排查，不自动恢复生成、不清除失败现场、不公开内部正文。此说明不检查线上咨询状态，也不宣称已修好或已完成双机验收。"),
     )),
-).filterNot { it.id == "ombre_phone" && !me.rerere.rikkahub.data.orbis.ombre.OMBRE_RUNTIME_ENTRY_ENABLED } + orbisStillerBrainChapters + orbisDeploymentChapters
+).filterNot { it.id == "ombre_phone" && !me.rerere.rikkahub.data.orbis.ombre.OMBRE_RUNTIME_ENTRY_ENABLED } + orbisStillerBrainChapters + orbisDeploymentChapters + orbisCommunityManualChapters + orbisTabletopMarketManualChapters
 
 internal fun orbisManualChapterMatches(chapter: OrbisManualChapter, query: String): Boolean = query.isBlank() ||
     (listOf(chapter.id, chapter.title, chapter.uiPath) + chapter.tools + chapter.sections.flatMap { listOf(it.title, it.text) })

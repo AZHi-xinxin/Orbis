@@ -412,7 +412,7 @@ class ConversationRepository(
             }
             conversationDAO.update(
                 conversationToConversationEntity(conversation).let { incoming ->
-                    if (stored != null) incoming.copy(orbisPrompt = stored.orbisPrompt,
+                    if (stored != null) incoming.copy(isPinned = stored.isPinned, orbisPrompt = stored.orbisPrompt,
                         modeInjectionIds = stored.modeInjectionIds, lorebookIds = stored.lorebookIds) else incoming
                 }
             )
@@ -462,6 +462,17 @@ class ConversationRepository(
         val candidate = current.copy(messageNodes = updated.messageNodes, chatSuggestions = emptyList(), updateAt = Instant.now())
         updateConversation(candidate, requireExistingOwner = expected.assistantId)
         getConversationById(expected.id)
+    }
+
+    /** The session edit mutex serializes live writers; the session owns message contents. */
+    suspend fun commitLiveConversation(updated: Conversation): Conversation = database.withTransaction {
+        val entity = checkNotNull(conversationDAO.getConversationById(updated.id.toString())) { "聊天已不存在" }
+        val current = conversationEntityToConversation(entity, loadMessageNodes(entity.id))
+        check(current.assistantId == updated.assistantId && current.consultation == updated.consultation) { "聊天归属已变化" }
+        me.rerere.rikkahub.data.model.requireCompactionEpoch(updated.compactionEpoch, current.compactionEpoch)
+        val candidate = current.copy(messageNodes = updated.messageNodes, chatSuggestions = updated.chatSuggestions, updateAt = updated.updateAt)
+        updateConversation(candidate, requireExistingOwner = updated.assistantId)
+        checkNotNull(getConversationById(updated.id))
     }
 
     /** Called only after the independent call archive has been durably verified. */
@@ -661,11 +672,11 @@ class ConversationRepository(
             }
     }
 
-    suspend fun togglePinStatus(conversationId: Uuid) {
-        conversationDAO.updatePinStatus(
-            id = conversationId.toString(),
-            isPinned = !(getConversationById(conversationId)?.isPinned ?: false)
-        )
+    // Pin/main-window choice is independent metadata. Read/toggle it atomically without
+    // loading message history; stale chat/stream snapshots must never write this column.
+    suspend fun togglePinStatus(conversationId: Uuid) = database.withTransaction {
+        val stored = conversationDAO.getConversationById(conversationId.toString()) ?: return@withTransaction
+        conversationDAO.updatePinStatus(id = stored.id, isPinned = !stored.isPinned)
     }
 
     /** Title and FTS metadata only: does not load, replace or delete message/attachment rows. */

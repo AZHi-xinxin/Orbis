@@ -40,4 +40,5 @@ internal fun ASRProviderSetting.forVoiceCallSilence(): ASRProviderSetting = when
     is ASRProviderSetting.MiMo -> copy()
     is ASRProviderSetting.Step -> copy()
     is ASRProviderSetting.SiliconFlow -> copy()
+    is ASRProviderSetting.DeepSeek -> copy()
 }

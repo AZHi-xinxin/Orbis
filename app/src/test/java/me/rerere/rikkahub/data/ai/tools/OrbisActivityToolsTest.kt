@@ -16,6 +16,36 @@ private class ActivityToolStorage : ActivityStorage {
 class OrbisActivityToolsTest {
     private suspend fun call(tool: Tool, input: String): JsonObject =
         Json.parseToJsonElement((tool.execute(Json.parseToJsonElement(input)).single() as UIMessagePart.Text).text).jsonObject
+    @Test fun oldPetArchiveGetsArtworkPreferenceWithoutLosingHistory() {
+        val storage=ActivityToolStorage();val repo=PetRepository(storage)
+        repo.adopt("墨","cat-black-v1");repo.act("feed","legacy-feed")
+        val old=Json.parseToJsonElement(storage.saved!!).jsonObject
+        storage.saved=JsonObject(old.filterKeys {it!="originalArtwork"}).toString()
+        val reopened=PetRepository(storage)
+        assertTrue(reopened.snapshot().originalArtwork)
+        reopened.configureArtwork(false)
+        val again=PetRepository(storage).snapshot()
+        assertFalse(again.originalArtwork);assertEquals("墨",again.pet!!.name)
+        assertEquals("legacy-feed",again.events.single().id)
+    }
+    @Test fun artworkUsesOnlyBoundPetAndNeverCallsTheModel() = runBlocking {
+        val storage=ActivityToolStorage();val repo=PetRepository(storage);repo.adopt("墨","cat-black-v1");repo.configureArtwork(false)
+        var calls=0; var reacts=0
+        val tool=petTool({true},{_,_->reacts++},{action,state->
+            kotlinx.coroutines.delay(1);calls++
+            assertEquals("cat-black-v1",state.pet!!.appearance)
+            buildJsonObject {put("installed",action=="install_art")}
+        }){repo}
+        val before=storage.saved
+        assertTrue(call(tool,"""{"action":"art_info"}""").getValue("ok").jsonPrimitive.boolean)
+        assertEquals(before,storage.saved)
+        assertTrue(call(tool,"""{"action":"install_art","appearance":"dog-shiba-v1"}""").getValue("ok").jsonPrimitive.boolean)
+        assertTrue(PetRepository(storage).snapshot().originalArtwork)
+        assertEquals("cat-black-v1",repo.snapshot().pet!!.appearance)
+        assertEquals(2,calls);assertEquals(0,reacts)
+        val disabled=petTool({false},artwork={_,_->error("must_not_download")}){repo}
+        assertFalse(call(disabled,"""{"action":"install_art"}""").getValue("ok").jsonPrimitive.boolean)
+    }
     @Test fun disabledToolsNeverOpenStorageAndReturnWithoutThrowing() = runBlocking {
         var opens = 0
         val pet = petTool({ false }) { opens++; error("must_not_open") }

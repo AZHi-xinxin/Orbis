@@ -21,14 +21,28 @@ internal fun ChatComposerSurface(
     orbis: Boolean,
     content: @Composable () -> Unit,
 ) {
-    Surface(modifier = modifier, shape = shape, color = color, contentColor = contentColor,
-        border = border, tonalElevation = 0.dp,
+    me.rerere.rikkahub.ui.components.message.ThemeChromeSurface(role = "composer", enabled = orbis,
+        modifier = modifier, shape = shape, radius = 23, color = color, contentColor = contentColor,
+        border = border,
         shadowElevation = if (orbis && color.alpha >= 1f) 6.dp else 0.dp,
         content = content)
 }
 
 @Composable
-internal fun chatInputFieldColors(): TextFieldColors = TextFieldDefaults.colors().copy(
+internal fun chatInputFieldColors(): TextFieldColors {
+    val theme = me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body
+    val base = TextFieldDefaults.colors()
+    val ink = theme?.let { Color(me.rerere.rikkahub.data.orbis.theme.themeArgb(it.chrome.onComposer ?: it.colors.text)) }
+    return base.copy(
+    focusedTextColor = ink ?: base.focusedTextColor,
+    unfocusedTextColor = ink ?: base.unfocusedTextColor,
+    cursorColor = ink ?: base.cursorColor,
+    focusedPlaceholderColor = ink?.copy(alpha=.65f) ?: base.focusedPlaceholderColor,
+    unfocusedPlaceholderColor = ink?.copy(alpha=.65f) ?: base.unfocusedPlaceholderColor,
+    focusedLeadingIconColor = ink ?: base.focusedLeadingIconColor,
+    unfocusedLeadingIconColor = ink ?: base.unfocusedLeadingIconColor,
+    focusedTrailingIconColor = ink ?: base.focusedTrailingIconColor,
+    unfocusedTrailingIconColor = ink ?: base.unfocusedTrailingIconColor,
     unfocusedIndicatorColor = Color.Transparent,
     focusedIndicatorColor = Color.Transparent,
     disabledIndicatorColor = Color.Transparent,
@@ -38,3 +52,4 @@ internal fun chatInputFieldColors(): TextFieldColors = TextFieldDefaults.colors(
     disabledContainerColor = Color.Transparent,
     errorContainerColor = Color.Transparent,
 )
+}

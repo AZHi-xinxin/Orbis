@@ -39,7 +39,12 @@ class ImageWorkshop private constructor(private val context: Context) {
         onNewAccepted: ((WorkshopJob) -> Unit)? = null,
         referenceMode: String = "img2img", referenceStrength: Double = 0.6,
         authorizedChatReferences: Set<String> = emptySet(),
-        validateChatReferences: suspend () -> Unit = {}): WorkshopJob = withContext(Dispatchers.IO) {
+        validateChatReferences: suspend () -> Unit = {},
+        referenceIds: List<String> = emptyList()): WorkshopJob = withContext(Dispatchers.IO) {
+        val named = ledger.resolveReferences(assistantId, byAi, referenceIds)
+        val namedFiles = named.map { it.asset.file }
+        val allReferences = (references + namedFiles).distinct()
+        require(allReferences.size <= 4) { "workshop_reference_limit" }
         val settings = GlobalContext.get().get<SettingsStore>().settingsFlow.first { !it.init }
         require(settings.assistants.any { it.id.toString() == assistantId }) { "workshop_owner_missing" }
         if (conversationId != null) {
@@ -50,27 +55,28 @@ class ImageWorkshop private constructor(private val context: Context) {
         val provider = model.findProvider(settings.providers) ?: error("workshop_model_missing")
         require(settings.providers.any { it.enabled && it.models.any { candidate -> candidate.id == model.id } }) { "workshop_provider_unsupported" }
         require(supports(provider, model)) { "workshop_provider_unsupported" }
-        require(supportsEditing(provider) || (!widgetKit && references.isEmpty())) { "workshop_text_to_image_only" }
+        require(supportsEditing(provider) || (!widgetKit && allReferences.isEmpty())) { "workshop_text_to_image_only" }
         require(!widgetKit || supportsWidgetKit(provider)) { "workshop_widget_kit_unsupported" }
         if (me.rerere.ai.provider.providers.openai.NovelAiImageApi.isConnection(provider)) {
-            require(references.size <= 1) { "workshop_single_reference_only" }
+            require(allReferences.size <= 1) { "workshop_single_reference_only" }
             require(referenceMode == "img2img" || model.modelId == me.rerere.ai.provider.providers.openai.NovelAiImageApi.MODEL) { "workshop_reference_mode" }
         } else require(referenceMode == "img2img") { "workshop_reference_mode" }
-        references.forEach { name ->
+        allReferences.forEach { name ->
             require(assetFile(name).isFile) { "workshop_reference" }
-            if (byAi) require(name in authorizedChatReferences || conversationId != null &&
+            if (byAi) require(name in namedFiles || name in authorizedChatReferences || conversationId != null &&
                 ledger.ownsAiReference(assistantId, conversationId, name)) { "workshop_reference_owner" }
         }
         val candidate = WorkshopJob(requestId = requestId, assistantId = assistantId,
             conversationId = conversationId, byAi = byAi, modelId = modelId,
             maker = workshopMakerLabel(provider, model), configHash = configurationHash(provider, model),
-            prompt = prompt.trim(), widgetKit = widgetKit, references = references, notifyConversation = byAi && notifyConversation,
-            referenceMode = referenceMode, referenceStrength = referenceStrength)
+            prompt = prompt.trim(), widgetKit = widgetKit, references = allReferences, notifyConversation = byAi && notifyConversation,
+            referenceMode = referenceMode, referenceStrength = referenceStrength, namedReferences = named)
         validateChatReferences()
         synchronized(ledger) {
-            references.forEach { name ->
+            ledger.validateReferences(assistantId, byAi, named)
+            allReferences.forEach { name ->
                 require(assetFile(name).isFile) { "workshop_reference" }
-                if (byAi) require(name in authorizedChatReferences || conversationId != null &&
+                if (byAi) require(name in namedFiles || name in authorizedChatReferences || conversationId != null &&
                     ledger.ownsAiReference(assistantId, conversationId, name)) { "workshop_reference_owner" }
             }
             ledger.submitAndSchedule(candidate, onNewAccepted, ::enqueue)
@@ -94,6 +100,16 @@ class ImageWorkshop private constructor(private val context: Context) {
 
     fun delete(id: String, assistant: String, file: String? = null) {
         ledger.delete(id, assistant, file)
+        cleanDeletedOriginals()
+    }
+
+    fun saveReference(reference: WorkshopReference, expectedRevision: Long? = null): WorkshopReference = synchronized(ledger) {
+        require(assetFile(reference.asset.file).isFile) { "workshop_reference" }
+        ledger.saveReference(reference, expectedRevision).also { cleanDeletedOriginals() }
+    }
+
+    fun deleteReference(id: String, assistant: String) {
+        ledger.deleteReference(id, assistant)
         cleanDeletedOriginals()
     }
 

@@ -29,6 +29,11 @@ internal class ThemeRepository(private val root: File) {
         check(f.length() <= 2 * 1024 * 1024) { "theme_store_invalid" }
         themeJson.decodeFromString<ThemeState>(f.readText()).also { state ->
             check(state.schema == 1 && state.entries.size <= 30 && state.entries.map { it.id }.distinct().size == state.entries.size) { "theme_store_invalid" }
+            check(state.materialTextColors.size <= MaterialThemePreset.entries.size) { "theme_store_invalid" }
+            state.materialTextColors.forEach { (id, colors) ->
+                check(MaterialThemePreset.fromId(id) != null && state.entries.any { it.id == id && it.authorRole == "human" }) { "theme_store_invalid" }
+                colors.validate()
+            }
             state.entries.forEach { e ->
                 check(e.id.matches(Regex("[A-Za-z0-9_-]{1,80}")) && e.authorRole in setOf("ai", "human") && e.versions.size <= 20 && e.revision >= 0) { "theme_store_invalid" }
                 e.draft?.validate(); e.versions.forEach { it.body.validate() }
@@ -145,6 +150,58 @@ internal class ThemeRepository(private val root: File) {
         save(state.copy(entries = state.entries.filterNot { it.id == id }, active = state.active?.takeUnless { it.id == id },
             pending = state.pending?.takeUnless { it.id == id }, previous = state.previous.filter { it?.id != id }, autoApply = state.autoApply - id))
     }
+    /** Native human controls: built-ins are separate entries, never edits of an AI's design. */
+    fun prepareMaterialPreset(preset: MaterialThemePreset, fallbackWallpaper: String): ThemeRef = synchronized(lock) {
+        val state = snapshot()
+        val existing = state.entries.firstOrNull { it.id == preset.id }
+        if (existing != null) {
+            check(existing.authorRole == "human") { "theme_revision_or_owner_conflict" }
+            val ref = ThemeRef(existing.id,existing.versions.last().revision)
+            requireAssets(state.resolve(ref) ?: error("theme_version_missing"))
+            return@synchronized ref
+        }
+        check(state.entries.size < 30) { "theme_store_full" }
+        // First use keeps the user's current wallpaper, if any; the built-in image is a fallback.
+        val wallpaper = state.resolve()?.background?.asset?.takeIf { asset(it).isFile } ?: fallbackWallpaper
+        val body = materialThemePreset(preset,wallpaper); requireAssets(body)
+        val entry = ThemeEntry(preset.id,revision=1,authorRole="human",versions=listOf(ThemeVersion(1,body)))
+        // A first static variant keeps the current human ink choices; later visits keep its own edits.
+        val inheritedInk = if(preset==MaterialThemePreset.LIQUID_STILL) state.materialTextColors[state.active?.id] else null
+        save(state.copy(entries=state.entries+entry,materialTextColors=if(inheritedInk!=null)
+            state.materialTextColors+(preset.id to inheritedInk) else state.materialTextColors))
+        ThemeRef(entry.id,1)
+    }
+    fun setMaterialBackground(expected: ThemeRef, wallpaper: String): ThemeRef = synchronized(lock) {
+        val state = snapshot()
+        check(state.active == expected) { "theme_revision_or_owner_conflict" }
+        check(MaterialThemePreset.fromId(expected.id) != null) { "theme_not_material_preset" }
+        val old = state.entries.first { it.id == expected.id }
+        check(old.authorRole == "human") { "theme_revision_or_owner_conflict" }
+        val body = state.resolve(expected) ?: error("theme_version_missing")
+        val changed = body.copy(background=ThemeBackground("image",wallpaper,dim=0f))
+        val nextBody = changed.copy(assets=changed.assetReferences().values.distinct()).also { it.validate();requireAssets(it) }
+        val ref = ThemeRef(old.id,old.revision+1)
+        val keep = (listOf(ThemeVersion(ref.revision,nextBody)) + old.versions.filter { it.revision == expected.revision } + old.versions.reversed())
+            .distinctBy { it.revision }.take(20).sortedBy { it.revision }
+        val next = old.copy(revision=ref.revision,versions=keep)
+        val previous = (state.previous + state.active).filter {
+            it == null || it.id != old.id || keep.any { v -> v.revision == it.revision }
+        }.takeLast(20)
+        save(state.copy(entries=state.entries.map { if(it.id==old.id)next else it },active=ref,pending=null,previous=previous))
+        ref
+    }
+
+    /** Explicit native editor only. Does not grant AI access or change published versions. */
+    fun setMaterialTextColor(expected: ThemeRef, target: MaterialTextTarget, color: String?) = synchronized(lock) {
+        val state = snapshot()
+        check(state.active == expected && MaterialThemePreset.fromId(expected.id) != null &&
+            state.entries.any { it.id == expected.id && it.authorRole == "human" }) { "theme_revision_or_owner_conflict" }
+        val next = (state.materialTextColors[expected.id] ?: MaterialTextColors()).with(target, color)
+        val preferences = if (next == MaterialTextColors()) state.materialTextColors - expected.id
+            else state.materialTextColors + (expected.id to next)
+        save(state.copy(materialTextColors = preferences))
+    }
+
     fun asset(name: String): File { require(name.matches(Regex("[a-f0-9]{64}\\.(png|jpg|webp)"))) { "theme_asset_invalid" }; return file(name) }
     fun missingAssetFields(body: ThemePackage): List<String> = synchronized(lock) {
         body.assets.filterNot { asset(it).isFile }.flatMap { missing ->

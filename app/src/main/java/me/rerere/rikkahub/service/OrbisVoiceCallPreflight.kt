@@ -100,6 +100,7 @@ internal object OrbisVoiceCallPreflight {
             is ASRProviderSetting.SiliconFlow -> {
                 endpoint = provider.baseUrl; key = provider.apiKey; model = provider.model; sampleRate = provider.sampleRate
             }
+            is ASRProviderSetting.DeepSeek -> { endpoint = "https://api.deepseek.com"; key = provider.apiKey; model = "asr"; sampleRate = 16000 }
             is ASRProviderSetting.Step -> {
                 endpoint = provider.baseUrl; key = provider.apiKey; model = provider.model; sampleRate = provider.sampleRate
             }
@@ -129,6 +130,7 @@ internal object OrbisVoiceCallPreflight {
             is TTSProviderSetting.MiMo -> { endpoint = provider.baseUrl; key = provider.apiKey; modelAndVoicePresent = provider.model.isNotBlank() && provider.voice.isNotBlank() }
             is TTSProviderSetting.ElevenLabs -> { endpoint = provider.baseUrl; key = provider.apiKey; modelAndVoicePresent = provider.model.isNotBlank() && provider.voiceId.isNotBlank() }
             is TTSProviderSetting.Step -> { endpoint = provider.baseUrl; key = provider.apiKey; modelAndVoicePresent = provider.model.isNotBlank() && provider.voice.isNotBlank() }
+            is TTSProviderSetting.DeepSeek -> { endpoint = "https://api.deepseek.com"; key = provider.apiKey; modelAndVoicePresent = provider.voice in setOf("stella", "tide") }
             // Fish can select a default voice without reference_id.
             is TTSProviderSetting.FishAudio -> { endpoint = provider.baseUrl; key = provider.apiKey; modelAndVoicePresent = provider.model.isNotBlank() }
             is TTSProviderSetting.Volcengine -> {
@@ -154,7 +156,7 @@ internal object OrbisVoiceCallPreflight {
 
     private val batchSampleRates = setOf(8000, 16000, 24000, 32000, 44100, 48000)
     private val authenticatedSpeechHosts = setOf(
-        "api.siliconflow.cn", "api.siliconflow.com", "api.openai.com", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "openspeech.bytedance.com",
+        "api.deepseek.com", "api.siliconflow.cn", "api.siliconflow.com", "api.openai.com", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "openspeech.bytedance.com",
         "api.xiaomimimo.com", "api.stepfun.com", "generativelanguage.googleapis.com", "api.minimaxi.com",
         "api.minimax.io", "api.minimax.chat", "api.groq.com", "api.x.ai", "api.elevenlabs.io", "api.fish.audio",
     )

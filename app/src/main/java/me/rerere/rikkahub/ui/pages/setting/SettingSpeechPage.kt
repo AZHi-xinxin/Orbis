@@ -587,6 +587,10 @@ private fun AddASRProviderButton(onAdd: (ASRProviderSetting) -> Unit) {
                 }
             )
             DropdownMenuItem(
+                text = { Text("DeepSeek") },
+                onClick = { currentProvider = ASRProviderSetting.DeepSeek(); showTypeMenu = false; showBottomSheet = true }
+            )
+            DropdownMenuItem(
                 text = { Text("Step") },
                 onClick = {
                     currentProvider = ASRProviderSetting.Step()
@@ -718,6 +722,7 @@ private fun TTSProviderItem(
                             is TTSProviderSetting.XAI -> "xAI"
                             is TTSProviderSetting.MiMo -> "MiMo"
                             is TTSProviderSetting.Step -> "Step"
+                            is TTSProviderSetting.DeepSeek -> "DeepSeek"
                             is TTSProviderSetting.ElevenLabs -> "ElevenLabs"
                             is TTSProviderSetting.FishAudio -> "Fish Audio"
                             is TTSProviderSetting.Volcengine -> "豆包 TTS 2.0"
@@ -863,6 +868,7 @@ private fun ASRProviderItem(
                             is ASRProviderSetting.MiMo -> "MiMo"
                             is ASRProviderSetting.Step -> "Step"
                             is ASRProviderSetting.SiliconFlow -> "硅基流动"
+                            is ASRProviderSetting.DeepSeek -> "DeepSeek"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

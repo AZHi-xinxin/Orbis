@@ -98,7 +98,7 @@ internal fun OrbisCloudConnectionEditor(
     var retrying by remember { mutableStateOf(false) }
     var retryError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(
             onDismissRequest = { if (!saving) onDismiss() },

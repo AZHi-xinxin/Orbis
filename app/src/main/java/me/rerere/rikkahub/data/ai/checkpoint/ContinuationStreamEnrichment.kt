@@ -10,15 +10,16 @@ import me.rerere.rikkahub.data.model.MessageNode
  * limits recovery to unfinished, selected assistant prose moving forward. It is NOT a
  * general prefix merge: other branches, human edits, tool receipts and ownership stay exact.
  */
-internal fun isProvenContinuationTextAdvance(before: MessageNode, after: MessageNode): Boolean {
+internal fun isProvenContinuationTextAdvance(before: MessageNode, after: MessageNode,
+    allowUnchangedExecutedTools: Boolean = false): Boolean {
     if (before.id != after.id || before.selectIndex != after.selectIndex ||
         before.messages.size != after.messages.size) return false
     return before.messages.zip(after.messages).all { (a, b) ->
         if (a == b) true else {
             if (a.id != before.currentMessage.id || a.role != MessageRole.ASSISTANT || a.finishedAt != null ||
                 a.isSynthetic || a.orbisEvent != null || a.deletedToolRecords.isNotEmpty() ||
-                a.parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Reasoning } ||
-                b.parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Reasoning } ||
+                a.parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Reasoning &&
+                    !(allowUnchangedExecutedTools && it is UIMessagePart.Tool && it.isExecuted) } ||
                 b.parts.size < a.parts.size || b.finishedAt?.let { it < a.createdAt } == true ||
                 a.copy(parts = b.parts, finishedAt = b.finishedAt, usage = b.usage) != b) return false
             a.parts.zip(b.parts).all { (old, next) ->
@@ -32,7 +33,8 @@ internal fun isProvenContinuationTextAdvance(before: MessageNode, after: Message
                     else -> false
                 }
             } && b.parts.drop(a.parts.size).all { part ->
-                part !is UIMessagePart.Reasoning || part.finishedAt?.let { it >= part.createdAt } != false
+                part is UIMessagePart.Text || part is UIMessagePart.Reasoning &&
+                    part.finishedAt?.let { it >= part.createdAt } != false
             }
         }
     }
@@ -58,15 +60,33 @@ internal class ContinuationStreamEnrichment private constructor(
 
     fun projectMessages(messages: List<UIMessage>): List<UIMessage>? = messages.map { message ->
         val (before, after) = changes[message.id] ?: return@map message
-        if (message.role != before.role || message.parts.size != before.parts.size) return null
-        val parts = message.parts.mapIndexed { index, part ->
-            val old = before.parts[index]; val saved = after.parts[index]
-            if (old == saved) part else when {
+        if (message.parts.size !in before.parts.size..after.parts.size ||
+            message.finishedAt != before.finishedAt && message.finishedAt != after.finishedAt ||
+            message.usage != before.usage && message.usage != after.usage ||
+            message.copy(parts = before.parts, finishedAt = before.finishedAt, usage = before.usage,
+                orbisRecalled = before.orbisRecalled, orbisQuoteRecalled = before.orbisQuoteRecalled) != before)
+            return null
+        val parts = after.parts.mapIndexed { index, saved ->
+            val old = before.parts.getOrNull(index)
+            val part = message.parts.getOrNull(index)
+            if (old == null) {
+                // Only the journal's exact appended parts are admitted. A locally stopped
+                // reasoning timer may already be closed; never reopen or replace that timer.
+                when {
+                    part == null || part == saved -> saved
+                    part is UIMessagePart.Reasoning && saved is UIMessagePart.Reasoning &&
+                        part.copy(finishedAt = saved.finishedAt) == saved &&
+                        part.finishedAt?.let { it >= part.createdAt } == true -> part
+                    else -> return null
+                }
+            } else when {
+                old == saved && part == old -> part
                 old is UIMessagePart.Reasoning && saved is UIMessagePart.Reasoning && part is UIMessagePart.Reasoning -> {
-                    if (part.copy(reasoning = old.reasoning, finishedAt = old.finishedAt) != old) return null
+                    if (part.copy(reasoning = old.reasoning, finishedAt = old.finishedAt) != old ||
+                        part.finishedAt?.let { it < part.createdAt } == true) return null
                     when {
                         saved.reasoning.startsWith(part.reasoning) && part.reasoning.startsWith(old.reasoning) ->
-                            part.copy(reasoning = saved.reasoning)
+                            part.copy(reasoning = saved.reasoning, finishedAt = part.finishedAt ?: saved.finishedAt)
                         part.reasoning.startsWith(saved.reasoning) -> part
                         else -> return null
                     }
@@ -82,7 +102,7 @@ internal class ContinuationStreamEnrichment private constructor(
                 else -> return null
             }
         }
-        if (parts == message.parts) message else message.copy(parts = parts)
+        message.copy(parts = parts, finishedAt = message.finishedAt ?: after.finishedAt, usage = after.usage)
     }
 
     companion object {
@@ -92,22 +112,9 @@ internal class ContinuationStreamEnrichment private constructor(
                 before.messageNodes.size != after.messageNodes.size) return null
             val changes = mutableMapOf<kotlin.uuid.Uuid, Pair<UIMessage, UIMessage>>()
             for ((left, right) in before.messageNodes.zip(after.messageNodes)) {
-                if (left.id != right.id || left.selectIndex != right.selectIndex || left.messages.size != right.messages.size) return null
+                if (!isProvenContinuationTextAdvance(left, right, allowUnchangedExecutedTools = true)) return null
                 for ((a, b) in left.messages.zip(right.messages)) {
                     if (a == b) continue
-                    if (a.role != MessageRole.ASSISTANT || a.isSynthetic || a.orbisEvent != null) return null
-                    if (a.copy(parts = b.parts) != b || a.parts.size != b.parts.size) return null
-                    for ((x, y) in a.parts.zip(b.parts)) {
-                        if (x == y) continue
-                        val extends = when {
-                            x is UIMessagePart.Reasoning && y is UIMessagePart.Reasoning ->
-                                x.finishedAt == null && x.copy(reasoning = y.reasoning) == y && y.reasoning.startsWith(x.reasoning)
-                            x is UIMessagePart.Text && y is UIMessagePart.Text ->
-                                a.finishedAt == null && x.copy(text = y.text) == y && y.text.startsWith(x.text)
-                            else -> false
-                        }
-                        if (!extends) return null
-                    }
                     changes[a.id] = a to b
                 }
             }

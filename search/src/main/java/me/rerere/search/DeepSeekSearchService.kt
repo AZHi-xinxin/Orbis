@@ -50,10 +50,15 @@ object DeepSeekSearchService : SearchService<SearchServiceOptions.DeepSeekOption
 
     override fun parameters(options: SearchServiceOptions.DeepSeekOptions): InputSchema = InputSchema.Obj(
         properties = buildJsonObject {
+            if (options.allowDeepResearch) put("mode", buildJsonObject {
+                put("type", "string")
+                put("enum", kotlinx.serialization.json.JsonArray(listOf("search", "research").map(::JsonPrimitive)))
+                put("description", "search: direct results (query <=128 characters). research: ask DeepSeek Flash to research a focused question with citations (<=4000 characters); extra model and multiple web-call fees. Only send the research question, never private conversation or persona.")
+            })
             put("query", buildJsonObject {
                 put("type", "string")
                 put("minLength", 1)
-                put("maxLength", 128)
+                put("maxLength", if (options.allowDeepResearch) 4000 else 128)
                 put("description", "Focused search query (1–128 Unicode characters). Supports site:, -site:, lang:, after:, before: and quoted phrases; include these only when relevant.")
             })
         }, required = listOf("query"))
@@ -69,8 +74,15 @@ object DeepSeekSearchService : SearchService<SearchServiceOptions.DeepSeekOption
 
     override suspend fun search(params: JsonObject, commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.DeepSeekOptions): Result<SearchResult> = safely {
-        val body = searchBody(params, commonOptions.resultSize)
-        parseSearch(post("search", body, serviceOptions))
+        val mode = string(params, "mode") ?: "search"
+        require(mode in setOf("search", "research")) { "不支持的 DeepSeek 搜索模式。" }
+        if (mode == "research") {
+            check(serviceOptions.allowDeepResearch) { "请先在搜索设置中开启 DeepSeek 深度检索。" }
+            DeepSeekResearch.search(string(params, "query").orEmpty(), keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString()))
+        } else {
+            val body = searchBody(params, commonOptions.resultSize)
+            parseSearch(post("search", body, serviceOptions))
+        }
     }
 
     override suspend fun scrape(params: JsonObject, commonOptions: SearchCommonOptions,

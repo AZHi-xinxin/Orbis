@@ -19,6 +19,13 @@ import java.util.Locale
 
 object DeviceContextSnapshot {
     const val SCHEMA_VERSION = "lc-device-context/0.1"
+    /** A narrow projection for explicitly approved plugins; never collects notification/location text. */
+    fun pluginForeground(context: Context): JSONObject {
+        if(!DeviceContextSettings.isEnabled(context)) return JSONObject().put("ok",false).put("error","device_context_disabled")
+        val fact=foregroundApp(context,System.currentTimeMillis())
+        if(fact==null || fact.optString("freshness")!="fresh") return JSONObject().put("ok",false).put("error","foreground_observation_unavailable_or_stale")
+        return JSONObject().put("ok",true).put("observation",fact).put("note","最近一次前台观察；不证明此刻仍在同一应用。")
+    }
 
     fun build(
         context: Context,

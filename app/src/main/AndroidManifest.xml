@@ -94,6 +94,9 @@
       <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
       <meta-data android:name="android.appwidget.provider" android:resource="@xml/orbis_character_widget_info" />
     </receiver>
+    <service android:name=".data.orbis.plugins.PluginSandboxService"
+      android:exported="false" android:isolatedProcess="true" android:process=":personal_plugin"
+      android:stopWithTask="true" />
     <service android:name=".data.orbis.music.OrbisMusicService" android:exported="true" android:foregroundServiceType="mediaPlayback">
       <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
     </service>
@@ -179,6 +182,11 @@
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
         android:value="User-controlled local assistant wake schedules and authorized device observations" />
     </service>
+    <service android:name=".service.TabletopCompanionService" android:exported="false"
+      android:stopWithTask="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="User-joined multiplayer game companion connection and notifications with visible pause control" />
+    </service>
     <receiver android:name=".service.OrbisSentinelReceiver" android:exported="false">
       <intent-filter>
         <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -225,6 +233,13 @@
         android:value="androidx.startup"
         tools:node="remove" />
     </provider>
+    <service android:name=".data.orbis.agentwork.PhoneControlService"
+      android:label="@string/orbis_phone_control_label"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+      android:exported="true">
+      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+      <meta-data android:name="android.accessibilityservice" android:resource="@xml/orbis_phone_control" />
+    </service>
   </application>
 
 </manifest>

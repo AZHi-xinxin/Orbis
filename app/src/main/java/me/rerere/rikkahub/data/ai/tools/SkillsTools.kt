@@ -4,12 +4,16 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.rerere.ai.core.InputSchema
 import me.rerere.ai.core.Tool
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.files.SkillFrontmatterParser
 import me.rerere.rikkahub.data.files.SkillMetadata
 import me.rerere.rikkahub.data.files.SkillPaths
+import me.rerere.rikkahub.data.orbis.skills.WorkspaceSkillFailure
 
 fun createSkillTools(
     enabledSkills: Set<String>,
@@ -58,23 +62,26 @@ fun createSkillTools(
                     required = listOf("name")
                 )
             },
-            execute = {
+            execute = { workspaceSkillReceipt("use_skill") {
                 val name = it.jsonObject["name"]?.jsonPrimitive?.content
                     ?: error("name is required")
                 val skill = available.firstOrNull { skill -> skill.name == name }
-                    ?: error("Skill '$name' is not available. Available skills: ${available.joinToString { it.name }}")
+                    ?: throw WorkspaceSkillFailure("skill_not_available", "此name不在当前AI已启用的技能清单中。请核对清单；工作区新登记的技能应通过orbis_skill_register(operation=read,name=技能名)读取。")
                 val path = it.jsonObject["path"]?.jsonPrimitive?.content
-                val content = if (path.isNullOrBlank()) {
-                    require(skill.skillFile.exists()) { "Skill '$name' not found" }
-                    SkillFrontmatterParser.extractBody(skill.skillFile.readText())
-                } else {
-                    val target = SkillPaths.resolveSkillFile(skill.skillDir, path)
-                        ?: error("Path '$path' is outside the skill directory")
-                    require(target.exists()) { "File '$path' not found in skill '$name'" }
-                    target.readText()
+                val content = withContext(Dispatchers.IO) {
+                    val target = if(path.isNullOrBlank()) skill.skillFile else {
+                        SkillPaths.resolveSkillFile(skill.skillDir, path)
+                            ?: throw WorkspaceSkillFailure("skill_path_denied", "参考文件path必须位于此技能目录内，不能读取外部路径。")
+                    }
+                    if(!target.isFile) throw WorkspaceSkillFailure("skill_file_missing", "技能文件不存在或不是普通文件，请核对SKILL.md及其引用文件，未读取其他目录。")
+                    try {
+                        val text=target.readText()
+                        if(path.isNullOrBlank()) SkillFrontmatterParser.extractBody(text) else text
+                    } catch(e:CancellationException) { throw e }
+                    catch(e:Exception) { throw WorkspaceSkillFailure("skill_file_unreadable", "技能文件无法读取，请核对文件与读取权限。", cause=e) }
                 }
                 listOf(UIMessagePart.Text(content))
-            }
+            } }
         )
     )
 }

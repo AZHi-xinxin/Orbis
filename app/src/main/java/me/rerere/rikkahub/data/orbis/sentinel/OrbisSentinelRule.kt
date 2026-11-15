@@ -48,6 +48,10 @@ enum class OrbisSentinelRearm {
 @Serializable
 data class OrbisSentinelBinding(val assistantId: String, val conversationId: String)
 
+/** Host-only origin. JS/tool parameters cannot choose or remove this binding. */
+@Serializable
+data class OrbisSentinelPlugin(val id: String, val hash: String, val permission: String)
+
 @Serializable
 data class OrbisSentinelRule(
     val id: String = UUID.randomUUID().toString(),
@@ -95,6 +99,7 @@ data class OrbisSentinelRule(
     val lastError: String? = null,
     /** Scheduler-owned durable decisions. Never accepted from a configuration edit. */
     val policy: OrbisSentinelPolicyState = OrbisSentinelPolicyState(),
+    val plugin: OrbisSentinelPlugin? = null,
 ) {
     val binding: OrbisSentinelBinding get() = OrbisSentinelBinding(assistantId, conversationId)
 }

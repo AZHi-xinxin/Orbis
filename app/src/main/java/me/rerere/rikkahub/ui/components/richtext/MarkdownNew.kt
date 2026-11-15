@@ -73,13 +73,19 @@ import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.toDp
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import org.intellij.markdown.IElementType
+import org.intellij.markdown.MarkdownElementTypes
+import org.intellij.markdown.ast.ASTNode
+import org.intellij.markdown.html.GeneratingProvider
 import org.intellij.markdown.html.HtmlGenerator
+import org.intellij.markdown.parser.LinkMap
 import org.intellij.markdown.parser.MarkdownParser
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
+import java.net.URI
 
 // ---- Preprocessing (mirrors Markdown.kt logic) ----
 
@@ -104,7 +110,17 @@ private fun preProcess(content: String): String {
 // ---- HTML generation ----
 
 private val flavour by lazy {
-    GFMFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true)
+    object : GFMFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true) {
+        override fun createHtmlGeneratingProviders(linkMap: LinkMap, baseURI: URI?): Map<IElementType, GeneratingProvider> {
+            val providers = super.createHtmlGeneratingProviders(linkMap, baseURI)
+            val inlineLink = providers.getValue(MarkdownElementTypes.INLINE_LINK)
+            return providers + (MarkdownElementTypes.INLINE_LINK to object : GeneratingProvider {
+                override fun processNode(visitor: HtmlGenerator.HtmlGeneratingVisitor, text: String, node: ASTNode) {
+                    inlineLink.processNode(visitor, text, node.withCompatibleLinkDestination())
+                }
+            })
+        }
+    }
 }
 
 private val parser by lazy { MarkdownParser(flavour) }
@@ -139,16 +155,18 @@ fun MarkdownNew(
         }
     }
 
-    if (document == null) {
-        Text(
-            text = if (parseFailed) "此段内容暂时无法显示。" else "…",
-            modifier = modifier.padding(start = 4.dp),
-            style = style,
-        )
-    } else ProvideTextStyle(style) {
-        Column(modifier = modifier.padding(start = 4.dp)) {
-            document.body().childNodes().fastForEach { node ->
-                HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+    MarkdownLinkFeedback {
+        if (document == null) {
+            Text(
+                text = if (parseFailed) "此段内容暂时无法显示。" else "…",
+                modifier = modifier.padding(start = 4.dp),
+                style = style,
+            )
+        } else ProvideTextStyle(style) {
+            Column(modifier = modifier.padding(start = 4.dp)) {
+                document.body().childNodes().fastForEach { node ->
+                    HtmlBodyNode(node = node, onClickCitation = onClickCitation)
+                }
             }
         }
     }

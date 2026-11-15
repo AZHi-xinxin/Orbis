@@ -188,7 +188,7 @@ class OrbisVoiceCallForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_rikkahub)
+            .setSmallIcon(R.drawable.ic_stat_orbis)
             .setContentTitle(state.title.ifBlank { "语音通话" })
             .setContentText(when {
                 runtime.voiceSession.state.value.replyBlocked -> "回复已暂停 · 通话保留，点此检查"

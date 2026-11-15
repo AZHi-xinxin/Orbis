@@ -73,7 +73,9 @@ internal fun OrbisChatMessageLayout(
         if (message.role != MessageRole.USER) OrbisChatMessageAvatar(message, model, assistant, loading)
         if (segmentedReply) {
             CompositionLocalProvider(
-                LocalOrbisChatTextColor provides (me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body?.colors?.text
+                LocalOrbisChatTextColor provides (me.rerere.rikkahub.ui.pages.orbis.LocalChatTheme.current?.body?.bubbles?.let {
+                    if (message.role == MessageRole.USER) it.user.text else it.assistant.text
+                }
                     ?.let { Color(android.graphics.Color.parseColor(it)) }
                     ?: appearance.normalized().chatTextColor?.let { Color(it) }),
             ) {

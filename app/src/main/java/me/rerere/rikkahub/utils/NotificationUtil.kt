@@ -19,7 +19,7 @@ class NotificationConfig {
     var title: String = ""
     var content: String = ""
     var subText: String? = null
-    var smallIcon: Int = R.drawable.ic_stat_rikkahub
+    var smallIcon: Int = R.drawable.ic_stat_orbis
     var autoCancel: Boolean = false
     var ongoing: Boolean = false
     var onlyAlertOnce: Boolean = false

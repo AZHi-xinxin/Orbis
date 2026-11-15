@@ -316,6 +316,7 @@ private fun createShellTool(
                     if (result.capabilityError != null) {
                         put("status", "failed")
                         put("reason_code", "workspace_shell_unavailable")
+                        put("capability_code", result.capabilityError)
                         put("execution_performed", JsonNull)
                         put("message", "当前环境无法运行工作区 Linux 命令；文件工具仍可独立使用。不要重复执行，不会降级到宿主 shell。")
                     }

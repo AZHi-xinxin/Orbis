@@ -24,6 +24,10 @@ data class UIMessage(
     val finishedAt: LocalDateTime? = null,
     val modelId: Uuid? = null,
     val configuredModelReceipt: ConfiguredModelReceipt? = null,
+    /** Local approval continuation metadata, excluded from provider message DTOs. */
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+    val orbisApprovalToolCatalog: ApprovalToolCatalog? = null,
     val usage: TokenUsage? = null,
     /** Historical usage remains visible after a manual history edit, but is not a current budget anchor. */
     val usageContextInvalidated: Boolean = false,

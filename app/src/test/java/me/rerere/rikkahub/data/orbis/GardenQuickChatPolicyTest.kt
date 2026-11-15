@@ -16,6 +16,14 @@ class GardenQuickChatPolicyTest {
         initialized = true,
     )
 
+    @Test fun selectedImageCanBeSentWithoutTextButNotWithoutTheOriginalOwner() {
+        assertNull(gardenQuickChatSendBlockReason(ready, "", hasAttachments = true))
+        assertEquals("garden_quick_chat_owner_changed",
+            gardenQuickChatSendBlockReason(ready.copy(conversationAssistantId = "other"), "", hasAttachments = true))
+        assertTrue(canClearGardenQuickChatDraft("window", "window", 2, 2, "", "", hasAttachments = true))
+        assertFalse(canClearGardenQuickChatDraft("window", "window", 3, 2, "", "", hasAttachments = true))
+    }
+
     @Test fun existingInitializedConversationForCapturedCurrentAssistantCanSend() {
         assertTrue(gardenQuickChatTargetAllowed(ready))
         assertNull(gardenQuickChatSendBlockReason(ready, "A message explicitly typed by the user"))

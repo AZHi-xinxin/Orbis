@@ -7,6 +7,11 @@ import me.rerere.ai.core.Tool
  */
 internal data class OrbisToolDocumentation(val summary: String, val details: String)
 internal val orbisToolDocumentation = mapOf(
+    "orbis_conversation_settings" to OrbisToolDocumentation(
+        "读写当前聊天“对话设置”中的提示词与世界书。inspect读取；update修改text/enabled/world_book_text/world_book_enabled。省略字段保留原值，保存后下轮生效。",
+        "人类在当前助手设置→本地工具开启“允许AI修改本会话提示词和世界书”后可用。action=inspect读取当前值；action=update仅提交要修改的字段：text为补充提示词，enabled为其开关，world_book_text为本会话世界书正文，world_book_enabled为世界书开关。省略字段保持原值；空字符串清空正文；关闭开关保留正文。按人类要求编辑，保留未要求修改的内容。写入的就是聊天→对话设置里的同一份记录，不修改助手主提示词、全局世界书或其他窗口。世界书是整段随该会话发送的背景，不是关键词触发库。成功回执status=saved，从下一轮回复生效，本轮工具链继续使用开始时的配置。未成功保存不能声称已改好。",
+    ),
+    "orbis_community" to OrbisToolDocumentation(me.rerere.rikkahub.data.orbis.community.COMMUNITY_TOOL_SUMMARY, me.rerere.rikkahub.data.orbis.community.COMMUNITY_TOOL_GUIDE),
     "orbis_music" to OrbisToolDocumentation(me.rerere.rikkahub.data.orbis.music.MUSIC_SUMMARY, me.rerere.rikkahub.data.orbis.music.MUSIC_GUIDE),
     "orbis_body" to OrbisToolDocumentation(
         "当前助手的身体表达模拟。先rules查看定义、revision和setup；按提示完成设置。修改规则用pause→draft→activate→resume，写入带最新expected_revision。首次规则默认auto，由新人类消息自动计算，auto禁用event/undo；state读值。私密层由AI共享与人类展开共同控制。创建规则前查完整说明；规则/数值不是生理测量。",
@@ -26,7 +31,7 @@ internal val orbisToolDocumentation = mapOf(
     ),
     "orbis_theme" to OrbisToolDocumentation(
         "设计当前助手聊天外观。先list查看授权；首次写主题先查完整说明或action=guide。write写JSON字符串草稿；小改优先read→patch同一id，仅传改动字段；publish用expected_revision，apply用revision。按人类授权直接应用或等待预览确认。import_asset只接受/workspace/已有图片；revert回退。主题仅绘图数据。",
-        "为当前助手设计聊天外观，默认关闭。action=list/read/guide/write/patch/publish/apply/revert/delete/import_asset。小改动必须优先patch已有主题id，body仅传更改字段；不传的字段保留，null移除可选字段，数组整组替换。publish和apply继续同一id，不增一套主题。guide返回完整自由绘制规格与可运行示例。先list读取授权；人类打开“交给AI自由装扮”后，新建主题也能通过write→publish→apply立即更换，不再每套确认。import_asset传path=/workspace/内已有图片，返回asset文件名；可做背景或气泡角标。write只写数据草稿，body为JSON字符串，最多32KiB；新建不传id，修改需id和expected_revision，不能修改人类主题或其他助手。publish校验草稿并生成不可变版本；apply带id和revision，只请求人类在侧栏“自定义美化”预览确认，人类全局允许AI装扮或对该主题开启自动应用时直接生效。revert一步回到上次已用外观，不改全局手工设置。list也列出人类导入的图片asset名称。schemaVersion=1,name,basedOn=builtin:default；缺省字段继承内置值。colors含background/surface/primary/onPrimary/text/textSecondary，均#RRGGBB；typography:{fontFamily:default|sans|serif|monospace|NotoSerifSC,fontSizeScale:0.85到1.4,lineHeight:1.2到2,weight:100到900,italic:boolean,letterSpacing:-0.05到0.2em}，NotoSerifSC使用系统衬线后备；bubbles:{assistant:{bg,text,radius:0到32,padding:6到24,maxWidthRatio:0.55到1,opacity:0到1(默认1，只改变底色/花纹/尾巴，文字与角标不透明),tail:none|cat|curl,shape:round|cat|rabbit|ticket|speech,pattern:none|dots|stars|gingham,decoration:none|paw|heart|star,decorationAsset:可选已导入文件名,typography:可选独立字体样式,drawing:自由向量轮廓/渐变/描边/动画图层，详见guide},user:{同上}}；background:{type:solid|image,asset:已导入文件名,dim:0到0.8,scroll:fixed}，assets:[该文件名]，纯色不带asset。chrome:{dock,onDock,star,composer,onComposer}可选#RRGGBB，控制底栏、星星与输入框。颜色仍用#RRGGBB，透明度单独用opacity，不使用8位颜色。透明气泡遇到壁纸时请通过预览检查文字；文字需足够对比度。主题正文禁止脚本、CSS、远程URL、文件路径；只有import_asset接受当前助手工作区路径。不会修改系统栏或输入法，不读取聊天正文。",
+        "为当前助手设计聊天外观，默认关闭。action=list/read/guide/write/patch/publish/apply/revert/delete/import_asset。小改动必须优先patch已有主题id，body仅传更改字段；不传的字段保留，null移除可选字段，数组整组替换。publish和apply继续同一id，不增一套主题。guide返回完整自由绘制规格与可运行示例。先list读取授权；人类打开“交给AI自由装扮”后，新建主题也能通过write→publish→apply立即更换，不再每套确认。import_asset传path=/workspace/内已有图片，返回asset文件名；可做背景或气泡角标。write只写数据草稿，body为JSON字符串，最多32KiB；新建不传id，修改需id和expected_revision，不能修改人类主题或其他助手。publish校验草稿并生成不可变版本；apply带id和revision，只请求人类在侧栏“自定义美化”预览确认，人类全局允许AI装扮或对该主题开启自动应用时直接生效。revert一步回到上次已用外观，不改全局手工设置。list也列出人类导入的图片asset名称。schemaVersion=1,name,basedOn=builtin:default；缺省字段继承内置值。colors含background/surface/primary/onPrimary/text/textSecondary，均#RRGGBB；typography:{fontFamily:default|sans|serif|monospace|NotoSerifSC,fontSizeScale:0.85到1.4,lineHeight:1.2到2,weight:100到900,italic:boolean,letterSpacing:-0.05到0.2em}，NotoSerifSC使用系统衬线后备；bubbles:{assistant:{bg,text,radius:0到32,padding:6到24,maxWidthRatio:0.55到1,opacity:0到1(默认1，只改变底色/花纹/尾巴，文字与角标不透明),tail:none|cat|curl,shape:round|cat|rabbit|ticket|speech,pattern:none|dots|stars|gingham,decoration:none|paw|heart|star,decorationAsset:可选已导入文件名,material:可选原生毛玻璃frosted或液态玻璃liquid(模糊/折光/色散/流光参数见guide),stickers:最多4个自由图片/矢量边缘贴纸(见guide),texture:可选羽毛冰花ice或导入图片纹理image(见guide),typography:可选独立字体样式,drawing:自由向量轮廓/渐变/描边/动画图层，详见guide},user:{同上}}；background:{type:solid|image,asset:已导入文件名,dim:0到0.8,scroll:fixed}，assets:[该文件名]，纯色不带asset。chrome:{dock,onDock,star,composer,onComposer}可选#RRGGBB，控制底栏、星星与输入框。chrome还支持surface共享材质及composerSurface/dockSurface/starSurface独立材质，可用同款流动液态金属玻璃、毛玻璃或冰花纹理；参数见guide。颜色仍用#RRGGBB，透明度单独用opacity，不使用8位颜色。透明气泡遇到壁纸时请通过预览检查文字；文字需足够对比度。主题正文禁止脚本、CSS、远程URL、文件路径；只有import_asset接受当前助手工作区路径。不会修改系统栏或输入法，不读取聊天正文。",
     ),
     "orbis_configure" to OrbisToolDocumentation(
         "管理原生模型、TTS、记忆和工作区。inspect默认读当前设置；section=providers/models/tts/mcp分页查目录，可用query/provider_id筛选。首次配置查完整说明。chat模型和记忆仅当前助手，其余工具模型与TTS全应用共享。check发真实短测试，可能计费；queued后继续回复，check_status查结果。新连接用orbis_propose_connection；安装ST先workspace_status。回执不含密钥。",
@@ -48,9 +53,10 @@ action=check 后台检查连接；action=save_now 安排一次独立即时存档
 action=restore_latest 是人类明确要求找回资料时才用的恢复命令：后台等当前回复/通话结束，下载并校验最新完整存档，暂存后提示重启，不自动重启或清数据。首次绑定发现服务器原有存档会保护原件，不能反复save强行覆盖。返回queued就继续正常回复，不等轮询、不重复提交。无额外安全码；重装需从应用外恢复连接文件重新绑定。""",
     ),
     "orbis_memory" to OrbisToolDocumentation(
-        "本助手跨窗口本机便签，与ST独立。仅传body默认完整保存为static；read按id/query及offset/limit查询，update改指定字段，delete软删，history查版本，restore恢复。set_state选择static/conditional/pinned/paused；暂停只停浮现。AI自行决定内容与状态，不自动合并或截断原文；轻档不自动带入，关闭自动带入仍可存查。",
+        "本助手跨窗口本机便签，与ST独立。开启跨助手记忆时可访问同样开启的库，libraries列出范围，library_id限定库。仅传body默认完整保存为static；read按id/query及offset/limit查询，update改指定字段，delete软删，history查版本，restore恢复。set_state选择static/conditional/pinned/paused；暂停只停浮现。AI自行决定内容与状态，不自动合并或截断原文；轻档不自动带入，关闭自动带入仍可存查。",
         """
         你的本机随身便签，同一助手跨窗口可用，与 ST 和旧记忆库独立。一个工具完成存、改、删、看、设状态；不需要人类审批。
+        人类在本机助手记忆页开启「跨助手记忆」后，同样开启的助手库连通。action=libraries查询当前可访问库和助手名；read默认检索这些库，library_id可限定其中一个。新记忆默认存当前库，更新/删除/恢复按ID定位原库；同ID多库时用library_id明确。库开关由人类设置，AI不能自行扩大范围。原归属、状态和版本保留；关闭不删除或搬迁。标准/独立档在原预算内补充连通库的常驻及关键词命中资料，标注来源；轻档仍只按需查询。语义索引仍处理本助手的旧摘要。没有后台自动整理，内容维护由AI自己决定。
         存：只传 body 即可；可选 summary、tags、keywords、important、state。正文完整保存，默认 static（仅存），不自动提炼或改写。
         可选 emotion=暖/软/要/闷/烦/冷/火，仅保存你自标的情绪，不做语义猜测；不填兼容旧记录，传null清除。不改身体计算值、不依赖ST。
         读：action=read，可用 id 或 query；支持 offset/limit 分页。改：action=update、id 和要修改的字段。删：action=delete、id，为可恢复的软删。

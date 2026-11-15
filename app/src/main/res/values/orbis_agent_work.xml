@@ -1,0 +1,4 @@
+<resources>
+    <string name="orbis_phone_control_label">Orbis 手机操作</string>
+    <string name="orbis_phone_control_description">在你为当前助手开启手机操作并选择允许的应用后，按需读取界面、点击、输入和滚动。读取的界面文字会发送给你配置的模型服务。不会在后台持续记录屏幕，不操作密码、锁屏或系统授权页面；可随时在 Orbis 或系统关闭。</string>
+</resources>

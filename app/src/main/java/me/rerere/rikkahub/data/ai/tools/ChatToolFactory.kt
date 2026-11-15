@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.data.ai.tools
 
+import me.rerere.rikkahub.data.ai.mcp.mcpModelName
+import me.rerere.rikkahub.data.ai.mcp.requireUniqueMcpModelNames
+import me.rerere.rikkahub.data.ai.mcp.withMcpModelName
+
 import me.rerere.rikkahub.data.model.recallableAiReplies
 
 import android.util.Log
@@ -86,8 +90,33 @@ class ChatToolFactory(
         onWorkshopAccepted: ((me.rerere.rikkahub.data.orbis.workshop.WorkshopJob) -> Unit)? = null,
         readActiveConversation: (suspend () -> me.rerere.rikkahub.data.model.Conversation?)? = null,
         recallOwnMessage: (suspend (kotlin.uuid.Uuid) -> Boolean)? = null,
+        updateConversationPrompt: (suspend ((me.rerere.rikkahub.data.model.OrbisConversationPrompt) ->
+            me.rerere.rikkahub.data.model.OrbisConversationPrompt) -> me.rerere.rikkahub.data.model.OrbisConversationPrompt)? = null,
+        expectedTurnEvent: me.rerere.ai.ui.OrbisEventMetadata? = null,
     ): List<Tool> = buildList {
         if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null) {
+            if(conversationId!=null && voiceCallId==null) {
+                val tabletop=me.rerere.rikkahub.data.orbis.tabletop.TabletopConversationHost.get(context)
+                // A human may continue with this assistant in any of its windows.
+                if(expectedTurnEvent==null) tabletop.useConversation(assistant.id.toString(),conversationId)
+                addAll(tabletop.tools(assistant.id.toString(),me.rerere.ai.provider.Modality.IMAGE in model.inputModalities))
+                if(LocalToolOption.HeartPrison in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.tabletop.heartPrisonLobbyTool(context,assistant.id.toString(),conversationId) {
+                        settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.HeartPrison)==true
+                    })
+                }
+                if(LocalToolOption.DrawGuess in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.tabletop.drawGuessLobbyTool(context,assistant.id.toString(),conversationId) {
+                        settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.DrawGuess)==true
+                    })
+                }
+                if(LocalToolOption.Werewolf in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.tabletop.werewolfLobbyTool(context,assistant.id.toString(),conversationId) {
+                        settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.Werewolf)==true
+                    })
+                }
+            }
+
             if (assistant.allowHumanThought) add(humanThoughtTool(assistant.id,
                 { settingsStore.settingsFlow.value }, { transform -> settingsStore.update(transform) }))
             if (settings.aiGlobalObservation) add(observationWindowsTool(
@@ -101,12 +130,22 @@ class ChatToolFactory(
                     else queue.offer(conversationId, proposal, guide)
                 }
             })
-            if (LocalToolOption.SelfCheck in assistant.localTools) {
+            if (LocalToolOption.SelfCheck in assistant.localTools || LocalToolOption.AgentWork in assistant.localTools) {
                 val selfCheck = me.rerere.rikkahub.data.orbis.diagnostics.SelfCheckHost(context, settingsStore, mcpManager, workspaceRepository)
                 add(createOrbisSelfCheckTool(
-                    enabled = { settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.SelfCheck) == true },
+                    enabled = { settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.any {
+                        it == LocalToolOption.SelfCheck || it == LocalToolOption.AgentWork } == true },
                     check = { selfCheck.check(assistant.id.toString(), it, conversationId) },
                 ))
+            }
+            if (LocalToolOption.AgentWork in assistant.localTools) {
+                add(me.rerere.rikkahub.data.orbis.agentwork.discoveryTool { emptyList() })
+                if (conversationId != null) add(me.rerere.rikkahub.data.orbis.agentwork.taskTool(
+                    me.rerere.rikkahub.data.orbis.agentwork.agentTasks(context, assistant.id.toString()), conversationId,
+                    enabled = { settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.AgentWork) == true }))
+            }
+            if (LocalToolOption.PhoneControl in assistant.localTools && conversationId != null) {
+                add(me.rerere.rikkahub.data.orbis.agentwork.PhoneControlHost(context, assistant.id.toString(), conversationId, settingsStore).tool())
             }
             var stRuntimeWorkspaceForRun: String? = null
             add(orbisSelfConfigurationTool(settingsStore, assistant.id.toString(), context, mcpManager, workspaceRepository,
@@ -172,7 +211,17 @@ class ChatToolFactory(
             add(buildOrbisMemoryTool(assistant.id.toString(),
                 assistantExists = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
                 readOnly = consultationReferenceOnly,
-                executeMemory = orbisMemoryRepository::execute))
+                libraries = { me.rerere.rikkahub.data.orbis.memory.sharedMemoryOwners(assistant.id,
+                    (settingsStore?.settingsFlow?.value ?: settings).assistants) },
+                executeMemory = { owner, request, key ->
+                    val owners = me.rerere.rikkahub.data.orbis.memory.sharedMemoryOwners(assistant.id,
+                        (settingsStore?.settingsFlow?.value ?: settings).assistants).keys
+                    val result = orbisMemoryRepository.executeShared(owner, owners, request, key)
+                    val liveOwners = me.rerere.rikkahub.data.orbis.memory.sharedMemoryOwners(assistant.id,
+                        (settingsStore?.settingsFlow?.value ?: settings).assistants).keys
+                    if (!liveOwners.containsAll(owners)) memoryToolError("memory_scope_changed", "记忆连通范围已变更，请按当前设置重新查询。")
+                    else result
+                }))
         }
         if (me.rerere.rikkahub.data.ai.legacyMemoryEnabled(assistant.enableMemory)) {
             val memoryAssistantId = if (assistant.useGlobalMemory) {
@@ -195,7 +244,13 @@ class ChatToolFactory(
         addAll(withContext(Dispatchers.IO) { localTools.getTools(assistant.localTools,
             conversationId?.let { OrbisNotificationSpeechScope(assistant.id.toString(), it) }) })
         if (assistant.enableRecentChatsReference) {
-            addAll(createConversationTools(conversationRepository, assistant.id))
+            addAll(createConversationTools(conversationRepository, assistant.id,
+                allAssistants = assistant.orbisHistoryAcrossAssistants,
+                enabled = {
+                    val live = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                    live?.enableRecentChatsReference == true &&
+                        live.orbisHistoryAcrossAssistants == assistant.orbisHistoryAcrossAssistants
+                }))
         }
         if (assistant.workspaceId == null) {
             hostWorkspaceId(assistant, consultationReferenceOnly)?.let { expectedId ->
@@ -204,6 +259,25 @@ class ChatToolFactory(
             }
         } else {
             addAll(createWorkspaceToolsIfReady(assistant.workspaceId.toString(), workspaceCwd, consultationReferenceOnly))
+        }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null && LocalToolOption.SkillBinding in assistant.localTools) {
+            assistant.workspaceId?.toString()?.let { workspace ->
+                add(workspaceSkillTool(context,assistant.id.toString(),workspace,workspaceRepository) {
+                    settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.let {live->
+                        live.workspaceId?.toString()==workspace && LocalToolOption.SkillBinding in live.localTools
+                    }==true
+                })
+            }
+        }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null &&
+            LocalToolOption.TabletopSubmission in assistant.localTools && voiceCallId == null) {
+            assistant.workspaceId?.toString()?.let { workspace ->
+                add(me.rerere.rikkahub.data.orbis.tabletop.tabletopSubmissionTool(context,assistant.id.toString(),workspace,workspaceRepository) {
+                    settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.let { live ->
+                        live.workspaceId?.toString()==workspace && LocalToolOption.TabletopSubmission in live.localTools
+                    }==true
+                })
+            }
         }
         if (assistant.enabledSkills.isNotEmpty()) {
             addAll(
@@ -230,7 +304,7 @@ class ChatToolFactory(
                 val server = settings.mcpServers.first { it.id == serverId }
                 val store = entries.firstOrNull { it.third.name == "store_memory_image" } ?: entries.first()
                 StImageDestination(serverId, approvalFingerprint(json.encodeToString(server)), store.second,
-                    "mcp__${store.second}__${store.third.name}")
+                    mcpModelName("mcp__${store.second}__${store.third.name}"))
             }
         val imageConversationId = conversationId?.let(kotlin.uuid.Uuid::parse)
         // The active continuation can be newer than Room. Use the SAME owner-bound source
@@ -240,6 +314,33 @@ class ChatToolFactory(
             else imageConversationId?.let { conversationRepository.getConversationById(it) })
                 ?.takeIf { it.id == imageConversationId && it.assistantId == assistant.id }
         }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && conversationId != null) {
+            val currentEvent = readBoundConversation()?.currentMessages?.lastOrNull {
+                it.role == me.rerere.ai.core.MessageRole.USER
+            }?.orbisEvent
+            val preparation = me.rerere.rikkahub.data.orbis.market.prepareMarketSave(
+                expectedTurnEvent, currentEvent, assistant.id.toString(), conversationId,
+                LocalToolOption.LocalGallery in assistant.localTools,
+            ) { id -> me.rerere.rikkahub.data.orbis.market.MarketDeliveries(context).read(id) }
+            preparation.diagnostic?.let { code ->
+                me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(
+                    context, assistant.id.toString(), "tool", code)
+            }
+            val marketEvent = preparation.event
+            val delivery = preparation.delivery
+            if (marketEvent != null && delivery != null) {
+                add(me.rerere.rikkahub.data.orbis.market.marketSaveTool(context, delivery) {
+                    val live = settingsStore?.settingsFlow?.value?.getAssistantById(assistant.id)
+                    val event = org.koin.core.context.GlobalContext.get().get<me.rerere.rikkahub.service.ChatService>()
+                        .orbisEvents.inbox.get(marketEvent.recordId)
+                    live != null && (delivery.category == "extra" || LocalToolOption.LocalGallery in live.localTools) &&
+                        readBoundConversation()?.currentMessages?.lastOrNull { it.role == me.rerere.ai.core.MessageRole.USER }
+                            ?.orbisEvent?.recordId == marketEvent.recordId &&
+                        event != null && event.state in setOf("generating", "pending_tool") &&
+                        me.rerere.rikkahub.data.orbis.sentinel.OrbisSentinels.open(context).mayDeliver(event)
+                })
+            }
+        }
         val presentChatImage: suspend (me.rerere.ai.ui.UIMessagePart.Image) -> List<me.rerere.ai.ui.UIMessagePart> = { image ->
             val ctx = me.rerere.rikkahub.data.ai.transformers.TransformerContext(context, model, assistant, settings)
             val message = me.rerere.ai.ui.UIMessage.user("").copy(parts = listOf(image))
@@ -247,6 +348,18 @@ class ChatToolFactory(
             else if (image.url.startsWith("file:"))
                 me.rerere.rikkahub.data.ai.transformers.OcrTransformer.transform(ctx, listOf(message)).single().parts
             else listOf(me.rerere.ai.ui.UIMessagePart.Text("当前模型不支持直接看图，且此图片无法使用本地识别；不要假定已看到。"))
+        }
+        if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && settingsStore != null &&
+            LocalToolOption.Community in assistant.localTools && conversationId != null && voiceCallId == null) {
+            val allowed = { settingsStore.settingsFlow.value.getAssistantById(assistant.id)?.localTools?.contains(LocalToolOption.Community)==true }
+            val images = readBoundConversation()?.let { current ->
+                me.rerere.rikkahub.data.orbis.community.CommunityChatImages.capture(current,readBoundConversation) {
+                    check(allowed()) { "社区参与已关闭" }
+                }
+            }
+            add(me.rerere.rikkahub.data.orbis.community.CommunityRuntime.tool(context,assistant.id.toString(),conversationId,
+                supportsImages = me.rerere.ai.provider.Modality.IMAGE in model.inputModalities,
+                allowed = allowed, chatImages = images))
         }
         if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && imageConversationId != null &&
             !assistant.sendHistoryImages && imageSourceMessageIds != null) {
@@ -259,6 +372,14 @@ class ChatToolFactory(
             }
         }
         if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && imageConversationId != null) {
+            if (LocalToolOption.ConversationSettings in assistant.localTools && updateConversationPrompt != null) {
+                add(createOrbisConversationSettingsTool(
+                    enabled = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                        ?.localTools?.contains(LocalToolOption.ConversationSettings) == true },
+                    read = { checkNotNull(readBoundConversation()) { "当前会话已不存在" }.orbisPrompt },
+                    update = updateConversationPrompt,
+                ))
+            }
             add(createOrbisConversationHistoryTool(assistant.id, imageConversationId, readBoundConversation,
                 listRemoved = { current, limit, offset -> conversationRepository.listRemovedHistory(current, limit, offset) },
                 readRemoved = { current, message -> conversationRepository.readRemovedHistory(current, message) },
@@ -326,7 +447,7 @@ class ChatToolFactory(
                         mcpSelected() && me.rerere.rikkahub.data.ai.mcp.mcpApprovalCurrent(server, tool, current)
                     },
                     execute = { mcpManager.callTool(serverId, tool.name, it.jsonObject) },
-                )
+                ).withMcpModelName()
             add(if (bridgeImageTool) wrapStImageUploadTool(definition, tool.name, imageScope!!, imageDestination!!,
                 stImageAttachments, readImageConversation, readImageOriginal, stage = { ref, original ->
                     check(imageTargetsCurrent()) { "st_image_target_changed" }
@@ -336,6 +457,10 @@ class ChatToolFactory(
         if (BuildConfig.ORBIS_ENABLED) {
             if (!consultationReferenceOnly) {
                 fun liveOwner() = (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id)
+                if (LocalToolOption.PersonalPlugins in assistant.localTools && settingsStore != null) {
+                    addAll(me.rerere.rikkahub.data.orbis.plugins.personalPluginTools(
+                        me.rerere.rikkahub.data.orbis.plugins.PluginHost(context, assistant.id.toString(), settingsStore, workspaceRepository, conversationId)))
+                }
                 if (LocalToolOption.HumanHealth in assistant.localTools) {
                     add(me.rerere.rikkahub.data.orbis.health.healthTool(context, assistant.id.toString(),
                         { liveOwner()?.localTools?.contains(LocalToolOption.HumanHealth) == true }))
@@ -370,6 +495,19 @@ class ChatToolFactory(
                 }
                 if (assistant.orbisPetEnabled) add(petTool({ liveOwner()?.orbisPetEnabled == true }, { action, text ->
                     me.rerere.rikkahub.data.orbis.activities.PetAiRuntime.enqueue(context, assistant.id.toString(), action, text)
+                }, artwork = { action, state ->
+                    val id=checkNotNull(state.pet).appearance
+                    val assets=me.rerere.rikkahub.data.orbis.activities.PetArtDownloads
+                    if(action=="install_art") assets.download(context,id)
+                    val spec=assets.catalog(context).packages.getValue(id)
+                    kotlinx.serialization.json.buildJsonObject {
+                        put("appearance",kotlinx.serialization.json.JsonPrimitive(id))
+                        put("download_url",kotlinx.serialization.json.JsonPrimitive(assets.url(context,id)))
+                        put("bytes",kotlinx.serialization.json.JsonPrimitive(spec.bytes))
+                        put("sha256",kotlinx.serialization.json.JsonPrimitive(spec.sha256))
+                        put("installed",kotlinx.serialization.json.JsonPrimitive(assets.store(context).ready(id)))
+                        put("guide",kotlinx.serialization.json.JsonPrimitive("工具与娱乐→宠物区→布置。原画单独获取；install_art可直接安装当前宠物，不必在工作区下载。三种房间色用decorate切换，用户自定义图片不会被替换。"))
+                    }
                 }) {
                     me.rerere.rikkahub.data.orbis.activities.OrbisActivities.pet(context, assistant.id.toString())
                 })
@@ -479,7 +617,11 @@ class ChatToolFactory(
                     onNewAccepted = onWorkshopAccepted,
                     chatImages = if (imageSourceMessageIds == null) null else readBoundConversation()?.let { ChatImageReadScope.capture(it, imageSourceMessageIds) },
                     readChat = readBoundConversation, presentImage = presentChatImage))
-                addAll(createOrbisCompanionSpaceTools(context, assistant.id.toString()))
+                addAll(createOrbisCompanionSpaceTools(context, assistant.id.toString(),
+                    chatImages = if (conversationId == null || voiceCallId != null) null else readBoundConversation()?.let { current ->
+                        PhotoWallChatImages.capture(current, readBoundConversation,
+                            load = { image -> loadPhotoWallChatImage(context, image) }, present = presentChatImage)
+                    }))
                 if (conversationId != null) addAll(createOrbisScreenShareTools(context, assistant.id.toString(), conversationId))
                 if (conversationId != null) addAll(createOrbisVideoCallTools(context, assistant.id.toString(),
                     conversationId, voiceCallId, allowAmbientCallBinding))
@@ -509,8 +651,13 @@ class ChatToolFactory(
             })
         }
     }.let { builtTools ->
+        requireUniqueMcpModelNames(builtTools.map { it.name })
         val boundary = me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context)
         val ownerId = assistant.id.toString()
+        val originalMcpNames = mcpToolsForAssistant(settings, assistant).associate { (_, name, tool) ->
+            val original = "mcp__${name}__${tool.name}"
+            mcpModelName(original) to original
+        }
         val tools = if (BuildConfig.ORBIS_ENABLED && !consultationReferenceOnly && boundary.state(ownerId).grants.isNotEmpty()) builtTools +
             createBoundaryTool(boundary, ownerId, conversationId, catalog = {
                 val live = settingsStore?.settingsFlow?.value ?: settings
@@ -520,7 +667,7 @@ class ChatToolFactory(
                         model.tools.associate { me.rerere.rikkahub.data.orbis.boundary.builtinBoundaryId(it) to "模型内置 $it" }))
             }, toolSources = {
                 mcpToolsForAssistant(settings, assistant).associate { (id, name, tool) ->
-                    "mcp__${name}__${tool.name}" to id.toString()
+                    mcpModelName("mcp__${name}__${tool.name}") to id.toString()
                 }
             }, bindingCurrent = { (settingsStore?.settingsFlow?.value ?: settings).getAssistantById(assistant.id) != null },
                 verifyConversation = {
@@ -538,6 +685,8 @@ class ChatToolFactory(
             if (tool.name in setOf("toy_bluetooth_stop", "toy_lab_stop", "end_voice_call")) return true
             if (boundary.pause(ownerId, conversationId) != null && !boundaryPauseAllowed()) return false
             if (!boundary.permits(ownerId, "tool", tool.name)) return false
+            // A prior denial under the original name must survive the model alias upgrade.
+            if (originalMcpNames[tool.name]?.let { !boundary.permits(ownerId, "tool", it) } == true) return false
             return true // MCP-specific selection is bound to the server ID in the tool itself.
         }
         val compactDescriptions = BuildConfig.ORBIS_ENABLED && boundary.permits(ownerId, "tool", ORBIS_HELP_TOOL_NAME)
@@ -568,7 +717,8 @@ class ChatToolFactory(
                         live.enableMemory == assistant.enableMemory &&
                         live.useGlobalMemory == assistant.useGlobalMemory &&
                         live.enabledSkills == assistant.enabledSkills &&
-                        live.enableRecentChatsReference == assistant.enableRecentChatsReference
+                        live.enableRecentChatsReference == assistant.enableRecentChatsReference &&
+                        live.orbisHistoryAcrossAssistants == assistant.orbisHistoryAcrossAssistants
                 })
                 // Emergency stop does not become inaccessible when its family is disabled.
                 (tool.name in setOf("toy_bluetooth_stop", "toy_lab_stop", "end_voice_call") || selectionCurrent) && selected(tool) && tool.isApprovalCurrent()
@@ -583,14 +733,18 @@ class ChatToolFactory(
                         if (part.text.length > 32 * 1024) null else runCatching { json.parseToJsonElement(part.text) as? kotlinx.serialization.json.JsonObject }.getOrNull()
                     }.firstOrNull { it["ok"] == kotlinx.serialization.json.JsonPrimitive(false) }?.let { failure ->
                         val code = me.rerere.rikkahub.data.orbis.diagnostics.toolDiagnosticCode(failure)
-                        me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, ownerId,
+                        if(tool.name in setOf("orbis_skill_register", "use_skill")) {
+                            me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.recordSkillFailure(context, ownerId, code, tool.name,
+                                if(tool.name=="use_skill") "read" else ((args as? kotlinx.serialization.json.JsonObject)?.get("operation") as? kotlinx.serialization.json.JsonPrimitive)?.content,
+                                (failure["diagnostic_id"] as? kotlinx.serialization.json.JsonPrimitive)?.content)
+                        } else me.rerere.rikkahub.data.orbis.diagnostics.DiagnosticJournal.record(context, ownerId,
                             if (tool.name == "orbis_theme") "theme" else "tool", code)
                     }
                 }
                 result
             })
         }
-    }
+    }.let { me.rerere.rikkahub.data.orbis.agentwork.refreshDiscovery(it) }
 
     private suspend fun createWorkspaceToolsIfReady(workspaceId: String?, cwd: String?, consultationReferenceOnly: Boolean): List<Tool> {
         if (workspaceId.isNullOrBlank()) return emptyList()

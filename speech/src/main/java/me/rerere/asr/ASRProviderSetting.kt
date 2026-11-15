@@ -16,7 +16,7 @@ sealed class ASRProviderSetting {
     /** MiMo/Step use local speech endpointing plus HTTP transcription, not server VAD. */
     val supportsVoiceCall: Boolean
         get() = when (this) {
-            is OpenAIRealtime, is DashScope, is Volcengine, is MiMo, is Step, is SiliconFlow -> true
+            is OpenAIRealtime, is DashScope, is Volcengine, is MiMo, is Step, is SiliconFlow, is DeepSeek -> true
         }
 
     abstract fun copyProvider(
@@ -194,6 +194,16 @@ sealed class ASRProviderSetting {
         }
     }
 
+    @Serializable
+    @SerialName("deepseek")
+    data class DeepSeek(
+        override val id: Uuid = Uuid.random(),
+        override val name: String = "DeepSeek ASR",
+        val apiKey: String = "",
+    ) : ASRProviderSetting() {
+        override fun copyProvider(id: Uuid, name: String): ASRProviderSetting = copy(id = id, name = name)
+    }
+
     companion object {
         val Types by lazy {
             listOf(
@@ -203,6 +213,7 @@ sealed class ASRProviderSetting {
                 MiMo::class,
                 Step::class,
                 SiliconFlow::class,
+                DeepSeek::class,
             )
         }
     }

@@ -66,7 +66,7 @@ internal fun OrbisGardenWeb(config: OrbisCloudHomeConfig, onOpenChat: () -> Unit
         val id = importing; importing = null
         if (id != null) {
             if (uri == null || uri.scheme != "content") reply(id, error = "已取消导入。")
-            else scope.launch {
+            else scope.launch(Dispatchers.Main.immediate) {
                 try {
                     val data = withContext(Dispatchers.IO) {
                         val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
@@ -87,7 +87,7 @@ internal fun OrbisGardenWeb(config: OrbisCloudHomeConfig, onOpenChat: () -> Unit
         val id = importingLibrary; importingLibrary = null
         if (id != null) {
             if (uri == null) reply(id, buildJsonObject { put("cancelled", true) })
-            else scope.launch {
+            else scope.launch(Dispatchers.Main.immediate) {
                 try {
                     val data = withContext(Dispatchers.IO) {
                         require(uri.scheme == "content")
@@ -109,7 +109,7 @@ internal fun OrbisGardenWeb(config: OrbisCloudHomeConfig, onOpenChat: () -> Unit
         val pending = exportingLibrary; exportingLibrary = null
         if (pending != null) {
             if (uri == null) reply(pending.requestId, buildJsonObject { put("cancelled", true) })
-            else scope.launch {
+            else scope.launch(Dispatchers.Main.immediate) {
                 try {
                     withContext(Dispatchers.IO) {
                         require(uri.scheme == "content")
@@ -167,7 +167,7 @@ internal fun OrbisGardenWeb(config: OrbisCloudHomeConfig, onOpenChat: () -> Unit
                     val id = root["id"]?.jsonPrimitive?.content?.takeIf { it.matches(Regex("[0-9]{1,12}")) } ?: return@addWebMessageListener
                     if (id in active || active.size >= 8) return@addWebMessageListener
                     active.add(id)
-                    scope.launch {
+                    scope.launch(Dispatchers.Main.immediate) {
                         try {
                             require(root.keys == setOf("id", "action", "payload"))
                             val args = root.getValue("payload").jsonObject
@@ -230,7 +230,14 @@ internal fun OrbisGardenWeb(config: OrbisCloudHomeConfig, onOpenChat: () -> Unit
             exportingLibrary?.let { reply(it.requestId, buildJsonObject { put("cancelled", true) }) }; exportingLibrary = null
         }, title = { Text("导出藏书阁备份？") },
         text = { Text("文件包含本机书籍全文、书签、进度和批注，为明文 JSON。不会包含聊天或模型配置。选择云盘保存位置时，由你选择的云盘应用处理；请自行妥善保管。") },
-        confirmButton = { TextButton(onClick = { confirmLibraryExport = false; libraryExporter.launch("Orbis-藏书阁-${LocalDate.now()}.json") }) { Text("选择保存位置") } },
+        confirmButton = { TextButton(onClick = {
+            confirmLibraryExport = false
+            try { libraryExporter.launch("Orbis-藏书阁-${LocalDate.now()}.json") }
+            catch (_: Exception) {
+                exportingLibrary?.let { reply(it.requestId, error = "无法打开系统保存入口，请检查系统文件管理器后重试；原书库保留。") }
+                exportingLibrary = null
+            }
+        }) { Text("选择保存位置") } },
         dismissButton = { TextButton(onClick = { confirmLibraryExport = false
             exportingLibrary?.let { reply(it.requestId, buildJsonObject { put("cancelled", true) }) }; exportingLibrary = null
         }) { Text("取消") } },

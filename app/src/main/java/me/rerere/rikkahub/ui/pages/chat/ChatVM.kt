@@ -675,12 +675,10 @@ class ChatVM(
         return persistOrbisGenerationParameters(edit, settingsStore::update)
     }
 
-    fun updateTitle(title: String) {
-        viewModelScope.launch {
-            val updatedConversation = conversation.value.copy(title = title)
-            chatService.saveConversation(_conversationId, updatedConversation)
-        }
-    }
+    // Match the drawer's metadata-only path. The visible history may be paged,
+    // compacted, or holding an interrupted generation; it is not a save snapshot.
+    suspend fun updateTitle(title: String): Boolean =
+        chatService.renameConversation(_conversationId, title)
 
     fun deleteConversation(conversation: Conversation): Job =
         viewModelScope.launch {

@@ -55,7 +55,7 @@ class BackupVM(
     private fun importAssistantName(id: kotlin.uuid.Uuid): String? = settingsStore.settingsFlow.value.let {
         if (it.init) null else it.assistants.firstOrNull { assistant -> assistant.id == id }?.name
     }
-    val deepSeekImport = DeepSeekImportController(context, viewModelScope, conversationRepository,
+    val deepSeekImport = DeepSeekImportController(context, viewModelScope, conversationRepository, filesManager = filesManager,
         assistantName = ::importAssistantName) {
         check(!settings.value.init)
         settings.value.assistantId

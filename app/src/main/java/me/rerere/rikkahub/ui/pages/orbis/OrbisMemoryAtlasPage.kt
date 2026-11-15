@@ -190,7 +190,7 @@ fun OrbisMemoryAtlasPage(hostVisible: Boolean = true, assistantIdOverride: Strin
         paused -> "自转已暂停 · 可手动旋转"
         else -> "轻牵星云 · 松手归位 · 双指缩放 · 轻触星点"
     }
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         Scaffold(containerColor = Color(0xFF080A17),
             topBar = {
                 OrbisPageHeader(title = "记忆星盘", subtitle = if (source == OrbisAtlasSource.LOCAL) "本机 · 状态、时间与标签族" else "${source.label} · 时间、类型与关联",

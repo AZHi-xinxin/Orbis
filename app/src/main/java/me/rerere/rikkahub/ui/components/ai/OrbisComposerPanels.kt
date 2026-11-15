@@ -20,6 +20,19 @@ import me.rerere.rikkahub.data.model.OrbisComposerAction
 import me.rerere.rikkahub.data.model.orbisQuickEmotions
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 import me.rerere.rikkahub.ui.pages.orbis.LocalOrbisDeepSeekStyle
+import me.rerere.rikkahub.ui.pages.orbis.OrbisInterfaceTheme
+
+/** Controls use paired interface colors, independent of a translucent chat material. */
+@Composable
+internal fun OrbisComposerControls(content: @Composable ColumnScope.() -> Unit) {
+    OrbisInterfaceTheme {
+        Surface(color = OrbisTheme.colors.panel, contentColor = OrbisTheme.colors.ink,
+            shape = RoundedCornerShape(16.dp), modifier = Modifier.testTag("orbis-composer-controls")) {
+            Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content)
+        }
+    }
+}
 
 @Composable
 internal fun OrbisComposerTab(label: String, selected: Boolean = false, onClick: () -> Unit) {

@@ -3,6 +3,8 @@ package me.rerere.rikkahub.data.orbis.character
 import android.app.Application
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
@@ -36,6 +38,8 @@ class CharacterWidgetSettingsDeviceTest {
         val qemu = instrumentation.uiAutomation.executeShellCommand("getprop ro.kernel.qemu")
         check(android.os.ParcelFileDescriptor.AutoCloseInputStream(qemu).bufferedReader().use { it.readText().trim() } == "1")
         val context = instrumentation.targetContext
+        val preferences=context.getSharedPreferences("rikkahub.preferences",android.content.Context.MODE_PRIVATE)
+        val oldMode=preferences.getString("colorMode",null)
         assertEquals(Application::class.java, context.applicationContext.javaClass)
         check(GlobalContext.getOrNull() == null)
         val owner = Assistant(name = "阿止 · 界面验收")
@@ -60,9 +64,14 @@ class CharacterWidgetSettingsDeviceTest {
             bitmap.recycle()
         }
         try {
+            check(preferences.edit().putString("colorMode","DARK").commit())
             val intent = Intent(context, OrbisCharacterActivity::class.java).putExtra("character_owner", owner.id.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ActivityScenario.launch<OrbisCharacterActivity>(intent).use { scenario ->
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("widget-tile-cloud-blue").fetchSemanticsNodes().isNotEmpty() }
+                fun edgeLuminance():Float = compose.onRoot().captureToImage().toPixelMap().let { it[2,it.height/2].luminance() }
+                assertTrue("Standalone widget editor follows saved night mode",edgeLuminance()<.2f)
+                compose.runOnIdle { check(preferences.edit().putString("colorMode","LIGHT").commit()) }
+                compose.waitUntil(5_000) { edgeLuminance()>.7f }
                 compose.onNodeWithTag("widget-effect-preview").assertIsDisplayed()
                 compose.onNodeWithTag("widget-tile-cloud-blue").assertIsDisplayed()
                 compose.onNodeWithTag("widget-tile-peach-cream").performClick()
@@ -99,6 +108,9 @@ class CharacterWidgetSettingsDeviceTest {
                 compose.onNodeWithText("高级设置").performScrollTo().performClick()
                 compose.onNodeWithText("全屏互动开发中，入口暂未开放；已有房间素材与台词保留。").performScrollTo().assertIsDisplayed()
             }
-        } finally { stopKoin() }
+        } finally {
+            preferences.edit().apply { if(oldMode==null) remove("colorMode") else putString("colorMode",oldMode) }.commit()
+            stopKoin()
+        }
     }
 }

@@ -178,10 +178,8 @@ fun Route.conversationRoutes(
         // POST /api/conversations/{id}/pin - Toggle pinned status
         post("/{id}/pin") {
             val uuid = call.parameters["id"].toUuid("conversation id")
-            val conversation = conversationRepo.getConversationById(uuid)
-                ?: throw NotFoundException("Conversation not found")
-
-            chatService.saveConversation(uuid, conversation.copy(isPinned = !conversation.isPinned))
+            if (!conversationRepo.existsConversationById(uuid)) throw NotFoundException("Conversation not found")
+            conversationRepo.togglePinStatus(uuid)
             call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
         }
 

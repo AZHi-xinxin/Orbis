@@ -82,12 +82,44 @@ internal object AiConfigurationChecks {
                     when (probeKind) {
                         "model" -> {
                             val (model, provider) = modelTarget(settings, id)
-                            val response = ProviderManager(client, context).getProviderByType(provider, me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context).requestContext(owner).check).generateText(provider,
+                            val probeSession = Uuid.random().toString()
+                            val probeHeaders = connectionProbeHeaders(
+                                AiConfigurationRules.requireOwner(settings, owner).customHeaders + model.customHeaders, probeSession)
+                            // /models needs the same connection headers. This interceptor is
+                            // local to this probe and this exact URL, never a global HTTP client.
+                            val probeClient = if (provider is ProviderSetting.OpenAI) client.newBuilder()
+                                .addInterceptor { chain ->
+                                    val request = chain.request()
+                                    val builder = request.newBuilder()
+                                    if (request.method == "GET" && request.url.toString() == "${provider.baseUrl}/models") {
+                                        probeHeaders.forEach { builder.header(it.name, it.value) }
+                                        if (request.url.host == "opencode.ai") builder.header("x-opencode-session", probeSession)
+                                    }
+                                    chain.proceed(builder.build())
+                                }.build() else client
+                            val engine = ProviderManager(probeClient, context).getProviderByType(provider,
+                                me.rerere.rikkahub.data.orbis.boundary.BoundaryHost.get(context).requestContext(owner).check)
+                            // A background check against ST's chat alias is a NEW human turn
+                            // and supersedes the tool chain that requested this check. Discover
+                            // its advertised auxiliary alias first; never fall back after errors.
+                            val probeModel = if (provider is ProviderSetting.OpenAI) {
+                                val advertised = try { engine.listModels(provider) }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { throw ModelConnectionProbeFailure("probe_catalog_unavailable") }
+                                connectionProbeModel(model, advertised)
+                            } else model.copy(tools = emptySet(), customHeaders = emptyList(), customBodies = emptyList())
+                            check(validateTarget(store.settingsFlow.value, owner, probeKind, id) == identity) { "configuration_changed" }
+                            val response = engine.generateText(provider,
                                 listOf(UIMessage.user("Reply with OK.")),
-                                TextGenerationParams(model = model.copy(tools = emptySet(), customHeaders = emptyList(), customBodies = emptyList()),
+                                TextGenerationParams(model = probeModel,
+                                    customHeaders = probeHeaders, sessionId = probeSession,
                                     maxTokens = 16, reasoningLevel = ReasoningLevel.OFF, tools = emptyList(), maxAutomaticContinuations = 0))
                             check(response.message.toText().isNotBlank() && response.message.getTools().isEmpty()) { "empty_or_tool_response" }
-                            buildJsonObject { put("probe", "short_text_response"); put("playback_tested", false) }
+                            buildJsonObject {
+                                put("probe", "short_text_response"); put("playback_tested", false)
+                                put("auxiliary_route", probeModel.modelId.endsWith("--auxiliary-no-memory"))
+                                put("chat_tool_continuation_tested", false)
+                            }
                         }
                         "tts" -> {
                             val provider = settings.ttsProviders.single { it.id.toString() == id }
@@ -161,7 +193,7 @@ internal object AiConfigurationChecks {
         val assistant = AiConfigurationRules.requireOwner(settings, owner)
         Uuid.parse(id)
         return when (kind) {
-            "model" -> modelTarget(settings, id)
+            "model" -> modelTarget(settings, id) to assistant.customHeaders
             "tts" -> settings.ttsProviders.singleOrNull { it.id.toString() == id } ?: error("tts_missing")
             "mcp" -> {
                 val server = settings.mcpServers.singleOrNull { it.id.toString() == id && it.id in assistant.mcpServers }
@@ -179,7 +211,14 @@ internal object AiConfigurationChecks {
     }
 
     internal fun failure(error: Exception): JsonObject = buildJsonObject {
-        if (error is HttpException) {
+        if (error is ModelConnectionProbeFailure) {
+            put("reason", error.code)
+            put("message", when (error.code) {
+                "probe_auxiliary_alias_missing" -> "此服务没有为所选模型提供对应的独立辅助型号，未发送测试消息；请核对服务模型目录。"
+                "probe_model_not_advertised" -> "服务模型目录未列出所选型号，未发送测试消息；请核对准确型号。"
+                else -> "模型目录暂时无法读取，未发送测试消息，以免连接检查打断正在进行的聊天；请检查服务的模型列表接口。"
+            })
+        } else if (error is HttpException) {
             put("reason", "http_error")
             error.httpStatus?.takeIf { it in 100..599 }?.let { put("http_status", it) }
             safeRejectedParameter(error.rejectedParameter)?.let { put("rejected_parameter", it) }

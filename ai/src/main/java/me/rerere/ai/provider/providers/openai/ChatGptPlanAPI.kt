@@ -116,6 +116,12 @@ internal fun buildChatGptPlanBody(base: JsonObject): JsonObject = buildJsonObjec
     put("input", buildJsonArray {
         (base["input"] as? JsonArray).orEmpty().forEach { raw ->
             val item = raw.jsonObject
+            // Non-stored Responses can replay native reasoning only with its encrypted state.
+            // Other providers' visible thinking / imported summaries are not native GPT items:
+            // reasoning.content is rejected (array_above_max_length) on the plan route.
+            // Filter only this wire copy; keep saved history, text and tool pairs unchanged.
+            if (item["type"]?.jsonPrimitive?.contentOrNull == "reasoning" &&
+                item["encrypted_content"]?.jsonPrimitive?.contentOrNull.isNullOrBlank()) return@forEach
             add(buildJsonObject {
                 item.forEach { (key, value) -> put(key, value) }
                 if (item["role"]?.jsonPrimitive?.contentOrNull == "system") put("role", "developer")

@@ -10,6 +10,7 @@ internal fun conversationInputTransformers(
     add(TimeReminderTransformer)
     add(PromptInjectionTransformer)
     add(PlaceholderTransformer)
+    add(DeepSeekAttachmentTransformer)
     add(DocumentAsPromptTransformer)
     add(OcrTransformer)
     add(OrbisEventTransformer)

@@ -28,6 +28,9 @@ internal class SelfCheckHost(private val context: Context, private val settings:
         val a = AiConfigurationRules.requireOwner(snapshot, owner)
         val boundary = BoundaryHost.get(context).state(owner)
         val items = selfCheckConfiguration(snapshot, owner, focus, boundary, conversationId).toMutableList()
+        items.add(SelfCheckItem("fault_report_entry","闪退与按钮故障报告","info",
+            "配置自检与系统退出记录是两类证据；未分类故障不能据此确定闪退原因。",
+            "人类打开自检→故障记录与导出，开启30分钟记录，复现一次，重开后导出并自行分享；也可从设置→关于进入。不会收集聊天或密钥，不自动上传。","human"))
         fun add(code: String, title: String, status: String, evidence: String, next: String, by: String = "human") {
             items.add(SelfCheckItem(code, title, status, evidence, next, by))
         }
@@ -106,14 +109,31 @@ internal class SelfCheckHost(private val context: Context, private val settings:
             schemas.take(1000).forEachIndexed { index, (serverId, tool) ->
                 tool.inputSchema?.let { schema ->
                     val codes = me.rerere.ai.provider.providers.google.googleToolSchemaIssueCodes(Json.encodeToJsonElement(schema))
-                    if (codes.isNotEmpty() && failures++ < 10) add("schema_$index", "工具参数结构需核对", "blocked",
-                        "MCP id=$serverId；已选目录序号=${index + 1}；结构代码=${codes.joinToString()}。",
-                        "设置→MCP→对应连接→刷新工具目录。缺items等结构需由服务定义修正；不要把联合类型强改成数组来掩盖问题。", "developer")
+                    if (codes.isNotEmpty() && failures++ < 10) add("schema_$index", "工具参数兼容性线索", "info",
+                        "MCP id=$serverId；已选目录序号=${index + 1}；Google原生协议转换副本的结构代码=${codes.joinToString()}。此检查不禁用工具，也不证明当前模型请求被拒绝。",
+                        "先核对实际请求协议及错误卡。当前若是OpenAI兼容或Anthropic，不能把Google转换副本的提示直接当成该协议故障；需要时由对应MCP服务维护者核对定义，不猜填items类型。", "developer")
                 }
             }
-            add("schema_summary", "MCP参数结构检查", if (failures == 0) "info" else "blocked",
-                "检查${schemas.size.coerceAtMost(1000)}个已选工具，发现${failures}项线索，最多展示10项；本次只检查数组items与类型转换，不是完整远端兼容认证。",
-                "Google原生协议的本机转换会保留anyOf分支内items；如仍报400，请保留实际错误卡与本报告，核对中转或服务端转换。")
+            add("schema_summary", "MCP参数兼容性检查", "info",
+                "检查${schemas.size.coerceAtMost(1000)}个已选工具的Google原生协议转换副本，发现${failures}项线索，最多展示10项；不增删或禁用工具，不证明工具目录被截断，也不是完整远端兼容认证。",
+                "本次只检查数组items与类型转换；需结合当前实际协议和错误卡核对。工具名不在目录与参数结构拒绝是不同问题，不根据本报告合并定因。")
+        }
+        if (focus in setOf("tools", "permissions")) section("phone_control") {
+            val selected = me.rerere.rikkahub.data.ai.tools.local.LocalToolOption.PhoneControl in a.localTools
+            val connected = me.rerere.rikkahub.data.orbis.agentwork.PhoneControlService.instance != null
+            val count = me.rerere.rikkahub.data.orbis.agentwork.PhoneGrants(context,owner).read().size
+            add("phone_control_status", "通用手机操作", if (selected && (!connected || count == 0)) "blocked" else "info",
+                "当前助手开关=$selected；系统服务已连接=$connected；已选应用数=$count。未读取屏幕或执行操作。",
+                "工具与娱乐→任务与能力→手机操作。开启助手开关、选择允许应用，再由人类启用Orbis手机操作无障碍服务。")
+        }
+        if (focus == "tools") section("prepared_tools") {
+            val receipt = me.rerere.rikkahub.data.orbis.agentwork.catalogPrefs(context).getString(owner,null)?.let {
+                Json.decodeFromString<me.rerere.rikkahub.data.orbis.agentwork.AgentCatalogReceipt>(it)
+            }
+            add("prepared_tool_catalog", "最近工具目录记录", "info",
+                receipt?.let { "本机准备${it.names.size}项函数工具，记录时间=${it.at}；未核对服务商实际接收数量，数量本身不能证明目录被截断。" }
+                    ?: "没有近期目录记录。开启工具发现后发起新一轮生成可记录。",
+                "工具与娱乐→任务与能力→工具与诊断查看名称；AI可调用orbis_tool_discover按用途查找。本项不会自动收起工具；只有核实服务商报数量超限后，才按需由人类手动收起暂不用的工具。")
         }
         if (focus == "workspace") section("workspace") {
             val ready = workspace.readiness(a.workspaceId?.toString())

@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
@@ -80,6 +81,10 @@ class OrbisMessageAppearanceTest {
             kotlin.math.abs(actual.blue - expected.blue) < .025f && actual.alpha > .97f
 
     private fun textColor(text: String): Color {
+        // Markdown parsing may finish after Compose's first idle frame.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
         val results = mutableListOf<TextLayoutResult>()
         compose.onNodeWithText(text, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action -> action(results) }

@@ -95,10 +95,31 @@ class WorkspaceNativeFiles(
     }
 
     @Synchronized
-    fun writeText(path: List<String>, text: String, overwrite: Boolean): WorkspaceNativeStat {
+    fun copyBounded(path: List<String>, output: java.io.OutputStream, maxBytes: Long): WorkspaceNativeStat = withParent(path, false) { parent, name ->
+        parent.read(name).use { input ->
+            val before = input.stat()
+            require(before.size in 1..maxBytes) { "workspace_file_too_large" }
+            var offset=0L
+            while(offset<before.size) {
+                val length=minOf(65536L,before.size-offset).toInt()
+                val bytes=input.readAt(offset,length)
+                check(bytes.size==length) { "workspace_file_changed" }
+                output.write(bytes);offset+=bytes.size
+            }
+            check(input.stat()==before) { "workspace_file_changed" }
+            before
+        }
+    }
+
+    @Synchronized
+    fun writeText(path: List<String>, text: String, overwrite: Boolean, trace: (String)->Unit = {}): WorkspaceNativeStat {
         val bytes = encodeUtf8(text)
         require(bytes.size <= MAX_FILE_BYTES) { "workspace_write_too_large" }
-        return withParent(path, true) { parent, name -> parent.writeAtomic(name, bytes, overwrite, null) }
+        trace("parent")
+        return withParent(path, true) { parent, name ->
+            trace("write")
+            parent.writeAtomic(name, bytes, overwrite, null).also { trace("verified") }
+        }
     }
 
     @Synchronized

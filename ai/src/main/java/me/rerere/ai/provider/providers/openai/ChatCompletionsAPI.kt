@@ -1,5 +1,7 @@
 package me.rerere.ai.provider.providers.openai
 
+import me.rerere.ai.util.deepSeekFileId
+import me.rerere.ai.util.deepSeekFileBlock
 import me.rerere.ai.util.orbisSourceHeaders
 import me.rerere.ai.util.chatCompletionsHostMemoryLayout
 import me.rerere.ai.util.isRequestHostDataMessage
@@ -86,19 +88,28 @@ class ChatCompletionsAPI(
         params: TextGenerationParams,
     ): TextGenerationResult = withContext(Dispatchers.IO) {
         me.rerere.ai.provider.requireModelAccess(params.model)
-        val requestBody =
+        var requestBody =
             buildChatCompletionRequest(
                 messages = messages,
                 params = params,
                 providerSetting = providerSetting
             )
 
+        val imageEndpoint = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}".toHttpUrl()
+        val selectedKey = params.gatewayImageTurn?.key(imageEndpoint, providerSetting.id.toString()) {
+            keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        } ?: keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        params.gatewayImageTurn?.let { turn ->
+            if (turn.supported == null && !me.rerere.ai.util.GatewayImagePeers.known(imageEndpoint)) turn.supported = false
+            if (turn.supported != false || turn.referencesUsed) requestBody = me.rerere.ai.util.GatewayImageFiles(client).project(
+                requestBody, imageEndpoint, "Bearer $selectedKey", turn)
+        }
         observePrefix(providerSetting, params, requestBody)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.orbisSourceHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+            .addHeader("Authorization", "Bearer $selectedKey")
             .configureReferHeaders(providerSetting.baseUrl)
             .apply {
                 if (providerSetting.baseUrl.toHttpUrl().host == "opencode.ai") {
@@ -144,19 +155,28 @@ class ChatCompletionsAPI(
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
         me.rerere.ai.provider.requireModelAccess(params.model)
-        val requestBody = buildChatCompletionRequest(
+        var requestBody = buildChatCompletionRequest(
             messages = messages,
             params = params,
             providerSetting = providerSetting,
             stream = true,
         )
 
+        val imageEndpoint = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}".toHttpUrl()
+        val selectedKey = params.gatewayImageTurn?.key(imageEndpoint, providerSetting.id.toString()) {
+            keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        } ?: keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+        params.gatewayImageTurn?.let { turn ->
+            if (turn.supported == null && !me.rerere.ai.util.GatewayImagePeers.known(imageEndpoint)) turn.supported = false
+            if (turn.supported != false || turn.referencesUsed) requestBody = me.rerere.ai.util.GatewayImageFiles(client).project(
+                requestBody, imageEndpoint, "Bearer $selectedKey", turn)
+        }
         observePrefix(providerSetting, params, requestBody)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.orbisSourceHeaders())
             .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer ${keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())}")
+            .addHeader("Authorization", "Bearer $selectedKey")
             .addHeader("Content-Type", "application/json")
             .configureReferHeaders(providerSetting.baseUrl)
             .apply {
@@ -204,6 +224,8 @@ class ChatCompletionsAPI(
         providerSetting: ProviderSetting.OpenAI,
         stream: Boolean = false,
     ): JsonObject {
+        me.rerere.ai.util.checkDeepSeekFilesTarget(messages, providerSetting.baseUrl,
+            params.customBody.lastOrNull { it.key == "model" }?.value?.let { (it as? JsonPrimitive)?.contentOrNull } ?: params.model.modelId)
         val host = providerSetting.baseUrl.toHttpUrl().host
         val isOpenRouter = host == "openrouter.ai"
         // Live V4 Pro probes lose the prefix cache with changing tail SYSTEM blocks.
@@ -695,6 +717,7 @@ class ChatCompletionsAPI(
                                 })
                             }
 
+                            is UIMessagePart.Document -> part.deepSeekFileBlock("chat")?.let { add(it) }
                             else -> {}
                         }
                     }
@@ -860,7 +883,7 @@ class ChatCompletionsAPI(
     }
 
     private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
-        val gonnaSend = filter { it is UIMessagePart.Text || it is UIMessagePart.Image }.size
+        val gonnaSend = filter { it is UIMessagePart.Text || it is UIMessagePart.Image || it.deepSeekFileId() != null }.size
         val texts = filter { it is UIMessagePart.Text }.size
         return gonnaSend == texts && texts == 1
     }

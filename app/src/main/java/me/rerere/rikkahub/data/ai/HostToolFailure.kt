@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.rikkahub.data.ai.mcp.matchesMcpModelName
+
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -97,7 +99,7 @@ internal suspend fun UIMessagePart.Tool.dispatchProvidedTool(
     executeProvided: suspend (Tool) -> UIMessagePart.Tool,
 ): UIMessagePart.Tool {
     if (isExecuted) return this
-    val definition = tools.firstOrNull { it.name == toolName }
+    val definition = tools.firstOrNull { it.matchesMcpModelName(toolName) }
         ?: return withHostToolFailure(HostToolFailure.NOT_PROVIDED)
     return executeProvided(definition)
 }

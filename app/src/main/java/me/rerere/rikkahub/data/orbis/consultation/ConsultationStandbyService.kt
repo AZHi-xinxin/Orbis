@@ -113,7 +113,7 @@ class ConsultationStandbyService : Service() {
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "咨询室待命", NotificationManager.IMPORTANCE_LOW))
         val stop = PendingIntent.getService(this, 8701, Intent(this, ConsultationStandbyService::class.java).setAction(STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_stat_rikkahub)
+        val notification = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_stat_orbis)
             .setContentTitle("Orbis · 咨询室").setContentText(text).setOngoing(true)
             .addAction(0, "停止本机待命", stop).build()
         ServiceCompat.startForeground(this, 8701, notification,
@@ -121,7 +121,7 @@ class ConsultationStandbyService : Service() {
     }
     private fun showNotice(text: String) {
         getSystemService(NotificationManager::class.java).notify(8702,
-            NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_stat_rikkahub)
+            NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_stat_orbis)
                 .setContentTitle("Orbis · 咨询室状态").setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text)).build())
     }
     override fun onTimeout(startId: Int, fgsType: Int) { execution?.cancel(); stopSelf() }

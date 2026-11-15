@@ -214,7 +214,7 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
         val manager = context.getSystemService(NotificationManager::class.java)
         val view = activityIntent(value.attempt, "view")
         val notification = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_rikkahub).setContentTitle("${value.title}的${if (value.attempt.video) "视频" else "语音"}来电")
+            .setSmallIcon(R.drawable.ic_stat_orbis).setContentTitle("${value.title}的${if (value.attempt.video) "视频" else "语音"}来电")
             .setContentText(value.attempt.reason).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true).setContentIntent(view)
@@ -239,7 +239,7 @@ class OrbisIncomingCallRuntime private constructor(private val context: Context)
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
             manager.getNotificationChannel(FALLBACK_CHANNEL).importance == NotificationManager.IMPORTANCE_NONE) return false
         manager.notify(attempt.id.hashCode(), NotificationCompat.Builder(context, FALLBACK_CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_rikkahub).setContentTitle("$title 的未接来电")
+            .setSmallIcon(R.drawable.ic_stat_orbis).setContentTitle("$title 的未接来电")
             .setContentText(attempt.reason).setStyle(NotificationCompat.BigTextStyle().bigText(attempt.reason))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setAutoCancel(true).build())
         return true

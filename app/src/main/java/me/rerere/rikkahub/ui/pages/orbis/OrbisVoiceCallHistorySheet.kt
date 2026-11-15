@@ -100,11 +100,13 @@ fun OrbisVoiceCallHistorySheet(
     }
     BackHandler(enabled = selectedId != null) { selectedId = null; retryError = false }
 
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(
             onDismissRequest = onDismiss,
             containerColor = colors.panel,
+            contentColor = colors.ink,
+            tonalElevation = 0.dp,
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden,
                 enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),

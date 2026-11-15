@@ -11,10 +11,12 @@ import me.rerere.rikkahub.data.ai.ToolRejectedBeforeExecutionException
 import me.rerere.rikkahub.data.orbis.sentinel.*
 
 /** Trusted caller scope, never IDs supplied by the model. Opening this factory does not start observation. */
-internal fun createOrbisSentinelTools(controller: OrbisSentinels, assistantId: String, conversationId: String): List<Tool> =
+internal fun createOrbisSentinelTools(controller: OrbisSentinels, assistantId: String, conversationId: String,
+    plugin: OrbisSentinelPlugin? = null): List<Tool> =
     createOrbisSentinelTools(controller.rules, assistantId, conversationId,
         onChanged = controller::reschedule, editRule = controller::withRuleEdit,
-        runtimeStatus = { controller.runtimeState.value })
+        runtimeStatus = { controller.runtimeState.value }, plugin = plugin,
+        targetAvailable = controller::targetAvailable)
 
 /** Pure test seam; no Android, service, permission or device access unless explicitly supplied by the host. */
 internal fun createOrbisSentinelTools(
@@ -25,6 +27,8 @@ internal fun createOrbisSentinelTools(
     now: () -> Long = System::currentTimeMillis,
     editRule: suspend (String, OrbisSentinelBinding, () -> OrbisSentinelRule?) -> OrbisSentinelRule? = { _, _, edit -> edit() },
     runtimeStatus: () -> OrbisSentinelRuntimeState? = { null },
+    plugin: OrbisSentinelPlugin? = null,
+    targetAvailable: suspend (OrbisSentinelBinding) -> Boolean = { true },
 ): List<Tool> {
     // Fail closed for a missing host identity; do not invent a current/latest conversation.
     listOf(assistantId, conversationId).forEach {
@@ -35,14 +39,36 @@ internal fun createOrbisSentinelTools(
     fun owned(id: String): OrbisSentinelRule = store.get(id)?.takeIf { it.assistantId == assistantId }
         ?: error("该哨兵不存在或不属于当前 AI。")
 
-    fun changedResult(rule: OrbisSentinelRule?, deletedId: String? = null): List<UIMessagePart> {
+    val currentBinding = OrbisSentinelBinding(assistantId, conversationId)
+    suspend fun requireCurrentTarget() = sentinelPrewrite(
+        "当前调用窗口已删除、归属已变或暂时无法核验；未创建或迁移哨兵。请在该 AI 的现有窗口发新消息后重试。",
+    ) { require(targetAvailable(currentBinding)) }
+
+    suspend fun ruleJson(rule: OrbisSentinelRule, includePrompt: Boolean, state: OrbisSentinelState): JsonObject {
+        val available = try { targetAvailable(rule.binding) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        return JsonObject(rule.sentinelJson(includePrompt, state) + buildJsonObject {
+            put("target_status", when (available) { true -> "available"; false -> "unavailable"; null -> "unknown" })
+            put("bound_to_current_conversation", rule.binding == currentBinding)
+            if (available != true) {
+                put("next_due_at_ms", JsonNull)
+                put("target_note", if (available == null) "暂时无法核验目标；不能据此判断会话已删除。"
+                    else if (rule.plugin != null) "固定会话已不存在或不再属于该 AI；此规则来自插件，请在插件设置中重新绑定。"
+                    else "固定会话已不存在或不再属于该 AI；可在希望接收提醒的窗口调用 orbis_sentinel_rebind(rule_id)。无需删除聊天或重建规则。")
+            }
+        })
+    }
+
+    suspend fun changedResult(rule: OrbisSentinelRule?, deletedId: String? = null): List<UIMessagePart> {
         val scheduled = try { onChanged(); true }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { false }
         val state = store.refresh()
         return sentinelResult(buildJsonObject {
             put("saved", true)
-            rule?.let { put("rule", it.sentinelJson(includePrompt = true, state = state)) }
+            put("current_conversation_id", conversationId)
+            rule?.let { put("rule", ruleJson(it, includePrompt = true, state = state)) }
             deletedId?.let { put("deleted_rule_id", it); put("historical_receipts_retained", true) }
             put("human_master_enabled", state.enabled)
             put("runtime_reschedule_requested", scheduled)
@@ -75,6 +101,7 @@ internal fun createOrbisSentinelTools(
                 val category = sentinelArgs(args, setOf("category")).sentinelString("category")
                 require(category == null || orbisSentinelGuide.any { it.type == category }) { "未知类别，请省略 category 查看所有类别。" }
                 sentinelResult(buildJsonObject {
+                    put("current_conversation_id", conversationId)
                     put("common", ORBIS_SENTINEL_COMMON_GUIDE)
                     put("categories", buildJsonArray {
                         orbisSentinelGuide.filter { category == null || it.type == category }.forEach { entry ->
@@ -99,12 +126,13 @@ internal fun createOrbisSentinelTools(
                 val all = state.rules.filter { it.assistantId == assistantId }.sortedByDescending { it.updatedAtMs }
                 val page = all.drop(offset).take(limit)
                 sentinelResult(buildJsonObject {
+                    put("current_conversation_id", conversationId)
                     put("human_master_enabled", state.enabled)
                     put("runtime", sentinelRuntimeJson(runtimeStatus()))
-                    put("rules", buildJsonArray { page.forEach { add(it.sentinelJson(includePrompt = false, state = state)) } })
+                    put("rules", buildJsonArray { page.forEach { add(ruleJson(it, includePrompt = false, state = state)) } })
                     put("total", all.size)
                     put("next_offset", offset.coerceAtMost(all.size) + page.size)
-                    put("note", "总开关仅人类可改。enabled 是规则自身设置；总开关关闭时不能自动唤醒。固定目标不会跟随最近聊天。")
+                    put("note", "总开关仅人类可改。enabled 是规则自身设置；总开关关闭时不能自动唤醒。固定目标不会跟随最近聊天；需要迁移时在目标窗口调用 orbis_sentinel_rebind(rule_id)。")
                 })
             }),
         Tool(name = "orbis_sentinel_read",
@@ -125,7 +153,8 @@ internal fun createOrbisSentinelTools(
                 val page = records.drop(offset).take(limit)
                 val state = store.refresh()
                 sentinelResult(buildJsonObject {
-                    put("rule", rule?.sentinelJson(includePrompt = true, state = state) ?: JsonNull)
+                    put("current_conversation_id", conversationId)
+                    put("rule", rule?.let { ruleJson(it, includePrompt = true, state = state) } ?: JsonNull)
                     put("rule_deleted", rule == null)
                     put("human_master_enabled", state.enabled)
                     put("runtime", sentinelRuntimeJson(runtimeStatus()))
@@ -139,11 +168,12 @@ internal fun createOrbisSentinelTools(
             description = "一次调用即可创建需要的本机哨兵，无逐次确认，不必先查说明。长期类别：ritual 每日仪式（daily_at_local+prompt，可选随机窗口）；agreement 静默约定（默认30分钟/50%/23:30–07:30静默+prompt）；screen_observation 默认30分钟屏幕观察；night_usage 默认00:00–07:30非聊天应用5分钟；screen_on 默认常亮10分钟；low_battery 低电量默认100%；geofence 沿用人类围栏；touch 触屏+prompt。once 用due_at_ms+prompt预约一次。系统事实类 observation/night/screen_on/battery/geofence 不接受prompt。全部自由选设，可enabled=false；人类总开关不可改。系统自动加真实日期时间时区。细节/示例可查orbis_sentinel_guide。",
             parameters = { sentinelSchema(sentinelConfigurationProperties(), listOf("type")) },
             needsApproval = { false }, execute = { args ->
+                requireCurrentTarget()
                 val candidate = sentinelPrewrite("哨兵创建参数无效，尚未写入或预约。只填写所选 type 的字段；once 最小参数为 type=once、due_at_ms（未来Unix毫秒）、prompt，不要附 duration_seconds、每日/静默/概率/应用字段。其他类型请查询 orbis_sentinel_guide 后修正参数。") {
                     val obj = sentinelArgs(args, SENTINEL_CONFIGURATION_KEYS)
                     val type = sentinelType(obj.sentinelRequiredString("type"))
                     val at = now()
-                    val initial = OrbisSentinelRule(assistantId = assistantId, conversationId = conversationId, type = type,
+                    val initial = OrbisSentinelRule(assistantId = assistantId, conversationId = conversationId, type = type, plugin = plugin,
                         prompt = obj.sentinelString("prompt") ?: "", enabled = true, createdAtMs = at, updatedAtMs = at)
                     initial.withSentinelConfiguration(obj, newRule = true)
                 }
@@ -152,7 +182,7 @@ internal fun createOrbisSentinelTools(
                 changedResult(store.create(candidate))
             }),
         Tool(name = "orbis_sentinel_update",
-            description = "修改当前 AI 已有本机哨兵的内容、条件或规则启用状态，可跨本 AI 窗口管理；不能更改固定 AI/会话绑定或人类总开关。只传要改的字段，prompt 原样保存。类型改变时须提供新类型条件。宿主先核对旧预约：已送达的不重发，未送达的旧预约结束后再修改。",
+            description = "修改当前 AI 已有本机哨兵的内容、条件或规则启用状态，可跨本 AI 窗口管理；迁移到当前窗口请另用 orbis_sentinel_rebind，不能修改 AI 归属或人类总开关。只传要改的字段，prompt 原样保存。类型改变时须提供新类型条件。宿主先核对旧预约：已送达的不重发，未送达的旧预约结束后再修改。",
             parameters = { sentinelSchema(buildJsonObject {
                 put("rule_id", sentinelString()); sentinelConfigurationProperties().forEach { (key, value) -> put(key, value) }
             }, listOf("rule_id")) }, needsApproval = { false }, execute = { args ->
@@ -168,6 +198,23 @@ internal fun createOrbisSentinelTools(
                 } catch (failure: IllegalArgumentException) {
                     if (failure.message == "sentinel_event_pending") error("该规则仍有待处理事件，未改写。请用 orbis_sentinel_read(rule_id) 查看状态后重试；不要重复新建。")
                     throw failure
+                }
+                changedResult(checkNotNull(updated))
+            }),
+        Tool(name = "orbis_sentinel_rebind",
+            description = "明确把当前 AI 的一条本机哨兵迁移到本次调用所在的聊天窗口，适用于原窗口删除或主动换窗。仅传 rule_id，目标由宿主核验；不能指定其他 AI/会话，插件规则不可迁移。保留原文、启停状态与历史，旧事件不补发；已过期的一次性提醒仍需另设未来时间。不会随切换窗口自动迁移。",
+            parameters = { sentinelRuleIdSchema() }, needsApproval = { false }, execute = { args ->
+                val id = sentinelPrewrite("迁移参数无效；仅传 rule_id，未修改任何配置。") {
+                    sentinelArgs(args, setOf("rule_id")).sentinelRequiredString("rule_id")
+                }
+                val old = sentinelOwnedPrewrite { owned(id) }
+                sentinelPrewrite("插件创建的哨兵固定跟随插件绑定，请从插件设置调整；未修改任何配置。") {
+                    require(plugin == null && old.plugin == null)
+                }
+                requireCurrentTarget()
+                // Idempotent rebind to the same window must not settle pending work or reset its clock.
+                val updated = if (old.binding == currentBinding) old else editRule(id, old.binding) {
+                    store.rebind(id, old.binding, currentBinding, now())
                 }
                 changedResult(checkNotNull(updated))
             }),

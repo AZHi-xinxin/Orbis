@@ -288,6 +288,7 @@ sealed class SearchServiceOptions {
     data class DeepSeekOptions(
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
+        val allowDeepResearch: Boolean = false,
     ) : SearchServiceOptions()
 
     @Serializable

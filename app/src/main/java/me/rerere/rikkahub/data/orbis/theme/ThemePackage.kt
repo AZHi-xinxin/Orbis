@@ -27,10 +27,16 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
     val shape: String = "round", val pattern: String = "none", val decoration: String = "none",
     val decorationAsset: String? = null, val opacity: Float = 1f,
     val typography: ThemeTypography? = null, val drawing: ThemeDrawing? = null,
+    val material: ThemeBubbleMaterial? = null, val stickers: List<ThemeSticker> = emptyList(),
+    val texture: ThemeBubbleTexture? = null,
 )
 @Serializable internal data class ThemeChrome(
     val dock: String? = null, val onDock: String? = null, val star: String? = null,
     val composer: String? = null, val onComposer: String? = null,
+    val surface: ThemeSurface? = null,
+    val composerSurface: ThemeSurface? = null,
+    val dockSurface: ThemeSurface? = null,
+    val starSurface: ThemeSurface? = null,
 )
 @Serializable internal data class ThemeBubbles(
     val assistant: ThemeBubble = ThemeBubble(),
@@ -74,8 +80,19 @@ internal val themeJson = Json { encodeDefaults = true; ignoreUnknownKeys = false
             if (it.decorationAsset != null && it.decorationAsset !in assets) throw ThemeAssetException(
                 if (it === bubbles.assistant) "bubbles.assistant.decorationAsset" else "bubbles.user.decorationAsset", issue = "not_declared")
             it.typography?.validate(); it.drawing?.validate()
+            it.material?.validate()
+            it.texture?.validate()
+            require(it.material?.type != "liquid" || (it.shape == "round" && it.tail == "none" && it.drawing?.outline == null)) {
+                "theme_liquid_requires_round_shape"
+            }
+            require(it.stickers.size <= 4) { "theme_stickers_too_many" }
+            it.stickers.forEach { sticker -> sticker.validate() }
+        }
+        assetReferences().forEach { (field, asset) ->
+            if (asset !in assets) throw ThemeAssetException(field, issue = "not_declared")
         }
         typography.validate()
+        listOfNotNull(chrome.surface,chrome.composerSurface,chrome.dockSurface,chrome.starSurface).forEach { it.validate() }
         require(background.type in setOf("solid", "image") && background.scroll == "fixed" &&
             background.dim.isFinite() && background.dim in 0f.. .8f) { "theme_background_invalid" }
         if (background.type == "image" && background.asset !in assets) throw ThemeAssetException("background.asset", issue = "not_declared")
@@ -99,6 +116,16 @@ internal fun ThemePackage.assetReferences(): Map<String, String> = buildMap {
     background.asset?.let { put("background.asset", it) }
     bubbles.assistant.decorationAsset?.let { put("bubbles.assistant.decorationAsset", it) }
     bubbles.user.decorationAsset?.let { put("bubbles.user.decorationAsset", it) }
+    listOf("surface" to chrome.surface,"composerSurface" to chrome.composerSurface,
+        "dockSurface" to chrome.dockSurface,"starSurface" to chrome.starSurface).forEach { (key, surface) ->
+        surface?.texture?.asset?.let { put("chrome.$key.texture.asset",it) }
+    }
+    listOf("assistant" to bubbles.assistant, "user" to bubbles.user).forEach { (role, bubble) ->
+        bubble.texture?.asset?.let { put("bubbles.$role.texture.asset", it) }
+        bubble.stickers.forEachIndexed { index, sticker ->
+            sticker.asset?.let { put("bubbles.$role.stickers[$index].asset", it) }
+        }
+    }
 }
 internal fun themeArgb(value: String): Int {
     require(value.matches(Regex("#[A-Fa-f0-9]{6}"))) { "theme_color_invalid" }
@@ -123,6 +150,7 @@ internal fun parseTheme(text: String): ThemePackage {
 @Serializable internal data class ThemeRef(val id: String, val revision: Int)
 @Serializable internal data class ThemeState(val schema: Int = 1, val entries: List<ThemeEntry> = emptyList(),
     val active: ThemeRef? = null, val previous: List<ThemeRef?> = emptyList(), val pending: ThemeRef? = null,
-    val autoApply: Set<String> = emptySet(), val followHumanFont: Boolean = true, val allowAiApply: Boolean = false) {
+    val autoApply: Set<String> = emptySet(), val followHumanFont: Boolean = true, val allowAiApply: Boolean = false,
+    val materialTextColors: Map<String, MaterialTextColors> = emptyMap()) {
     fun resolve(ref: ThemeRef? = active) = entries.firstOrNull { it.id == ref?.id }?.versions?.firstOrNull { it.revision == ref?.revision }?.body
 }

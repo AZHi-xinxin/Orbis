@@ -15,7 +15,7 @@ import me.rerere.rikkahub.data.orbis.voice.OrbisVoiceCallRepository
 class IsolatedVoiceCallArchive : Closeable {
     private val owner = InstrumentationRegistry.getInstrumentation().let { instrumentation ->
         check(instrumentation is IsolatedGenerationLoopRunner) { "Use the isolated test runner" }
-        check(instrumentation.targetContext.packageName == "org.orbis.agent.dev")
+        check(instrumentation.targetContext.packageName in setOf("org.orbis.agent.dev", "org.orbis.agent.bodylab"))
         check(instrumentation.targetContext.applicationContext.javaClass == Application::class.java)
         instrumentation.targetContext
     }

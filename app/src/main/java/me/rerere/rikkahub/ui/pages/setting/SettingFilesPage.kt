@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -55,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -66,6 +68,9 @@ import me.rerere.rikkahub.data.db.entity.ManagedFileEntity
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FileFolders
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.files.TemporaryFileCleanup
+import me.rerere.rikkahub.data.sync.AutoBackupRuntime
+import me.rerere.rikkahub.ui.pages.orbis.OrbisInterfaceTheme
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -94,6 +99,11 @@ fun SettingFilesPage(
     var selectedFolder by remember { mutableStateOf(FileFolders.UPLOAD) }
     var pendingDelete by remember { mutableStateOf<ManagedFileEntity?>(null) }
     var showCleanSheet by remember { mutableStateOf(false) }
+    var cleanTemporary by remember { mutableStateOf(true) }
+    var cleaningTemporary by remember { mutableStateOf(false) }
+    val context = LocalContext.current.applicationContext
+    val temporaryCleanup = remember(context) { TemporaryFileCleanup(context.cacheDir,
+        canClean = { !AutoBackupRuntime.status.value.busy }) }
     var selectedCleanRange by remember { mutableStateOf(CleanRange.DAYS_7) }
     val files by filesManager.observe(selectedFolder).collectAsState(initial = emptyList())
     val protectionRevision by filesManager.protectionRevision.collectAsState()
@@ -183,11 +193,21 @@ fun SettingFilesPage(
             initialValue = SheetValue.Hidden,
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
         )
-        ModalBottomSheet(
-            onDismissRequest = { showCleanSheet = false },
+        OrbisInterfaceTheme { ModalBottomSheet(
+            onDismissRequest = { if (!cleaningTemporary) showCleanSheet = false },
             sheetState = sheetState,
         ) {
-            CleanFilesSheet(
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+                Text("清理空间", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(horizontal = 24.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = cleanTemporary, enabled = !cleaningTemporary,
+                        onClick = { cleanTemporary = true }, label = { Text("临时文件") })
+                    FilterChip(selected = !cleanTemporary, enabled = !cleaningTemporary,
+                        onClick = { cleanTemporary = false }, label = { Text("聊天附件") })
+                }
+                if (cleanTemporary) TemporaryFilesPanel(temporaryCleanup) { cleaningTemporary = it }
+                else CleanFilesSheet(
+                enabled = protectionReady && !busy && files.isNotEmpty(),
                 selectedRange = selectedCleanRange,
                 onRangeSelected = { selectedCleanRange = it },
                 onClean = {
@@ -207,7 +227,8 @@ fun SettingFilesPage(
                     }
                 },
             )
-        }
+            }
+        } }
     }
 
     Scaffold(
@@ -221,7 +242,7 @@ fun SettingFilesPage(
                     }
                     IconButton(
                         onClick = { showCleanSheet = true },
-                        enabled = files.isNotEmpty() && protectionReady && !busy,
+                        enabled = !busy,
                     ) {
                         Icon(
                             imageVector = HugeIcons.Clean,
@@ -312,6 +333,7 @@ private enum class CleanRange(val days: Int?) {
 
 @Composable
 private fun CleanFilesSheet(
+    enabled: Boolean,
     selectedRange: CleanRange,
     onRangeSelected: (CleanRange) -> Unit,
     onClean: () -> Unit,
@@ -360,6 +382,7 @@ private fun CleanFilesSheet(
 
         TextButton(
             onClick = onClean,
+            enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp),

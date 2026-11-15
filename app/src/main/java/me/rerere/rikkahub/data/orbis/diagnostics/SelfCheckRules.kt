@@ -7,6 +7,8 @@ import me.rerere.rikkahub.data.orbis.boundary.AssistantBoundary
 import me.rerere.rikkahub.data.orbis.integration.AiConfigurationRules
 
 internal val diagnosticToolOptions = linkedMapOf(
+    LocalToolOption.AgentWork to ("orbis_tool_discover" to "工具发现与任务卡"),
+    LocalToolOption.PhoneControl to ("orbis_phone" to "手机操作"),
     LocalToolOption.JavascriptEngine to ("eval_javascript" to "JavaScript计算"),
     LocalToolOption.Clipboard to ("clipboard" to "剪贴板"),
     LocalToolOption.Tts to ("text_to_speech" to "文字转语音"),
@@ -17,8 +19,10 @@ internal val diagnosticToolOptions = linkedMapOf(
     LocalToolOption.LocalReading to ("orbis_reading" to "本地共读批注"),
     LocalToolOption.LocalSoup to ("orbis_soup" to "海龟汤"),
     LocalToolOption.MessageRecall to ("orbis_recall_message" to "允许AI撤回自己的消息"),
+    LocalToolOption.ConversationSettings to ("orbis_conversation_settings" to "允许AI修改本会话提示词和世界书"),
     LocalToolOption.ContextPruning to ("orbis_context_pruning" to "允许AI清理旧思考与工具记录"),
     LocalToolOption.LocalMusic to ("orbis_music" to "星河音乐"),
+    LocalToolOption.PersonalPlugins to ("orbis_personal_plugins" to "个人插件"),
     LocalToolOption.ThemeDesign to ("orbis_theme" to "AI自定义美化"),
     LocalToolOption.SelfCheck to ("orbis_self_check" to "AI自检"),
     LocalToolOption.TimeInfo to ("get_time_info" to "时间"),
@@ -73,12 +77,14 @@ internal fun selfCheckConfiguration(settings: Settings, owner: String, focus: St
     }
     if (focus in setOf("tools", "theme")) {
         diagnosticToolOptions.filter { focus == "tools" || it.key == LocalToolOption.ThemeDesign }.forEach { (option, label) ->
-            val enabled = option in a.localTools
+            val enabled = option in a.localTools || option == LocalToolOption.SelfCheck && LocalToolOption.AgentWork in a.localTools
             // Only exact tool IDs can prove a boundary choice; do not invent family-level IDs.
             val declined = option in setOf(LocalToolOption.ThemeDesign, LocalToolOption.SelfCheck, LocalToolOption.TimeInfo) && !boundary.permits("tool", label.first)
             add("tool_${label.first}", label.second, if (!enabled || declined) "info" else "ok",
                 when { !enabled -> "人类尚未为当前助手打开此工具。"; declined -> "人类已开启，当前AI自行停用了此工具。"; else -> "当前助手已开启此工具；执行仍按当前授权。" },
-                if (declined) "orbis_boundary state(kind=tool)查看真实ID，再由AI选择恢复。" else "侧栏→当前助手设置→本地工具→${label.second}。未使用的功能可以保持关闭。",
+                if (declined) "orbis_boundary state(kind=tool)查看真实ID，再由AI选择恢复。"
+                else if (option in setOf(LocalToolOption.AgentWork,LocalToolOption.PhoneControl)) "工具与娱乐→任务与能力。手机操作还需选择应用并由人类开启系统无障碍。"
+                else "侧栏→当前助手设置→本地工具→${label.second}。未使用的功能可以保持关闭。",
                 if (declined) "ai_with_existing_tools" else "human")
         }
     }

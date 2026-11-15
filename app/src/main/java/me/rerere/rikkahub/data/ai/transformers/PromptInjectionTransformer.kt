@@ -9,6 +9,10 @@ import me.rerere.rikkahub.data.model.PromptInjection
 import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.extractContextForMatching
 import me.rerere.rikkahub.data.model.isTriggered
+import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.ai.provider.ProviderSetting
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlin.uuid.Uuid
 
 /**
@@ -28,9 +32,22 @@ object PromptInjectionTransformer : InputMessageTransformer {
             lorebooks = ctx.settings.lorebooks,
             conversationModeInjectionIds = ctx.conversationModeInjectionIds,
             conversationLorebookIds = ctx.conversationLorebookIds,
+            deferConditionalSystemInjections = supportsLateSystemInjections(
+                ctx.model.findProvider(ctx.settings.providers),
+                (ctx.assistant.customBodies + ctx.model.customBodies).lastOrNull { it.key == "model" }
+                    ?.value?.let { (it as? JsonPrimitive)?.contentOrNull } ?: ctx.model.modelId,
+            ),
         )
     }
 }
+
+/** Enable only the verified Flash family. OpenAI-compatible transports may flatten SYSTEM
+ * messages (notably Claude relays); wire compatibility alone does not prove cache compatibility.
+ * All other routes, including the already accepted Claude and Pro paths, keep their layout. */
+internal fun supportsLateSystemInjections(provider: ProviderSetting?, modelId: String): Boolean =
+    provider is ProviderSetting.OpenAI && !provider.useResponseApi && provider.chatGptAccountId == null &&
+        modelId.contains("deepseek", ignoreCase = true) && modelId.contains("flash", ignoreCase = true) &&
+        !modelId.contains("pro", ignoreCase = true)
 
 /**
  * 核心注入逻辑（可测试的纯函数）
@@ -42,6 +59,7 @@ internal fun transformMessages(
     lorebooks: List<Lorebook>,
     conversationModeInjectionIds: Set<Uuid> = emptySet(),
     conversationLorebookIds: Set<Uuid> = emptySet(),
+    deferConditionalSystemInjections: Boolean = false,
 ): List<UIMessage> {
     // 收集所有需要注入的内容
     val injections = collectInjections(
@@ -62,8 +80,25 @@ internal fun transformMessages(
         .sortedByDescending { it.priority }
         .groupBy { it.position }
 
-    // 应用注入
-    return applyInjections(messages, byPosition)
+    // Keep the entire AFTER group in its original priority order. If a conditional entry is
+    // configured, placement must stay the same even on turns where that entry is inactive.
+    // Never move BEFORE entries or change USER/ASSISTANT injections and their depth semantics.
+    val deferAfter = deferConditionalSystemInjections && messages.any { it.role == MessageRole.USER } &&
+        configuredInjections(assistant, modeInjections, lorebooks, conversationModeInjectionIds,
+            conversationLorebookIds).any {
+            it is PromptInjection.RegexInjection && !it.constantActive && it.keywords.isNotEmpty() &&
+                it.position == InjectionPosition.AFTER_SYSTEM_PROMPT
+        }
+    val applied = applyInjections(messages,
+        if (deferAfter) byPosition - InjectionPosition.AFTER_SYSTEM_PROMPT else byPosition)
+    val after = byPosition[InjectionPosition.AFTER_SYSTEM_PROMPT].orEmpty().joinToString("\n") { it.content }
+    if (!deferAfter || after.isEmpty()) return applied
+    val insertion = applied.indexOfLast { it.role == MessageRole.USER && !it.isSynthetic }
+        .takeIf { it >= 0 } ?: applied.indexOfLast { it.role == MessageRole.USER }
+    val safe = findSafeInsertIndex(applied, insertion)
+    // This is a real system instruction, not host retrieval data or a fabricated human turn.
+    // GenerationInputSnapshot freezes this projection once for the entire tool sequence.
+    return applied.take(safe) + UIMessage.system(after).copy(isSynthetic = true) + applied.drop(safe)
 }
 
 /**
@@ -76,6 +111,21 @@ internal fun collectInjections(
     lorebooks: List<Lorebook>,
     conversationModeInjectionIds: Set<Uuid> = emptySet(),
     conversationLorebookIds: Set<Uuid> = emptySet(),
+): List<PromptInjection> {
+    val nonSystemMessages = messages.filter { it.role != MessageRole.SYSTEM }
+    return configuredInjections(assistant, modeInjections, lorebooks, conversationModeInjectionIds,
+        conversationLorebookIds).filter { injection ->
+        injection !is PromptInjection.RegexInjection ||
+            injection.isTriggered(extractContextForMatching(nonSystemMessages, injection.scanDepth))
+    }
+}
+
+private fun configuredInjections(
+    assistant: Assistant,
+    modeInjections: List<PromptInjection.ModeInjection>,
+    lorebooks: List<Lorebook>,
+    conversationModeInjectionIds: Set<Uuid>,
+    conversationLorebookIds: Set<Uuid>,
 ): List<PromptInjection> {
     val injections = mutableListOf<PromptInjection>()
     val effectiveModeInjectionIds = if (assistant.allowConversationPromptInjection) {
@@ -98,19 +148,7 @@ internal fun collectInjections(
     val enabledLorebooks = lorebooks.filter {
         it.enabled && effectiveLorebookIds.contains(it.id)
     }
-    if (enabledLorebooks.isNotEmpty()) {
-        // 提取上下文用于匹配（只取非 SYSTEM 消息）
-        val nonSystemMessages = messages.filter { it.role != MessageRole.SYSTEM }
-
-        enabledLorebooks.forEach { lorebook ->
-            lorebook.entries
-                .filter { entry ->
-                    val context = extractContextForMatching(nonSystemMessages, entry.scanDepth)
-                    entry.isTriggered(context)
-                }
-                .forEach { injections.add(it) }
-        }
-    }
+    enabledLorebooks.forEach { lorebook -> injections.addAll(lorebook.entries.filter { it.enabled }) }
 
     return injections
 }

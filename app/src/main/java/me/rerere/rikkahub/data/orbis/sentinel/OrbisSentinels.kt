@@ -145,8 +145,32 @@ class OrbisSentinels private constructor(private val context: Context) {
 
     fun setRuntime(running: Boolean, error: String?) { mutableRuntime.value = OrbisSentinelRuntimeState(running, error) }
 
+    /** Bounded metadata lookup; do not load every message when listing rule destinations. */
+    suspend fun targetAvailable(binding: OrbisSentinelBinding): Boolean =
+        GlobalContext.get().get<ConversationRepository>().getConversationSummaryOfAssistant(
+            Uuid.parse(binding.conversationId), Uuid.parse(binding.assistantId),
+        )?.let { !it.isConsultation } == true
+
+    // Caller holds tickMutex. A deleted target must be visible without inventing a wake or
+    // transferring old pending work into a newly selected conversation.
+    private fun recordTargetAvailability(rule: OrbisSentinelRule, available: Boolean): Boolean {
+        if (!available) settlePending(rule)
+        rules.recordTargetAvailability(rule.id, rule.binding, available)
+        return available
+    }
+
     /** Also applied to legacy ingress, and rechecked immediately before generation. */
     fun mayDeliver(event: OrbisInboxEvent): Boolean {
+        if (me.rerere.rikkahub.data.orbis.isGatheringEventSource(event.source) &&
+            !me.rerere.rikkahub.data.orbis.community.GatheringDelivery.accepts(context,event)) return false
+        if(me.rerere.rikkahub.data.orbis.isTabletopEventSource(event.source))
+            return me.rerere.rikkahub.data.orbis.tabletop.TabletopConversationHost.get(context).accepts(event)
+        if (me.rerere.rikkahub.data.orbis.isMarketEventSource(event.source) &&
+            !me.rerere.rikkahub.data.orbis.market.MarketDeliveries(context).accepts(event)) return false
+        if(event.source.startsWith("native_sentinel.")) {
+            val rule=rules.get(event.source.removePrefix("native_sentinel."))
+            if(rule!=null && !me.rerere.rikkahub.data.orbis.plugins.pluginSentinelAllowed(context,rule)) return false
+        }
         if (me.rerere.rikkahub.data.orbis.isPetEventSource(event.source)) return runCatching {
             val settings = GlobalContext.get().get<me.rerere.rikkahub.data.datastore.SettingsStore>().settingsFlow.value
             val owner = settings.assistants.firstOrNull { it.id.toString() == event.assistantId && it.orbisPetEnabled }
@@ -159,6 +183,10 @@ class OrbisSentinels private constructor(private val context: Context) {
     }
 
     suspend fun tick() = tickMutex.withLock {
+        rules.refresh().rules.filter { it.enabled && it.plugin!=null &&
+            !me.rerere.rikkahub.data.orbis.plugins.pluginSentinelAllowed(context,it) }.forEach {
+            rules.pause(it.id,it.binding,System.currentTimeMillis())
+        }
         rules.refresh().rules.filter { it.pendingBlocked }.forEach(::settlePending)
         val state = rules.refresh()
         if (state.historyRetention.isDue(System.currentTimeMillis())) {
@@ -182,14 +210,16 @@ class OrbisSentinels private constructor(private val context: Context) {
             val rule = fresh.rules.firstOrNull { it.id == snapshot.id && it.enabled } ?: continue
             if ((retryAfter[rule.id] ?: 0) > now) continue
             try {
+                val conversation = repo.getConversationById(Uuid.parse(rule.conversationId))
+                if (!recordTargetAvailability(rule, conversation != null &&
+                        conversation.assistantId.toString() == rule.assistantId && !conversation.isConsultation)) continue
+                checkNotNull(conversation)
                 // Resume only the reserved identity, never pair an old reservation with a new
                 // physical event. Geofence facts are recovered by deliverLocationJobs instead.
                 if (rule.type == OrbisSentinelType.TOUCH && rule.pendingEventId != null) {
                     deliver(rule, chat)
                     continue
                 }
-                val conversation = repo.getConversationById(Uuid.parse(rule.conversationId))
-                if (conversation?.assistantId?.toString() != rule.assistantId) continue
                 val lastHuman = conversation.currentMessages.lastOrNull {
                     it.role == MessageRole.USER && it.orbisEvent == null &&
                         (it.orbisVoiceCallKind == null || it.orbisVoiceCallKind == "turn")
@@ -253,6 +283,7 @@ class OrbisSentinels private constructor(private val context: Context) {
     private fun finishProactiveWithoutDelivery(rule: OrbisSentinelRule, reason: String) {
         val id = rule.pendingEventId ?: return
         val current = rules.get(rule.id) ?: return
+        if(!me.rerere.rikkahub.data.orbis.plugins.pluginSentinelAllowed(context,current)) return
         if (current.pendingEventId != id) return
         val state = rules.refresh()
         if (!state.enabled || !current.enabled || current.pendingBlocked) {
@@ -354,6 +385,7 @@ class OrbisSentinels private constructor(private val context: Context) {
     }
 
     private suspend fun deliver(initial: OrbisSentinelRule, chat: ChatService, systemFacts: String? = null) {
+        if (!recordTargetAvailability(initial, targetAvailable(initial.binding))) return
         val id = checkNotNull(initial.pendingEventId)
         val source = "native_sentinel.${initial.id}"
         val receipt = chat.orbisEvents.inbox.receipt(source, id)
@@ -406,6 +438,8 @@ class OrbisSentinels private constructor(private val context: Context) {
         }
     }
 
+    fun latestTouchReceipt(): SentinelIngressReceipt? = ingress.latest("touch")?.let { touchReceipt(it.eventId) }
+
     fun touchReceipt(eventId: String): SentinelIngressReceipt? {
         val receipt = ingress.receipt("touch", eventId) ?: return null
         if (receipt.status !in setOf("processing", "unknown")) return receipt
@@ -434,6 +468,7 @@ class OrbisSentinels private constructor(private val context: Context) {
         var delivered = 0
         try {
             selected.forEach { rule ->
+                if (!recordTargetAvailability(rule, targetAvailable(rule.binding))) return@forEach
                 val id = "touch:" + sentinelIdentityHash("${rule.id}\n$eventId")
                 val facts = OrbisSentinelObservation(now, eventKey = eventId, eventObservedAtMs = observedAtMs)
                 val reservation = rules.evaluateAndReserve(rule.id, id, facts,
@@ -485,9 +520,11 @@ class OrbisSentinels private constructor(private val context: Context) {
                 locations.mark(job, "cancelled", now); continue
             }
             val conversation = repo.getConversationById(Uuid.parse(rule.conversationId))
-            if (conversation == null || conversation.assistantId.toString() != rule.assistantId) {
+            if (!recordTargetAvailability(rule, conversation != null &&
+                    conversation.assistantId.toString() == rule.assistantId && !conversation.isConsultation)) {
                 locations.mark(job, "cancelled", now); continue
             }
+            checkNotNull(conversation)
             if (job.kind in OrbisSentinelLocationStore.CHECKS) {
                 val end = if (job.kind == "initial") trip.departedAtMs else now
                 val messages = conversation.currentMessages.filter {

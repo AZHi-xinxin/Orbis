@@ -33,6 +33,7 @@ data class DeepSeekImportResult(
     val messages: Int = 0, val attachmentReferences: Int = 0,
     val failures: List<DeepSeekImportFailure> = emptyList(),
     val skippedSummaries: Int = 0,
+    val restoredAttachments: Int = 0,
 )
 data class DeepSeekImportProgress(val total: Int, val completed: Int, val result: DeepSeekImportResult)
 class DeepSeekImportCancelledException(val partialResult: DeepSeekImportResult) : CancellationException("聊天导入已取消；已完成的会话保留")
@@ -52,11 +53,12 @@ internal fun deepSeekImportId(kind: String, vararg identities: String): Uuid {
 }
 
 /** Explicit selected-path import. Other branches remain in the user's unmodified source ZIP. */
-class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImportSink) {
-    constructor(repository: ConversationRepository) : this(object : DeepSeekImportSink {
+class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImportSink,
+    private val attachmentStore: DeepSeekAttachmentStore? = null) {
+    constructor(repository: ConversationRepository, files: me.rerere.rikkahub.data.files.FilesManager? = null, cacheDir: File? = null) : this(object : DeepSeekImportSink {
         override suspend fun exists(id: Uuid) = repository.existsConversationById(id)
         override suspend fun insert(conversation: Conversation) = repository.insertImportedConversations(listOf(conversation)) == 1
-    })
+    }, if (files != null && cacheDir != null) ManagedDeepSeekAttachmentStore(files, cacheDir) else null)
 
     suspend fun import(
         file: File, assistantId: Uuid, selections: Map<String, String>,
@@ -87,7 +89,13 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                             if (sink.exists(id)) result = result.copy(skipped = result.skipped + 1)
                             else {
                                 ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, ArchiveCapacity.MAX_WINDOW_CHARS.toLong())
-                                val converted = try { convert(source, leaf, assistantId, checkCancelled) }
+                                val attachments = DeepSeekAttachmentSession(archive, attachmentStore)
+                                var committed = false
+                                try {
+                                val converted = try {
+                                    val local = attachments.restore(source.pathTo(leaf, checkCancelled), checkCancelled)
+                                    convert(source, leaf, assistantId, local, checkCancelled)
+                                }
                                 catch (_: DeepSeekMessageTooLarge) {
                                     result = result.copy(failed = result.failed + 1, failures = result.failures +
                                         DeepSeekImportFailure(source.sourceId, "单条消息超过安全读取大小；该会话未导入，原文未截断"))
@@ -100,13 +108,16 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                                     // Cancellation before/after this boundary never reports a committed chat as absent.
                                     withContext(NonCancellable) {
                                         val inserted = sink.insert(converted.conversation)
+                                        committed = inserted
                                         if (inserted) result = result.copy(imported = result.imported + 1,
                                             messages = result.messages + converted.conversation.messageNodes.size,
-                                            attachmentReferences = result.attachmentReferences + converted.attachmentReferences)
+                                            attachmentReferences = result.attachmentReferences + converted.attachmentReferences,
+                                            restoredAttachments = result.restoredAttachments + converted.restoredAttachments)
                                         else result = result.copy(skipped = result.skipped + 1)
                                     }
                                     checkCancelled()
                                 }
+                                } finally { if (!committed) withContext(NonCancellable) { attachments.rollback() } }
                             }
                             completed++
                             onProgress(DeepSeekImportProgress(selections.size, completed, result))
@@ -142,10 +153,11 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
             return digest.digest().joinToString("") { "%02x".format(it) }
         }
 
-        internal data class Converted(val conversation: Conversation, val attachmentReferences: Int, val serializedBytes: Long = 0)
+        internal data class Converted(val conversation: Conversation, val attachmentReferences: Int, val serializedBytes: Long = 0, val restoredAttachments: Int = 0)
         internal fun convert(source: DeepSeekConversation, leaf: String, assistantId: Uuid,
-            checkCancelled: () -> Unit = {}): Converted {
+            localAttachments: Map<String, UIMessagePart> = emptyMap(), checkCancelled: () -> Unit = {}): Converted {
             var attachments = 0
+            var restored = 0
             var serializedBytes = 0L
             val nodes = source.pathTo(leaf, checkCancelled).map { node ->
                 checkCancelled()
@@ -157,6 +169,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                     put("source_node_id", node.sourceId)
                     node.parentId?.let { put("source_parent_id", it) }
                     put("source_model", message.sourceModel)
+                    if (message.sourceMetadata.isNotEmpty()) put("source_message_metadata", message.sourceMetadata)
                     put("source_timestamp", message.createdAt.toString())
                 }
                 val parts = buildList<UIMessagePart> {
@@ -164,12 +177,24 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                         checkCancelled()
                         when (fragment.type) {
                             "REQUEST", "RESPONSE" -> add(UIMessagePart.Text(checkNotNull(fragment.content)))
+                            "FILE" -> {
+                                val files = fragment.raw["files"] as? kotlinx.serialization.json.JsonArray
+                                files.orEmpty().forEach { entry ->
+                                    attachments++
+                                    val record = entry as JsonObject
+                                    val path = (record["export_path"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                                    val part = path?.let(localAttachments::get)
+                                    if (part != null) { add(part); restored++ }
+                                    else add(UIMessagePart.Text("[历史附件引用；原包未包含可恢复文件，未联网下载]\n$record"))
+                                }
+                                if (files.isNullOrEmpty()) add(UIMessagePart.Text("[历史附件引用；未下载]\n${fragment.raw}"))
+                            }
                             "THINK" -> add(UIMessagePart.Reasoning(checkNotNull(fragment.content), createdAt = time, finishedAt = time))
                             else -> {
                                 // Keep historical content byte-for-byte as text; references remain inert data.
                                 fragment.content?.let { add(UIMessagePart.Text(it)) }
                                 val record = JsonObject(fragment.raw.filterKeys { it != "content" })
-                                val label = if (fragment.type == "FILE") "历史附件引用；导出包未含附件，未下载" else "历史检索记录；未执行"
+                                val label = if (fragment.type in setOf("TEMPLATE_RESPONSE", "CONTENT_RISK", "TIP")) "DeepSeek 历史提示；原样保留" else "历史检索记录；未执行"
                                 add(UIMessagePart.Text("[$label]\n$record"))
                                 attachments += (fragment.raw["files"] as? kotlinx.serialization.json.JsonArray)?.size ?: 0
                             }
@@ -181,6 +206,8 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                     if (index == 0) when (part) {
                         is UIMessagePart.Text -> part.copy(metadata = metadata)
                         is UIMessagePart.Reasoning -> part.copy(metadata = metadata)
+                        is UIMessagePart.Image -> part.copy(metadata = metadata)
+                        is UIMessagePart.Document -> part.copy(metadata = metadata)
                         else -> part
                     } else part
                 }
@@ -196,7 +223,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
             }
             return Converted(Conversation(id = deepSeekImportId("conversation", source.sourceId, leaf),
                 assistantId = assistantId, title = source.title, createAt = source.createdAt, updateAt = source.updatedAt,
-                messageNodes = nodes), attachments, serializedBytes)
+                messageNodes = nodes), attachments, serializedBytes, restored)
         }
     }
     private class DeepSeekMessageTooLarge : IllegalArgumentException()

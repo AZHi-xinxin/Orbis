@@ -61,10 +61,21 @@ object DeepSeekArchive {
         checkCancelled()
         require(file.isFile) { "deepseek_missing_file" }
         ArchiveCapacity.requireSize(file.length(), MAX_ARCHIVE_BYTES)
-        return safeRead { ArchiveReader(ZipFile(file), checkCancelled) }
+        return safeRead {
+            val zip = ZipFile(file)
+            try {
+                if (zip.entries().asSequence().any { it.name.substringAfterLast('/') == "manifest.json" })
+                    DeepSeekV3Archive(zip, checkCancelled) else LegacyArchiveReader(zip, checkCancelled)
+            } catch (failure: Throwable) { zip.close(); throw failure }
+        }
     }
 
-    internal class ArchiveReader(private val zip: ZipFile, private val checkCancelled: () -> Unit) : Closeable {
+    internal interface ArchiveReader : Closeable {
+        fun conversations(): Sequence<DeepSeekConversation>
+        fun copyAttachment(path: String, output: java.io.OutputStream): Boolean = false
+    }
+
+    private class LegacyArchiveReader(private val zip: ZipFile, private val checkCancelled: () -> Unit) : ArchiveReader {
         private val reader: Reader
         private val crc = CRC32()
         private var bytes = 0L
@@ -108,7 +119,7 @@ object DeepSeekArchive {
                 reader = InputStreamReader(stream, decoder).buffered(32 * 1024)
             } catch (failure: Throwable) { zip.close(); throw failure }
         }
-        fun conversations(): Sequence<DeepSeekConversation> = sequence {
+        override fun conversations(): Sequence<DeepSeekConversation> = sequence {
             check(!consumed) { "deepseek_already_read" }; consumed = true
             val identities = hashSetOf<String>()
             var nodes = 0

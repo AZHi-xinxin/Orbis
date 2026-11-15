@@ -49,5 +49,9 @@ body:not(.at-home) .stardisc-wrap,body:not(.at-home) #garden-home-star { display
 .reading-page .reading-empty,.reading-page .reading-loader,.reading-page .reading-error { color:#67566b; }
 .reading-page .reading-search input { min-width:0; flex:1; border:0; background:transparent; }
 .reading-page .reading-search button { flex-shrink:0; }
+.reading-backup-guide { position:relative; backdrop-filter:none; -webkit-backdrop-filter:none; background:#fdf8f3; color:#44374b; }
+.reading-backup-guide .reading-cards-sheet__head { padding:0 0 12px; }
+.reading-backup-guide .reading-compose-actions { flex-wrap:wrap; justify-content:flex-start; }
+.reading-backup-guide .reading-small-btn { min-height:44px; }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
 @media(max-width:350px) { .local-home .top-section { padding-left:8px;padding-right:8px;gap:0; } .name-tag{font-size:.63rem!important;} .calendar__header{padding:16px;} }

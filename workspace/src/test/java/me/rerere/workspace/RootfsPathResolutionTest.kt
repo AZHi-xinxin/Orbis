@@ -10,6 +10,16 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 
 class RootfsPathResolutionTest {
+    @Test fun nativeSkillScanDistinguishesEmptyMountedLibraryFromAnUnboundPlaceholder() {
+        val empty=createManager()
+        assertTrue(empty.listNativeFiles(root,"/skills").isEmpty())
+        File(skillsDir,"demo").mkdirs()
+        assertEquals(listOf("demo"),empty.listNativeFiles(root,"/skills").map { it.name })
+        val unmounted=WorkspaceManager(baseDir=tempFolder.newFolder("unmounted"))
+        File(unmounted.linuxDir(root),"skills").mkdirs()
+        val failure=assertThrows(IllegalStateException::class.java) { unmounted.listNativeFiles(root,"/skills") }
+        assertEquals("Skill library is not mounted",failure.message)
+    }
     @get:Rule
     val tempFolder = TemporaryFolder()
 

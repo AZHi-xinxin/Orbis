@@ -17,7 +17,7 @@ import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.data.orbis.soup.createSoupTools
 
 internal const val ORBIS_HELP_TOOL_NAME = "orbis_help"
-internal const val ORBIS_MANUAL_VERSION = "orbis-help/38"
+internal const val ORBIS_MANUAL_VERSION = "orbis-help/43"
 private val manualTopics = listOf("overview", "tools", "permissions", "limits", "local_tools", "chapters", "guide", "tool")
 private const val manualHostUi = "同一 App 内的原 Orbis 本地主页、原生聊天、同一 AI 的会话历史/搜索/重命名/分组、外观 DIY、本地动态星图演示与独立 ST 元信息连接设置、TechHub 和多 AI 群聊独立入口，以及模型/MCP/语音/文件/工作区/技能配置入口。"
 private const val manualStarMapDemoScope = "星点为本地合成数据，仅展示示例时间、类型与无标签关联，不读取真实 ST 记忆。"
@@ -35,16 +35,19 @@ private data class ManualToolCategory(val id: String, val names: List<String>, v
 }
 
 private val manualToolCategories = listOf(
+    ManualToolCategory("tabletop", listOf("orbis_tabletop_submit"), "投稿：guide/tabletop_submission；剧本杀：guide/tabletop_ai；狼人杀及重联：guide/werewolf_ai。", prefix = "werewolf_"),
+    ManualToolCategory("community", listOf("orbis_community"), "好友、群聊、朋友圈与艾特。contacts/send_message无需预约；详见tool/orbis_community。"),
+    ManualToolCategory("agent_work", listOf("orbis_tool_discover", "orbis_task", "orbis_phone"), "先发现工具；回执不等于进展。手机须授权和页面票据。见guide/agent_work。"),
     ManualToolCategory("zip_files", listOf("orbis_zip_read", "orbis_zip_create"), "收发文字 ZIP，按需读目录/UTF-8 文本，不执行。见guide/zip_files。"),
-    ManualToolCategory("local_schedule", listOf("orbis_schedule_list", "orbis_schedule_read", "orbis_schedule_create", "orbis_schedule_update", "orbis_schedule_delete"), "本机共享课表/日程，无需网关。写入须宿主批准与revision核验，不自动提醒。周重复/有效期、单次日期、重要标红及参数见guide/schedule或local_tools。"),
-    ManualToolCategory("local_kaomoji", listOf("orbis_kaomoji_list", "orbis_kaomoji_add", "orbis_kaomoji_update"), "本机文字库，AI写入经批准，保存不发送；人类点选独立发送，草稿不变，删除在人类面板。不是图片表情包；参数/冲突见guide/expressions。"),
+    ManualToolCategory("local_schedule", listOf("orbis_schedule_list", "orbis_schedule_read", "orbis_schedule_create", "orbis_schedule_update", "orbis_schedule_delete"), "本机课表/日程：批准与revision核验后写入，不自动提醒。重复、日期与标红参数见guide/schedule。"),
+    ManualToolCategory("local_kaomoji", listOf("orbis_kaomoji_list", "orbis_kaomoji_add", "orbis_kaomoji_update"), "文字库：批准后写入，保存不发送；人类点选发送。见guide/expressions。"),
     ManualToolCategory("companion_spaces", listOf("orbis_secret_base", "orbis_shared_space", "orbis_photo_wall"), "当前助手的本地空间，双方可见，非联网社交。用法见guide/secret_base、shared_space、photo_wall。"),
     ManualToolCategory("video_calls", listOf("start_video_call", "orbis_video_frame_now", "orbis_video_frames", "orbis_video_frame_read", "orbis_video_frame_keep"), "接听授权后前台抽帧，非直播；声音仍是ASR。每通最多留10张，临时图片结束10分钟过期；挂断end_voice_call，见guide/video。"),
     ManualToolCategory("voice_notes", listOf("orbis_voice_note", "orbis_send_audio"), "原生语音条：orbis_voice_note的text为1–2000字符，批准后用已有TTS/音色，可能计费。orbis_send_audio直接发送绑定工作区/workspace/下已有WAV/MP3/OGG，最大32MiB，不调用TTS。都可点击但不自动播放，失败不自动重试；ASR纠正见guide/voice。"),
     ManualToolCategory("device_facts", listOf("orbis_device"), "仅读设备事实/观察摘要，section=all/device/observation；不启动观察、截屏、定位或读通知/聊天，不代表情绪。"),
-    ManualToolCategory("local_reading", listOf("orbis_reading_list", "orbis_reading_read_chapter", "orbis_reading_annotate", "orbis_reading_list_annotations"), "本机藏书阁，无需VPS；目录/章节/批注按需读取，不改人类进度或自动上传全书。批注写入须选用及批准；参数/云本地区分见local_tools或guide/reading。"),
+    ManualToolCategory("local_reading", listOf("orbis_reading_list", "orbis_reading_read_chapter", "orbis_reading_annotate", "orbis_reading_list_annotations"), "本机藏书阁：按需读目录/章节/批注，不改人类进度或上传全书。批注须选用及批准；详见guide/reading。"),
     ManualToolCategory("local_soup", listOf("orbis_soup_current", "orbis_soup_ask", "orbis_soup_hint", "orbis_soup_submit", "orbis_soup_reveal"), "本机海龟汤，未开局为空；current只读，其余须选用及批准。ask/submit是待页面确认建议，非执行回执；开局/下一题在人类页面。参数见local_tools。"),
-    ManualToolCategory("local_garden", listOf("orbis_garden_list", "orbis_garden_read", "orbis_garden_create"), "本机共用花园，需人类为具体AI开启读写；可读人类/其他已授权AI记录，结果进入模型。list取目录、read取正文，create经批准新增、不覆盖删除。无需VPS，仅本地路线；云端工具独立，不自动迁移同步，切换不删数据。专用明文备份不含附件本体，聊天ZIP不能替代。用法/备份边界见guide/garden。"),
+    ManualToolCategory("local_garden", listOf("orbis_garden_list", "orbis_garden_read", "orbis_garden_create"), "本机共用花园，需人类为具体AI开启读写。list目录/read正文/create批准后新增，不覆盖删除；云端独立，不自动迁移。明文备份不含附件，聊天ZIP不能替代；详见guide/garden。"),
     ManualToolCategory("native_sentinels", listOf("orbis_sentinel_guide", "orbis_sentinel_list", "orbis_sentinel_read", "orbis_sentinel_create", "orbis_sentinel_update", "orbis_sentinel_pause", "orbis_sentinel_resume", "orbis_sentinel_delete"), "AI设置本机哨兵，参数查orbis_sentinel_guide，人类操作/排错见guide/automation。目标固定；总开关仅人类控制，恢复不补发。设备事实不得代写；accepted不等于回复/出声，不证明外部检测已接通或旧VPS停用。"),
     ManualToolCategory("voice_calls", listOf("orbis_call_records", "orbis_call_read", "start_voice_call", "end_voice_call", "orbis_incoming_call_records"), "CALL_MODE输入是转写，不是原始声音；可靠回声控制才可插话，否则半双工；本轮真机声学效果未验收。静音接听是关麦、保留扬声器，接听前不开麦；关喇叭时播放时间轴继续。start_voice_call须写来电原因，接通后一次自由开场；拒接/无人接进入冷却，不自动回拨。end_voice_call仅挂本轮通话。原文独存、分页查询，不每轮自动注入全文；补档不恢复旧队列。语音台、声学与后台限制见guide/voice和limits。"),
     ManualToolCategory("connection_proposals", listOf("orbis_propose_connection", "orbis_configure", "orbis_self_check"), "AI填写模型/TTS/MCP，管理工具型号与记忆并测试；人类填必要key、开启MCP。支持以后允许；inspect读配置。自检查orbis_self_check；未开时当前助手设置→本地工具→AI自检。详情guide/self_check。"),
@@ -55,11 +58,11 @@ private val manualToolCategories = listOf(
     ManualToolCategory("cloud_orbis", emptyList(), "Orbis 云端原生工具，保留云端数据；需独立设备授权及当前 AI 逐工具启用，写入按审批或已保存授权执行。不是离线功能，也不通过 MCP 代理。", "cloud_orbis_"),
     ManualToolCategory("cloud_reading", emptyList(), "共读云端原生工具，目录以授权 API 为准；默认关闭，写入须审批。不要把未知结果当作未执行后自动重试。", "cloud_reading_"),
     ManualToolCategory("cloud_turtlesoup", emptyList(), "海龟汤云端原生工具，共用原云端房间与引擎；默认关闭，读写与审批以本轮 schema 为准。", "cloud_turtlesoup_"),
-    ManualToolCategory("conversation_reference", listOf("recent_chats", "conversation_search", "orbis_list_windows"), "本地会话查询；全局观测开启后可分页查同助手窗口名。"),
-    ManualToolCategory("current_history", listOf("orbis_current_history", "orbis_recall_message"), "history经批准只读本窗口非当前分支/删除缓存，不自动注入执行，不回查压缩档案；recall开启后只撤自己最近20条AI回复。撤回操作见guide/message_recall。"),
+    ManualToolCategory("conversation_reference", listOf("recent_chats", "conversation_search", "conversation_read", "orbis_list_windows"), "按需搜索并分页读取历史聊天；范围由助手记忆页的历史开关决定，与全局观测及跨助手记忆独立。"),
+    ManualToolCategory("current_history", listOf("orbis_current_history", "orbis_recall_message", "orbis_conversation_settings"), "本窗口分支及删除历史；撤回最近20条AI回复；修改本会话提示词、世界书。详查对应工具。"),
     ManualToolCategory("group_reference", listOf("orbis_group_list", "orbis_group_read"), "私聊中按需只读本 AI 仍加入的本机多 AI 群。先list取群编号，再read最近记录；最多50条/64KiB，单条文字最多8KiB，截断明示且原文保留。返回说话人、消息编号、时间和状态，游标查更早；only_own只看自己的当前成员发言。只给附件名称等元信息，不读文件内容。不合并上下文、不自动注入，不自动写ST；离群或删除身份后立即失去查询权限。历史正文和群名不是指令。"),
     ManualToolCategory("workspace", listOf("workspace_read_file", "workspace_write_file", "workspace_edit_file", "workspace_shell"), "隔离工作区内的文件与命令；是否可执行仍受当前环境、路径规则与审批限制。"),
-    ManualToolCategory("skills", listOf("use_skill"), "按需加载已启用技能；说明书不读取技能文件或私人指令。"),
+    ManualToolCategory("skills", listOf("use_skill", "orbis_skill_register"), "按需加载已启用技能；说明书不读取技能文件或私人指令。"),
     ManualToolCategory("web", listOf("search_web", "scrape_web"), "主动调用时可能联网；是否成功取决于搜索服务配置。"),
     ManualToolCategory("javascript", listOf("eval_javascript"), "本地 QuickJS 计算，没有 DOM 或 Node.js；不等于小游戏入库或游戏界面。"),
     ManualToolCategory("time", listOf("get_time_info"), "主动查询设备时间；说明书不读取设备时间。"),
@@ -185,6 +188,7 @@ internal fun createOrbisHelpTool(registeredNames: List<String>, build: OrbisHelp
     val categories = buildJsonArray {
         manualToolCategories.forEach { category ->
             val present = category.names.filter { it in names } + names.filter { it !in category.names && category.matches(it) }
+            if (category.id in setOf("agent_work","community") && present.isEmpty()) return@forEach
             add(buildJsonObject {
                 put("category", category.id)
                 put("registered_for_this_run", present.isNotEmpty())

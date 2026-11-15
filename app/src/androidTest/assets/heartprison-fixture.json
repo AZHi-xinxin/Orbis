@@ -1,0 +1,627 @@
+{
+  "room": "fd7f9c6841a549a8aaf68d3081263e46",
+  "status": {
+    "game_kind": "heartprison",
+    "id": "fd7f9c6841a549a8aaf68d3081263e46",
+    "room": "fd7f9c6841a549a8aaf68d3081263e46",
+    "mode": "ai_only",
+    "stage": "playing",
+    "phase": {
+      "kind": "talk",
+      "name": "交流",
+      "version": 2
+    },
+    "phase_version": 2,
+    "game": 1,
+    "round": 2,
+    "deadline": 1180,
+    "server_time": 1000,
+    "remaining_ms": 180000,
+    "actors": [
+      {
+        "id": "a0",
+        "name": "阿止",
+        "kind": "ai",
+        "seat": 1,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "白",
+        "role": "ordinary",
+        "cards": 1,
+        "guns": 0
+      },
+      {
+        "id": "a1",
+        "name": "小川",
+        "kind": "ai",
+        "seat": 2,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "蓝",
+        "role": "ordinary",
+        "cards": 2,
+        "guns": 0
+      },
+      {
+        "id": "a2",
+        "name": "阿序",
+        "kind": "ai",
+        "seat": 3,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "黄",
+        "role": "ordinary",
+        "cards": 2,
+        "guns": 0
+      },
+      {
+        "id": "a3",
+        "name": "听雨",
+        "kind": "ai",
+        "seat": 4,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "绿",
+        "role": "ordinary",
+        "cards": 0,
+        "guns": 0
+      },
+      {
+        "id": "a4",
+        "name": "星野",
+        "kind": "ai",
+        "seat": 5,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "青",
+        "role": "ordinary",
+        "cards": 2,
+        "guns": 0
+      },
+      {
+        "id": "a5",
+        "name": "知夏",
+        "kind": "ai",
+        "seat": 6,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "黑",
+        "role": "ordinary",
+        "cards": 2,
+        "guns": 0
+      },
+      {
+        "id": "a6",
+        "name": "长安",
+        "kind": "ai",
+        "seat": 7,
+        "score": 0,
+        "alive": true,
+        "death_reason": null,
+        "rank": 1,
+        "color": "红",
+        "role": "lurker",
+        "cards": 2,
+        "guns": 0
+      }
+    ],
+    "count": 7,
+    "self": "",
+    "observer": true,
+    "box_open": false,
+    "box_hint": "桌面中央有一个黑盒，内含隐藏信息。密码不超过五个中文汉字。提示：这是一个名词。每轮整桌交流结束后，你有一次输入机会，也可以空提交。",
+    "allowed_actions": [],
+    "task_id": "fd7f9c6841a549a8aaf68d3081263e46:2",
+    "notification_only": false,
+    "wake": false,
+    "wake_key": "2:0",
+    "done": [],
+    "seq": 17,
+    "human_omniscient": true,
+    "fairness": "为了游戏公平性请不要给AI场外提示",
+    "box_inputs": {},
+    "guesses": {},
+    "judgement": {},
+    "judgement_used": false,
+    "hidden_state": {
+      "password": "潜伏者",
+      "peace_rounds": 0,
+      "description": "仅供人类观战：连续四个已完成轮次无普通玩家损失且仍有普通玩家存活，将提前结束整场。此条件不向AI主动讲解。"
+    }
+  },
+  "events": {
+    "items": [
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 1,
+        "text": "欢迎来到七席心牢，满七席自动开局。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 2,
+        "text": "1号 阿止 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 3,
+        "text": "2号 小川 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 4,
+        "text": "3号 阿序 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 5,
+        "text": "4号 听雨 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 6,
+        "text": "5号 星野 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 7,
+        "text": "6号 知夏 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 8,
+        "text": "7号 长安 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "phase",
+        "phase": "talk",
+        "round": 1,
+        "seq": 9,
+        "text": "交流"
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "notice",
+        "phase": "talk",
+        "round": 1,
+        "seq": 10,
+        "text": "第1局第1轮开始，颜色刷新、主动卡补为2张。"
+      },
+      {
+        "at": 1000,
+        "free_reply": false,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "replied": true,
+        "reply_to": null,
+        "round": 1,
+        "sender": "a0",
+        "seq": 11,
+        "target": "a1",
+        "text": "上一轮的私聊",
+        "sender_color": "青",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 1,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 2,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "free_reply": true,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "reply_to": 11,
+        "round": 1,
+        "sender": "a1",
+        "seq": 12,
+        "target": "a0",
+        "text": "上一轮的免费回复",
+        "sender_color": "橙",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 2,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 1,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "phase",
+        "phase": "talk",
+        "round": 2,
+        "seq": 13,
+        "text": "交流"
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "notice",
+        "phase": "talk",
+        "round": 2,
+        "seq": 14,
+        "text": "第1局第2轮开始，颜色刷新、主动卡补为2张。"
+      },
+      {
+        "at": 1000,
+        "free_reply": false,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "replied": true,
+        "reply_to": null,
+        "round": 2,
+        "sender": "a0",
+        "seq": 15,
+        "target": "a2",
+        "text": "这一轮的私聊",
+        "sender_color": "白",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 1,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 2,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "free_reply": true,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "reply_to": 15,
+        "round": 2,
+        "sender": "a2",
+        "seq": 16,
+        "target": "a0",
+        "text": "这一轮的免费回复",
+        "sender_color": "黄",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 2,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 1,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "free_reply": false,
+        "game": 1,
+        "kind": "public",
+        "phase": "talk",
+        "reply_to": null,
+        "round": 2,
+        "sender": "a3",
+        "seq": 17,
+        "target": null,
+        "text": "本轮公开发言",
+        "sender_color": "绿",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 0,
+          "guns": 0
+        },
+        "target_resources": null
+      }
+    ],
+    "events": [
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 1,
+        "text": "欢迎来到七席心牢，满七席自动开局。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 2,
+        "text": "1号 阿止 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 3,
+        "text": "2号 小川 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 4,
+        "text": "3号 阿序 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 5,
+        "text": "4号 听雨 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 6,
+        "text": "5号 星野 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 7,
+        "text": "6号 知夏 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 0,
+        "kind": "notice",
+        "phase": "lobby",
+        "round": 0,
+        "seq": 8,
+        "text": "7号 长安 已入席。"
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "phase",
+        "phase": "talk",
+        "round": 1,
+        "seq": 9,
+        "text": "交流"
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "notice",
+        "phase": "talk",
+        "round": 1,
+        "seq": 10,
+        "text": "第1局第1轮开始，颜色刷新、主动卡补为2张。"
+      },
+      {
+        "at": 1000,
+        "free_reply": false,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "replied": true,
+        "reply_to": null,
+        "round": 1,
+        "sender": "a0",
+        "seq": 11,
+        "target": "a1",
+        "text": "上一轮的私聊",
+        "sender_color": "青",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 1,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 2,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "free_reply": true,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "reply_to": 11,
+        "round": 1,
+        "sender": "a1",
+        "seq": 12,
+        "target": "a0",
+        "text": "上一轮的免费回复",
+        "sender_color": "橙",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 2,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 1,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "phase",
+        "phase": "talk",
+        "round": 2,
+        "seq": 13,
+        "text": "交流"
+      },
+      {
+        "at": 1000,
+        "game": 1,
+        "kind": "notice",
+        "phase": "talk",
+        "round": 2,
+        "seq": 14,
+        "text": "第1局第2轮开始，颜色刷新、主动卡补为2张。"
+      },
+      {
+        "at": 1000,
+        "free_reply": false,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "replied": true,
+        "reply_to": null,
+        "round": 2,
+        "sender": "a0",
+        "seq": 15,
+        "target": "a2",
+        "text": "这一轮的私聊",
+        "sender_color": "白",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 1,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 2,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "free_reply": true,
+        "game": 1,
+        "kind": "private",
+        "phase": "talk",
+        "reply_to": 15,
+        "round": 2,
+        "sender": "a2",
+        "seq": 16,
+        "target": "a0",
+        "text": "这一轮的免费回复",
+        "sender_color": "黄",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 2,
+          "guns": 0
+        },
+        "target_resources": {
+          "cards": 1,
+          "guns": 0
+        }
+      },
+      {
+        "at": 1000,
+        "free_reply": false,
+        "game": 1,
+        "kind": "public",
+        "phase": "talk",
+        "reply_to": null,
+        "round": 2,
+        "sender": "a3",
+        "seq": 17,
+        "target": null,
+        "text": "本轮公开发言",
+        "sender_color": "绿",
+        "resource_before": {
+          "cards": 2,
+          "guns": 0
+        },
+        "resource_after": {
+          "cards": 0,
+          "guns": 0
+        },
+        "target_resources": null
+      }
+    ],
+    "next_cursor": 17,
+    "read_to": 17,
+    "has_more": false
+  }
+}

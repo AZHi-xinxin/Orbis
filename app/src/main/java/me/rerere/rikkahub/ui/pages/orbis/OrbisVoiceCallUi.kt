@@ -102,7 +102,7 @@ fun OrbisVoiceCallOverlay(runtime: OrbisVoiceCallRuntime, assistant: Assistant?,
         usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false,
     )) {
         BindVoiceCallDialogVolumeStream()
-        OrbisVisualTheme {
+        OrbisInterfaceTheme {
             val colors = OrbisTheme.colors
             val cream = colors.onDock
             Surface(Modifier.fillMaxSize().testTag("orbis-voice-call"), color = colors.dock) {
@@ -296,7 +296,7 @@ internal fun OrbisVoiceCallReturnDialog(phase: OrbisVoiceReturnPhase, onDismiss:
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
         usePlatformDefaultWidth = false, dismissOnClickOutside = false, decorFitsSystemWindows = false,
     )) {
-        OrbisVisualTheme {
+        OrbisInterfaceTheme {
             val colors = OrbisTheme.colors
             Surface(Modifier.fillMaxSize().testTag("orbis-call-return"), color = colors.dock) {
                 Column(Modifier.fillMaxSize().systemBarsPadding().padding(28.dp),

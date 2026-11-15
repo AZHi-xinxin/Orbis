@@ -100,7 +100,7 @@ internal fun OrbisManualContextSheet(
     }
     fun dismiss() { if (!busy) onDismiss() }
 
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(
             onDismissRequest = ::dismiss,

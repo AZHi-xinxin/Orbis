@@ -66,7 +66,7 @@ internal data class OrbisSpeechRules(
 internal fun orbisSettingsInitialItem(startAtMcp: Boolean): Int = if (startAtMcp) 1 else 0
 
 internal enum class OrbisToolGroup { WORK, PLAY }
-internal enum class OrbisToolDestination { MUSIC, WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER, PET, STUDY, BODY, HUMAN_HEALTH }
+internal enum class OrbisToolDestination { MUSIC, PLUGINS, WORKSPACE, ATTACHMENTS, LOCAL_CAPABILITIES, IMAGE_WORKSHOP, GAMES, STICKERS, BLUETOOTH_TOY, GALLERY, MARKET, COMMUNITY, SCHEDULE, PRIVATE_ROOM, SECRET_BASE, SHARED_SPACE, PHOTO_WALL, CHARACTER, PET, STUDY, BODY, HUMAN_HEALTH }
 internal data class OrbisToolEntry(
     val destination: OrbisToolDestination,
     val group: OrbisToolGroup,
@@ -96,4 +96,7 @@ internal val orbisToolEntries = listOf(
     OrbisToolEntry(OrbisToolDestination.PET, OrbisToolGroup.PLAY, "♡", "宠物区", "共同领养与照料"),
     OrbisToolEntry(OrbisToolDestination.BODY, OrbisToolGroup.PLAY, "♡", "身体表达", "此刻的状态与身体记录"),
     OrbisToolEntry(OrbisToolDestination.MUSIC, OrbisToolGroup.PLAY, "♫", "星河音乐", "本地曲库 · 一起听歌"),
+    OrbisToolEntry(OrbisToolDestination.PLUGINS, OrbisToolGroup.PLAY, "✧", "插件区", "AI 的个人工具"),
+    OrbisToolEntry(OrbisToolDestination.MARKET, OrbisToolGroup.PLAY, "✉", "番外与格子市场", "发现设定 · 寄出愿望"),
+    OrbisToolEntry(OrbisToolDestination.COMMUNITY, OrbisToolGroup.PLAY, "♧", "社区", "群聊 · 朋友圈 · 联系人"),
 )

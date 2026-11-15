@@ -23,6 +23,8 @@ import kotlin.uuid.Uuid
 fun createConversationTools(
     conversationRepo: ConversationRepository,
     assistantId: Uuid,
+    allAssistants: Boolean = false,
+    enabled: () -> Boolean = { true },
 ): List<Tool> = listOf(
     Tool(
         name = "recent_chats",
@@ -45,7 +47,9 @@ fun createConversationTools(
                 }
             )
         },
+        isApprovalCurrent = enabled,
         execute = {
+            check(enabled()) { "conversation_history_disabled" }
             val limit = (it.jsonObject["limit"]?.jsonPrimitive?.intOrNull ?: 10).coerceIn(1, 30)
             val recent = conversationRepo.getRecentConversations(
                 assistantId = assistantId,
@@ -61,6 +65,7 @@ fun createConversationTools(
                     })
                 }
             }
+            check(enabled()) { "conversation_history_disabled" }
             listOf(UIMessagePart.Text(JsonInstantPretty.encodeToString(payload)))
         }
     ),
@@ -70,7 +75,8 @@ fun createConversationTools(
             Full-text search across the user's past conversations to recall specific information they mentioned before.
             Use focused keywords. Run multiple searches with different keywords if needed.
             Each result includes the conversation title, a snippet with matched keywords wrapped in [brackets], and the date.
-        """.trimIndent(),
+        """.trimIndent() + if (allAssistants) " 当前可搜索所有助手的普通聊天；查询命中后用 conversation_read 按页读原文。" else
+            " 当前仅可搜索本助手的聊天，可跨窗口；用 conversation_read 按页读原文。",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
@@ -89,13 +95,18 @@ fun createConversationTools(
                 required = listOf("query")
             )
         },
+        isApprovalCurrent = enabled,
         execute = {
+            check(enabled()) { "conversation_history_disabled" }
             val query = it.jsonObject["query"]?.jsonPrimitive?.contentOrNull
                 ?: error("query is required")
             val limit = (it.jsonObject["limit"]?.jsonPrimitive?.intOrNull ?: 15).coerceIn(1, 50)
-            val results = conversationRepo
-                .searchMessages(query, MessageSearchSort.RELEVANCE, assistantId, includeConsultations = true)
-                .take(limit)
+            val matches = conversationRepo
+                .searchMessages(query, MessageSearchSort.RELEVANCE, if (allAssistants) null else assistantId,
+                    includeConsultations = !allAssistants)
+            val results = (matches + if (allAssistants)
+                conversationRepo.searchMessages(query, MessageSearchSort.RELEVANCE, assistantId, includeConsultations = true)
+                else emptyList()).distinctBy { it.messageId }.take(limit)
             val payload = buildJsonArray {
                 results.forEach { result ->
                     add(buildJsonObject {
@@ -106,7 +117,9 @@ fun createConversationTools(
                     })
                 }
             }
+            check(enabled()) { "conversation_history_disabled" }
             listOf(UIMessagePart.Text(JsonInstantPretty.encodeToString(payload)))
         }
-    )
+    ),
+    createConversationReadTool(assistantId, allAssistants, enabled, conversationRepo::getConversationById),
 )

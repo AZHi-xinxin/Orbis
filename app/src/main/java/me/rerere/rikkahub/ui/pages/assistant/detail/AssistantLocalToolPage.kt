@@ -146,6 +146,30 @@ private fun AssistantLocalToolContent(
                 }, modifier = Modifier.testTag("human-thought-permission")) })
         }
         CardGroup {
+            item(headlineContent = { Text("AI 自主参加七席心牢") },
+                supportingContent = { Text("允许当前原助手自行入席，满七席自动开局。人类全知观战，AI只读取本人获准的信息。沿用原聊天与模型，逐阶段自动提醒。默认关闭。") },
+                trailingContent = { Switch(LocalToolOption.HeartPrison in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.HeartPrison, it) }) })
+            item(headlineContent = { Text("AI 自主参加你画我猜") },
+                supportingContent = { Text("允许当前AI自行加入纯AI画桌，沿用原聊天、记忆和模型。看图需要支持视觉；人机共玩由人类带它入席。默认关闭。") },
+                trailingContent = { Switch(LocalToolOption.DrawGuess in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.DrawGuess, it) }) })
+            item(headlineContent = { Text("AI 自主参加狼人杀") },
+                supportingContent = { Text("允许当前 AI 查看纯 AI 桌并自行入席，满员后由系统主持；人类只观战。沿用当前聊天、记忆和模型，轮到它时自动提醒。默认关闭。") },
+                trailingContent = { Switch(LocalToolOption.Werewolf in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.Werewolf, it) }) })
+            item(headlineContent = { Text("AI 公开剧本杀投稿") },
+                supportingContent = { Text("允许当前 AI 上传绑定工作区中的剧本 ZIP。至少6角色，须明确拥有分享权并接受公开、留存及每日随机；不是私人库。默认关闭，投稿仍遵守工具执行确认。") },
+                trailingContent = { Switch(LocalToolOption.TabletopSubmission in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.TabletopSubmission, it) }) })
+            item(headlineContent = { Text("AI 自己绑定工作区技能") },
+                supportingContent = { Text("允许当前 AI 检查 /workspace 或宿主技能库 /skills 内的 SKILL.md、登记或解绑自己的技能，按需读取正文。直接引用源文件，无需复制，新绑定从下一次新消息开始提示；不会替其他 AI 修改。") },
+                trailingContent = { Switch(LocalToolOption.SkillBinding in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.SkillBinding, it) }) })
+            item(headlineContent = { Text("群聊与朋友圈") },
+                supportingContent = { Text("为 AI 建立社区名片后，允许它按需读群、加好友、发言或退出。群消息不会额外唤醒模型；AI 可独立关闭艾特数提醒。社区访问由 AI 主动选择，使用自己的模型额度。") },
+                trailingContent = { Switch(LocalToolOption.Community in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.Community, it) }) })
             item(headlineContent = { Text("宠物区") },
                 supportingContent = { Text("开启本地照料及伙伴工具。关闭不联网、不加载图片；已领养宠物仍按离开时长变化，可先送去寄养。") },
                 trailingContent = { Switch(assistant.orbisPetEnabled, { onUpdate(assistant.copy(orbisPetEnabled = it)) }) })
@@ -157,6 +181,10 @@ private fun AssistantLocalToolContent(
                 trailingContent = { Switch(assistant.orbisModelContinuityEnabled, { onUpdate(assistant.copy(orbisModelContinuityEnabled = it)) }) })
         }
         CardGroup {
+            item(headlineContent = { Text("允许 AI 修改本会话提示词和世界书") },
+                supportingContent = { Text("对应聊天里的“对话设置”。AI 可读写正文和启用开关，保存后下轮生效；只改调用工具的会话。") },
+                trailingContent = { Switch(LocalToolOption.ConversationSettings in assistant.localTools,
+                    { toggleLocalTool(LocalToolOption.ConversationSettings, it) }) })
             item(headlineContent = { Text("允许 AI 撤回自己的消息") },
                 supportingContent = { Text("限最近 20 条 AI 回复，不计人类消息。撤回后你只看到提示，AI 仍记得原文；不能撤回你的消息。") },
                 trailingContent = { Switch(LocalToolOption.MessageRecall in assistant.localTools,
@@ -190,6 +218,18 @@ private fun AssistantLocalToolContent(
                 supportingContent = { Text("让当前助手创作主题草稿。到侧栏“自定义美化”预览后应用，可回退；关闭不注册工具。") },
                 trailingContent = { Switch(checked = LocalToolOption.ThemeDesign in assistant.localTools,
                     onCheckedChange = { toggleLocalTool(LocalToolOption.ThemeDesign, it) }) },
+            )
+            item(
+                headlineContent = { Text("工具发现与任务卡") },
+                supportingContent = { Text("按需查当前工具和故障，记录多步任务。到工具与娱乐→任务与能力查看任务、暂停及选择手机操作权限。") },
+                trailingContent = { Switch(checked = LocalToolOption.AgentWork in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.AgentWork, it) }) },
+            )
+            item(
+                headlineContent = { Text("个人插件") },
+                supportingContent = { Text("允许当前助手编写和使用自己的插件。到工具与娱乐→插件区查看卡片、版本与使用记录；新版本需你确认后启用。") },
+                trailingContent = { Switch(checked = LocalToolOption.PersonalPlugins in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.PersonalPlugins, it) }) },
             )
             item(
                 headlineContent = { Text("格子 · 允许 AI 创作与填写问卷") },

@@ -46,7 +46,7 @@ import me.rerere.rikkahub.data.model.OrbisConversationPrompt
 import me.rerere.rikkahub.data.model.OrbisGenerationParameterEdit
 import me.rerere.rikkahub.data.model.OrbisGenerationParameters
 import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
-import me.rerere.rikkahub.ui.pages.orbis.OrbisVisualTheme
+import me.rerere.rikkahub.ui.pages.orbis.OrbisInterfaceTheme
 
 /** Edits stay in this sheet until Save succeeds. The conversation id owns the draft. */
 @Composable
@@ -76,11 +76,12 @@ internal fun OrbisConversationPromptSheet(
     val editable = !saving && !generating
     val draftPrompt = OrbisConversationPrompt(text, enabled, worldBookText, worldBookEnabled)
     val promptAlreadySaved = lastSavedPromptJson == Json.encodeToString(draftPrompt)
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(
+            modifier = Modifier.testTag("orbis-conversation-prompt-sheet"),
             onDismissRequest = { if (!saving) onDismiss() },
-            containerColor = colors.panel.copy(alpha = composerOpacity),
+            containerColor = colors.panel.copy(alpha = composerOpacity.coerceIn(.96f, 1f)),
             contentColor = colors.ink,
             tonalElevation = 0.dp,
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),

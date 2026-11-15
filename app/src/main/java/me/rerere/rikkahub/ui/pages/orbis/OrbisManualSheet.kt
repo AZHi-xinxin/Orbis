@@ -92,7 +92,7 @@ private fun OrbisManualSheet(onDismiss: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val scroll = rememberScrollState()
     LaunchedEffect(selected, chapterId) { scroll.scrollTo(0) }
-    OrbisVisualTheme {
+    OrbisInterfaceTheme {
         val colors = OrbisTheme.colors
         ModalBottomSheet(
             onDismissRequest = onDismiss,
