@@ -3,8 +3,8 @@
   "baseUrl": "https://raw.githubusercontent.com/AZHi-xinxin/Orbis/orbis-pet-assets-v1/packs/",
   "packages": {
     "cat-tabby-v1": {
-      "sha256": "78b132305bf9b496b538a6017bd024c558aa217672c224a316aace8299217a1e",
-      "bytes": 1858562,
+      "sha256": "28ab3763c1335943f04094b187e8673383fcb9bac892fd06dfccd1e79a9a7fa0",
+      "bytes": 2292646,
       "files": {
         "cat.webp": {
           "sha256": "45206bc5d4c61a5c64aa91c618c76a1f306ff8fdc10523b9e20cdae0a1720a5d",
@@ -33,6 +33,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "fbc79efe20aa6bde90a9b012a7db70ca69a0930382ea894ad7ea2478fcd46202",
+          "bytes": 433990
         }
       },
       "legacy": {
@@ -42,8 +46,8 @@
       }
     },
     "cat-orange-v1": {
-      "sha256": "59189be7acbb759088ee61b959d47ee6dbd1a8104c9507c332b31dd4e2addbb3",
-      "bytes": 1853290,
+      "sha256": "f4610c06f736ca8841367e25c81c1844ccc0000a0fc0607899ebfdd075386a3f",
+      "bytes": 2247220,
       "files": {
         "cat.webp": {
           "sha256": "9de0e999e8963839b464bc84888d584fd43f335b9d23afd18a80d69f6eb833c5",
@@ -72,6 +76,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "831fb60faa2cc667c6b83ebbcc353df23098bcf26650b55ed51267dff49a3a38",
+          "bytes": 393836
         }
       },
       "legacy": {
@@ -81,8 +89,8 @@
       }
     },
     "cat-tuxedo-v1": {
-      "sha256": "fe34ed2a5fc04d8edbc66b81f9d22d71012f16c9a41c74d3ef35b54ce8f68a7b",
-      "bytes": 1828740,
+      "sha256": "b49e5f246f9a850613924a4f40cb20bebba7384212c11d2bfacb2a0c34fad137",
+      "bytes": 2204002,
       "files": {
         "cat.webp": {
           "sha256": "1768b489a2e9efcd5f996d91d016d0f469ebd825d5f48c796bfd4c087c8a7cae",
@@ -111,6 +119,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "65250ca20c73898bfa1109f76e3792a65f159506993a74313f3efaa639d93280",
+          "bytes": 375168
         }
       },
       "legacy": {
@@ -179,8 +191,8 @@
       }
     },
     "cat-silver-v1": {
-      "sha256": "25ae254362e5b8759136f161cd64c4e3ff624a48c08891a2962b3cec1245e1e5",
-      "bytes": 1885936,
+      "sha256": "7c1c287b14b28bb28483a3c0c406e389795a72e0b10634117d22718bdf88aa94",
+      "bytes": 2273594,
       "files": {
         "cat.webp": {
           "sha256": "0b77a871c6a79518205d380207eac716be228dc604e17d3795b189ddd1b53692",
@@ -209,6 +221,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "bfa12d2beefb9db2cd30423f0fb059de5fe7a7c26f74f56b3dbf560c690753f0",
+          "bytes": 387564
         }
       },
       "legacy": {
@@ -218,8 +234,8 @@
       }
     },
     "cat-blue-white-v1": {
-      "sha256": "9046d981a43f8c99d400cbb2593311d7c0dbf975a67ce2dd9118f35066617f74",
-      "bytes": 1865090,
+      "sha256": "70c2645b3ffd7198b18ba056e7ee7f8ec840c0465a64f84ce8e2880aee806d28",
+      "bytes": 2212248,
       "files": {
         "cat.webp": {
           "sha256": "c0e1f0bc96067708b1b040e438aad08e635c1be55574867ca2630dd568bcfe0c",
@@ -248,6 +264,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "cee182c0b43e61bfd0202cf9ea9608b6debdee1925037d7d0a3d72d023750e33",
+          "bytes": 347064
         }
       },
       "legacy": {
@@ -257,8 +277,8 @@
       }
     },
     "cat-calico-v1": {
-      "sha256": "10e473b2fc604bbcb409bd14dc30c463b5b049cf7d1eefd7b082678ad635b334",
-      "bytes": 1865426,
+      "sha256": "d505f54c50fbfbd605ef088c6531874f1c76dcb4dd5202e099fe9306d83f6b62",
+      "bytes": 2207482,
       "files": {
         "cat.webp": {
           "sha256": "fb032c583e8e4c663a7660b0f0b25f8bceb6b6dc6f0882134ad97a1163210871",
@@ -287,6 +307,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "f46baee89ec8df3edce7b5164636f0605f470449155c626f8f1f96bd8403d510",
+          "bytes": 341962
         }
       },
       "legacy": {
@@ -296,8 +320,8 @@
       }
     },
     "cat-point-v1": {
-      "sha256": "3f629532d5ddb244b6d7fe95e412e27c3bd7e521b69b88504a0cb011f7a90cfe",
-      "bytes": 1849872,
+      "sha256": "0b8926922fe25a5d7cd3250bdac886bd31d0e493e65f5c9991f4ec46ce1d0196",
+      "bytes": 2218558,
       "files": {
         "cat.webp": {
           "sha256": "50d3952275b3e7c3bd79735a69a99d4bc4dd42bc4e73f7235017df49def6a0a9",
@@ -326,6 +350,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "18be9dbda839dcb00fcc432fe6b3521a9522ab66bc0ec4685b0a0c736a682608",
+          "bytes": 368592
         }
       },
       "legacy": {
@@ -335,8 +363,8 @@
       }
     },
     "cat-cream-v1": {
-      "sha256": "ed436eea42c9131be60b586e50820bb68bd3c7340f1e4328a3449578a86773a2",
-      "bytes": 1852610,
+      "sha256": "9930f30e0a00cbdd7c3581a514e4818b6d9bdee356bcab7328b5d10a40ff2c04",
+      "bytes": 2208810,
       "files": {
         "cat.webp": {
           "sha256": "2474bac3f29474fb0bade58a192c39b85916787b96d2eaf3a13e769cd1bacb6b",
@@ -365,6 +393,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "14dabfd92965fc800980fb73f9f9737a2053fd425370fd8a7d4728530b8f23d8",
+          "bytes": 356106
         }
       },
       "legacy": {
@@ -374,8 +406,8 @@
       }
     },
     "cat-brown-longhair-v1": {
-      "sha256": "75e07bc0f1a5555f11b95a15a0edc3e4aa181252966536e5f557ce133dca1acc",
-      "bytes": 1903522,
+      "sha256": "1a86b841dadf2e2e8b83aa8dbbb6899d50d138cfe30d94a2ed4027281c81413c",
+      "bytes": 2321212,
       "files": {
         "cat.webp": {
           "sha256": "68f55429814249fc244a7848d751ef0ca9e3c5ffc5f4b27398735f2791fbf1b4",
@@ -404,6 +436,10 @@
         "room-sky-messy.webp": {
           "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
           "bytes": 285104
+        },
+        "care.webp": {
+          "sha256": "b413bbb35d0749afb2158d891b82f907b8666cc77b5ad1c0e50dc6298efa3f30",
+          "bytes": 417596
         }
       },
       "legacy": {
@@ -413,8 +449,8 @@
       }
     },
     "dog-shiba-v1": {
-      "sha256": "9620ed48df926c3e84994cf903577573fb2cfeb8353fea9ae8776200877e4b7a",
-      "bytes": 1339162,
+      "sha256": "813a9c883196b2302e844d4433e63d690249d349cbdb5757386e1898ecae5ef4",
+      "bytes": 1762608,
       "files": {
         "cat.webp": {
           "sha256": "f30724781b0df5303b8ceda3357449ef233f74bc09e516fb9c830e1f1dd8275d",
@@ -427,6 +463,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "66370b8f72a5d2352e762b90eef1a46aa51a9c0eab610215addd0e9e837ac101",
+          "bytes": 423352
         },
         "pose.webp": {
           "sha256": "c38dc87eaedc073624fb763553f52a95035b7149288162bf3667299af03eb8f9",
@@ -444,8 +484,8 @@
       }
     },
     "dog-corgi-v1": {
-      "sha256": "052161d236e741f2ad142d0ad964ac3fb1037f77dc2eb414ec5e12fac1da8980",
-      "bytes": 960632,
+      "sha256": "489a68a7adca2f3b9ca8508bbae87761fd9c81d68b838f8e744f7c988034a68e",
+      "bytes": 1351202,
       "files": {
         "cat.webp": {
           "sha256": "3071066f0346400e0fe7d3188979fa76e3f9a6b5287ab744316bfe629fb976b0",
@@ -458,6 +498,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "8342cf561b9e589986f8034e081938348299263e71a655e8a92eaf6245d4b242",
+          "bytes": 390476
         }
       },
       "legacy": {
@@ -467,8 +511,8 @@
       }
     },
     "dog-golden-v1": {
-      "sha256": "5f7958260078ece79b17a2768965bbe4008d9fae2976ee926a7fb6c0788d34dc",
-      "bytes": 966396,
+      "sha256": "b519bf5770b07b2bb94abbb56458c2ea97cab979fbed0c3739f2d4e97184edd0",
+      "bytes": 1383412,
       "files": {
         "cat.webp": {
           "sha256": "5609e3e51d5b03f00577500d1279a587762f422975b440f9f11c61d52c8fbc13",
@@ -481,6 +525,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "d2a9973ea2fd7aff6eddae3a84cab68e446496e8b772ac28dba6465a42255326",
+          "bytes": 416922
         }
       },
       "legacy": {
@@ -490,8 +538,8 @@
       }
     },
     "dog-labrador-v1": {
-      "sha256": "0850c70bad08d57da3d35e58d67edffbc11a87050a084360d672c67c4a797d33",
-      "bytes": 935364,
+      "sha256": "e43fbc8490fec1602886dcaa6e40f2790d52151870097d9f4a30da3d828f85b7",
+      "bytes": 1350456,
       "files": {
         "cat.webp": {
           "sha256": "8701dbeb2b47f8d43d7a8e9bfe514ac08875908acb496015e7a2ce270df86f89",
@@ -504,6 +552,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "5c20d5206c92b17ec3f1edef142035df253b295602dad488c4831f5fd0932e9c",
+          "bytes": 414998
         }
       },
       "legacy": {
@@ -513,8 +565,8 @@
       }
     },
     "dog-collie-v1": {
-      "sha256": "083ad8da8bf699a84fe70540b1458ff887ca81ff1c9ce3b22b0527b5e18cd4b9",
-      "bytes": 949902,
+      "sha256": "0fcaf1c5377bff5257bfc8035b3ab19faae81402002a2c30c7851760e3a39c2f",
+      "bytes": 1352550,
       "files": {
         "cat.webp": {
           "sha256": "fd8c21ba8c68e5d9288af78e636aa09a3cea02177c2bb72962acacaf6a3436ff",
@@ -527,6 +579,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "347481c1bd258dccb12499b4bd6721d737c24788b37a0731e543067ce46cd8cb",
+          "bytes": 402554
         }
       },
       "legacy": {
@@ -536,8 +592,8 @@
       }
     },
     "dog-beagle-v1": {
-      "sha256": "0eca47cf9fad14ac5f631c61a4afdf5d116fa41299e56238daa6438636d8b6b7",
-      "bytes": 943432,
+      "sha256": "d5e35abbd915c079a0d55874f0f2735c5056fe16a083b2a06d006da1e76660a1",
+      "bytes": 1314878,
       "files": {
         "cat.webp": {
           "sha256": "7361203ea682c7b120ea2427fa30a0410986d815a2959a628f7c70da0a47e441",
@@ -550,6 +606,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "12c8bfbd38a59be7e4badfbd6e17885cdf900b2e50a1c59f6b7c689ef7fe4ca6",
+          "bytes": 371352
         }
       },
       "legacy": {
@@ -559,8 +619,8 @@
       }
     },
     "dog-poodle-v1": {
-      "sha256": "20468dc42d37c570e870771cf0b70f53f68e77c6e8332e7aac557bba3b430bb9",
-      "bytes": 973850,
+      "sha256": "c1bf18ea6a547fd86dd086bebaf32fedb8d481285a1d323ba7a78e638269c70c",
+      "bytes": 1402402,
       "files": {
         "cat.webp": {
           "sha256": "19bdd1d44a5bfa0b5273f16bb91d8aa5f046cd9d93aa92bdce301c771dfdc0d9",
@@ -573,6 +633,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "e35144a4922a13f0f3604061bd4db9a58262bab739b8281d61f9ca5c5b5b850e",
+          "bytes": 428458
         }
       },
       "legacy": {
@@ -582,8 +646,8 @@
       }
     },
     "dog-pomeranian-v1": {
-      "sha256": "0db1db84468f968783172ee27a94f7d4e249729b29b1b705c518f7355127053e",
-      "bytes": 1006366,
+      "sha256": "040f7a94531592e4b4e059ed6696d230e90e3f2a7209282833dfc35640ebcaef",
+      "bytes": 1331852,
       "files": {
         "cat.webp": {
           "sha256": "f76f6babf6d244b3ff3ec306c56f58cccf83a44b5239b455ccfeefeeaefdc82c",
@@ -596,6 +660,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "f0966e58c8bcf2374d3cc0c505da41ab0f6394ae643bfc063f8fb454f82d9e4f",
+          "bytes": 325392
         }
       },
       "legacy": {
@@ -605,8 +673,8 @@
       }
     },
     "dog-samoyed-v1": {
-      "sha256": "4f3aaaeff43a719bed525f6d7e977c2e38a2b2f7cf962b7ef00e1ab5b24b1bf4",
-      "bytes": 943332,
+      "sha256": "d99cd62ec8869c7e1771ca250f3e58d771951e67b3da9c65558d5c3697938426",
+      "bytes": 1410054,
       "files": {
         "cat.webp": {
           "sha256": "cdf704bbd80536c8c6063ab8dcc5ce7f33c40b421b3ae5a9d644346de8ce0887",
@@ -619,6 +687,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "b5f40c77e67fa66585f8758cb91ed378e4bd74c8954f6f1ba5d29a4e9ebe366c",
+          "bytes": 466628
         }
       },
       "legacy": {
@@ -628,8 +700,8 @@
       }
     },
     "dog-dachshund-v1": {
-      "sha256": "5c5708d5ef8fb48afb08f8f480b115c0e9028eba15569654276018c8e47176a4",
-      "bytes": 950306,
+      "sha256": "dddcb4bafd34443b4c71f05283482af431f8ef73edee6601ab3c52dcba06a8c0",
+      "bytes": 1304778,
       "files": {
         "cat.webp": {
           "sha256": "ac16f34dc2e3eb91425f5236be9ac03b03578c751519e2c7d18d01020c8a2fa3",
@@ -642,6 +714,10 @@
         "room-sage-messy.webp": {
           "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
           "bytes": 382326
+        },
+        "care.webp": {
+          "sha256": "f67701f9e2f8036a709e8c76fcd99215358d2091b28393d4df8e652fbbc18ddb",
+          "bytes": 354378
         }
       },
       "legacy": {
@@ -651,8 +727,8 @@
       }
     },
     "bird-budgie-v1": {
-      "sha256": "9301d8bbc83a75de25f8353beeda2dc5ebe33133b1fcb3ba869a76a715cde4af",
-      "bytes": 1196824,
+      "sha256": "b7ca6f7316e05b5343ce67da35e2283499a2505d27242435f905b0d9fceaf9e3",
+      "bytes": 1580524,
       "files": {
         "cat.webp": {
           "sha256": "a909120b782317d446f151cdb752acad135e8f58be176219298a40706e6b7063",
@@ -665,6 +741,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "167c197a964fbeb97cc820b2741f1831d72af7ef2eee89e4f988369425bc8acb",
+          "bytes": 383606
         },
         "pose.webp": {
           "sha256": "adb24484e60074d72b4bfad6c4505e39a9fa5ba6a9ef82be8d6bb791380dc2a1",
@@ -682,8 +762,8 @@
       }
     },
     "bird-cockatiel-v1": {
-      "sha256": "bb04b77726028f7bde5e206417dfde1bd82308992240475ac0757fcd4c097f70",
-      "bytes": 810842,
+      "sha256": "d764ee712a35ebeb10bf00244435c32f011bde65f22d9e217108d7a3c5b18565",
+      "bytes": 1193234,
       "files": {
         "cat.webp": {
           "sha256": "e16f4654d138e7214cccd2b0ce23def6fc5e829ce151236fe1d8d6b45d2e3aa7",
@@ -696,6 +776,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "5ef8271b47e19e8d8e91555754ddb3e20f7ed12a981e62c8eea8fae2954b94a3",
+          "bytes": 382298
         }
       },
       "legacy": {
@@ -705,8 +789,8 @@
       }
     },
     "bird-lovebird-v1": {
-      "sha256": "ce58cf6f2ad18b2c8b5e8371a3a1e69e379f086a9cc8a5d26ab54d37a4bde708",
-      "bytes": 820198,
+      "sha256": "4d4f700a79185d3a7eb4a905182185802d57b1b8a2a1eb181aa20ba3e4a68d33",
+      "bytes": 1148900,
       "files": {
         "cat.webp": {
           "sha256": "74d643a7004312e761e780da8117e70ae9347aa994ebb6c3d6d3a05ca0a8f18f",
@@ -719,6 +803,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "b80a7a95e54001c0681134449017df9fdb6a1bdef43d2584739aebdb77d85ada",
+          "bytes": 328608
         }
       },
       "legacy": {
@@ -728,8 +816,8 @@
       }
     },
     "bird-conure-v1": {
-      "sha256": "60c93a54ad68573ba6c1107688e51b51853d0353304bfeb329dfe465652ab956",
-      "bytes": 846168,
+      "sha256": "2996a7234875c993f6464499a7577f3b4e7de088d197f9ac12dc4cc97d3ac97f",
+      "bytes": 1203818,
       "files": {
         "cat.webp": {
           "sha256": "c2d576019d0d397d2e886e9d13ad33bceb962d326b4d9eac79d321cc2e568a5d",
@@ -742,6 +830,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "5afef120aea7395a78faf16c69a76d3611eb42dd1e75dcc4354958125397a22f",
+          "bytes": 357556
         }
       },
       "legacy": {
@@ -751,8 +843,8 @@
       }
     },
     "bird-java-v1": {
-      "sha256": "1db3c0f37141b7231c08963f45186c5c85c2ec5cf122e1d074c1dc918906ca1b",
-      "bytes": 782640,
+      "sha256": "a1a26de22d5b547eaadfe4f21d2f78a27e75c7e3114c9a06eb9aeb96856c0bd6",
+      "bytes": 1107752,
       "files": {
         "cat.webp": {
           "sha256": "cdc7279039a5921f1d27af306db7ed7ac03fd815a7a17d3d59da028fc090e145",
@@ -765,6 +857,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "bbfbeacf5266b644a72077da466f12df212b2b115e73dbdaea26fdbeb33f2198",
+          "bytes": 325018
         }
       },
       "legacy": {
@@ -774,8 +870,8 @@
       }
     },
     "bird-zebra-v1": {
-      "sha256": "633e099f5d6155f61a6c741bbcfeec13cb860e8b981c5b6d42c56a50d9fc376a",
-      "bytes": 845294,
+      "sha256": "e404674c1ae40f96e42f6aa6e3e1fe7d518cf1939ae98274aeef52ca40f8e483",
+      "bytes": 1202580,
       "files": {
         "cat.webp": {
           "sha256": "8afaacc4e13622aa049d8707e79defb7de51a90d82371869e070df7bd954cf26",
@@ -788,6 +884,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "1d55bb4102692f13922a66551f3bbd45d0d46e326be1d04f2abe0f5d8c47bc54",
+          "bytes": 357192
         }
       },
       "legacy": {
@@ -797,8 +897,8 @@
       }
     },
     "bird-canary-v1": {
-      "sha256": "d19d31076c77e4831b1b25d63e6e05e70568c9e3d0b269d4843a31e857e60843",
-      "bytes": 794072,
+      "sha256": "4bd1812133bfcb174524b1e5ffbdc825fe62af91e547011287cd4bd411debcde",
+      "bytes": 1124360,
       "files": {
         "cat.webp": {
           "sha256": "22953e5207d00ad0f67e1c7118db8771035f71aef4c297688200e5fd16ad20ed",
@@ -811,6 +911,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "12e554b6447a8e339d63c70aa18b3d08a209932b4c5fc4155224eacf98675d50",
+          "bytes": 330194
         }
       },
       "legacy": {
@@ -820,8 +924,8 @@
       }
     },
     "bird-pigeon-v1": {
-      "sha256": "c5f4a3d06fc694d46fab6546f3bdab9fc959dd4f870bb24616fe163e7442b226",
-      "bytes": 805960,
+      "sha256": "7ede55c9d3c3ca26dfd5a1138a9e010e34b930859dc67cc853bcff633914e5fb",
+      "bytes": 1110848,
       "files": {
         "cat.webp": {
           "sha256": "8b6c8069a425c3688a7064fac6ca80bf4676167603a2bfd33a4df4fa8ab800f8",
@@ -834,6 +938,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "04b452e0dd1373bf4dc33e68efee19935b6f4a8eee3972c8695771c92ceab5da",
+          "bytes": 304794
         }
       },
       "legacy": {
@@ -843,8 +951,8 @@
       }
     },
     "bird-lineolated-v1": {
-      "sha256": "48de16be8c29de9a6272c86a70b458862e17cbb755ebedca0ab2f93b489dc83f",
-      "bytes": 840622,
+      "sha256": "748a8ca76f6cced77b1d261445fe1f726c527a2dc25b48c6b555292d4b59f42e",
+      "bytes": 1192626,
       "files": {
         "cat.webp": {
           "sha256": "36317991e0a7ec830554cc5cb3060f8ca810dc8507dd6166e4e178e830f889da",
@@ -857,6 +965,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "812b3cb8868b2ba1474c00cebb4a6c37ab2066994baad4e5feb86d3b723d9e2d",
+          "bytes": 351910
         }
       },
       "legacy": {
@@ -866,8 +978,8 @@
       }
     },
     "bird-monk-v1": {
-      "sha256": "3d203e7f0e5c84731e676ad0f591148e94ac15e3bc2bea1a412c50adc44bf9b4",
-      "bytes": 832052,
+      "sha256": "f57120828336265ff725e6e0e3ae1f42bd9da381ec9bdb8b1a132a207f14f3dc",
+      "bytes": 1125282,
       "files": {
         "cat.webp": {
           "sha256": "c0978f9d8ffe8bf112fb080f1b29666aae8184a5dc69490f75ed4438c2cbac12",
@@ -880,6 +992,10 @@
         "room-sage-messy.webp": {
           "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
           "bytes": 351850
+        },
+        "care.webp": {
+          "sha256": "70a74f35c3f493650d6a1bc14789a54e0dc2d4be05f750b5dd6012d51f456bda",
+          "bytes": 293136
         }
       },
       "legacy": {
@@ -889,8 +1005,8 @@
       }
     },
     "reptile-leopard-gecko-v1": {
-      "sha256": "ed2c4dab797b9b1e81daa59b2879b4acf2adf2a9b48f41235dbeb3b170d28c5e",
-      "bytes": 1240920,
+      "sha256": "5ecfca3143235f62c47db48463fd6e5cd174e31b1251f63391bb4a3a3e7e38b8",
+      "bytes": 1735412,
       "files": {
         "cat.webp": {
           "sha256": "4164766df97e6c43bf43ebe0fadb27320caa9b5620c76bd77bd8768358448934",
@@ -903,6 +1019,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "82557fadc9b8e4538b4c8ed50b8381a247fba41134d47b10e8073d4b4965fbf6",
+          "bytes": 494398
         },
         "pose.webp": {
           "sha256": "cb90cbbf20b90f712d56328291052023e38ff2c7abd21500aad88bdfb158da06",
@@ -920,8 +1040,8 @@
       }
     },
     "reptile-crested-gecko-v1": {
-      "sha256": "e22d77cbad1844474ad7a905cc9ff7bc6a539e1765b17e46c0e22876166ac36b",
-      "bytes": 963614,
+      "sha256": "3579c34f4461c672641aae5b71c03f3f4079ac09f1a1b12042ffefd3054db21c",
+      "bytes": 1458794,
       "files": {
         "cat.webp": {
           "sha256": "e8149e585b99d8890b3437e150802d3812dc5ad57e397b5630ac4da78f8e158f",
@@ -934,6 +1054,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "0196964d6cad6c787a337107051b398b38b0152c43719aaf810e83ebe2064fe3",
+          "bytes": 495086
         }
       },
       "legacy": {
@@ -943,8 +1067,8 @@
       }
     },
     "reptile-bearded-dragon-v1": {
-      "sha256": "43af23277d60e0d42dccfeb6f02defe4af4803e309b725a5506d864f6cce685c",
-      "bytes": 979820,
+      "sha256": "df2aa0d721a943f22729766da8ff3cda350f1de4a015d0cb6565c2e35f381164",
+      "bytes": 1488994,
       "files": {
         "cat.webp": {
           "sha256": "ee54a7d77e8a2f18cd2658b2894908bbb4f472d9e29aa2098d3e9df0b6a056ec",
@@ -957,6 +1081,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "845645f0936b93215fd922a74d30624de381f5bc755eae5847990cca7ad6839a",
+          "bytes": 509080
         }
       },
       "legacy": {
@@ -966,8 +1094,8 @@
       }
     },
     "reptile-blue-tongue-v1": {
-      "sha256": "ee226b63392e6b77dd7c6d02d395e9f8e2f264cc2ab6cf6b62bf9c243251ddd7",
-      "bytes": 921148,
+      "sha256": "bbbf10a704ed38e048a4cd4f7f6bd9e0914a96261dce433ba75474ed12b79d70",
+      "bytes": 1409732,
       "files": {
         "cat.webp": {
           "sha256": "58058b1ea935e6d2fd6fc73642d414417eaa5bf60faecb28b72414112f2aa2ea",
@@ -980,6 +1108,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "17bea6e8e5db05291fee59bc447564a0d103d0257b95c0249856f2d596042116",
+          "bytes": 488490
         }
       },
       "legacy": {
@@ -989,8 +1121,8 @@
       }
     },
     "reptile-corn-snake-v1": {
-      "sha256": "2fc37fa9491b2cbcb76dee23452a3208404b55cb39ac8351fc0bbca404ba516a",
-      "bytes": 954306,
+      "sha256": "81fe6557a099d31cba44c8f4d96f1563312df5b432fd62cb0b17a07a5276c707",
+      "bytes": 1505188,
       "files": {
         "cat.webp": {
           "sha256": "10ab833479f98801a513f0197038d917a7982399e90ab28ef1a19b6688796e10",
@@ -1003,6 +1135,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "6b189acbcec69653fdfa387947e2b62ca0af2ec35296f8d90c15ae955adf30ed",
+          "bytes": 550788
         }
       },
       "legacy": {
@@ -1012,8 +1148,8 @@
       }
     },
     "reptile-ball-python-v1": {
-      "sha256": "de1f20b1e1b54941c8bb450b0832ee1ed8a492dc9ff7551c8c66367aa0db0bad",
-      "bytes": 925460,
+      "sha256": "e1806c61307c76732a8a7fbd05cde575af8c25fb91ad57544de4c22bb3d07c69",
+      "bytes": 1378554,
       "files": {
         "cat.webp": {
           "sha256": "d74fdbfebc34b1301b4490baf4765c76cbaa3132733f379ef49b1ace06e2eeec",
@@ -1026,6 +1162,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "b280cb7511c7f30cb3f786c7456ec847a2efd4d99d920708c5a2dadd19976c65",
+          "bytes": 453000
         }
       },
       "legacy": {
@@ -1035,8 +1175,8 @@
       }
     },
     "reptile-hognose-v1": {
-      "sha256": "375e942bcf7edfb9a73758a98fdc17265c70d9e9ccf53aaf4b97d79d7b6439d6",
-      "bytes": 907928,
+      "sha256": "779532a50c8b5db90c2ccbeea41d446d25a887231cd714e9b7080341cb1c2cab",
+      "bytes": 1445906,
       "files": {
         "cat.webp": {
           "sha256": "fbea042f001e51f02913847effb2926a798725a042901c9cb7f913c96e36f856",
@@ -1049,6 +1189,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "e598aec818f270ddb375377349371666efe5cec21271d2ee127a359548a16f1c",
+          "bytes": 537884
         }
       },
       "legacy": {
@@ -1058,8 +1202,8 @@
       }
     },
     "reptile-hermann-v1": {
-      "sha256": "25e3c31577ff61b51da7eb188976ad817e61973a14da6afdc1cf49d1cf525b8e",
-      "bytes": 973362,
+      "sha256": "ac93f90972a06dfee19f43f51b5ddb96574d96c4db59233bf23d3d6a77b024cf",
+      "bytes": 1553980,
       "files": {
         "cat.webp": {
           "sha256": "96bf74c3001db48af7a4b5d0c4ce41b564e894338cdf66d4aed315715ab77294",
@@ -1072,6 +1216,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "a966fde6f23762be92d9dd057414e5b75c49d502f305ce17fc4365e55807f1cb",
+          "bytes": 580524
         }
       },
       "legacy": {
@@ -1081,8 +1229,8 @@
       }
     },
     "reptile-redfoot-v1": {
-      "sha256": "edf998385b432791398312272f51d7a12107e327d9eeeaf1c4aa8eb294454b9b",
-      "bytes": 961672,
+      "sha256": "b3966b42c9287c26900e24bc70ee8669452ddf6938eca0947d2f0cbcbce6f36e",
+      "bytes": 1464458,
       "files": {
         "cat.webp": {
           "sha256": "1a936fb84fd7ccd4fc8715ed193dbfd2ba35b4b1b60932234d2d2efc1fded3c1",
@@ -1095,6 +1243,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "8d10e7526c0953d53dbadb5c4c0106ed8143500a8c2c2caf98b0a1918c732c35",
+          "bytes": 502692
         }
       },
       "legacy": {
@@ -1104,8 +1256,8 @@
       }
     },
     "reptile-musk-v1": {
-      "sha256": "a9bde1ed6915f3a71f96b4884b5f414fa49e1385c300c3813ffe0fa2134148bd",
-      "bytes": 895778,
+      "sha256": "6d51688f0770bbfa4c5c3ede70517bc0463f9ccdf537d777e69cfc99861e329d",
+      "bytes": 1371976,
       "files": {
         "cat.webp": {
           "sha256": "a2cdc400419a5032acb0495727c4daa5a588b650bada606060af548b419e1d73",
@@ -1118,6 +1270,10 @@
         "room-sage-messy.webp": {
           "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
           "bytes": 358416
+        },
+        "care.webp": {
+          "sha256": "69823540a753934df5a5ae05d538a6aaa1fea6848e42a3316dd6898589297a4a",
+          "bytes": 476104
         }
       },
       "legacy": {
@@ -1126,5 +1282,1211 @@
         "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
       }
     }
+  },
+  "previousPackages": {
+    "cat-tabby-v1": [
+      {
+        "sha256": "78b132305bf9b496b538a6017bd024c558aa217672c224a316aace8299217a1e",
+        "bytes": 1858562,
+        "files": {
+          "cat.webp": {
+            "sha256": "45206bc5d4c61a5c64aa91c618c76a1f306ff8fdc10523b9e20cdae0a1720a5d",
+            "bytes": 238424
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "27a520c0eddd890e8e0931fe7910421a7931a660a0f84f0b8e81dc707350ac09",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-orange-v1": [
+      {
+        "sha256": "59189be7acbb759088ee61b959d47ee6dbd1a8104c9507c332b31dd4e2addbb3",
+        "bytes": 1853290,
+        "files": {
+          "cat.webp": {
+            "sha256": "9de0e999e8963839b464bc84888d584fd43f335b9d23afd18a80d69f6eb833c5",
+            "bytes": 233152
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "da134b34cd72d35912515c4d24f729128b3900f53466d4a4aaab0649e23daef0",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-tuxedo-v1": [
+      {
+        "sha256": "fe34ed2a5fc04d8edbc66b81f9d22d71012f16c9a41c74d3ef35b54ce8f68a7b",
+        "bytes": 1828740,
+        "files": {
+          "cat.webp": {
+            "sha256": "1768b489a2e9efcd5f996d91d016d0f469ebd825d5f48c796bfd4c087c8a7cae",
+            "bytes": 208602
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "982ed06350318d197a23f7d17f7f4e94f7acf0ca0b9941ed1a841b568a7ecdc3",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-black-v1": [
+      {
+        "sha256": "380e7f29b5cfcef976bc3401eb6e6eef571c51acca87285404aa58461d83fb0e",
+        "bytes": 2892955,
+        "files": {
+          "cat.webp": {
+            "sha256": "e2add5e48fadfb74bb7d47c9b4cb4c65a87e7ffe91a5694d12095d18482a9e5b",
+            "bytes": 215486
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "rest-sage.webp": {
+            "sha256": "860d5524052081c1a6271e8a9e3fab12bc3fb12fde6e90c7c16378bb7b93522e",
+            "bytes": 284256
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "rest-rose.webp": {
+            "sha256": "e998140865798c4a9850d4cd47793e41f677848b7eb2f0171527fab013451165",
+            "bytes": 263810
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          },
+          "rest-sky.webp": {
+            "sha256": "4f03ac1c51c81827cb3c6dd29b7964bbcfe3d21d31e0caad8d1c2e9c6a6ac0c5",
+            "bytes": 271538
+          },
+          "pose.webp": {
+            "sha256": "b6d079452d4b257c058e7d9578f9079d73356c277d77a5b2c67bb1e1a66ffcae",
+            "bytes": 236610
+          },
+          "pose.json": {
+            "sha256": "28bbe22fa4e5bc1f7aed287ad065726e0d3dbadf927f6cb86f05e39a1393daf4",
+            "bytes": 619
+          }
+        },
+        "legacy": {
+          "cat.png": "686cfcc09ca5837f887999f1c8eceb89329f464e1f670c43996e101dbb784c6d",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-silver-v1": [
+      {
+        "sha256": "25ae254362e5b8759136f161cd64c4e3ff624a48c08891a2962b3cec1245e1e5",
+        "bytes": 1885936,
+        "files": {
+          "cat.webp": {
+            "sha256": "0b77a871c6a79518205d380207eac716be228dc604e17d3795b189ddd1b53692",
+            "bytes": 265798
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "5c6c208032246d3a4a5a85a4ffb60d54c122e54eacd102b3293e47c8779e37dc",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-blue-white-v1": [
+      {
+        "sha256": "9046d981a43f8c99d400cbb2593311d7c0dbf975a67ce2dd9118f35066617f74",
+        "bytes": 1865090,
+        "files": {
+          "cat.webp": {
+            "sha256": "c0e1f0bc96067708b1b040e438aad08e635c1be55574867ca2630dd568bcfe0c",
+            "bytes": 244952
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "344e9769f5b8f5f1b9fc2c744b316cce38fba9a100e46c26b98e60ed7014b348",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-calico-v1": [
+      {
+        "sha256": "10e473b2fc604bbcb409bd14dc30c463b5b049cf7d1eefd7b082678ad635b334",
+        "bytes": 1865426,
+        "files": {
+          "cat.webp": {
+            "sha256": "fb032c583e8e4c663a7660b0f0b25f8bceb6b6dc6f0882134ad97a1163210871",
+            "bytes": 245288
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "63eb3af4d21f3a1ab0e4b3ce05e19b9b2900cebde83234974033d22ed9a79f44",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-point-v1": [
+      {
+        "sha256": "3f629532d5ddb244b6d7fe95e412e27c3bd7e521b69b88504a0cb011f7a90cfe",
+        "bytes": 1849872,
+        "files": {
+          "cat.webp": {
+            "sha256": "50d3952275b3e7c3bd79735a69a99d4bc4dd42bc4e73f7235017df49def6a0a9",
+            "bytes": 229734
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "54bf7cb820cfc63a2e6881936313617e212b3627097df625006639fe054a1234",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-cream-v1": [
+      {
+        "sha256": "ed436eea42c9131be60b586e50820bb68bd3c7340f1e4328a3449578a86773a2",
+        "bytes": 1852610,
+        "files": {
+          "cat.webp": {
+            "sha256": "2474bac3f29474fb0bade58a192c39b85916787b96d2eaf3a13e769cd1bacb6b",
+            "bytes": 232472
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "c6b5428a88076e7ce5a0bee668eea4c5cdf29301df6d98e7489633c5c7828756",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "cat-brown-longhair-v1": [
+      {
+        "sha256": "75e07bc0f1a5555f11b95a15a0edc3e4aa181252966536e5f557ce133dca1acc",
+        "bytes": 1903522,
+        "files": {
+          "cat.webp": {
+            "sha256": "68f55429814249fc244a7848d751ef0ca9e3c5ffc5f4b27398735f2791fbf1b4",
+            "bytes": 283384
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f4c75cf5f3d08d0b73db34943a2d3b885c0415868a1043bbabb0ccca0b24264c",
+            "bytes": 253066
+          },
+          "room-sage-messy.webp": {
+            "sha256": "631f49ed6d460cec1e283160e96ef68200c84636cb7e0928ef4edc26576aa33f",
+            "bytes": 290242
+          },
+          "room-rose-tidy.webp": {
+            "sha256": "c491e1352a35f91db557dc07a0236a7d94b7159f2b5d88ce58ab3264c6453b61",
+            "bytes": 258574
+          },
+          "room-rose-messy.webp": {
+            "sha256": "3eaaf66b5e4172b601819d9e740e54aeca6fd4c85182a88117e1d14791dfe4bd",
+            "bytes": 271884
+          },
+          "room-sky-tidy.webp": {
+            "sha256": "6143ddc4691677ac7e126ae2d1b7a927014d36486f64e6a2bca8822a391e1402",
+            "bytes": 260468
+          },
+          "room-sky-messy.webp": {
+            "sha256": "d24eccb72b878157a39dda1322af6fe26e0fcd20622ea772c9c5fbe3488e65a1",
+            "bytes": 285104
+          }
+        },
+        "legacy": {
+          "cat.png": "23f6264b232a4f563fad4c8438c864872f94fd3d8e4b129165b2cb425b29302d",
+          "tidy.png": "1512344df5f2acd2cd0a6550b0a10de4922e07eed1df94dab92e4b1b8d1b1e59",
+          "messy.png": "6e6d2daec9d641afacd786bf6cc985667d02fbdf60e4065bf0558af2829d114a"
+        }
+      }
+    ],
+    "dog-shiba-v1": [
+      {
+        "sha256": "9620ed48df926c3e84994cf903577573fb2cfeb8353fea9ae8776200877e4b7a",
+        "bytes": 1339162,
+        "files": {
+          "cat.webp": {
+            "sha256": "f30724781b0df5303b8ceda3357449ef233f74bc09e516fb9c830e1f1dd8275d",
+            "bytes": 288930
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          },
+          "pose.webp": {
+            "sha256": "c38dc87eaedc073624fb763553f52a95035b7149288162bf3667299af03eb8f9",
+            "bytes": 356704
+          },
+          "pose.json": {
+            "sha256": "43d2fc7a8bed95c0296e4ae72c92ef8c7718ad3532a031e81f2c6d53db7d3112",
+            "bytes": 616
+          }
+        },
+        "legacy": {
+          "cat.png": "72d29342e74e05164d21731366435eea8ef9562e388b511d59e2b8577c72ecc8",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-corgi-v1": [
+      {
+        "sha256": "052161d236e741f2ad142d0ad964ac3fb1037f77dc2eb414ec5e12fac1da8980",
+        "bytes": 960632,
+        "files": {
+          "cat.webp": {
+            "sha256": "3071066f0346400e0fe7d3188979fa76e3f9a6b5287ab744316bfe629fb976b0",
+            "bytes": 267908
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "c3f2131f1ea1cb706cc9c4f0f8163a313e127ef958a4d279ab3864c4cb5c1746",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-golden-v1": [
+      {
+        "sha256": "5f7958260078ece79b17a2768965bbe4008d9fae2976ee926a7fb6c0788d34dc",
+        "bytes": 966396,
+        "files": {
+          "cat.webp": {
+            "sha256": "5609e3e51d5b03f00577500d1279a587762f422975b440f9f11c61d52c8fbc13",
+            "bytes": 273672
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "1a16b70cf98c19a1a753013b61efed47ad3b70578c0302581882a8d1545283dd",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-labrador-v1": [
+      {
+        "sha256": "0850c70bad08d57da3d35e58d67edffbc11a87050a084360d672c67c4a797d33",
+        "bytes": 935364,
+        "files": {
+          "cat.webp": {
+            "sha256": "8701dbeb2b47f8d43d7a8e9bfe514ac08875908acb496015e7a2ce270df86f89",
+            "bytes": 242640
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "72151cea3d9ed77f199c4bc3b44aa869328251a0211ea5703a7c3265dbdc48e7",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-collie-v1": [
+      {
+        "sha256": "083ad8da8bf699a84fe70540b1458ff887ca81ff1c9ce3b22b0527b5e18cd4b9",
+        "bytes": 949902,
+        "files": {
+          "cat.webp": {
+            "sha256": "fd8c21ba8c68e5d9288af78e636aa09a3cea02177c2bb72962acacaf6a3436ff",
+            "bytes": 257178
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "837f028a9df3be633f1c8eababe251deebfdf5302fb0fa4dd5c58a53ac492066",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-beagle-v1": [
+      {
+        "sha256": "0eca47cf9fad14ac5f631c61a4afdf5d116fa41299e56238daa6438636d8b6b7",
+        "bytes": 943432,
+        "files": {
+          "cat.webp": {
+            "sha256": "7361203ea682c7b120ea2427fa30a0410986d815a2959a628f7c70da0a47e441",
+            "bytes": 250708
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "413e17291e077ddd2371accc6cfcc5b5608bef9aae13154b118ae8781603d07e",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-poodle-v1": [
+      {
+        "sha256": "20468dc42d37c570e870771cf0b70f53f68e77c6e8332e7aac557bba3b430bb9",
+        "bytes": 973850,
+        "files": {
+          "cat.webp": {
+            "sha256": "19bdd1d44a5bfa0b5273f16bb91d8aa5f046cd9d93aa92bdce301c771dfdc0d9",
+            "bytes": 281126
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "2035b3a4fa580052302fa9022b5aac229a4ca0f636c531e4f46b001e86e934b8",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-pomeranian-v1": [
+      {
+        "sha256": "0db1db84468f968783172ee27a94f7d4e249729b29b1b705c518f7355127053e",
+        "bytes": 1006366,
+        "files": {
+          "cat.webp": {
+            "sha256": "f76f6babf6d244b3ff3ec306c56f58cccf83a44b5239b455ccfeefeeaefdc82c",
+            "bytes": 313642
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "e49032135dbddf2f0c18bbe9dd9f8b264c03163d6d47e0ff9bd94c3a33f0438c",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-samoyed-v1": [
+      {
+        "sha256": "4f3aaaeff43a719bed525f6d7e977c2e38a2b2f7cf962b7ef00e1ab5b24b1bf4",
+        "bytes": 943332,
+        "files": {
+          "cat.webp": {
+            "sha256": "cdf704bbd80536c8c6063ab8dcc5ce7f33c40b421b3ae5a9d644346de8ce0887",
+            "bytes": 250608
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "c3ea397a626cf165e83df821c91adcdfbeac2c004fa775c7551a3112d75b3fd7",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "dog-dachshund-v1": [
+      {
+        "sha256": "5c5708d5ef8fb48afb08f8f480b115c0e9028eba15569654276018c8e47176a4",
+        "bytes": 950306,
+        "files": {
+          "cat.webp": {
+            "sha256": "ac16f34dc2e3eb91425f5236be9ac03b03578c751519e2c7d18d01020c8a2fa3",
+            "bytes": 257582
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "dce3ddd3a658e522159c311d533cbf469dc7284000b7ef1fbd90285ba2d8bb47",
+            "bytes": 310054
+          },
+          "room-sage-messy.webp": {
+            "sha256": "c6cc5efb381ce94a87eebaa93d088021b859432d4bb154e840eb24392a2a92e2",
+            "bytes": 382326
+          }
+        },
+        "legacy": {
+          "cat.png": "775612f812edf9aeadc06786b9ebadb46e2b14e38888cb043db60dc595b06c25",
+          "tidy.png": "c4d32f4fa2f1cf3f72e37c666cfbce7900920075570bd9140b013548a40b9a49",
+          "messy.png": "d634f2b08fa27cac44f8b3f70d8a7511b18829ab4d2d7412615c0fbc505938a0"
+        }
+      }
+    ],
+    "bird-budgie-v1": [
+      {
+        "sha256": "9301d8bbc83a75de25f8353beeda2dc5ebe33133b1fcb3ba869a76a715cde4af",
+        "bytes": 1196824,
+        "files": {
+          "cat.webp": {
+            "sha256": "a909120b782317d446f151cdb752acad135e8f58be176219298a40706e6b7063",
+            "bytes": 238920
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          },
+          "pose.webp": {
+            "sha256": "adb24484e60074d72b4bfad6c4505e39a9fa5ba6a9ef82be8d6bb791380dc2a1",
+            "bytes": 345964
+          },
+          "pose.json": {
+            "sha256": "01f3ddf88c147cc1a5baacbaab9946a53261d014b49031c44d616bf68fa2b4c9",
+            "bytes": 620
+          }
+        },
+        "legacy": {
+          "cat.png": "14fb2eb381390c5facd65adba6d781b02c3e20c90629fb03c11d2615df19dfcc",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-cockatiel-v1": [
+      {
+        "sha256": "bb04b77726028f7bde5e206417dfde1bd82308992240475ac0757fcd4c097f70",
+        "bytes": 810842,
+        "files": {
+          "cat.webp": {
+            "sha256": "e16f4654d138e7214cccd2b0ce23def6fc5e829ce151236fe1d8d6b45d2e3aa7",
+            "bytes": 199710
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "a6a16ddd3dd03d44cfa7280b77063c62171248f8565dafbf92388e26d44b12ef",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-lovebird-v1": [
+      {
+        "sha256": "ce58cf6f2ad18b2c8b5e8371a3a1e69e379f086a9cc8a5d26ab54d37a4bde708",
+        "bytes": 820198,
+        "files": {
+          "cat.webp": {
+            "sha256": "74d643a7004312e761e780da8117e70ae9347aa994ebb6c3d6d3a05ca0a8f18f",
+            "bytes": 209066
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "1dc47c698caf41ff558332144ab23abf40579d55506e0d8f66fdb7a9324eed23",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-conure-v1": [
+      {
+        "sha256": "60c93a54ad68573ba6c1107688e51b51853d0353304bfeb329dfe465652ab956",
+        "bytes": 846168,
+        "files": {
+          "cat.webp": {
+            "sha256": "c2d576019d0d397d2e886e9d13ad33bceb962d326b4d9eac79d321cc2e568a5d",
+            "bytes": 235036
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "12d22bbd1cb62110f0d635e296061be3b6cbefcd9f7474542ed617b2c690d40f",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-java-v1": [
+      {
+        "sha256": "1db3c0f37141b7231c08963f45186c5c85c2ec5cf122e1d074c1dc918906ca1b",
+        "bytes": 782640,
+        "files": {
+          "cat.webp": {
+            "sha256": "cdc7279039a5921f1d27af306db7ed7ac03fd815a7a17d3d59da028fc090e145",
+            "bytes": 171508
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "e2f1a1badc8ca779f4f66d49baa88cfc6f07e119f2d12abaa9fbf0e54264a950",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-zebra-v1": [
+      {
+        "sha256": "633e099f5d6155f61a6c741bbcfeec13cb860e8b981c5b6d42c56a50d9fc376a",
+        "bytes": 845294,
+        "files": {
+          "cat.webp": {
+            "sha256": "8afaacc4e13622aa049d8707e79defb7de51a90d82371869e070df7bd954cf26",
+            "bytes": 234162
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "56178095ff2b16ca9713db52c06f5846cda85b680239c72a421d3e5397c8a4d0",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-canary-v1": [
+      {
+        "sha256": "d19d31076c77e4831b1b25d63e6e05e70568c9e3d0b269d4843a31e857e60843",
+        "bytes": 794072,
+        "files": {
+          "cat.webp": {
+            "sha256": "22953e5207d00ad0f67e1c7118db8771035f71aef4c297688200e5fd16ad20ed",
+            "bytes": 182940
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "fe2f23ed4a2830c07e494288d4b03b826d0a75092db11df28dda3a0d37c61de7",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-pigeon-v1": [
+      {
+        "sha256": "c5f4a3d06fc694d46fab6546f3bdab9fc959dd4f870bb24616fe163e7442b226",
+        "bytes": 805960,
+        "files": {
+          "cat.webp": {
+            "sha256": "8b6c8069a425c3688a7064fac6ca80bf4676167603a2bfd33a4df4fa8ab800f8",
+            "bytes": 194828
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "51cdadfe2a8cfa22c078e4e1d4758731052adc6a81ec1fec0fb5ca6d94951417",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-lineolated-v1": [
+      {
+        "sha256": "48de16be8c29de9a6272c86a70b458862e17cbb755ebedca0ab2f93b489dc83f",
+        "bytes": 840622,
+        "files": {
+          "cat.webp": {
+            "sha256": "36317991e0a7ec830554cc5cb3060f8ca810dc8507dd6166e4e178e830f889da",
+            "bytes": 229490
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "33f418f4786b4ba61ce1c1943393981de384f4b5367d751386e2e3fc9899cd1b",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "bird-monk-v1": [
+      {
+        "sha256": "3d203e7f0e5c84731e676ad0f591148e94ac15e3bc2bea1a412c50adc44bf9b4",
+        "bytes": 832052,
+        "files": {
+          "cat.webp": {
+            "sha256": "c0978f9d8ffe8bf112fb080f1b29666aae8184a5dc69490f75ed4438c2cbac12",
+            "bytes": 220920
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "97b535a9866e231103b28e33f0f30daf3fe65666895f28330e68ef30e36de7db",
+            "bytes": 258938
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5a62f19132234e48dc3564f32a1e732d8560c0384cd50a9974679c3160f8a06c",
+            "bytes": 351850
+          }
+        },
+        "legacy": {
+          "cat.png": "95cdf5dff2656bf4a974843b5bdaefed6a33f2bbad4fe89bd2f464a03d80038a",
+          "tidy.png": "832fec5251545dabebded9c7ffe1d7b54d046cbdead9af3fbe5577fe961775e7",
+          "messy.png": "e4cb1240b0c65ab0129a84a450eda2919b58ccadaff059d344acfd39516d5293"
+        }
+      }
+    ],
+    "reptile-leopard-gecko-v1": [
+      {
+        "sha256": "ed2c4dab797b9b1e81daa59b2879b4acf2adf2a9b48f41235dbeb3b170d28c5e",
+        "bytes": 1240920,
+        "files": {
+          "cat.webp": {
+            "sha256": "4164766df97e6c43bf43ebe0fadb27320caa9b5620c76bd77bd8768358448934",
+            "bytes": 231362
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          },
+          "pose.webp": {
+            "sha256": "cb90cbbf20b90f712d56328291052023e38ff2c7abd21500aad88bdfb158da06",
+            "bytes": 336124
+          },
+          "pose.json": {
+            "sha256": "1ceb0b05852317e31050450bc5b4320d7c5b7ba8b5a66d4a81cd260f8a550301",
+            "bytes": 630
+          }
+        },
+        "legacy": {
+          "cat.png": "545c5ba33a8f71f9cd489a70778251df87c2dec7cfb5c93557cc5cf3d7e0cf9e",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-crested-gecko-v1": [
+      {
+        "sha256": "e22d77cbad1844474ad7a905cc9ff7bc6a539e1765b17e46c0e22876166ac36b",
+        "bytes": 963614,
+        "files": {
+          "cat.webp": {
+            "sha256": "e8149e585b99d8890b3437e150802d3812dc5ad57e397b5630ac4da78f8e158f",
+            "bytes": 290998
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "92e78e4079bbd5db12037d6c0c274e5f22c7007ddbdeeba56698e92380beb35e",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-bearded-dragon-v1": [
+      {
+        "sha256": "43af23277d60e0d42dccfeb6f02defe4af4803e309b725a5506d864f6cce685c",
+        "bytes": 979820,
+        "files": {
+          "cat.webp": {
+            "sha256": "ee54a7d77e8a2f18cd2658b2894908bbb4f472d9e29aa2098d3e9df0b6a056ec",
+            "bytes": 307204
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "361c2e9d77b26c9abffc7f9a6a0ee7f585ef4e5665cad0fe08d9fea7fa3adfb1",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-blue-tongue-v1": [
+      {
+        "sha256": "ee226b63392e6b77dd7c6d02d395e9f8e2f264cc2ab6cf6b62bf9c243251ddd7",
+        "bytes": 921148,
+        "files": {
+          "cat.webp": {
+            "sha256": "58058b1ea935e6d2fd6fc73642d414417eaa5bf60faecb28b72414112f2aa2ea",
+            "bytes": 248532
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "b68bb7281c71b8b98e3f111e68329e0e7800582ebe69f01db1f9a4ec38a8750a",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-corn-snake-v1": [
+      {
+        "sha256": "2fc37fa9491b2cbcb76dee23452a3208404b55cb39ac8351fc0bbca404ba516a",
+        "bytes": 954306,
+        "files": {
+          "cat.webp": {
+            "sha256": "10ab833479f98801a513f0197038d917a7982399e90ab28ef1a19b6688796e10",
+            "bytes": 281690
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "7b45ee392df01733fc7d40f08791c46755072f91884d2f67a84feb76cc735777",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-ball-python-v1": [
+      {
+        "sha256": "de1f20b1e1b54941c8bb450b0832ee1ed8a492dc9ff7551c8c66367aa0db0bad",
+        "bytes": 925460,
+        "files": {
+          "cat.webp": {
+            "sha256": "d74fdbfebc34b1301b4490baf4765c76cbaa3132733f379ef49b1ace06e2eeec",
+            "bytes": 252844
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "cac1f221c0792246d25f41d63c63825c79d139b7b7763637d59410f3001d98dc",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-hognose-v1": [
+      {
+        "sha256": "375e942bcf7edfb9a73758a98fdc17265c70d9e9ccf53aaf4b97d79d7b6439d6",
+        "bytes": 907928,
+        "files": {
+          "cat.webp": {
+            "sha256": "fbea042f001e51f02913847effb2926a798725a042901c9cb7f913c96e36f856",
+            "bytes": 235312
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "48ece0d6aecdd80ad05289f560e95483a13cabe67718bd619ce715204be3afe7",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-hermann-v1": [
+      {
+        "sha256": "25e3c31577ff61b51da7eb188976ad817e61973a14da6afdc1cf49d1cf525b8e",
+        "bytes": 973362,
+        "files": {
+          "cat.webp": {
+            "sha256": "96bf74c3001db48af7a4b5d0c4ce41b564e894338cdf66d4aed315715ab77294",
+            "bytes": 300746
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "a0be9524df947e3c26f455322e29647b0fd75585a6fe6f08e29f96b8c77a3b2d",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-redfoot-v1": [
+      {
+        "sha256": "edf998385b432791398312272f51d7a12107e327d9eeeaf1c4aa8eb294454b9b",
+        "bytes": 961672,
+        "files": {
+          "cat.webp": {
+            "sha256": "1a936fb84fd7ccd4fc8715ed193dbfd2ba35b4b1b60932234d2d2efc1fded3c1",
+            "bytes": 289056
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "667d940a1390ca83b8bf26bed613bc07613df54f00f26783b7250299a02fca87",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ],
+    "reptile-musk-v1": [
+      {
+        "sha256": "a9bde1ed6915f3a71f96b4884b5f414fa49e1385c300c3813ffe0fa2134148bd",
+        "bytes": 895778,
+        "files": {
+          "cat.webp": {
+            "sha256": "a2cdc400419a5032acb0495727c4daa5a588b650bada606060af548b419e1d73",
+            "bytes": 223162
+          },
+          "room-sage-tidy.webp": {
+            "sha256": "f23d8240a6280475470caf7d073d21f3c35a21b4311231361a777f2bad8f7702",
+            "bytes": 313856
+          },
+          "room-sage-messy.webp": {
+            "sha256": "5b6a9e8094f70bb86d766ae959c56ee3a34c401acd19d579a223e336c051b555",
+            "bytes": 358416
+          }
+        },
+        "legacy": {
+          "cat.png": "c37acfcfa1e7e14d406ccf05ffbe24cd70462ed68491c57375b8655a9e0e8eb2",
+          "tidy.png": "2bcd4a20c52f75e9bbcfabf2f448ea43162a3b7a13f418e49f8d6bd44fa9632d",
+          "messy.png": "258d3fcecd9ee751f49589a0cbf27bb49bf631a4912b8479a106916b80e637ae"
+        }
+      }
+    ]
   }
 }
