@@ -21,8 +21,8 @@ android {
         applicationId = "org.orbis.agent"
         minSdk = 26
         targetSdk = 37
-        versionCode = 312
-        versionName = "2.6.19"
+        versionCode = 313
+        versionName = "3.0.0"
 
         // Public and ordinary local builds keep consultation closed, including old saved settings.
         buildConfigField("boolean", "ORBIS_CONSULTATION_ENABLED", "false")
