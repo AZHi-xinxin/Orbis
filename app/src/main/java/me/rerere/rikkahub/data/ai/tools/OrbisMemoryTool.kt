@@ -28,8 +28,13 @@ internal fun buildOrbisMemoryTool(
         field("id", "string", "已有便签 ID；范围由人类的跨助手记忆开关决定")
         field("body", "string", "完整正文；只有存入时必填，可长于300字")
         field("summary", "string", "可选，由你写的带入摘要，不影响完整正文")
-        put("emotion", buildJsonObject { put("type", JsonArray(listOf(JsonPrimitive("string"), JsonPrimitive("null"))))
-            put("enum", JsonArray(me.rerere.rikkahub.data.orbis.memory.OrbisMemoryEmotions.labels.map(::JsonPrimitive) + JsonNull)) })
+        // Some OpenAI-compatible relays convert tools to Google's string-only enum.
+        // Keep the declaration portable; translate the explicit clear operation locally.
+        put("emotion", buildJsonObject {
+            put("type", "string")
+            put("enum", JsonArray((me.rerere.rikkahub.data.orbis.memory.OrbisMemoryEmotions.labels + "clear").map(::JsonPrimitive)))
+            put("description", "可选自标标签：暖、软、要、闷、烦、冷、火；clear 清除标签。不填时新记忆无标签，更新保留已有标签。")
+        })
         for (name in listOf("tags", "keywords")) put(name, buildJsonObject {
             put("type", "array"); put("items", buildJsonObject { put("type", "string") })
         })
@@ -110,6 +115,8 @@ internal fun normalizeOrbisMemoryArguments(input: JsonElement): JsonObject {
         "恢复" -> "restore"
         else -> action
     })
+    // Preserve legacy null calls and omitted-update semantics. Never persist "clear" as a label.
+    if (values["emotion"] == JsonPrimitive("clear")) values["emotion"] = JsonNull
     for (name in listOf("tags", "keywords")) {
         val value = values[name]
         if (value is JsonPrimitive && value.isString) {

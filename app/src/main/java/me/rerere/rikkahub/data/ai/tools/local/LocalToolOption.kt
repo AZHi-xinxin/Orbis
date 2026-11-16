@@ -6,6 +6,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 sealed class LocalToolOption {
     @Serializable
+    @SerialName("orbis_web_shortcuts")
+    data object WebShortcuts : LocalToolOption()
+
+    @Serializable
     @SerialName("orbis_heartprison")
     data object HeartPrison : LocalToolOption()
 

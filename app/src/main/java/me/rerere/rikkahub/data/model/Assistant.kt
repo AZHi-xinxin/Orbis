@@ -166,6 +166,9 @@ enum class InjectionPosition {
     @SerialName("bottom_of_chat")
     BOTTOM_OF_CHAT,         // 最新消息之前（当前用户输入之前）
 
+    @SerialName("before_latest_user_system")
+    BEFORE_LATEST_USER_SYSTEM, // 显式选择：最近真实人类消息前的独立系统条目
+
     @SerialName("at_depth")
     AT_DEPTH,               // 在指定深度位置插入（从最新消息往前数）
 }
@@ -222,6 +225,8 @@ sealed class PromptInjection {
         val caseSensitive: Boolean = false,        // 大小写敏感
         val scanDepth: Int = 4,                    // 扫描最近N条消息
         val constantActive: Boolean = false,       // 常驻激活（无需匹配）
+        @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.NEVER)
+        val scanUserOnly: Boolean = false,         // 旧记录保留人类与AI扫描；新建界面推荐仅人类
     ) : PromptInjection()
 }
 

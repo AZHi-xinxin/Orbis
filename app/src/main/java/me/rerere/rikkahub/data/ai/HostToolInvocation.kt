@@ -12,7 +12,8 @@ import me.rerere.rikkahub.data.orbis.cloudtools.CloudToolInvocationContext
 internal suspend fun executeGenerationTool(tool: Tool, arguments: JsonElement,
     callId: String, messageId: String, conversationId: String?): List<UIMessagePart> {
     val needsIdentity = tool.name.startsWith("cloud_orbis_") || tool.name.startsWith("cloud_reading_") ||
-        tool.name.startsWith("cloud_turtlesoup_") || tool.name == ORBIS_MEMORY_TOOL || tool.name == ORBIS_BODY_TOOL
+        tool.name.startsWith("cloud_turtlesoup_") || tool.name == ORBIS_MEMORY_TOOL || tool.name == ORBIS_BODY_TOOL ||
+        tool.name == "orbis_web_shortcuts"
     return if (needsIdentity) withContext(CloudToolInvocationContext(callId, messageId, conversationId)) {
         tool.execute(arguments)
     } else tool.execute(arguments)

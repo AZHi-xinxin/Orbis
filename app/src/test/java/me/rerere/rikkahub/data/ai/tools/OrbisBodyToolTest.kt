@@ -147,4 +147,40 @@ class OrbisBodyToolTest {
         assertEquals(before.snapshot.sessions["chat"]!!.values, repo.snapshot().snapshot.sessions["chat"]!!.values)
         assertTrue(repo.snapshot().snapshot.sessions["chat"]!!.privateShared)
     }
+    @Test fun reportedVisibilityArgumentsExplainEveryWrongFieldWithoutWriting() = runBlocking {
+        val repo = repo(); val tool = bodyTool("chat", { true }) { repo }
+        val attempts = listOf(
+            """{"action":"visibility","shared":true,"visible":true}""",
+            """{"action":"visibility","shared":true,"version":7,"visible":true}""",
+            """{"action":"visibility","expected_revision":7548,"shared":true,"visible":true}""",
+            """{"action":"visibility","shared":true,"visible":true}""",
+            """{"action":"visibility","expected_revision":7551,"shared":true,"visible":true}""",
+            """{"action":"visibility","expected_revision":7554,"shared":true,"visible":true}""",
+            """{"action":"visibility","expected_revision":7555,"shared":true,"visible":true}"""
+        )
+        val before = repo.snapshot()
+        attempts.forEachIndexed { index, args ->
+            val result = Json.parseToJsonElement((executeGenerationTool(tool, Json.parseToJsonElement(args),
+                "attempt-$index", "message", "chat").single() as UIMessagePart.Text).text).jsonObject
+            assertEquals("body_parameters_invalid", result["code"]!!.jsonPrimitive.content)
+            assertTrue(result["parameter_errors"]!!.jsonArray.any { "visible" in it.jsonPrimitive.content })
+            if (index in listOf(0, 1, 3)) assertTrue(result["parameter_errors"]!!.toString().contains("expected_revision"))
+            assertTrue(result["retry_hint"]!!.jsonPrimitive.content.contains("无需暂停"))
+            assertEquals(before, repo.snapshot())
+        }
+        val valid = Json.parseToJsonElement((executeGenerationTool(tool,
+            Json.parseToJsonElement("""{"action":"visibility","shared":true,"expected_revision":${before.revision}}"""),
+            "corrected", "message", "chat").single() as UIMessagePart.Text).text).jsonObject
+        assertTrue(valid["ok"]!!.jsonPrimitive.boolean)
+        assertTrue(valid["privateShared"]!!.jsonPrimitive.boolean)
+        val after = repo.snapshot()
+        for (args in listOf(
+            """{"action":"visibility","shared":"true","expected_revision":1}""",
+            """{"action":"visibility","shared":true,"expected_revision":"1"}""",
+            """{"action":"visibility","shared":true,"expected_revision":1.5}""")) {
+            val result = (executeGenerationTool(tool, Json.parseToJsonElement(args), "invalid-type-$args", "message", "chat").single() as UIMessagePart.Text).text
+            assertTrue(result.contains("parameter_errors")); assertEquals(after, repo.snapshot())
+        }
+    }
+
 }

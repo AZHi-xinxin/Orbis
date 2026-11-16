@@ -108,10 +108,11 @@ class CommunityFeedbackDeviceTest {
                         "/community/hints/clear" -> buildJsonObject { put("newer_hints_preserved",true);putJsonObject("cleared_cursors") { if("group_cursor" in body) put("groups",body.cl("group_cursor")); if("feed_cursor" in body) put("feed",body.cl("feed_cursor")) } }
                         "/community/friends" -> {
                             if(body.ms("action") in setOf("block","unblock")) {
-                                check(body.ms("actor")==human && body.ms("target")==ai)
+                                check((body.ms("actor")==human && body.ms("target")==ai) || (body.ms("actor")==ai && body.ms("target")==human))
+                                val targetPerson=if(body.ms("target")==ai) robot else person
                                 if(body.ms("action")=="unblock" && rejectUnblock) error("合成取消屏蔽失败")
-                                if(body.ms("action")=="block") blockedPeople+=robot else blockedPeople.removeAll {it.ms("id")==ai}
-                                buildJsonObject {put("ok",true);put("action",body.ms("action"));put("target",robot);put("blocked_by_me",body.ms("action")=="block");put("friend",false)}
+                                if(body.ms("action")=="block") blockedPeople+=targetPerson else blockedPeople.removeAll {it.ms("id")==targetPerson.ms("id")}
+                                buildJsonObject {put("ok",true);put("action",body.ms("action"));put("target",targetPerson);put("blocked_by_me",body.ms("action")=="block");put("friend",false)}
                             } else {
                                 check(body.ms("target")==human || body.ms("target")==profileCandidate?.ms("id"));accepted=true
                                 buildJsonObject {put("ok",true);put("request_processed",true);put("request_state",body.ms("action"));put("friend",true)}
@@ -160,6 +161,10 @@ class CommunityFeedbackDeviceTest {
                     path.startsWith("/community/posts/") -> buildJsonObject {
                         put("id",post);put("actor",ai);put("author",robot);put("text","保留这条动态");put("visibility","public");put("more",false)
                         put("replies",JsonArray(listOfNotNull(if(commentDeleted) null else buildJsonObject {put("id",ownComment);put("actor",human);put("author",person);put("text","自己的测试评论");put("seq",1)},buildJsonObject {put("id",foreignComment);put("actor",ai);put("author",robot);put("text","别人的评论");put("seq",2)})))
+                    }
+                    path.startsWith("/community/feed") && "author=" in path -> {
+                        val author=Regex("[?&]author=([^&]+)").find(path)!!.groupValues[1]
+                        buildJsonObject {put("feed_author",author);put("items",JsonArray(emptyList()));put("next_before",JsonNull)}
                     }
                     path.startsWith("/community/feed") && longFeed -> buildJsonObject {put("items",JsonArray(feedIds.mapIndexed { index,id -> buildJsonObject {put("id",id);put("actor",ai);put("author",robot);put("text","动态 $index");put("visibility","public");put("comments",2)} }))}
                     path.startsWith("/community/media/") -> {
@@ -473,6 +478,39 @@ class CommunityFeedbackDeviceTest {
         assertTrue(writes.isEmpty());androidx.test.espresso.Espresso.pressBack();compose.waitForIdle()
         compose.onNodeWithText("提醒正文1").assertIsDisplayed();compose.onNodeWithText("未读").assertIsDisplayed()
     }
+    @Test fun ownAndMemberTimelineEntrancesUseCurrentIdentity() {
+        profileCandidate=JsonObject(robot+("friend" to JsonPrimitive(false)))
+        mount(api())
+        compose.onNodeWithText("朋友圈",useUnmergedTree=true).performClick()
+        compose.onNodeWithTag("community-own-feed").performClick()
+        compose.waitUntil(5000) {reads.any {it.startsWith("/community/feed") && "author=$human" in it && "actor=$human" in it}}
+        compose.onNodeWithText("暂无当前名片可见的动态。").assertIsDisplayed()
+        compose.onNodeWithText("全部动态").performClick()
+        compose.waitUntil(5000) {compose.onAllNodesWithText("保留这条动态").fetchSemanticsNodes().isNotEmpty()}
+        compose.onNodeWithText("合成AI").performClick()
+        compose.onNodeWithTag("community-profile-feed").performClick()
+        compose.waitUntil(5000) {reads.any {it.startsWith("/community/feed") && "author=$ai" in it && "actor=$human" in it}}
+        compose.onNodeWithText("合成AI的朋友圈").assertIsDisplayed()
+        compose.onNodeWithText("我的",useUnmergedTree=true).performClick()
+        compose.onNodeWithText("合成AI · AI").performScrollTo().performClick()
+        compose.onNodeWithText("朋友圈",useUnmergedTree=true).performClick()
+        compose.onNodeWithTag("community-own-feed").performClick()
+        compose.waitUntil(5000) {reads.any {it.startsWith("/community/feed") && "author=$ai" in it && "actor=$ai" in it}}
+        assertTrue(writes.isEmpty())
+    }
+    @Test fun aiIdentityAlsoHasBlockedListAndUnblockEntrance() {
+        blockedPeople+=person;mount(api())
+        compose.onNodeWithText("我的",useUnmergedTree=true).performClick()
+        compose.onNodeWithText("合成AI · AI").performScrollTo().performClick()
+        compose.onNodeWithText("联系人",useUnmergedTree=true).performClick()
+        compose.onNodeWithText("已屏蔽").performClick()
+        compose.waitUntil(5000) {reads.any {it.startsWith("/community/blocks") && "actor=$ai" in it}}
+        compose.onNodeWithText("取消屏蔽").assertIsEnabled()
+        // Fixture uses the existing fixed target; the receipt and request actor stay AI-bound.
+        compose.onNodeWithText("取消屏蔽").performClick()
+        compose.waitUntil(5000) {blockedPeople.isEmpty()}
+        assertEquals(ai,writes.single {it.first=="/community/friends"}.second.ms("actor"))
+    }
     @Test fun blockedFriendCanBeFoundAndUnblockedFromContacts() {
         profileCandidate=JsonObject(robot+("friend" to JsonPrimitive(true)))
         mount(api())
@@ -485,7 +523,7 @@ class CommunityFeedbackDeviceTest {
         compose.onNodeWithText("已屏蔽").performClick()
         compose.waitUntil(5000) {compose.onAllNodesWithText("取消屏蔽").fetchSemanticsNodes().isNotEmpty()}
         compose.onNodeWithText("合成AI").assertIsDisplayed()
-        compose.onNodeWithText("这里只显示你屏蔽的成员。取消屏蔽不会自动恢复好友，可重新申请添加。").assertIsDisplayed()
+        compose.onNodeWithText("这里只显示当前名片屏蔽的成员。取消屏蔽不会自动恢复好友，可重新申请添加。").assertIsDisplayed()
         capture("community-unblock-list.png")
         compose.onNodeWithText("取消屏蔽").performClick()
         compose.waitUntil(5000) {compose.onAllNodesWithText("暂无已屏蔽成员").fetchSemanticsNodes().isNotEmpty()}

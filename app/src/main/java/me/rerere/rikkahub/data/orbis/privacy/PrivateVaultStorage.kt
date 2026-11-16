@@ -186,6 +186,9 @@ internal class PrivateVaultStorage(
     }
 
     fun exists(): Boolean {
+        val abandoning = File(root, "abandoning.marker").toPath()
+        rejectVaultLinks(abandoning)
+        if (Files.exists(abandoning, NOFOLLOW_LINKS)) return true
         val current = File(root, "CURRENT").toPath()
         // An empty linked owner is unsafe, not an absent room that the UI can offer to create.
         rejectVaultLinks(current)
@@ -195,6 +198,8 @@ internal class PrivateVaultStorage(
     fun clearRecoveryMarker() { Files.deleteIfExists(File(root, "recovery-required.marker").toPath()) }
 
     fun load(): VaultSnapshot {
+        if (Files.exists(File(root, "abandoning.marker").toPath(), NOFOLLOW_LINKS))
+            throw PrivateVaultException("abandon_incomplete")
         val generation = readVaultFile(File(root, "CURRENT"), 36).toString(Charsets.US_ASCII)
         requireId(generation)
         val stateId = readVaultFile(File(gen(generation), "HEAD"), 36).toString(Charsets.US_ASCII)
@@ -203,6 +208,44 @@ internal class PrivateVaultStorage(
             File(gen(generation), "states/$stateId.vault"), MAX_ENVELOPE_BYTES))
         validateVaultEnvelope(envelope, owner)
         return VaultSnapshot(generation, stateId, envelope)
+    }
+
+    /** Called under the stable owner lock. Links are rejected before any deletion. */
+    fun abandonmentFingerprint(): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        Files.walk(root.toPath()).use { paths ->
+            paths.sorted().forEach { path ->
+                rejectVaultLinks(path)
+                if (path != root.toPath() && path.fileName.toString() != ".lock") {
+                    digest.update(root.toPath().relativize(path).toString().toByteArray(Charsets.UTF_8))
+                    digest.update(0.toByte())
+                    if (Files.isRegularFile(path, NOFOLLOW_LINKS)) Files.newInputStream(path, READ, NOFOLLOW_LINKS).use { input ->
+                        val buffer = ByteArray(8192)
+                        while (true) { val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) }
+                    }
+                }
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
+
+    fun abandon(expectedFingerprint: String) {
+        if (abandonmentFingerprint() != expectedFingerprint) throw PrivateVaultException("abandon_state_changed")
+        beforeCommit("abandon")
+        val marker = File(root, "abandoning.marker")
+        if (!marker.exists()) writeNew(marker, expectedFingerprint.toByteArray(Charsets.US_ASCII))
+        beforeCommit("abandon_cleanup")
+        // Keep .lock in place for other processes. A partial failure retains the marker and
+        // cannot be mistaken for an absent room, recovered or automatically overwritten.
+        Files.walk(root.toPath()).use { paths ->
+            paths.sorted(Comparator.reverseOrder()).forEach { path ->
+                if (path != root.toPath() && path.fileName.toString() !in setOf(".lock", "abandoning.marker")) {
+                    rejectVaultLinks(path)
+                    Files.delete(path)
+                }
+            }
+        }
+        Files.delete(marker.toPath())
     }
 
     fun record(generation: String, version: String): ByteArray {

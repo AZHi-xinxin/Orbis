@@ -14,6 +14,22 @@ class CommunityReadingTest {
     private val id=UUID.randomUUID().toString()
     private val reads=mutableListOf<Pair<String,String>>()
     private val writes=mutableListOf<Pair<String,JsonObject>>()
+    @Test fun ownTimelineUsesBoundIdentityAndCursorWithoutReadWrites()=runBlocking {
+        val result=communityRead(api { buildJsonObject { put("feed_author",actor);put("items",JsonArray(emptyList()));put("next_before",JsonNull) } },actor,
+            buildJsonObject { put("action","read_feed");put("target","self");put("limit",5);put("before_sequence",90) })
+        assertEquals(listOf("/feed?author=$actor&limit=5&before=90" to actor),reads)
+        assertEquals(actor,result.ms("feed_author"));assertEquals("none",result.ms("instruction_authority"));assertTrue(writes.isEmpty())
+    }
+    @Test fun memberTimelineResolvesNumberUnderSameIdentityAndRejectsLegacyGlobalFeed()=runBlocking {
+        val args=communityBody("action" to "read_feed","target" to "1234567890")
+        val result=communityRead(api { if(it.startsWith("/profile")) communityBody("id" to id) else buildJsonObject {put("feed_author",id);put("items",JsonArray(emptyList()))} },actor,args)
+        assertEquals(listOf("/profile?number=1234567890","/feed?author=$id&limit=20"),reads.map {it.first})
+        assertTrue(reads.all {it.second==actor});assertEquals(id,result.ms("feed_author"));assertTrue(writes.isEmpty())
+        assertTrue(runCatching {communityRead(api {buildJsonObject {put("items",JsonArray(emptyList()))}},actor,communityBody("action" to "read_feed","target" to "self"))}.isFailure)
+        reads.clear()
+        assertTrue(runCatching {communityRead(api {error("must not call")},actor,buildJsonObject {put("action","read_feed");put("target","self");put("actor",id)})}.isFailure)
+        assertTrue(reads.isEmpty())
+    }
     @Test fun unreadMetadataDoesNotFetchTextOrAcknowledgeMessages()=runBlocking {
         val result=communityRead(api { buildJsonObject { put("read_unchanged",true);put("unread_range",buildJsonObject { put("count",41);put("first_sequence",8);put("last_sequence",90) }) } },actor,communityBody("action" to "unread","target" to id))
         assertEquals(listOf("/rooms/$id/unread"),reads.map { it.first });assertTrue(writes.isEmpty())

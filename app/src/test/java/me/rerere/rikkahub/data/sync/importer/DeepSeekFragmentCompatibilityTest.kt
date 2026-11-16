@@ -155,30 +155,17 @@ class DeepSeekFragmentCompatibilityTest {
         assertArrayEquals(original, file.readBytes())
     }
 
-    @Test fun unknownTypesHaveASafeSpecificErrorThroughParseAndPreview() {
-        for (type in listOf("TOOL_FUTURE", "PRIVATE_SYNTHETIC_MARKER\n{\"secret\":true}", "")) {
-            val raw = conversation(listOf(fragment(type, "PRIVATE_SYNTHETIC_BODY")))
-            val parserError = assertThrows(IllegalArgumentException::class.java) { parse(raw) }
-            val previewError = assertThrows(IllegalArgumentException::class.java) { DeepSeekArchive.inspect(zip(raw)) }
-            assertEquals(unsupportedMessage, parserError.message)
-            assertEquals(unsupportedMessage, ArchiveCapacity.publicError(previewError))
-            assertEquals(ArchiveFailure.FORMAT, ArchiveCapacity.reasonOf(previewError))
-            assertNull(previewError.cause)
-        }
-    }
-
-    @Test fun unknownToolInLaterWindowPreventsAllWritesAndPreservesTheDiagnostic() = runBlocking {
+    @Test fun futureFragmentsRemainInertAndCompleteThroughPreviewAndImport() = runBlocking {
+        val future = buildJsonObject { put("type", "TOOL_FUTURE"); put("content", buildJsonObject { put("nested", "exact") }); put("ratio", 0.75) }
+        val partial = buildJsonObject { put("type", "PARTIAL_FILE_READ"); put("ratio", 0.25) }
+        val file = zip(conversation(listOf(future, partial)))
+        assertEquals(1, DeepSeekArchive.inspect(file).conversations.size)
         val sink = Sink()
-        val file = zip(conversation(listOf(fragment("TOOL_FIND"))), conversation(listOf(fragment("TOOL_FUTURE")), "bad"))
-        try {
-            DeepSeekChatImporter(sink).import(file, assistant, mapOf("c" to "tool"))
-            fail("Unknown fragments must not be silently discarded")
-        } catch (failure: DeepSeekImportException) {
-            assertEquals(0, failure.partialResult.imported)
-            assertEquals(unsupportedMessage, failure.publicDetail)
-            assertEquals(ArchiveFailure.FORMAT, failure.failureReason)
-        }
-        assertTrue(sink.saved.isEmpty())
+        assertEquals(1, DeepSeekChatImporter(sink).import(file, assistant, mapOf("c" to "tool")).imported)
+        val message = sink.saved.values.single().currentMessages.last()
+        assertTrue(message.getTools().isEmpty())
+        assertEquals(future, DeepSeekStrictJson.parse((message.parts[0] as UIMessagePart.Text).text.substringAfter('\n')))
+        assertEquals(partial, DeepSeekStrictJson.parse((message.parts[1] as UIMessagePart.Text).text.substringAfter('\n')))
     }
 
     @Test fun findDoesNotRelaxMixedRoleValidation() {
@@ -189,14 +176,23 @@ class DeepSeekFragmentCompatibilityTest {
         }
     }
 
-    @Test fun malformedKnownToolFieldsStillFailValidation() {
-        val malformed = listOf(
-            buildJsonObject { put("type", "TOOL_FIND"); put("content", JsonNull) },
-            buildJsonObject { put("type", "TOOL_FIND"); put("results", JsonPrimitive("not an array")) },
-            buildJsonObject { put("type", "TOOL_FIND"); put("results", buildJsonArray { add(buildJsonObject { put("url", "missing title") }) }) },
-        )
-        for (tool in malformed) {
-            assertThrows(IllegalArgumentException::class.java) { parse(conversation(listOf(tool))) }
-        }
+    @Test fun changedOptionalToolPayloadIsPreservedInsteadOfBlockingTheArchive() {
+        val fragment = buildJsonObject { put("type", "TOOL_FIND"); put("content", JsonNull); put("results", "new shape") }
+        val message = DeepSeekChatImporter.convert(parse(conversation(listOf(fragment))), "tool", assistant).conversation.currentMessages.last()
+        assertEquals(fragment, DeepSeekStrictJson.parse((message.parts.single() as UIMessagePart.Text).text.substringAfter('\n')))
+        assertTrue(message.getTools().isEmpty())
     }
+    @Test fun legacyNullTitleAndNullModelDoNotRejectValidHistory() {
+        val raw=conversation(listOf(fragment("RESPONSE","retained")))
+        val mapping=raw["mapping"] as JsonObject
+        val node=mapping["tool"] as JsonObject
+        val message=node["message"] as JsonObject
+        val changed=JsonObject(raw+mapOf("title" to JsonNull,"mapping" to JsonObject(mapping+
+            ("tool" to JsonObject(node+("message" to JsonObject(message+("model" to JsonNull))))))))
+        val c=parse(changed)
+        assertEquals("未命名会话",c.title);assertEquals("",c.nodes["tool"]!!.message!!.sourceModel)
+        assertEquals("retained",c.nodes["tool"]!!.message!!.fragments.single().content)
+        assertEquals(5,c.nodes.size)
+    }
+
 }

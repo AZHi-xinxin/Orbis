@@ -4,12 +4,23 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import java.security.MessageDigest
 import java.util.UUID
+import me.rerere.ai.core.TokenUsage
 
 /** Counts only leave this probe. Content hashes live in a bounded process-local map, never disk. */
 @Serializable data class PrefixObservation(val slot:String,val sequence:Int,val atMillis:Long,
     val model:String,val compared:Boolean,val toolsSame:Boolean,val optionsSame:Boolean,
     val commonMessages:Int,val commonMessageBytes:Int,val firstChangedMessage:Int?,val firstChangedRole:String?,
-    val messageCount:Int,val messageBytes:Int)
+    val messageCount:Int,val messageBytes:Int,
+    val firstChangedSources:List<String> = emptyList(), val changedMessageBytes:Int? = null,
+    val imagePartCount:Int = 0, val inlineMediaBytes:Int = 0,
+    val phase:String = "request", val usageAtMillis:Long? = null,
+    val promptTokens:Int? = null, val completionTokens:Int? = null, val cachedTokens:Int? = null)
+
+internal fun PrefixObservation.withUsage(usage: TokenUsage): PrefixObservation = copy(
+    phase = "usage", usageAtMillis = System.currentTimeMillis(),
+    promptTokens = usage.promptTokens, completionTokens = usage.completionTokens,
+    cachedTokens = usage.cachedTokens.takeIf { usage.cachedTokensReported },
+)
 
 internal class DeepSeekPrefixProbe {
     private data class Part(val role:String,val bytes:Int,val blocks:List<String>)
@@ -17,7 +28,7 @@ internal class DeepSeekPrefixProbe {
     private val previous=linkedMapOf<String,Stamp>()
     private fun hash(value:ByteArray)=MessageDigest.getInstance("SHA-256").digest(value).joinToString(""){"%02x".format(it)}
     private fun digest(value:JsonElement?)=hash(value.toString().toByteArray())
-    @Synchronized fun observe(key:String,body:JsonObject):PrefixObservation {
+    @Synchronized fun observe(key:String,body:JsonObject,sourceHints:Map<String,List<String>> = emptyMap()):PrefixObservation {
         val model=(body["model"] as? JsonPrimitive)?.content.orEmpty()
         val messages=(body["messages"] as? JsonArray).orEmpty().map { value ->
             val bytes=value.toString().toByteArray()
@@ -40,10 +51,33 @@ internal class DeepSeekPrefixProbe {
             };break }
         }
         val index=if(old!=null && count<minOf(old.messages.size,messages.size)) count else null
-        return PrefixObservation(current.slot,current.sequence,System.currentTimeMillis(),
-            if(model.contains("pro",true)) "pro" else if(model.contains("flash",true)) "flash" else "deepseek",
+        val rawMessages=(body["messages"] as? JsonArray).orEmpty()
+        val changed=index?.let { rawMessages[it] as? JsonObject }
+        val sources=changed?.let { message ->
+            sourceHints[message["content"].toString()] ?: if (message["name"]?.jsonPrimitive?.contentOrNull == "orbis_host_data_v1")
+                listOf("host_context") else listOf(if (messages[index].role == "system") "system_unknown" else messages[index].role)
+        }.orEmpty()
+        var imageCount=0;var mediaBytes=0
+        fun countMedia(value:JsonElement) { when(value) {
+            is JsonObject -> {
+                if ((value["type"] as? JsonPrimitive)?.contentOrNull in setOf("image_url","input_image","image")) imageCount++
+                value.values.forEach(::countMedia)
+            }
+            is JsonArray -> value.forEach(::countMedia)
+            is JsonPrimitive -> if (value.isString && listOf("data:image/","data:audio/","data:video/").any { value.content.startsWith(it) }) mediaBytes+=value.content.toByteArray().size
+        } }
+        rawMessages.forEach(::countMedia)
+        val family=when {
+            model.contains("deepseek",true) -> if(model.contains("pro",true)) "pro" else if(model.contains("flash",true)) "flash" else "deepseek"
+            model.contains("gpt",true) -> "gpt"
+            model.contains("claude",true) -> "claude"
+            model.contains("gemini",true) -> "gemini"
+            else -> "other"
+        }
+        return PrefixObservation(current.slot,current.sequence,System.currentTimeMillis(),family,
             old!=null,old?.tools==current.tools,old?.options==current.options,count,bytes,index,
-            index?.let { messages[it].role },messages.size,messages.sumOf { it.bytes })
+            index?.let { messages[it].role },messages.size,messages.sumOf { it.bytes },
+            sources,index?.let { messages[it].bytes },imageCount,mediaBytes)
     }
     companion object { val shared=DeepSeekPrefixProbe() }
 }

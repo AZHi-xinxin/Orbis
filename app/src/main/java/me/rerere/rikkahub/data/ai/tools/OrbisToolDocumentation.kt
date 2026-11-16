@@ -23,7 +23,7 @@ internal val orbisToolDocumentation = mapOf(
         definition示例：{"triggerMode":"auto","dimensions":[{"id":"energy","label":"活力","scope":"session","baseline":50,"min":0,"max":100,"maxDelta":10,"halfLifeMinutes":30,"private":false}],"rules":[{"event":"rest","deltas":{"energy":8},"keywords":["休息"],"synonyms":["歇一会儿"],"weight":1.0}],"absence":{"graceMinutes":30,"capHours":24,"perHour":{},"returnEvent":null}}。这只是格式示例，不是预置个性。
         最多16个独立维度、64个事件；scope=session会话隔离或persistent助手共享。规则只是数据，不支持脚本。auto中每个词面/近义短语命中算一份，重叠词不重复计份，乘weight后受浓度上限限制；delta乘浓度再受maxDelta和min/max约束。可配置autoPolicy={maxConcentration:3,windowMinutes:10,maxEventsPerWindow:3}，分别为浓度上限(0.1–10)、同句去重及频率窗口(1–1440分钟)、同事件同会话窗口内次数(1–60)。这些是省略时的默认参数，不是所有角色固定的反应节奏；只能在定义阶段修改。去重跨重开保留，不存人类原句。synonyms由你定义，是本机短语匹配，不冒充外部语义模型。
         可选cooling={keywords:[],synonyms:[],event:null,blockedEvents:[],cooldownMinutes:5,pauseAuto:false}。词、反应事件、冷却的事件、时长及是否暂停全由规则定义；默认没有冷静词或固定反应，不把“停”、某个人的喜好或所有指标下降写成通用规则。命中时只触发配置的event，冷却只拦blockedEvents；可让某指标降低、另一个稳定指标升高。配置pauseAuto才暂停；AI须等配置的冷静期结束才能resume。此配置同样只可在暂停阶段修改。
-        维度可加private布尔字段，默认false；设为true后不能改为false，删除再建同ID也不能解除。action=visibility用shared布尔值及expected_revision决定你是否公开当前会话私密层，默认不公开；不影响数值。人类本机privateVisible查看开关默认false，只能人类UI改，你不能提交或查询。只有你愿意公开且人类选择展开时才渲染私密值/峰值/曲线；隐藏仍计算和记日志。
+        维度可加private布尔字段，默认false；设为true后不能改为false，删除再建同ID也不能解除。action=visibility用shared布尔值及expected_revision决定你是否公开当前会话私密层，默认不公开；不影响数值。此动作只接受action、shared、expected_revision，不能加visible/version/revision；visible仅用于event。先读state取得revision，再提交例如{"action":"visibility","shared":true,"expected_revision":刚读到的revision整数}。无需暂停或等待冷静期；如修订冲突则重新读state，不重复用旧值。人类本机privateVisible查看开关默认false，只能人类UI改，你不能提交或查询。只有你愿意公开且人类选择展开时才渲染私密值/峰值/曲线；隐藏仍计算和记日志。
         manual模式才允许action=event，传event、version、strength(0–3)、visible；不传数值，回执仅已记及seq。visible控制普通面板，不覆盖私密层双条件。manual的undo需最新seq，仅撤回当前会话最近事件。重试由宿主标识去重，不要另造事件重试。
         时间变化无需调用event：运行期间按真实经过的时间自然回归baseline；absence.graceMinutes是静默多少分钟后开始，perHour指定各指标每小时正负变化速率，capHours限制每段静默的累计作用时间。时间速率与自然回归连续合算，结果仍受min/max限制；maxDelta限制离散事件，不按刷新次数累加。session维度各会话独立计时，persistent维度按该助手最近一次人类消息计时，多个窗口不重复叠加。returnEvent仅在对应会话静默超过graceMinutes后收到新的人类消息时触发一次。后台/关闭重开也按经过时间计算，不调用模型；暂停或关闭模块期间冻结，恢复后重新计时。旧版升级从首次打开起建立新时钟，不追算升级前的空白。修改这些时间规则同样由你pause→draft→activate→resume。
         action=self_report、text最多300字，仅显示“自述”，不改任何计算值。规则/历史不自动带入上下文；不要借负面量表催促人类留下。
@@ -58,7 +58,7 @@ action=restore_latest 是人类明确要求找回资料时才用的恢复命令�
         你的本机随身便签，同一助手跨窗口可用，与 ST 和旧记忆库独立。一个工具完成存、改、删、看、设状态；不需要人类审批。
         人类在本机助手记忆页开启「跨助手记忆」后，同样开启的助手库连通。action=libraries查询当前可访问库和助手名；read默认检索这些库，library_id可限定其中一个。新记忆默认存当前库，更新/删除/恢复按ID定位原库；同ID多库时用library_id明确。库开关由人类设置，AI不能自行扩大范围。原归属、状态和版本保留；关闭不删除或搬迁。标准/独立档在原预算内补充连通库的常驻及关键词命中资料，标注来源；轻档仍只按需查询。语义索引仍处理本助手的旧摘要。没有后台自动整理，内容维护由AI自己决定。
         存：只传 body 即可；可选 summary、tags、keywords、important、state。正文完整保存，默认 static（仅存），不自动提炼或改写。
-        可选 emotion=暖/软/要/闷/烦/冷/火，仅保存你自标的情绪，不做语义猜测；不填兼容旧记录，传null清除。不改身体计算值、不依赖ST。
+        可选 emotion=暖/软/要/闷/烦/冷/火，仅保存你自标的情绪，不做语义猜测；不填时新记忆无标签、更新保留原标签，传clear清除（兼容旧null调用）。不改身体计算值、不依赖ST。
         读：action=read，可用 id 或 query；支持 offset/limit 分页。改：action=update、id 和要修改的字段。删：action=delete、id，为可恢复的软删。
         状态：action=set_state、id、state=static/conditional/pinned/paused。暂停只停浮现；恢复用 action=restore（可指定 revision），版本查询 action=history、id。
         你自行决定内容、标签、摘要、关键词、重要性、状态和 minIntervalTurns（条件浮现最小人类轮次间隔）。工具可能返回词面相似候选，由你决定是否合并，不会自动合并。

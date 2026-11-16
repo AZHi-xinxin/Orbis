@@ -31,8 +31,8 @@ data class DeepSeekArchivePreview(
 
 /** Local-only, bounded streaming reader. Never extracts paths or reads user.json contents. */
 object DeepSeekArchive {
-    const val MAX_JSON_BYTES = ArchiveCapacity.MAX_STREAM_JSON_BYTES
-    const val MAX_ARCHIVE_BYTES = ArchiveCapacity.MAX_ZIP_BYTES
+    const val MAX_JSON_BYTES = Long.MAX_VALUE
+    const val MAX_ARCHIVE_BYTES = Long.MAX_VALUE
     internal const val MAX_STRING_CHARS = 4 * 1024 * 1024
 
     fun inspect(file: File, checkCancelled: () -> Unit = {}): DeepSeekArchivePreview = safeRead {
@@ -64,7 +64,7 @@ object DeepSeekArchive {
         return safeRead {
             val zip = ZipFile(file)
             try {
-                if (zip.entries().asSequence().any { it.name.substringAfterLast('/') == "manifest.json" })
+                if (zip.entries().asSequence().any { it.name.substringAfterLast('/') == "chat_session_index.json" })
                     DeepSeekV3Archive(zip, checkCancelled) else LegacyArchiveReader(zip, checkCancelled)
             } catch (failure: Throwable) { zip.close(); throw failure }
         }
@@ -88,7 +88,6 @@ object DeepSeekArchive {
                 val enumeration = zip.entries()
                 while (enumeration.hasMoreElements()) {
                     checkCancelled()
-                    require(entries.size < 32) { "deepseek_zip_entries" }
                     entries += enumeration.nextElement()
                 }
                 val entry = selectConversationEntry(entries)
@@ -122,12 +121,9 @@ object DeepSeekArchive {
         override fun conversations(): Sequence<DeepSeekConversation> = sequence {
             check(!consumed) { "deepseek_already_read" }; consumed = true
             val identities = hashSetOf<String>()
-            var nodes = 0
-            for (raw in DeepSeekStrictJson.arrayItems(reader, checkCancelled)) {
+            for (raw in DeepSeekStrictJson.arrayItems(reader, checkCancelled, StreamingJsonBudget.deepSeek())) {
                 val conversation = DeepSeekParser.parse(JsonArray(listOf(raw)), checkCancelled).conversations.single()
-                require(identities.add(conversation.sourceId) && identities.size <= 10_000) { "deepseek_duplicate_or_many_conversations" }
-                nodes += conversation.nodes.size
-                require(nodes <= 1_000_000) { "deepseek_many_nodes" }
+                require(identities.add(conversation.sourceId)) { "deepseek_duplicate_or_many_conversations" }
                 yield(conversation)
             }
             require(identities.isNotEmpty()) { "deepseek_empty" }
@@ -141,40 +137,13 @@ object DeepSeekArchive {
     private fun selectConversationEntry(entries: List<java.util.zip.ZipEntry>): java.util.zip.ZipEntry {
         require(entries.isNotEmpty() && entries.map { it.name }.toSet().size == entries.size) { "deepseek_zip_paths" }
         entries.forEach { entry ->
-            val name = entry.name
-            require(name.length in 1..1024 && !name.startsWith('/') && '\\' !in name && ':' !in name &&
-                name.none { it.isISOControl() }) { "deepseek_zip_paths" }
-            val segments = name.removeSuffix("/").split('/')
-            require(segments.size <= 3 && segments.all { it.isNotEmpty() && it != "." && it != ".." }) { "deepseek_zip_paths" }
+            ArchiveCapacity.requireSafePath(entry.name, entry.isDirectory)
             if (entry.isDirectory) require(entry.size == 0L) { "deepseek_zip_directory" }
         }
-        val entry = entries.single { !it.isDirectory && it.name.substringAfterLast('/') == "conversations.json" }
-        val segments = entry.name.split('/')
-        require(segments.size <= 2 && segments.first() != "__MACOSX") { "deepseek_zip_paths" }
-        val prefix = entry.name.removeSuffix("conversations.json")
-        val dataNames = setOf(entry.name, prefix + "user.json")
-        val actualDataNames = entries.filter { !it.isDirectory && it.name in dataNames }.map { it.name }.toSet()
-        val directories = buildSet {
-            add("__MACOSX/")
-            if (prefix.isNotEmpty()) { add(prefix); add("__MACOSX/$prefix") }
-        }
-        val finderNames = buildSet {
-            add(".DS_Store"); add(prefix + ".DS_Store")
-            actualDataNames.forEach { name ->
-                val slash = name.lastIndexOf('/')
-                add("__MACOSX/" + name.substring(0, slash + 1) + "._" + name.substring(slash + 1))
-            }
-            if (prefix.isNotEmpty()) add("__MACOSX/._" + prefix.removeSuffix("/"))
-        }
-        entries.forEach { candidate ->
-            when {
-                candidate.isDirectory -> require(candidate.name in directories) { "deepseek_zip_paths" }
-                candidate.name == entry.name -> Unit
-                candidate.name == prefix + "user.json" -> require(candidate.size in 0..(1024L * 1024)) { "deepseek_user_size" }
-                candidate.name in finderNames -> require(candidate.size in 0..(1024L * 1024)) { "deepseek_metadata_size" }
-                else -> error("deepseek_zip_paths")
-            }
-        }
+        val entry = entries.single { !it.isDirectory && it.name.substringAfterLast('/') == "conversations.json" &&
+            !it.name.startsWith("__MACOSX/") }
+        // Other safe entries may be newer export metadata or local attachments. Never execute
+        // or extract them, and never parse account/settings files as conversations.
         return entry
     }
 
@@ -193,10 +162,16 @@ internal data class StreamingJsonBudget(
     val totalChars: Long = ArchiveCapacity.MAX_STREAM_JSON_BYTES,
     val itemChars: Int = ArchiveCapacity.MAX_WINDOW_CHARS,
     val itemValues: Int = 2_000_000,
+    val stringChars: Int = DeepSeekArchive.MAX_STRING_CHARS,
 ) {
     init {
-        require(totalChars in 1..ArchiveCapacity.MAX_STREAM_JSON_BYTES)
-        require(itemChars in 1..ArchiveCapacity.MAX_WINDOW_CHARS && itemValues in 1..2_000_000)
+        require(totalChars > 0)
+        require(itemChars > 0 && itemValues > 0 && stringChars > 0)
+    }
+    companion object {
+        // No product-level count/size quotas for official chat imports. Each conversation
+        // is consumed separately; filesystem capacity and valid JSON still apply.
+        fun deepSeek() = StreamingJsonBudget(Long.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
     }
 }
 
@@ -205,6 +180,8 @@ internal object DeepSeekStrictJson {
         ArchiveCapacity.requireSize(text.length.toLong(), ArchiveCapacity.MAX_WINDOW_CHARS.toLong(), allowEmpty = true)
         return JsonReader(StringReader(text), checkCancelled).read()
     }
+    fun read(reader: Reader, checkCancelled: () -> Unit, budget: StreamingJsonBudget): JsonElement =
+        JsonReader(reader, checkCancelled, budget).read()
     fun arrayItems(reader: Reader, checkCancelled: () -> Unit,
         budget: StreamingJsonBudget = StreamingJsonBudget()): Sequence<JsonElement> = JsonReader(reader, checkCancelled, budget).arrayItems()
     /** Streams a named array inside a small, explicitly allowed object envelope. Header order is not significant. */
@@ -359,7 +336,7 @@ internal object DeepSeekStrictJson {
                     }
                     else -> error("deepseek_json_escape")
                 }
-                require(output.length <= DeepSeekArchive.MAX_STRING_CHARS) { "deepseek_json_string_size" }
+                require(output.length <= budget.stringChars) { "deepseek_json_string_size" }
             }
         }
     }

@@ -92,6 +92,27 @@ class PrivateVaultRepository(
         commit(current, audited(current.state, "recovery_password_set"), envelope)
     } } }
 
+    /** Human recovery UI only. Never exposed by the AI session or any model tool. */
+    fun prepareAbandonment(): String = guarded {
+        requireUnavailableForAbandonment()
+        storage.abandonmentFingerprint()
+    }
+
+    fun abandonUnrecoverableRoom(expectedFingerprint: String, confirmation: String) = guarded {
+        if (confirmation != "放弃旧房间" || !expectedFingerprint.matches(Regex("[0-9a-f]{64}"))) fail("abandon_confirmation_required")
+        requireUnavailableForAbandonment()
+        storage.abandon(expectedFingerprint)
+    }
+
+    private fun requireUnavailableForAbandonment() {
+        try {
+            if (!storage.exists()) fail("room_missing")
+            if (!storage.recoveryRequired()) opened { fail("room_still_readable") }
+        } catch (error: PrivateVaultException) {
+            if (error.reasonCode !in setOf("device_key_unavailable", "recovery_required", "invalid_format", "storage_failed", "size_limit", "abandon_incomplete")) throw error
+        }
+    }
+
     private fun withPassword(password: CharArray, creating: Boolean = false, action: () -> Unit) {
         try {
             if (creating && (password.size !in 8..128 || !Charsets.UTF_8.newEncoder().canEncode(CharBuffer.wrap(password)))) {

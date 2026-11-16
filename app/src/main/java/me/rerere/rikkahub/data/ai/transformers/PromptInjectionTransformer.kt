@@ -13,6 +13,9 @@ import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.ai.provider.ProviderSetting
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.put
 import kotlin.uuid.Uuid
 
 /**
@@ -98,7 +101,8 @@ internal fun transformMessages(
     val safe = findSafeInsertIndex(applied, insertion)
     // This is a real system instruction, not host retrieval data or a fabricated human turn.
     // GenerationInputSnapshot freezes this projection once for the entire tool sequence.
-    return applied.take(safe) + UIMessage.system(after).copy(isSynthetic = true) + applied.drop(safe)
+    return applied.take(safe) + injectionSystemMessage(after,
+        byPosition[InjectionPosition.AFTER_SYSTEM_PROMPT].orEmpty()) + applied.drop(safe)
 }
 
 /**
@@ -115,8 +119,11 @@ internal fun collectInjections(
     val nonSystemMessages = messages.filter { it.role != MessageRole.SYSTEM }
     return configuredInjections(assistant, modeInjections, lorebooks, conversationModeInjectionIds,
         conversationLorebookIds).filter { injection ->
-        injection !is PromptInjection.RegexInjection ||
-            injection.isTriggered(extractContextForMatching(nonSystemMessages, injection.scanDepth))
+        injection !is PromptInjection.RegexInjection || injection.constantActive ||
+            injection.isTriggered(extractContextForMatching(
+                if (injection.scanUserOnly) nonSystemMessages.filter { it.role == MessageRole.USER && !it.isSynthetic }
+                else nonSystemMessages,
+                injection.scanDepth.coerceAtLeast(0)))
     }
 }
 
@@ -191,7 +198,9 @@ internal fun applyInjections(
             }
 
             result[systemIndex] = systemMessage.copy(
-                parts = listOf(UIMessagePart.Text(newText)),
+                parts = listOf(injectionText(newText,
+                    byPosition[InjectionPosition.BEFORE_SYSTEM_PROMPT].orEmpty() +
+                        byPosition[InjectionPosition.AFTER_SYSTEM_PROMPT].orEmpty(), includeBaseSystem = true)),
                 isSynthetic = true,
             )
         }
@@ -213,7 +222,9 @@ internal fun applyInjections(
         }
 
         if (combinedContent.isNotEmpty()) {
-            result.add(0, UIMessage.system(combinedContent).copy(isSynthetic = true))
+            result.add(0, injectionSystemMessage(combinedContent,
+                byPosition[InjectionPosition.BEFORE_SYSTEM_PROMPT].orEmpty() +
+                    byPosition[InjectionPosition.AFTER_SYSTEM_PROMPT].orEmpty()))
         }
     }
 
@@ -259,8 +270,33 @@ internal fun applyInjections(
         }
     }
 
+    // This explicit placement is anchored to the last authored human turn, never a tool result
+    // or a synthetic USER injection. Without a human carrier keep the rule as SYSTEM near the
+    // beginning (e.g. compacted context); never drop a selected rule or fabricate a human.
+    val nearHuman = byPosition[InjectionPosition.BEFORE_LATEST_USER_SYSTEM].orEmpty()
+    val humanIndex = result.indexOfLast { it.role == MessageRole.USER && !it.isSynthetic }
+    if (nearHuman.isNotEmpty()) {
+        val target = if (humanIndex >= 0) humanIndex else
+            (result.indexOfFirst { it.role == MessageRole.SYSTEM } + 1).coerceAtLeast(0)
+        result.add(findSafeInsertIndex(result, target),
+            injectionSystemMessage(nearHuman.joinToString("\n") { it.content }, nearHuman))
+    }
     return result
 }
+
+/** Local provenance only. Text metadata is never serialized as provider content. */
+private fun injectionText(content: String, entries: List<PromptInjection>, includeBaseSystem: Boolean = false) =
+    UIMessagePart.Text(content, metadata = buildJsonObject {
+        put("source", "orbis_prompt_injection")
+        put("diagnostic_sources", buildJsonArray {
+            if (includeBaseSystem) add(JsonPrimitive("system_prompt"))
+            if (entries.any { it is PromptInjection.RegexInjection }) add(JsonPrimitive("worldbook"))
+            if (entries.any { it is PromptInjection.ModeInjection }) add(JsonPrimitive("mode_injection"))
+        })
+    })
+
+private fun injectionSystemMessage(content: String, entries: List<PromptInjection>) =
+    UIMessage.system("").copy(isSynthetic = true, parts = listOf(injectionText(content, entries)))
 
 /**
  * 将同一 role 的注入合并成消息列表

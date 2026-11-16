@@ -88,7 +88,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                             val id = deepSeekImportId("conversation", source.sourceId, leaf)
                             if (sink.exists(id)) result = result.copy(skipped = result.skipped + 1)
                             else {
-                                ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace, ArchiveCapacity.MAX_WINDOW_CHARS.toLong())
+                                ArchiveCapacity.requireSpace(file.parentFile!!.usableSpace)
                                 val attachments = DeepSeekAttachmentSession(archive, attachmentStore)
                                 var committed = false
                                 try {
@@ -159,7 +159,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
             var attachments = 0
             var restored = 0
             var serializedBytes = 0L
-            val nodes = source.pathTo(leaf, checkCancelled).map { node ->
+            val nodes = source.pathTo(leaf, checkCancelled).flatMap { node ->
                 checkCancelled()
                 val message = checkNotNull(node.message)
                 val time = KotlinInstant.parse(message.createdAt.toString())
@@ -176,7 +176,7 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                     message.fragments.forEach { fragment ->
                         checkCancelled()
                         when (fragment.type) {
-                            "REQUEST", "RESPONSE" -> add(UIMessagePart.Text(checkNotNull(fragment.content)))
+                            "REQUEST", "RESPONSE" -> add(UIMessagePart.Text(fragment.content ?: "[DeepSeek 历史片段；原样保留]\n${fragment.raw}"))
                             "FILE" -> {
                                 val files = fragment.raw["files"] as? kotlinx.serialization.json.JsonArray
                                 files.orEmpty().forEach { entry ->
@@ -189,12 +189,17 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                                 }
                                 if (files.isNullOrEmpty()) add(UIMessagePart.Text("[历史附件引用；未下载]\n${fragment.raw}"))
                             }
-                            "THINK" -> add(UIMessagePart.Reasoning(checkNotNull(fragment.content), createdAt = time, finishedAt = time))
+                            "THINK" -> if (fragment.content != null) add(UIMessagePart.Reasoning(fragment.content!!, createdAt = time, finishedAt = time)) else add(UIMessagePart.Text("[DeepSeek 历史片段；原样保留]\n${fragment.raw}"))
                             else -> {
                                 // Keep historical content byte-for-byte as text; references remain inert data.
                                 fragment.content?.let { add(UIMessagePart.Text(it)) }
-                                val record = JsonObject(fragment.raw.filterKeys { it != "content" })
-                                val label = if (fragment.type in setOf("TEMPLATE_RESPONSE", "CONTENT_RISK", "TIP")) "DeepSeek 历史提示；原样保留" else "历史检索记录；未执行"
+                                val record = JsonObject(fragment.raw.filterKeys { it != "content" || fragment.content == null })
+                                val label = when (fragment.type) {
+                                    "TEMPLATE_RESPONSE", "CONTENT_RISK", "TIP" -> "DeepSeek 历史提示；原样保留"
+                                    "SEARCH", "TOOL_SEARCH", "TOOL_OPEN", "TOOL_FIND", "READ_LINK" -> "历史检索记录；未执行"
+                                    "PARTIAL_FILE_READ" -> "历史文件读取提示；原样保留"
+                                    else -> "DeepSeek 历史片段；原样保留，未执行"
+                                }
                                 add(UIMessagePart.Text("[$label]\n$record"))
                                 attachments += (fragment.raw["files"] as? kotlinx.serialization.json.JsonArray)?.size ?: 0
                             }
@@ -214,12 +219,9 @@ class DeepSeekChatImporter internal constructor(private val sink: DeepSeekImport
                 val ui = UIMessage(id = deepSeekImportId("message", source.sourceId, leaf, node.sourceId),
                     role = message.role, parts = parts, createdAt = time.toLocalDateTime(TimeZone.currentSystemDefault()),
                     finishedAt = time.toLocalDateTime(TimeZone.currentSystemDefault()))
-                val encodedBytes = JsonInstant.encodeToString(listOf(ui)).toByteArray(Charsets.UTF_8).size
-                if (encodedBytes > MAX_NODE_JSON_BYTES)
-                    throw DeepSeekMessageTooLarge()
-                serializedBytes += encodedBytes
-                if (serializedBytes > ArchiveCapacity.MAX_WINDOW_CHARS) throw ArchiveReadException(ArchiveFailure.WINDOW_LIMIT)
-                MessageNode(id = deepSeekImportId("node", source.sourceId, leaf, node.sourceId), messages = listOf(ui))
+                partitionDeepSeekMessage(ui, source.sourceId, leaf, node.sourceId, checkCancelled).also { segments ->
+                    segments.forEach { serializedBytes += JsonInstant.encodeToString(it.messages).toByteArray(Charsets.UTF_8).size }
+                }
             }
             return Converted(Conversation(id = deepSeekImportId("conversation", source.sourceId, leaf),
                 assistantId = assistantId, title = source.title, createAt = source.createdAt, updateAt = source.updatedAt,

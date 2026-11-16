@@ -10,69 +10,70 @@ import java.util.zip.ZipFile
 /** Official v3 export: index + one JSON per chat + optional local attachments. No profile is read. */
 internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCancelled: () -> Unit) : DeepSeekArchive.ArchiveReader {
     private val entries = zip.entries().asSequence().toList().also { list ->
-        require(list.size in 1..ArchiveCapacity.MAX_ENTRIES)
+        require(list.isNotEmpty())
         require(list.map { it.name }.toSet().size == list.size)
-        var expanded = 0L
         list.forEach {
             checkCancelled(); ArchiveCapacity.requireSafePath(it.name, it.isDirectory)
-            ArchiveCapacity.requireSize(it.size, ArchiveCapacity.MAX_DISK_ENTRY_BYTES, allowEmpty = true)
-            expanded += it.size
-            ArchiveCapacity.requireSize(expanded, ArchiveCapacity.MAX_EXPANDED_BYTES, allowEmpty = true)
+            ArchiveCapacity.requireSize(it.size, Long.MAX_VALUE, allowEmpty = true)
             if (it.isDirectory) require(it.size == 0L)
         }
     }.associateBy { it.name }
     private val manifest = entries.values.single { it.name.substringAfterLast('/') == "manifest.json" }
     private val prefix = manifest.name.removeSuffix("manifest.json").also {
-        require(it.isEmpty() || it.removeSuffix("/").split('/').size == 1 && it != "__MACOSX/")
+        require(it.isEmpty() || !it.startsWith("__MACOSX/"))
     }
     private val index: List<JsonObject>
     private val sessionIds: Set<String>
     private var consumed = false
 
     init {
-        val version = readJson(manifest.name, 1024 * 1024).jsonObject["export_format_version"]
-        require(version == JsonPrimitive(3)) { "deepseek_export_version" }
-        index = readJson(prefix + "chat_session_index.json", 16 * 1024 * 1024).jsonArray.map { it.jsonObject }
-        require(index.size in 1..10_000)
+        val version = readJson(manifest.name).jsonObject["export_format_version"]
+        require((version as? JsonPrimitive)?.intOrNull?.let { it >= 3 } == true) { "deepseek_export_version" }
+        index = readJson(prefix + "chat_session_index.json").jsonArray.map { it.jsonObject }
+        require(index.isNotEmpty())
         sessionIds = index.map { it.getValue("id").jsonPrimitive.content.also(::safeId) }.toSet()
         require(sessionIds.size == index.size)
         val jsonNames = sessionIds.map { prefix + "chat_sessions/$it.json" }.toSet()
         require(jsonNames.all { it in entries })
-        val allowedRoots = setOf(prefix + "manifest.json", prefix + "chat_session_index.json", prefix + "user.json")
-        val attachmentPrefixes = sessionIds.map { prefix + "chat_sessions/${it}_files/" }.toSet()
-        entries.values.forEach { entry ->
-            val name = entry.name
-            when {
-                name in allowedRoots -> if (name.endsWith("user.json")) require(entry.size <= 1024 * 1024)
-                name in jsonNames -> ArchiveCapacity.requireSize(entry.size, ArchiveCapacity.MAX_WINDOW_CHARS.toLong())
-                entry.isDirectory -> require(name == prefix || name == prefix + "chat_sessions/" || name in attachmentPrefixes)
-                attachmentPrefixes.any { name.startsWith(it) && '/' !in name.removePrefix(it) } -> Unit
-                else -> error("deepseek_v3_unexpected_path")
+        // New optional metadata does not change the indexed conversation layout.
+        // All names were validated above; only explicitly indexed chats are read.
+    }
+
+    private fun readJson(name: String): JsonElement {
+        val entry = requireNotNull(entries[name])
+        val crc = java.util.zip.CRC32()
+        var count = 0L
+        val input = object : java.io.FilterInputStream(zip.getInputStream(entry)) {
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                checkCancelled()
+                return `in`.read(buffer, offset, length).also { n ->
+                    if (n > 0) { count += n; crc.update(buffer, offset, n) }
+                    if (count > entry.size) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
+                }
+            }
+            override fun read(): Int {
+                val buffer = ByteArray(1)
+                return if (read(buffer, 0, 1) < 0) -1 else buffer[0].toInt() and 255
+            }
+        }
+        val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return java.io.InputStreamReader(input, decoder).buffered(32768).use { reader ->
+            DeepSeekStrictJson.read(reader, checkCancelled, StreamingJsonBudget.deepSeek()).also {
+                if (count != entry.size || crc.value != entry.crc) throw ArchiveReadException(ArchiveFailure.CHECKSUM)
             }
         }
     }
 
-    private fun readJson(name: String, limit: Int): JsonElement {
-        val entry = requireNotNull(entries[name])
-        ArchiveCapacity.requireSize(entry.size, limit.toLong())
-        val output = ByteArrayOutputStream()
-        ArchiveCapacity.copyZipEntry(zip, entry, output, limit.toLong(), checkCancelled)
-        val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(output.toByteArray())).toString()
-        return DeepSeekStrictJson.parse(text, checkCancelled)
-    }
-
     override fun conversations(): Sequence<DeepSeekConversation> = sequence {
         check(!consumed); consumed = true
-        var count = 0
         for (header in index) {
             checkCancelled()
             val id = header.getValue("id").jsonPrimitive.content
-            val raw = readJson(prefix + "chat_sessions/$id.json", ArchiveCapacity.MAX_WINDOW_CHARS).jsonObject
+            val raw = readJson(prefix + "chat_sessions/$id.json").jsonObject
             require(raw["id"] == header["id"])
             val messages = raw.getValue("messages").jsonArray
             require(header["message_count"]?.jsonPrimitive?.intOrNull == messages.size)
-            count += messages.size; require(count <= 1_000_000)
             // An exported path is data, never a destination or URL. Only this chat's local folder is eligible.
             messages.forEach { message -> message.jsonObject["fragments"]?.jsonArray?.forEach { fragment ->
                 fragment.jsonObject["files"]?.jsonArray?.forEach { file ->
@@ -96,7 +97,7 @@ internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCanc
         require(parts.size == 3 && parts[0] == "chat_sessions" && parts[1].endsWith("_files") && parts[1].removeSuffix("_files") in sessionIds)
         val entry = entries[prefix + path] ?: return false
         require(!entry.isDirectory)
-        ArchiveCapacity.copyZipEntry(zip, entry, output, ArchiveCapacity.MAX_DISK_ENTRY_BYTES, checkCancelled)
+        ArchiveCapacity.copyZipEntry(zip, entry, output, Long.MAX_VALUE, checkCancelled)
         return true
     }
     override fun close() = zip.close()
@@ -137,5 +138,5 @@ internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCanc
             "current_node" to (current?.let(::JsonPrimitive) ?: JsonNull)))
     }
 
-    private fun safeId(id: String) { require(id.length in 1..256 && id.all { it.isLetterOrDigit() || it == '-' || it == '_' }) }
+    private fun safeId(id: String) { require(id.isNotEmpty() && id.all { it.isLetterOrDigit() || it == '-' || it == '_' }) }
 }

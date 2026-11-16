@@ -8,10 +8,60 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OrbisMemoryToolTest {
+    @Test fun realMemoryToolOpenAiDeclarationHasOnlyNonemptyStringEmotionOptions() {
+        val tool = buildOrbisMemoryTool("synthetic-owner", { true }) { _, _, _ -> error("Serialization must not execute") }
+        val api = me.rerere.ai.provider.providers.openai.ChatCompletionsAPI(
+            okhttp3.OkHttpClient(), me.rerere.ai.util.KeyRoulette.default())
+        val method = api.javaClass.getDeclaredMethod("buildChatCompletionRequest", List::class.java,
+            me.rerere.ai.provider.TextGenerationParams::class.java,
+            me.rerere.ai.provider.ProviderSetting.OpenAI::class.java, Boolean::class.javaPrimitiveType
+        ).apply { isAccessible = true }
+        val request = method.invoke(api, listOf(me.rerere.ai.ui.UIMessage.user("synthetic query")),
+            me.rerere.ai.provider.TextGenerationParams(
+                model = me.rerere.ai.provider.Model(modelId = "gemini-4-hydrogen",
+                    abilities = listOf(me.rerere.ai.provider.ModelAbility.TOOL)), tools = listOf(tool)),
+            me.rerere.ai.provider.ProviderSetting.OpenAI(), true) as JsonObject
+        val function = request["tools"]!!.jsonArray.single().jsonObject["function"]!!.jsonObject
+        assertEquals("orbis_memory", function["name"]!!.jsonPrimitive.content)
+        val parameters = function["parameters"]!!.jsonObject
+        val emotion = parameters["properties"]!!.jsonObject["emotion"]!!.jsonObject
+        // This is the OpenAI wire schema handed to the relay, before conversion to Google's
+        // string-only enum. JSON null at enum[7] was the regression missed by native tests.
+        val options = emotion["enum"]!!.jsonArray
+        assertTrue("Relay enum entries must all be nonempty strings", options.all {
+            it is JsonPrimitive && it.isString && it.content.isNotBlank()
+        })
+        assertEquals(JsonPrimitive("string"), emotion["type"])
+        assertEquals(me.rerere.rikkahub.data.orbis.memory.OrbisMemoryEmotions.labels + "clear",
+            options.map { it.jsonPrimitive.content }.toSet())
+        assertFalse(parameters["required"]?.jsonArray.orEmpty().contains(JsonPrimitive("emotion")))
+    }
+
+    @Test fun emotionClearAndLegacyNullKeepTheSameHostBoundOperation() = runBlocking {
+        val received = mutableListOf<JsonObject>()
+        val tool = buildOrbisMemoryTool("owner", { true }) { owner, request, key ->
+            assertEquals("owner", owner)
+            assertEquals("conversation:message:call", key)
+            received += request
+            buildJsonObject { put("ok", true) }
+        }
+        withContext(CloudToolInvocationContext("call", "message", "conversation")) {
+            tool.execute(args("""{"action":"update","id":"note","emotion":"clear"}"""))
+            tool.execute(args("""{"action":"update","id":"note","emotion":null}"""))
+            tool.execute(args("""{"action":"update","id":"note","body":"updated"}"""))
+            tool.execute(args("""{"action":"update","id":"note","emotion":"暖"}"""))
+        }
+        assertEquals(4, received.size)
+        assertEquals(JsonNull, received[0]["emotion"])
+        assertEquals(received[0], received[1])
+        assertFalse(received[2].containsKey("emotion")) // Omitted updates must not erase a label.
+        assertEquals(JsonPrimitive("暖"), received[3]["emotion"])
+    }
+
     @Test fun realMemoryToolEmotionCanBeSerializedForGeminiWithoutChangingItsSchema() {
         val tool = buildOrbisMemoryTool("synthetic-owner", { true }) { _, _, _ -> error("Serialization must not execute") }
         val original = Json.encodeToJsonElement(tool.parameters()).jsonObject
-        // The fifth property matches the field index in the reported Gemini 400.
+        // Native Google and OpenAI-compatible relays must both accept the real tool schema.
         assertEquals("emotion", original["properties"]!!.jsonObject.keys.elementAt(4))
         val provider = me.rerere.ai.provider.providers.google.GoogleProvider(okhttp3.OkHttpClient())
         val method = provider.javaClass.getDeclaredMethod("buildCompletionRequestBody", List::class.java,
@@ -25,10 +75,10 @@ class OrbisMemoryToolTest {
         assertEquals("orbis_memory", declaration["name"]!!.jsonPrimitive.content)
         val emotion = declaration["parameters"]!!.jsonObject["properties"]!!.jsonObject["emotion"]!!.jsonObject
         assertEquals(JsonPrimitive("string"), emotion["type"])
-        assertEquals(JsonPrimitive(true), emotion["nullable"])
+        assertFalse(emotion.containsKey("nullable"))
         assertEquals(original, Json.encodeToJsonElement(tool.parameters()))
-        assertEquals(listOf(JsonPrimitive("string"), JsonPrimitive("null")),
-            original["properties"]!!.jsonObject["emotion"]!!.jsonObject["type"]!!.jsonArray.toList())
+        assertEquals(JsonPrimitive("string"),
+            original["properties"]!!.jsonObject["emotion"]!!.jsonObject["type"])
     }
 
     private fun args(text: String) = Json.parseToJsonElement(text)

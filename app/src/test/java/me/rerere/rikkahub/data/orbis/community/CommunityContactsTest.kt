@@ -43,4 +43,36 @@ class CommunityContactsTest {
         val missing=Api().apply {fail=true};assertTrue(runCatching {communityFriendAction(missing,ai,args)}.exceptionOrNull() is MarketProblem);assertEquals(1,missing.writes.size)
         val foreign=Api();assertTrue(runCatching {communityFriendAction(foreign,ai,JsonObject(args+mapOf("actor" to JsonPrimitive(other))))}.isFailure);assertTrue(foreign.reads.isEmpty());assertTrue(foreign.writes.isEmpty())
     }
+
+    @Test fun blockedNumbersResolveAcrossPagesWithoutReadingHiddenProfile()=runBlocking {
+        val reads=mutableListOf<String>();val writes=mutableListOf<JsonObject>()
+        val api=object:CommunityApi {
+            override val owner="synthetic"
+            override suspend fun get(path:String,actor:String,quick:Boolean):JsonObject {
+                assertEquals(ai,actor);assertTrue(path.startsWith("/blocks?"));reads+=path
+                return buildJsonObject {
+                    put("items",JsonArray(if(path.endsWith("offset=0")) emptyList() else listOf(communityBody("id" to other,"number" to "1234567890","name" to "blocked member"))))
+                    put("next_offset",if(path.endsWith("offset=0")) JsonPrimitive(50) else JsonNull)
+                }
+            }
+            override suspend fun post(path:String,actor:String,body:JsonObject):JsonObject {
+                assertEquals(ai,actor);writes+=body
+                return buildJsonObject {put("ok",true);put("action","unblock");put("blocked_by_me",false);put("target",communityBody("id" to other,"number" to "1234567890"))}
+            }
+        }
+        val result=communityFriendAction(api,ai,communityBody("action" to "unblock","target" to "1234567890"))
+        assertEquals(2,reads.size);assertEquals(other,writes.single().ms("target"))
+        assertFalse(result.mb("blocked_by_me"));assertEquals(ai,result.ms("actor"))
+        assertTrue(result.ms("help").contains("不会自动恢复好友"))
+        val count=reads.size
+        communityFriendAction(api,ai,communityBody("action" to "unblock","target" to other))
+        assertEquals(count,reads.size) // UUID undo does not require a visible public profile.
+        assertTrue(runCatching {communityBlocked(api,ai,communityBody("actor" to other))}.isFailure)
+    }
+
+    @Test fun unconfirmedUnblockIsNotReportedAsSuccess()=runBlocking {
+        val api=Api().apply { legacy=true }
+        assertTrue(runCatching {communityFriendAction(api,ai,communityBody("action" to "unblock","target" to other))}.isFailure)
+        assertEquals(1,api.writes.size)
+    }
 }

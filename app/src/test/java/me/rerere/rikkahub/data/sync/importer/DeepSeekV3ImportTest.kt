@@ -87,17 +87,36 @@ class DeepSeekV3ImportTest {
         assertThrows(DeepSeekImportException::class.java){runBlocking{DeepSeekChatImporter(sink,store).import(zip(),owner,mapOf("c" to "3"))}}
         assertEquals(1,deleted)
     }
-    @Test fun invalidIndexOrUnrelatedPathRejectsBeforeAnyWrites() {
+    @Test fun invalidIndexOrUnsafePathRejectsBeforeAnyWrites() {
         for(extra in listOf(mapOf("chat_session_index.json" to "[{\"id\":\"c\",\"message_count\":99}]".toByteArray()),
-            mapOf("../outside" to byteArrayOf()),mapOf("chat_sessions/other/f.png" to byteArrayOf()),
-            mapOf("manifest.json" to "{\"export_format_version\":4}".toByteArray()))) {
+            mapOf("../outside" to byteArrayOf()))) {
             assertThrows(IllegalArgumentException::class.java){DeepSeekArchive.inspect(zip(extra=extra))}
         }
     }
-    @Test fun duplicateIdsCyclesAndUnknownFragmentsRemainErrors() {
+    @Test fun futureVersionWithCompatibleStructureAndExtraFilesRemainsReadable() {
+        assertEquals(1, DeepSeekArchive.inspect(zip(extra=mapOf(
+            "manifest.json" to "{\"export_format_version\":4}".toByteArray(),
+            "chat_sessions/other/f.png" to byteArrayOf(1)
+        ))).conversations.size)
+    }
+    @Test fun duplicateIdsAndCyclesRemainErrors() {
         val raw=session();val ms=raw["messages"]!!.jsonArray
-        val variants=listOf(JsonArray(ms+ms.first()),JsonArray(ms.map {m -> if(m.jsonObject["id"]==JsonPrimitive(1)) JsonObject(m.jsonObject+("parent_id" to JsonPrimitive(3))) else m}),
-            JsonArray(ms+message(5,3,"ASSISTANT",fragment("UNRECOGNIZED_FUTURE_TYPE","keep original"))))
+        val variants=listOf(JsonArray(ms+ms.first()),JsonArray(ms.map {m -> if(m.jsonObject["id"]==JsonPrimitive(1)) JsonObject(m.jsonObject+("parent_id" to JsonPrimitive(3))) else m}))
         variants.forEach {bad->assertThrows(IllegalArgumentException::class.java){DeepSeekArchive.inspect(zip(JsonObject(raw+("messages" to bad))))}}
     }
+    @Test fun nullMissingAndBlankTitlesPreserveEveryMessageAndBranch() {
+        val original=session()
+        for (raw in listOf(JsonObject(original+("title" to JsonNull)), JsonObject(original-"title"),
+            JsonObject(original+("title" to JsonPrimitive("  "))))) {
+            val file=zip(raw);val preview=DeepSeekArchive.inspect(file).conversations.single()
+            assertEquals("未命名会话",preview.title);assertEquals(4,preview.messageCount)
+            DeepSeekArchive.open(file){}.use { archive ->
+                val c=archive.conversations().single()
+                assertEquals(listOf("1","3"),c.pathTo(c.selectedLeafId).map{it.sourceId})
+                assertTrue(DeepSeekChatImporter.convert(c,c.selectedLeafId,owner).conversation.currentMessages.last().toText().contains("selected"))
+                assertEquals(raw["title"],c.original["title"])
+            }
+        }
+    }
+
 }

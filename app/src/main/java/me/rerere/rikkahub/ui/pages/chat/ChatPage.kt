@@ -1033,6 +1033,9 @@ private fun TopBar(
                     if (assistant.orbisBodyEnabled && !conversation.isConsultation) {
                         me.rerere.rikkahub.ui.pages.orbis.OrbisBodyEntry(assistant.id.toString(), conversation.id.toString())
                     }
+                    if (!conversation.isConsultation) {
+                        me.rerere.rikkahub.ui.pages.orbis.OrbisWebEntry(assistant.id.toString(), conversation.id.toString())
+                    }
                 }
                 if (!conversation.isConsultation) me.rerere.rikkahub.ui.pages.orbis.community.CommunityEntry(assistant.id.toString())
                 me.rerere.rikkahub.ui.pages.orbis.music.MusicEntry()

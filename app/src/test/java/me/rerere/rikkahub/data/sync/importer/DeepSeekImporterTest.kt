@@ -179,13 +179,19 @@ class DeepSeekImporterTest {
         catch (_: CancellationException) { }
     }
 
-    @Test fun oversizedSingleNodeFailsThatConversationWithoutTruncatingOrBlockingOtherChats() = runBlocking {
+    @Test fun oversizedSingleNodeIsSplitLosslesslyAndCanBeImportedAgain() = runBlocking {
         val sink = Sink()
-        val result = DeepSeekChatImporter(sink).import(zip(conversation("huge", body = "x".repeat(800_000)), conversation("normal")),
-            assistant, mapOf("huge" to "a", "normal" to "a"))
-        assertEquals(1, result.failed); assertEquals(1, result.imported)
-        assertEquals("huge", result.failures.single().sourceId)
-        assertEquals(1, sink.saved.size)
+        val body = "汉字🙂\r\n\t\"".repeat(600_000) // Beyond the old 4 Mi-character string cap.
+        val file = zip(conversation("huge", body = body), conversation("normal"))
+        val importer = DeepSeekChatImporter(sink)
+        val result = importer.import(file, assistant, mapOf("huge" to "a", "normal" to "a"))
+        assertEquals(0, result.failed); assertEquals(2, result.imported)
+        val chat = sink.saved.getValue(deepSeekImportId("conversation", "huge", "a"))
+        val parts = chat.currentMessages.filter { it.role == MessageRole.USER }.flatMap { it.parts }
+        assertEquals(body, parts.filterIsInstance<UIMessagePart.Text>().joinToString("") { it.text })
+        assertTrue(chat.messageNodes.size > 2)
+        assertEquals(chat.messageNodes.size, chat.messageNodes.map { it.id }.toSet().size)
+        assertEquals(2, importer.import(file, assistant, mapOf("huge" to "a", "normal" to "a")).skipped)
     }
 
     @Test fun longMillionCharacterChainAndForkStayOneSelectedConversation() {
@@ -270,7 +276,7 @@ class DeepSeekImporterTest {
     }
 
     @Test fun traversalAndUnexpectedZipEntriesAreRejectedWithoutExtraction() {
-        for (path in listOf("../outside.json", "/absolute.json", "folder/conversations.json", "attachment.png", "C:\\outside")) {
+        for (path in listOf("../outside.json", "/absolute.json", "folder/conversations.json", "C:\\outside")) {
             try { DeepSeekArchive.inspect(zip(conversation(), extras = mapOf(path to byteArrayOf(1)))); fail() }
             catch (_: IllegalArgumentException) { }
         }

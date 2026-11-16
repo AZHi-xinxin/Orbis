@@ -92,6 +92,8 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
     var importPendingOwner by rememberSaveable(owner.id) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Job?>(null) }
+    var abandonToken by remember { mutableStateOf<String?>(null) }
+    var abandonConfirmation by remember { mutableStateOf("") }
 
     fun clearVisibleSecrets() {
         record = null; granted = emptyList(); selectedRequest = null; pageOffset = 0
@@ -100,6 +102,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
         newPasswordVisible = false; confirmPasswordVisible = false
         enteredPasswordVisible = false; enteredCodeVisible = false
         passwordConfirmationPending = false
+        abandonToken = null; abandonConfirmation = ""
     }
     suspend fun refresh(preserveNotice: Boolean = false): Boolean {
         val previousRequests = requests
@@ -401,7 +404,7 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                         }) { Text("选择已有密文备份") }
                                     }
                                     PrivateVaultAvailability.RECOVERY_REQUIRED -> item {
-                                        Text("设备密钥不可用或刚完成救援恢复。原密文仍在；请使用配套恢复密码或随机恢复码重新绑定本机。这里不能重置已经无法解密的房间。")
+                                        Text("设备密钥不可用或刚完成救援恢复。原密文仍在；请使用配套恢复密码或随机恢复码重新绑定本机。忘记全部恢复凭据时，也可以主动放弃旧房间后新建；旧内容不会随之恢复。")
                                         OutlinedButton(enabled = !busy, onClick = ::exportCiphertext) { Text("先导出原密文备份") }
                                     }
                                     PrivateVaultAvailability.UNREADABLE -> item {
@@ -460,6 +463,12 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
                                         Text("正在检查加密空间…")
                                         TextButton(enabled = !busy && foreground, onClick = { act { refresh() } }) { Text("重新核对空间状态") }
                                     }
+                                }
+                                if (status?.availability in setOf(PrivateVaultAvailability.RECOVERY_REQUIRED, PrivateVaultAvailability.UNREADABLE)) item {
+                                    OutlinedButton(enabled = !busy && foreground, onClick = { act {
+                                        clearVisibleSecrets()
+                                        abandonToken = withContext(Dispatchers.IO) { repo.prepareAbandonment() }
+                                    } }) { Text("忘记凭据 · 放弃旧房间后新建") }
                                 }
                                 if (status?.availability == PrivateVaultAvailability.RECOVERY_REQUIRED || importedUri != null) item {
                                     Text("请选择当时设置的恢复方式；不会根据输入内容自动切换。")
@@ -580,6 +589,25 @@ private fun PrivateRoomContent(owner: PrivateRoomOwner, owners: List<PrivateRoom
             }
         }
     }
+    if (abandonToken != null && foreground) AlertDialog(onDismissRequest = { if (!busy) { abandonToken = null; abandonConfirmation = "" } },
+        title = { Text("放弃${owner.name}的旧房间？") }, text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("这会删除这位助手当前设备上的隐私室密文、记录和阅读许可，无法撤销。普通聊天、身体规则、其他助手房间及你已导出的备份不会被删除。")
+                Text("如仍想保留旧内容，请取消并先导出密文。新密码不能解开旧内容；新房间将从空白开始，并保持关闭。")
+                OutlinedTextField(abandonConfirmation, { abandonConfirmation = it }, enabled = !busy,
+                    label = { Text("请输入：放弃旧房间") }, modifier = Modifier.testTag("private-room-abandon-confirmation"))
+            }
+        }, confirmButton = { TextButton(enabled = !busy && abandonConfirmation == "放弃旧房间",
+            modifier = Modifier.testTag("private-room-abandon-submit"), onClick = { act {
+                val token = checkNotNull(abandonToken); val confirmation = abandonConfirmation
+                clearVisibleSecrets()
+                withContext(Dispatchers.IO) { repo.abandonUnrecoverableRoom(token, confirmation) }
+                importedUri = null
+                requests = emptyList(); requestsKnown = false
+                navigate(PrivateRoomScreen.CREATE)
+                notice = "旧房间已放弃。请为新的空白房间设置恢复密码；不会自动开启或调用模型。"
+            } }) { Text("删除旧房间，重新创建") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = { abandonToken = null; abandonConfirmation = "" }) { Text("保留旧房间") } })
 }
 
 @Composable

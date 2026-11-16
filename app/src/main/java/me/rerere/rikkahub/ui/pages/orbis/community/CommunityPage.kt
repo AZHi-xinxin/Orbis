@@ -189,8 +189,22 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
     var deletingComment by remember(selected,postId) { mutableStateOf<JsonObject?>(null) }
     var profileName by remember { mutableStateOf("") }; var bio by remember { mutableStateOf("") }
     val route=when { roomId.isNotEmpty()->"/rooms/$roomId/messages"; postId.isNotEmpty()->"/posts/$postId"; tab=="chat"->"/rooms"; tab=="feed"->"/feed"; tab=="contacts"->"/contacts"; else->"/profile" }
-    val feedState=remember(selected) { CommunityViewState() }
-    val feedList=remember(selected) { LazyListState() }
+    var feedAuthor by rememberSaveable(selected) { mutableStateOf("") }
+    var feedAuthorName by rememberSaveable(selected) { mutableStateOf("") }
+    var feedOriginTab by rememberSaveable(selected) { mutableStateOf("feed") }
+    var feedOriginRoom by rememberSaveable(selected) { mutableStateOf("") }
+    var feedOriginPost by rememberSaveable(selected) { mutableStateOf("") }
+    val publicFeedState=remember(selected) { CommunityViewState() }
+    val publicFeedList=remember(selected) { LazyListState() }
+    val personalFeedState=remember(selected,feedAuthor) { CommunityViewState() }
+    val personalFeedList=remember(selected,feedAuthor) { LazyListState() }
+    val feedState=if(feedAuthor.isEmpty()) publicFeedState else personalFeedState
+    val feedList=if(feedAuthor.isEmpty()) publicFeedList else personalFeedList
+    fun openPersonalFeed(person: JsonObject) {
+        if(feedAuthor.isEmpty()) { feedOriginTab=tab; feedOriginRoom=roomId; feedOriginPost=postId }
+        feedAuthor=person.ms("id"); feedAuthorName=person.ms("name")
+        roomId="";postId="";postStartAfter=0;noticeComment="";tab="feed";profile=null
+    }
     val otherState=remember(selected,route) { CommunityViewState() }
     val state=if(route=="/feed") feedState else otherState
     fun mentionMember(member: JsonObject) {
@@ -211,6 +225,9 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
             composerFocus.requestFocus()
             keyboard?.show()
         }
+    }
+    fun invalidateFeeds() {
+        listOf(publicFeedState,personalFeedState).forEach { it.loading=true;it.rows=emptyList();it.next=null }
     }
     fun refreshFeed() { feedState.loading=true; feedState.rows=emptyList(); feedState.next=null; feedList.requestScrollToItem(0) }
     LaunchedEffect(selected,profile?.ms("id")) {
@@ -250,7 +267,9 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
         val query=fromSequence?.let { "?from=$it&limit=50" } ?: afterSequence?.let { "?after=$it&limit=50" }
             ?: offset?.let { "?$parameter=$it" }
             ?: if(postId.isNotEmpty() && postStartAfter>0) "?after=$postStartAfter&limit=20" else ""
-        val result=api.get(route+query,selected)
+        val authorQuery=if(route=="/feed" && feedAuthor.isNotEmpty()) (if(query.isEmpty()) "?" else "&")+"author=$feedAuthor" else ""
+        val result=api.get(route+query+authorQuery,selected)
+        if(authorQuery.isNotEmpty()) require(result.ms("feed_author")==feedAuthor) { "社区服务尚未支持个人朋友圈，请更新服务后重试" }
         if(route=="/profile" && result.ms("id")==selected) {
             identities=identities.map { if(it.ms("id")==selected) JsonObject(it+result) else it }
         }
@@ -356,7 +375,7 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
         }
     }
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if(uri!=null) run { images=images+api.upload(selected,uri,roomId.takeIf { it.isNotEmpty() }) } }
-    fun back() { when { publish->publish=false; roomId.isNotEmpty()->{ roomId=""; tab="chat" }; postId.isNotEmpty()->{postId="";postStartAfter=0;noticeComment=""}; else->close() } }
+    fun back() { when { publish->publish=false; roomId.isNotEmpty()->{ roomId=""; tab="chat" }; postId.isNotEmpty()->{postId="";postStartAfter=0;noticeComment=""}; feedAuthor.isNotEmpty()->{ feedAuthor="";tab=feedOriginTab;roomId=feedOriginRoom;postId=feedOriginPost }; else->close() } }
     BackHandler { back() }
     var wardrobeOpen by remember { mutableStateOf(false) }
     if(wardrobeOpen && identity!=null) CommunityWardrobeDialog(api,identity,{ wardrobeOpen=false },{ tick++ })
@@ -366,7 +385,7 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
     CompositionLocalProvider(LocalCommunityAvatars provides avatars) {
     Scaffold(containerColor=Paper,contentColor=Ink,
         topBar={ Column(Modifier.statusBarsPadding()) {
-            CommunityHeading(when { publish->"写一条动态"; roomId.isNotEmpty()->(state.data["room"] as? JsonObject)?.ms("title").orEmpty().ifEmpty { "群聊" }; postId.isNotEmpty()->"动态详情"; tab=="chat"->"同行"; tab=="feed"->"朋友圈"; tab=="contacts"->"联系人"; else->"公开身份与隐私" }, ::back,
+            CommunityHeading(when { publish->"写一条动态"; roomId.isNotEmpty()->(state.data["room"] as? JsonObject)?.ms("title").orEmpty().ifEmpty { "群聊" }; postId.isNotEmpty()->"动态详情"; tab=="chat"->"同行"; tab=="feed"->if(feedAuthor.isEmpty()) "朋友圈" else if(feedAuthor==selected) "我的朋友圈" else "${feedAuthorName}的朋友圈"; tab=="contacts"->"联系人"; else->"公开身份与隐私" }, ::back,
                 leading=if(tab=="feed" && !publish && postId.isEmpty() && roomId.isEmpty()) ({
                     OutlinedButton(onClick={gatheringOpen=true},contentPadding=PaddingValues(horizontal=10.dp,vertical=0.dp),modifier=Modifier.heightIn(min=40.dp)) {Text("拼桌大厅",fontSize=12.sp)}
                 }) else null) {
@@ -385,7 +404,7 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
         bottomBar={ if(roomId.isEmpty() && postId.isEmpty() && !publish) {
             Box(Modifier.navigationBarsPadding()) { NavigationBar(containerColor=Paper,tonalElevation=0.dp,windowInsets=WindowInsets(0),modifier=Modifier.height(72.dp)) {
                 listOf("chat" to ("♧" to "聊天"),"feed" to ("✦" to "朋友圈"),"contacts" to ("◌" to "联系人"),"me" to ("◇" to "我的")).forEach { (key,parts) ->
-                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(selectedIconColor=Accent,selectedTextColor=Ink,unselectedIconColor=Muted,unselectedTextColor=Muted,indicatorColor=Paper),selected=tab==key,onClick={ tab=key },icon={ Text(parts.first,fontSize=24.sp) },label={ Text(parts.second) })
+                    NavigationBarItem(colors=NavigationBarItemDefaults.colors(selectedIconColor=Accent,selectedTextColor=Ink,unselectedIconColor=Muted,unselectedTextColor=Muted,indicatorColor=Paper),selected=tab==key,onClick={ tab=key;feedAuthor="" },icon={ Text(parts.first,fontSize=24.sp) },label={ Text(parts.second) })
                 }
             }
         } } },
@@ -538,11 +557,18 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
                         } }
                     }
                     "feed" -> {
+                        item("personal-feed") {
+                            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                                TextButton(enabled=identity!=null,onClick={ identity?.let(::openPersonalFeed) },modifier=Modifier.testTag("community-own-feed")) { Text("我的朋友圈") }
+                                if(feedAuthor.isNotEmpty()) TextButton(onClick={ feedAuthor="" }) {Text("全部动态")}
+                            }
+                            if(feedAuthor.isNotEmpty()) Text(if(feedAuthor==selected) "当前名片发布的动态" else "仅展示当前名片有权查看的动态",fontSize=12.sp,color=Muted)
+                        }
                         if(human) item("reminders") {OutlinedButton(onClick={feedNoticesOpen=true},modifier=Modifier.fillMaxWidth().testTag("community-feed-notices-open")) {Text("提醒我的")}}
                         items(state.rows,key={ "post:"+it.ms("id") }) { p -> FeedCard(api,selected,p,{ profile=it },{ postStartAfter=0;noticeComment="";postId=p.ms("id") },{ run { api.post("/likes",selected,buildJsonObject { put("post",p.ms("id")); put("liked",!p.mb("liked")) }); feedState.rows=feedState.rows.map { if(it.ms("id")==p.ms("id")) JsonObject(it+mapOf("liked" to JsonPrimitive(!p.mb("liked")),"likes" to JsonPrimitive((p.mi("likes")+if(p.mb("liked")) -1 else 1).coerceAtLeast(0)))) else it } } },human) }
                     }
                     "contacts" -> {
-                        if(human) item("blocked") { TextButton(enabled=!busy,onClick={
+                        item("blocked") { TextButton(enabled=!busy,onClick={
                             blockedOpen=true; blockedRows=emptyList(); blockedNext=null
                             runBlocked { loadBlocked() }
                         }) { Text("已屏蔽") } }
@@ -587,7 +613,7 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
                         item("rules") { Text("社区不提供私聊。群主必须是人类，最多 5 位管理员；群内至少 3 位人类才能发言。好友关系不会自动广播私人聊天。",color=Muted,fontSize=12.sp) }
                     }
                 }
-                if(state.rows.isEmpty() && !state.loading && tab!="me") item("empty") { Text(when(tab) { "chat"->"群聊会在这里相聚。先去联系人添加好友吧。"; "feed"->"这里还很安静，分享第一件小事吧。"; else->"通过号码或朋友圈名片，认识新朋友。" },Modifier.padding(vertical=30.dp),color=Muted) }
+                if(state.rows.isEmpty() && !state.loading && tab!="me") item("empty") { Text(when(tab) { "chat"->"群聊会在这里相聚。先去联系人添加好友吧。"; "feed"->if(feedAuthor.isNotEmpty()) "暂无当前名片可见的动态。" else "这里还很安静，分享第一件小事吧。"; else->"通过号码或朋友圈名片，认识新朋友。" },Modifier.padding(vertical=30.dp),color=Muted) }
                 if(state.next!=null) item("more") { TextButton(onClick={ run { load(state.next) } }) { Text("继续查看") } }
             }
         }
@@ -657,9 +683,9 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
         }
     }
 
-    if(blockedOpen && human) AlertDialog(onDismissRequest={ blockedOpen=false },title={ Text("已屏蔽成员") },text={
+    if(blockedOpen) AlertDialog(onDismissRequest={ blockedOpen=false },title={ Text("已屏蔽成员") },text={
         Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
-            Text("这里只显示你屏蔽的成员。取消屏蔽不会自动恢复好友，可重新申请添加。",fontSize=13.sp,color=Muted)
+            Text("这里只显示当前名片屏蔽的成员。取消屏蔽不会自动恢复好友，可重新申请添加。",fontSize=13.sp,color=Muted)
             if(blockedError.isNotEmpty()) Text(blockedError,color=Accent,modifier=Modifier.testTag("community-blocked-error"))
             if(busy) Text("正在处理…",color=Muted)
             else if(blockedRows.isEmpty() && blockedError.isEmpty()) Text("暂无已屏蔽成员",color=Muted)
@@ -675,7 +701,7 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
                                 (receipt["target"] as? JsonObject)?.ms("id")==member.ms("id") && receipt["blocked_by_me"]==JsonPrimitive(false)) { "取消屏蔽回执未确认，请到“我的”核对回执" }
                             blockedRows=blockedRows.filterNot { it.ms("id")==member.ms("id") }
                             message="已取消屏蔽 ${member.ms("name")}，如需恢复好友请重新申请"
-                            tick++; loadBlocked()
+                            invalidateFeeds(); tick++; loadBlocked()
                         } }) { Text("取消屏蔽") }
                     }
                 }
@@ -691,6 +717,7 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
         AlertDialog(onDismissRequest={ profile=null },title={ Text(p.ms("name")) },text={
             Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
                 Text("${if(p.ms("kind")=="ai") "AI" else "人类"} · ${p.ms("number")}")
+                TextButton(onClick={openPersonalFeed(p)},modifier=Modifier.testTag("community-profile-feed")) {Text(if(p.ms("id")==selected) "我的朋友圈" else "查看朋友圈")}
                 Text("个性签名",fontWeight=FontWeight.SemiBold)
                 Text(p.ms("bio").ifBlank { "暂未填写" },modifier=Modifier.testTag("community-profile-bio"))
                 if(canRequest) {
@@ -705,8 +732,8 @@ private fun CommunityHomeContent(api: CommunityClient, assistantId: String, clos
             profile=null;message=if(receipt.mb("already_friends")) "已经是好友" else "好友申请已发送"
         } }) { Text(if(p.ms("id")==selected) "自己的名片" else if(p.mb("friend")) "已是好友" else if("friend" !in p) "核对好友状态…" else "申请好友") } },
         dismissButton={ Row {
-            if(p.mb("friend")) TextButton(enabled=human && !busy,onClick={ run { api.post("/friends",selected,communityBody("action" to "remove","target" to p.ms("id"))); profile=null; tick++ } }) { Text("删好友") }
-            if(p.ms("id")!=selected) TextButton(enabled=!busy,onClick={ run { api.post("/friends",selected,communityBody("action" to "block","target" to p.ms("id"))); profile=null; tick++ } }) { Text("屏蔽") }
+            if(p.mb("friend")) TextButton(enabled=human && !busy,onClick={ run { api.post("/friends",selected,communityBody("action" to "remove","target" to p.ms("id"))); profile=null; invalidateFeeds(); tick++ } }) { Text("删好友") }
+            if(p.ms("id")!=selected) TextButton(enabled=!busy,onClick={ run { api.post("/friends",selected,communityBody("action" to "block","target" to p.ms("id"))); profile=null; invalidateFeeds(); tick++ } }) { Text("屏蔽") }
             TextButton(onClick={profile=null}) {Text("关闭")}
         } })
     }

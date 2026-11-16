@@ -7,7 +7,7 @@ import me.rerere.rikkahub.data.orbis.market.*
 /** Reads always use the host-bound AI identity. A post read never writes a room read receipt. */
 internal suspend fun communityRead(api: CommunityApi, actor: String, args: JsonObject): JsonObject {
     val action=args.ms("action")
-    require(action in setOf("read","read_post","unread"))
+    require(action in setOf("read","read_post","read_feed","unread"))
     if(action=="unread") {
         require(args.keys.all { it in setOf("action","target") }) { "unread只需target群UUID" }
         return api.get("/rooms/${communityUuid(args.ms("target"))}/unread",actor)
@@ -20,6 +20,19 @@ internal suspend fun communityRead(api: CommunityApi, actor: String, args: JsonO
         listOf("before_sequence","after_sequence","from_sequence").count { it in args }<=1 &&
         ("from_sequence" !in args || from>0)) { "分页游标无效；from_sequence包含指定消息，且不能混用游标" }
     val target=args.ms("target")
+    if(action=="read_feed") {
+        require(args.keys.all { it in setOf("action","target","limit","before_sequence") }) { "个人朋友圈只填target=self、号码或UUID，limit和before_sequence" }
+        val author=if(target=="self") actor else {
+            val person=api.get(if(target.matches(Regex("[0-9]{10}"))) "/profile?number=$target" else "/profile?id=${communityUuid(target)}",actor)
+            communityUuid(person.ms("id"))
+        }
+        val page=api.get("/feed?author=$author&limit=$limit"+(if(before>0) "&before=$before" else ""),actor)
+        check(page.ms("feed_author")==author) { "服务端尚未确认个人朋友圈范围，请更新社区服务；未将公共列表当个人列表" }
+        return JsonObject(boundedCommunityFeed(page)+buildJsonObject {
+            put("feed_author",author);put("actor",actor)
+            put("visibility_notice","这里只返回当前名片可见的动态；陌生人仅公开，好友内容仍按权限判断。")
+        })
+    }
     if(action=="read" && target=="contacts") return communityContacts(api,actor,args)
     val postFields=setOf("action","target","limit","after_sequence")
     suspend fun readPost(): JsonObject {

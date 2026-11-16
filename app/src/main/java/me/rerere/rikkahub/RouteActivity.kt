@@ -606,6 +606,11 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.OrbisConversationTools> { key ->
                                 OrbisToolsPage(ownerAssistantId = key.assistantId, conversationId = key.conversationId)
                             }
+                            entry<Screen.OrbisWebShortcuts> { key ->
+                                val nav = LocalNavController.current
+                                me.rerere.rikkahub.ui.pages.orbis.OrbisWebShortcutsPage(key.assistantId,
+                                    initialUrl = key.url, onClose = { nav.popBackStack() })
+                            }
                             entry<Screen.OrbisSchedule> {
                                 val navController = LocalNavController.current
                                 me.rerere.rikkahub.ui.pages.orbis.OrbisSchedulePage(onBack = { navController.popBackStack() })
@@ -919,6 +924,9 @@ sealed interface Screen : NavKey {
     /** Keep the legacy general tools route separate from a chat-owned tools entry. */
     @Serializable
     data class OrbisConversationTools(val assistantId: String, val conversationId: String) : Screen
+
+    @Serializable
+    data class OrbisWebShortcuts(val assistantId: String, val url: String? = null) : Screen
 
     @Serializable
     data object OrbisSchedule : Screen

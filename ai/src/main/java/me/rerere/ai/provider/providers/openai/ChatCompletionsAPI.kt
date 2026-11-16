@@ -40,6 +40,7 @@ import me.rerere.ai.core.validateToolSchemaReferences
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.core.merge
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -104,7 +105,7 @@ class ChatCompletionsAPI(
             if (turn.supported != false || turn.referencesUsed) requestBody = me.rerere.ai.util.GatewayImageFiles(client).project(
                 requestBody, imageEndpoint, "Bearer $selectedKey", turn)
         }
-        observePrefix(providerSetting, params, requestBody)
+        val prefixObservation = observePrefix(providerSetting, params, requestBody, messages)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.orbisSourceHeaders())
@@ -138,6 +139,7 @@ class ChatCompletionsAPI(
                 ?.content
                 ?: "unknown"
             val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
+            usage?.let { reportPrefixUsage(params, prefixObservation, it) }
 
             TextGenerationResult(
                 id = id,
@@ -171,7 +173,7 @@ class ChatCompletionsAPI(
             if (turn.supported != false || turn.referencesUsed) requestBody = me.rerere.ai.util.GatewayImageFiles(client).project(
                 requestBody, imageEndpoint, "Bearer $selectedKey", turn)
         }
-        observePrefix(providerSetting, params, requestBody)
+        val prefixObservation = observePrefix(providerSetting, params, requestBody, messages)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}")
             .headers(params.orbisSourceHeaders())
@@ -189,9 +191,14 @@ class ChatCompletionsAPI(
         Log.i(TAG, "streamText: request prepared, messages=${messages.size}")
 
         val decoder = ChatCompletionsStreamDecoder()
+        var prefixUsage: TokenUsage? = null
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
+                if (chunk is StreamChunk.Usage) {
+                    prefixUsage = prefixUsage.merge(chunk.usage)
+                    reportPrefixUsage(params, prefixObservation, prefixUsage)
+                }
                 trySend(chunk).onFailure { e ->
                     Log.w(TAG, "onEvent: chunk dropped, error=${e?.javaClass?.simpleName}")
                 }
@@ -209,13 +216,23 @@ class ChatCompletionsAPI(
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
 
-    private fun observePrefix(provider: ProviderSetting.OpenAI, params: TextGenerationParams, body: JsonObject) {
-        val callback=params.onPrefixObservation ?: return
-        val session=params.orbisConversationId ?: return
-        if(provider.baseUrl.toHttpUrl().host!="api.deepseek.com" && !provider.cacheDiagnostics) return
-        try {
-            callback(DeepSeekPrefixProbe.shared.observe("${provider.id}|$session|${body["model"]}",body))
-        } catch(_: Exception) { /* Diagnostics must not change or prevent a model request. */ }
+    private fun observePrefix(provider: ProviderSetting.OpenAI, params: TextGenerationParams, body: JsonObject,
+        messages: List<UIMessage>): PrefixObservation? {
+        val callback=params.onPrefixObservation ?: return null
+        val session=params.orbisConversationId ?: return null
+        if(provider.baseUrl.toHttpUrl().host!="api.deepseek.com" && !provider.cacheDiagnostics) return null
+        return try {
+            val projected=if(provider.baseUrl.toHttpUrl().host=="api.deepseek.com" &&
+                (body["model"] as? JsonPrimitive)?.contentOrNull=="deepseek-v4-pro")
+                proHostNoticeDataLayout(messages) else chatCompletionsHostMemoryLayout(messages)
+            DeepSeekPrefixProbe.shared.observe("${provider.id}|$session|${body["model"]}",body,
+                prefixSystemSourceHints(projected)).also(callback)
+        } catch(_: Exception) { null /* Diagnostics must never prevent a model request. */ }
+    }
+
+    private fun reportPrefixUsage(params: TextGenerationParams, observation: PrefixObservation?, usage: TokenUsage) {
+        if (observation == null) return
+        try { params.onPrefixObservation?.invoke(observation.withUsage(usage)) } catch (_: Exception) { }
     }
 
     private fun buildChatCompletionRequest(

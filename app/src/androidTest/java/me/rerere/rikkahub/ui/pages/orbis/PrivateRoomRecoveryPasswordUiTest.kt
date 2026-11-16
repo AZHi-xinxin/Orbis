@@ -275,6 +275,29 @@ class PrivateRoomRecoveryPasswordUiTest {
         compose.onNodeWithText("RESTORED-BODY").assertDoesNotExist()
     }
 
+    @Test fun lostCredentialsRequireTypedConfirmationAndCreateSeparatePausedRoom() {
+        repo.createWithRecoveryPassword(password.toCharArray())
+        repo.confirmRecoverySaved(); repo.setEnabled(true)
+        repo.openAiSession("synthetic-lost-room").use { it.writeRecord("OLD", "SYNTHETIC-PRIVATE") }
+        keyStore().deleteEntry(aliases.single())
+        val before = vaultHashes()
+        show(); click("房间设置"); click("忘记凭据 · 放弃旧房间后新建")
+        compose.onNodeWithTag("private-room-abandon-submit").assertIsNotEnabled()
+        compose.onNodeWithTag("private-room-abandon-confirmation").performTextReplacement("放弃")
+        compose.onNodeWithTag("private-room-abandon-submit").assertIsNotEnabled()
+        compose.onNodeWithText("保留旧房间").performClick()
+        assertEquals(before, vaultHashes())
+        click("忘记凭据 · 放弃旧房间后新建")
+        compose.onNodeWithTag("private-room-abandon-confirmation").performTextReplacement("放弃旧房间")
+        compose.onNodeWithTag("private-room-abandon-submit").performClick()
+        compose.waitUntil(30_000) { repo.status().availability == PrivateVaultAvailability.ABSENT }
+        enter("新的合成恢复密码-267")
+        click("创建加密隐私室")
+        compose.waitUntil(30_000) { repo.status().availability == PrivateVaultAvailability.READY }
+        assertFalse(repo.status().enabled)
+        assertFalse(repo.status().recoveryConfirmed)
+    }
+
     private fun vaultHashes(): Map<String, String> {
         val vault = File(directory, "vault")
         return vault.walkTopDown().filter { it.isFile }.associate {

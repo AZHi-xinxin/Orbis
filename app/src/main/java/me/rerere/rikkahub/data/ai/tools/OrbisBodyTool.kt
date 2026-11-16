@@ -19,10 +19,14 @@ internal fun bodyTool(conversation: String, enabled: () -> Boolean, open: () -> 
     parameters = { InputSchema.Obj(buildJsonObject {
         put("action", buildJsonObject { put("type", "string"); put("enum", JsonArray(listOf("rules", "state", "visibility", "pause", "resume", "draft", "activate", "event", "undo", "self_report").map(::JsonPrimitive))) })
         put("definition", buildJsonObject { put("type", "object"); put("description", "完整安全规则JSON，参照工具说明；未知字段会拒绝") })
-        for(name in listOf("expected_revision", "version", "strength", "seq")) put(name, buildJsonObject { put("type", "integer") })
+        for(name in listOf("expected_revision", "version", "strength", "seq")) put(name, buildJsonObject {
+            put("type", "integer")
+            if (name == "expected_revision") put("description", "visibility/draft/activate/pause/resume 必填：刚读取 state 或 rules 的 revision 整数，不是 version。")
+            if (name == "version") put("description", "仅 event 使用的规则版本；visibility 不接受此字段。")
+        })
         for(name in listOf("event", "text")) put(name, buildJsonObject { put("type", "string") })
-        put("visible", buildJsonObject { put("type", "boolean") })
-        put("shared", buildJsonObject { put("type", "boolean") })
+        put("visible", buildJsonObject { put("type", "boolean"); put("description", "仅 event 的记录可见性；visibility 不接受 visible，也不能控制人类 privateVisible 开关。") })
+        put("shared", buildJsonObject { put("type", "boolean"); put("description", "仅 visibility：是否同意公开当前会话私密层，同时必须提供 expected_revision；无需 pause。") })
     }, required = listOf("action")) }, needsApproval = { false }, execute = { raw ->
         val invocation = currentCoroutineContext()[CloudToolInvocationContext]
         val result = try { withContext(Dispatchers.IO) {
@@ -36,6 +40,7 @@ internal fun bodyTool(conversation: String, enabled: () -> Boolean, open: () -> 
                 "activate", "pause", "resume" -> setOf("expected_revision"); "event" -> setOf("event", "version", "strength", "visible")
                 "undo" -> setOf("seq"); "self_report" -> setOf("text"); else -> error("body_parameters_invalid")
             }
+            if (action == "visibility") validateBodyVisibility(obj)
             require(obj.keys.all { it == "action" || it in fields }) { "body_parameters_invalid" }
             fun num(name: String): Long = (obj[name] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull ?: error("body_parameters_invalid")
             fun text(name: String): String = (obj[name] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("body_parameters_invalid")
@@ -90,6 +95,7 @@ internal fun bodyTool(conversation: String, enabled: () -> Boolean, open: () -> 
                         put("revision", state.revision); put("version", state.versions.lastOrNull()?.version ?: 0)
                         put("has_draft", state.draft != null)
                         put("running", state.running)
+                        if (action == "visibility") put("privateShared", state.snapshot.sessions[conversation]?.privateShared == true)
                     }
                     // Even a legacy caller that only sends events learns that auto is available.
                     putBodySetup(repo.snapshot())
@@ -97,9 +103,19 @@ internal fun bodyTool(conversation: String, enabled: () -> Boolean, open: () -> 
             }
         } } catch(cancelled: CancellationException) { throw cancelled }
         catch(error: Exception) { buildJsonObject {
-            val code = error.message?.takeIf { it.matches(Regex("body_[a-z_]+")) } ?: "body_unavailable"
+            val code = if (error is BodyVisibilityParametersError) "body_parameters_invalid"
+                else error.message?.takeIf { it.matches(Regex("body_[a-z_]+")) } ?: "body_unavailable"
             put("ok", false); put("code", code)
+            if (error is BodyVisibilityParametersError) {
+                put("action", "visibility")
+                put("parameter_errors", JsonArray(error.problems.map(::JsonPrimitive)))
+                put("allowed_fields", JsonArray(listOf("action", "shared", "expected_revision").map(::JsonPrimitive)))
+                put("retry_hint", "先读 state.revision；删除 visible/version/revision 等多余字段，再以 action=visibility、shared=布尔值、expected_revision=刚读到的 revision 整数提交。不要照抄旧修订号。无需暂停或等待冷静期；人类是否展开由其本机开关决定。")
+            }
             put("message", when (code) {
+                "body_parameters_invalid" -> if (error is BodyVisibilityParametersError)
+                    "参数未通过，未写入：${error.problems.joinToString("；")}。visibility 只接受 action、shared、expected_revision。visible 只用于 event。"
+                    else "参数未通过，未写入；请按 action 使用对应字段及类型，勿混用其他动作的字段。"
                 "body_invocation_missing" -> "应用未提供匹配的会话调用信息，未写入。这不是人类未开启运行；先修复或更新应用的工具执行链。"
                 "body_pause_before_definition" -> "当前正在运行，请先调用 pause 暂停，再 draft/activate 修改规则，最后 resume 继续。无需人类点运行。"
                 "body_definition_empty" -> "尚无已发布规则。先 draft 定义、再 activate 发布，之后调用 resume 开始运行。"
@@ -113,6 +129,20 @@ internal fun bodyTool(conversation: String, enabled: () -> Boolean, open: () -> 
         listOf(UIMessagePart.Text(result.toString()))
     },
 )
+
+private class BodyVisibilityParametersError(val problems: List<String>) : IllegalArgumentException()
+
+private fun validateBodyVisibility(obj: JsonObject) {
+    val problems = buildList {
+        val extra = obj.keys - setOf("action", "shared", "expected_revision")
+        if (extra.isNotEmpty()) add("含不适用于 visibility 的字段：${extra.sorted().take(8).joinToString(", ") { it.take(64) }}")
+        val shared = obj["shared"] as? JsonPrimitive
+        if (shared == null || shared.isString || shared.booleanOrNull == null) add("shared 必须是 true 或 false 布尔值")
+        val revision = obj["expected_revision"] as? JsonPrimitive
+        if (revision == null || revision.isString || revision.longOrNull == null) add("expected_revision 必须是 state.revision 的整数")
+    }
+    if (problems.isNotEmpty()) throw BodyVisibilityParametersError(problems)
+}
 
 private fun JsonObjectBuilder.putBodySetup(state: BodyState) {
     put("triggerMode", state.versions.lastOrNull()?.definition?.triggerMode ?: "unconfigured")

@@ -526,6 +526,68 @@ class PrivateVaultRepositoryTest {
         assertFalse(validateEmergencyVaultCopy(room()))
     }
 
+    @Test fun humanCanAbandonOnlyUnreadableOwnerThenCreateAnEmptyPausedRoom() {
+        val (original) = ready()
+        val oldSession = original.openAiSession("old")
+        oldSession.writeRecord("private", "old-room-content")
+        val other = PrivateVaultRepository(temporary.root, "other-owner", protector)
+        other.create()
+        val otherBefore = backup(other)
+        val locked = repo(key = TestProtector())
+        assertEquals(PrivateVaultAvailability.RECOVERY_REQUIRED, locked.status().availability)
+        val fingerprint = locked.prepareAbandonment()
+        denied("abandon_confirmation_required") { locked.abandonUnrecoverableRoom(fingerprint, "yes") }
+        assertEquals(fingerprint, locked.prepareAbandonment())
+        locked.abandonUnrecoverableRoom(fingerprint, "放弃旧房间")
+        assertEquals(PrivateVaultAvailability.ABSENT, locked.status().availability)
+        assertArrayEquals(otherBefore, backup(other))
+        assertEquals(listOf(".lock"), room().list()!!.toList())
+        locked.createWithRecoveryPassword("新的恢复密码123".toCharArray())
+        assertEquals(0, locked.status().recordCount)
+        assertFalse(locked.status().enabled)
+        assertFalse(locked.status().recoveryConfirmed)
+        denied { oldSession.writeRecord("stale", "must not enter new room") }
+        oldSession.close()
+    }
+
+    @Test fun recoveredOrChangedRoomCannotBeDeletedByAStaleConfirmation() {
+        val (original, recovery) = ready()
+        denied("room_still_readable") { original.prepareAbandonment() }
+        val locked = repo(key = TestProtector())
+        val fingerprint = locked.prepareAbandonment()
+        File(room(), "recovery-required.marker").writeText("restored")
+        denied("abandon_state_changed") { locked.abandonUnrecoverableRoom(fingerprint, "放弃旧房间") }
+        val current = locked.prepareAbandonment()
+        locked.recoverLocal(recovery.recoveryCode)
+        denied("room_still_readable") { locked.abandonUnrecoverableRoom(current, "放弃旧房间") }
+        assertEquals(PrivateVaultAvailability.READY, locked.status().availability)
+    }
+
+    @Test fun interruptedAbandonmentBlocksCreationUntilAnotherExplicitConfirmation() {
+        ready()
+        val missingKey = TestProtector()
+        val interrupted = repo(key=missingKey, before={if(it=="abandon_cleanup") throw java.io.IOException("synthetic")})
+        val fingerprint = interrupted.prepareAbandonment()
+        denied("storage_failed") { interrupted.abandonUnrecoverableRoom(fingerprint,"放弃旧房间") }
+        assertEquals(PrivateVaultAvailability.UNREADABLE, interrupted.status().availability)
+        denied("already_exists") { interrupted.create() }
+        val resumed = repo(key=missingKey)
+        resumed.abandonUnrecoverableRoom(resumed.prepareAbandonment(),"放弃旧房间")
+        assertEquals(PrivateVaultAvailability.ABSENT,resumed.status().availability)
+    }
+
+    @Test fun abandonmentRejectsLinkedContentsBeforeDeletingAnything() {
+        ready()
+        val outside = temporary.newFile("outside.txt").apply {writeText("untouched")}
+        val locked = repo(key=TestProtector())
+        val fingerprint=locked.prepareAbandonment()
+        java.nio.file.Files.createSymbolicLink(File(room(),"linked").toPath(),outside.toPath())
+        denied {locked.abandonUnrecoverableRoom(fingerprint,"放弃旧房间")}
+        assertEquals("untouched",outside.readText())
+        assertTrue(File(room(),"CURRENT").exists())
+        assertFalse(File(room(),"abandoning.marker").exists())
+    }
+
     private class TestProtector : PrivateVaultKeyProtector {
         private val random = SecureRandom()
         private val key = SecretKeySpec(ByteArray(32).also(random::nextBytes), "AES")

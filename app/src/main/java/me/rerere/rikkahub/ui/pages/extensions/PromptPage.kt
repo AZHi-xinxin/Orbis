@@ -537,7 +537,8 @@ private fun InjectionPositionSelector(
 
 private fun InjectionPosition.usesStandaloneMessage(): Boolean = when (this) {
     InjectionPosition.BEFORE_SYSTEM_PROMPT,
-    InjectionPosition.AFTER_SYSTEM_PROMPT -> false
+    InjectionPosition.AFTER_SYSTEM_PROMPT,
+    InjectionPosition.BEFORE_LATEST_USER_SYSTEM -> false
 
     InjectionPosition.TOP_OF_CHAT,
     InjectionPosition.BOTTOM_OF_CHAT,
@@ -550,6 +551,7 @@ private fun getPositionLabel(position: InjectionPosition): String = when (positi
     InjectionPosition.AFTER_SYSTEM_PROMPT -> stringResource(R.string.prompt_page_position_after_system)
     InjectionPosition.TOP_OF_CHAT -> stringResource(R.string.prompt_page_position_top_of_chat)
     InjectionPosition.BOTTOM_OF_CHAT -> stringResource(R.string.prompt_page_position_bottom_of_chat)
+    InjectionPosition.BEFORE_LATEST_USER_SYSTEM -> "最近人类消息前（系统条目）"
     InjectionPosition.AT_DEPTH -> stringResource(R.string.prompt_page_position_at_depth)
 }
 
@@ -900,7 +902,7 @@ private fun LorebookEditSheet(
                         style = MaterialTheme.typography.titleSmall
                     )
                     IconButton(onClick = {
-                        entryEditState.open(PromptInjection.RegexInjection())
+                        entryEditState.open(PromptInjection.RegexInjection(scanUserOnly = true))
                     }) {
                         Icon(HugeIcons.Add01, stringResource(R.string.prompt_page_add_entry))
                     }
@@ -1051,6 +1053,11 @@ private fun RegexInjectionEditDialog(
                     onSelect = { onEdit(entry.copy(position = it)) }
                 )
 
+                if (entry.position == InjectionPosition.BEFORE_LATEST_USER_SYSTEM) {
+                    Text("按需条目放到本轮人类消息前，减少改动早期历史。接口可能合并系统消息，实际命中仍需查看用量；常驻条目通常保留在系统提示词后。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+
                 AnimatedVisibility(visible = entry.position == InjectionPosition.AT_DEPTH) {
                     OutlinedTextField(
                         value = entry.injectDepth.toString(),
@@ -1133,7 +1140,7 @@ private fun RegexInjectionEditDialog(
 
                 FormItem(
                     label = { Text(stringResource(R.string.prompt_page_constant_active)) },
-                    description = { Text(stringResource(R.string.prompt_page_constant_active_desc)) },
+                    description = { Text("开启后每轮生效，不检查关键词；已有关键词会保留，关闭常驻后才恢复匹配。") },
                     tail = {
                         Switch(
                             checked = entry.constantActive,
@@ -1142,11 +1149,21 @@ private fun RegexInjectionEditDialog(
                     }
                 )
 
+                if (!entry.constantActive) {
+                    FormItem(
+                        label = { Text("仅扫描人类消息") },
+                        description = { Text("开启可减少 AI 回复触发世界书；关闭时扫描最近的人类与 AI 正文。") },
+                        tail = { Switch(checked = entry.scanUserOnly,
+                            onCheckedChange = { onEdit(entry.copy(scanUserOnly = it)) }) },
+                    )
+                }
+
                 OutlinedTextField(
                     value = entry.scanDepth.toString(),
                     onValueChange = {
-                        it.toIntOrNull()?.let { d -> onEdit(entry.copy(scanDepth = d)) }
+                        it.toIntOrNull()?.let { d -> onEdit(entry.copy(scanDepth = d.coerceAtLeast(0))) }
                     },
+                    enabled = !entry.constantActive,
                     label = { Text(stringResource(R.string.prompt_page_scan_depth)) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)

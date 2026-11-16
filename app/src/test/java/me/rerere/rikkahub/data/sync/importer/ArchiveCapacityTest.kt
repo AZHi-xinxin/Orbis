@@ -13,8 +13,8 @@ import java.util.zip.ZipOutputStream
 
 class ArchiveCapacityTest {
     @Test fun streamBudgetsDoNotUseIntOrTheOld64MiBCap() {
-        assertEquals(1024L * 1024 * 1024, DeepSeekArchive.MAX_JSON_BYTES)
-        assertEquals(DeepSeekArchive.MAX_JSON_BYTES, OperitChatArchive.MAX_ARCHIVE_BYTES)
+        assertEquals(Long.MAX_VALUE, DeepSeekArchive.MAX_JSON_BYTES)
+        assertEquals(1024L * 1024 * 1024, OperitChatArchive.MAX_ARCHIVE_BYTES)
         assertEquals(8L * 1024 * 1024 * 1024, RikkaChatArchive.MAX_ARCHIVE_BYTES)
         ArchiveCapacity.requireSize(80_289_258, DeepSeekArchive.MAX_JSON_BYTES)
         ArchiveCapacity.requireSize(Int.MAX_VALUE.toLong() + 1, RikkaChatArchive.MAX_ARCHIVE_BYTES)

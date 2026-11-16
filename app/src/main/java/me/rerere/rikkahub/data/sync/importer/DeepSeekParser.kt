@@ -58,30 +58,28 @@ internal class DeepSeekUnsupportedFragmentException : IllegalArgumentException(
 
 /** Parser consumes only data. It never creates assistants, tools, providers or remote attachment requests. */
 object DeepSeekParser {
-    private const val MAX_CONVERSATIONS = 2_000
-    private const val MAX_NODES = 100_000
     private val USER_TYPES = setOf("REQUEST", "FILE")
-    private val ASSISTANT_TYPES = setOf("RESPONSE", "THINK", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN", "TOOL_FIND", "TEMPLATE_RESPONSE", "READ_LINK")
+    private val ASSISTANT_TYPES = setOf("RESPONSE", "THINK", "SEARCH", "TOOL_SEARCH", "TOOL_OPEN", "TOOL_FIND", "TEMPLATE_RESPONSE", "READ_LINK", "PARTIAL_FILE_READ")
     private val TYPES = USER_TYPES + ASSISTANT_TYPES + setOf("CONTENT_RISK", "TIP")
 
     fun parse(root: JsonElement, checkCancelled: () -> Unit = {}): DeepSeekExport {
         try {
             val source = root as? JsonArray ?: error("deepseek_root_array")
-            require(source.size in 1..MAX_CONVERSATIONS) { "deepseek_conversation_count" }
-            var totalNodes = 0
+            require(source.isNotEmpty()) { "deepseek_conversation_count" }
             val ids = hashSetOf<String>()
             val conversations = source.map { item ->
                 checkCancelled()
                 val raw = item.obj()
                 val id = raw.string("id").identity()
                 require(ids.add(id)) { "deepseek_duplicate_conversation" }
-                val title = raw.string("title")
-                require(title.length <= 32_768) { "deepseek_title_size" }
+                // Official exports may leave a newly created/unnamed chat's title null.
+                // This is display metadata, never a reason to reject all its messages.
+                val title = raw["title"]?.takeUnless { it == JsonNull }?.string()
+                    ?.takeIf { it.isNotBlank() } ?: "未命名会话"
                 val createdAt = raw.string("inserted_at").timestamp()
                 val updatedAt = raw.string("updated_at").timestamp()
                 val mapping = raw.getValue("mapping").obj()
-                totalNodes += mapping.size
-                require(mapping.isNotEmpty() && totalNodes <= MAX_NODES) { "deepseek_node_count" }
+                require(mapping.isNotEmpty()) { "deepseek_node_count" }
                 val links = mapping.mapValues { (key, value) ->
                     checkCancelled()
                     key.identity()
@@ -120,17 +118,8 @@ object DeepSeekParser {
                         val fragments = content.getValue("fragments").array().map { fragment ->
                             val objectValue = fragment.obj()
                             val type = objectValue.string("type")
-                            if (type !in TYPES) throw DeepSeekUnsupportedFragmentException()
-                            objectValue["content"]?.let { require(it is JsonPrimitive && it.isString) { "deepseek_content_type" } }
-                            if (type in setOf("REQUEST", "RESPONSE", "THINK")) objectValue.string("content")
-                            objectValue["files"]?.array()?.forEach { file ->
-                                val data = file.obj()
-                                data.string("file_id"); data.string("file_name")
-                                require(data["file_size"] is JsonPrimitive) { "deepseek_file_metadata" }
-                            }
-                            objectValue["results"]?.array()?.forEach { result ->
-                                result.obj().string("url"); result.obj().string("title")
-                            }
+                            // Future fragments are inert historical data, not executable tools.
+                            // Keep their complete JSON, including null/structured content.
                             DeepSeekFragment(type, objectValue)
                         }
                         val user = fragments.any { it.type in USER_TYPES }
@@ -138,7 +127,7 @@ object DeepSeekParser {
                         require(!(user && assistant)) { "deepseek_mixed_roles" }
                         // Official exports have no role field. Keep even the empty interrupted message.
                         val role = when {
-                            content["export_v3"] == JsonPrimitive(true) -> when (content.string("role")) {
+                            content["role"] != null -> when (content.string("role")) {
                                 "USER" -> MessageRole.USER
                                 "ASSISTANT" -> MessageRole.ASSISTANT
                                 else -> error("deepseek_unknown_role")
@@ -146,9 +135,11 @@ object DeepSeekParser {
                             user -> MessageRole.USER
                             assistant -> MessageRole.ASSISTANT
                             nodes[link.parentId]?.message?.role == MessageRole.USER -> MessageRole.ASSISTANT
+                            fragments.any { it.type !in USER_TYPES && it.type !in setOf("CONTENT_RISK", "TIP") } -> MessageRole.ASSISTANT
                             else -> MessageRole.USER
                         }
-                        DeepSeekMessage(role, content.string("inserted_at").timestamp(), content.string("model"), fragments,
+                        DeepSeekMessage(role, content.string("inserted_at").timestamp(),
+                            content["model"]?.takeUnless { it == JsonNull }?.string().orEmpty(), fragments,
                             JsonObject(content.filterKeys { it in setOf("status", "thinking_enabled", "search_enabled", "accumulated_token_usage") }))
                     }
                     nodes[key] = link.copy(message = parsed)
@@ -178,7 +169,7 @@ object DeepSeekParser {
     private fun JsonElement.array() = this as? JsonArray ?: error("deepseek_array")
     private fun JsonElement.string() = (this as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("deepseek_string")
     private fun JsonObject.string(key: String) = getValue(key).string()
-    private fun String.identity() = also { require(length in 1..256 && none { it.isISOControl() }) { "deepseek_identity" } }
+    private fun String.identity() = also { require(isNotEmpty() && none { it.isISOControl() }) { "deepseek_identity" } }
     private fun String.timestamp(): Instant = OffsetDateTime.parse(this).toInstant().also {
         require(it.epochSecond in 0..253402300799L) { "deepseek_timestamp" }
     }

@@ -96,6 +96,14 @@ fun ShareHandlerPage(text: String, image: String?) {
                     shape = MaterialTheme.shapes.medium
                 ) {
                     ListItem(
+                        supportingContent = {
+                            if (me.rerere.rikkahub.BuildConfig.ORBIS_ENABLED) {
+                                val link = me.rerere.rikkahub.data.orbis.webshortcuts.sharedWebUrl(vm.shareText)
+                                if (link != null) androidx.compose.material3.TextButton(onClick = {
+                                    navController.navigate(me.rerere.rikkahub.Screen.OrbisWebShortcuts(assistant.id.toString(),link))
+                                }) { Text("保存到这个 AI 的快捷网页") }
+                            }
+                        },
                         headlineContent = {
                             Text(
                                 text = assistant.name.ifEmpty {

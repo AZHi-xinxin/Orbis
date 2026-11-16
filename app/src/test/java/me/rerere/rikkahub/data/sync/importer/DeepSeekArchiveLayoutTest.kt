@@ -71,32 +71,26 @@ class DeepSeekArchiveLayoutTest {
         assertEquals(before, saved.values.single())
     }
 
-    @Test fun rejectsMultipleExportsAndMismatchedProfileRoots() {
+    @Test fun rejectsMultipleExports() {
         rejects(mapOf("conversations.json" to json, "export/conversations.json" to json))
         rejects(mapOf("first/conversations.json" to json, "second/conversations.json" to json))
-        rejects(mapOf("export/conversations.json" to json, "user.json" to byteArrayOf()))
-        rejects(mapOf("first/conversations.json" to json, "second/user.json" to byteArrayOf()))
     }
 
     @Test fun rejectsTraversalAbsolutePathsAndExtraNestedExports() {
         for (path in listOf("../conversations.json", "/conversations.json", "C:/conversations.json",
             "export\\conversations.json", "./conversations.json", "export//conversations.json",
-            "a/b/conversations.json", "__MACOSX/conversations.json")) rejects(mapOf(path to json))
+            "__MACOSX/conversations.json")) rejects(mapOf(path to json))
         rejects(wrapped() + ("__MACOSX/export/../._user.json" to byteArrayOf()))
     }
 
-    @Test fun ignoresOnlyBoundedKnownMetadataNotArbitraryFiles() {
-        for (path in listOf("notes.txt", "export/plugin.json", "__MACOSX/executable.json", "__MACOSX/export/._unknown"))
-            rejects(wrapped() + (path to byteArrayOf(1)))
-        rejects(wrapped() + ("__MACOSX/export/._user.json" to ByteArray(1024 * 1024 + 1)))
-        rejects(wrapped() + ("empty-unrelated/" to byteArrayOf()))
-        rejects(wrapped() + ("export/" to byteArrayOf(1)))
-    }
-
-    @Test fun rejectsTooManyEntriesBeforeReadingData() {
+    @Test fun safeExtraFilesAndMetadataAndNestedWrapperDoNotBlockChats() {
         val entries = wrapped()
-        repeat(33) { entries["__MACOSX/extra$it"] = byteArrayOf() }
-        rejects(entries)
+        repeat(100) { entries["export/assets/extra$it"] = byteArrayOf(1) }
+        entries["export/user.json"] = ByteArray(1024 * 1024 + 1)
+        entries["export/plugin.json"] = "not parsed or executed".toByteArray()
+        assertEquals(1, DeepSeekArchive.inspect(zip(entries)).conversations.size)
+        assertEquals(1, DeepSeekArchive.inspect(zip(mapOf("a/b/conversations.json" to json))).conversations.size)
+        rejects(wrapped() + ("export/" to byteArrayOf(1)))
     }
 
     @Test fun malformedConversationIsStillRejectedInWrapper() {

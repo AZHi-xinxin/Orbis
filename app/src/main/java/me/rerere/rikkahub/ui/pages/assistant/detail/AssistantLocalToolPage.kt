@@ -226,6 +226,12 @@ private fun AssistantLocalToolContent(
                     onCheckedChange = { toggleLocalTool(LocalToolOption.AgentWork, it) }) },
             )
             item(
+                headlineContent = { Text("快捷网页收藏") },
+                supportingContent = { Text("允许 AI 查看共同收藏、添加自己的链接及推荐打开。普通网页只读；自建 MCP 游戏需你按站点开启交互。浏览和操作记录不会回传 AI。") },
+                trailingContent = { Switch(checked = LocalToolOption.WebShortcuts in assistant.localTools,
+                    onCheckedChange = { toggleLocalTool(LocalToolOption.WebShortcuts, it) }) },
+            )
+            item(
                 headlineContent = { Text("个人插件") },
                 supportingContent = { Text("允许当前助手编写和使用自己的插件。到工具与娱乐→插件区查看卡片、版本与使用记录；新版本需你确认后启用。") },
                 trailingContent = { Switch(checked = LocalToolOption.PersonalPlugins in assistant.localTools,

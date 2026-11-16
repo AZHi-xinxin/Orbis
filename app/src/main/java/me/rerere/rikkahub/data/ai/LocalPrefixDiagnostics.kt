@@ -3,6 +3,10 @@ package me.rerere.rikkahub.data.ai
 import android.content.Context
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import me.rerere.ai.provider.providers.openai.PrefixObservation
 import java.io.File
 import java.nio.file.Files
@@ -20,7 +24,18 @@ internal object LocalPrefixDiagnostics {
         val folder=File(context.noBackupFilesDir,"prefix-diagnostics");folder.mkdirs()
         val file=File(folder,"counts.jsonl");val tmp=File(folder,"counts.tmp")
         val old=if(file.isFile && file.length()<256*1024) file.readLines().takeLast(119) else emptyList()
-        tmp.writeText((old+Json.encodeToString(value)).joinToString("\n",postfix="\n"))
+        // Usage arrives asynchronously. Match the request's slot+sequence, never the latest
+        // request or global counters; concurrent chats and tool continuations stay separate.
+        tmp.writeText(mergePrefixDiagnosticLines(old,value).joinToString("\n",postfix="\n"))
         Files.move(tmp.toPath(),file.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING)
     }
+}
+
+internal fun mergePrefixDiagnosticLines(old: List<String>, value: PrefixObservation): List<String> {
+    val updated=old.filterNot { line -> runCatching {
+        val saved=Json.parseToJsonElement(line).jsonObject
+        saved["slot"]?.jsonPrimitive?.contentOrNull==value.slot &&
+            saved["sequence"]?.jsonPrimitive?.intOrNull==value.sequence
+    }.getOrDefault(false) }
+    return (updated+Json.encodeToString(value)).takeLast(120)
 }

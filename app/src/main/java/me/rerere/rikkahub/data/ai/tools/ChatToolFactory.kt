@@ -461,6 +461,11 @@ class ChatToolFactory(
                     addAll(me.rerere.rikkahub.data.orbis.plugins.personalPluginTools(
                         me.rerere.rikkahub.data.orbis.plugins.PluginHost(context, assistant.id.toString(), settingsStore, workspaceRepository, conversationId)))
                 }
+                if (LocalToolOption.WebShortcuts in assistant.localTools) {
+                    add(me.rerere.rikkahub.data.orbis.webshortcuts.webShortcutTool(assistant.id.toString(), conversationId,
+                        { liveOwner()?.localTools?.contains(LocalToolOption.WebShortcuts) == true },
+                        { me.rerere.rikkahub.data.orbis.webshortcuts.openWebShortcuts(context, assistant.id.toString()) }))
+                }
                 if (LocalToolOption.HumanHealth in assistant.localTools) {
                     add(me.rerere.rikkahub.data.orbis.health.healthTool(context, assistant.id.toString(),
                         { liveOwner()?.localTools?.contains(LocalToolOption.HumanHealth) == true }))
