@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.rikkahub.data.sync.importer.deepSeekTimeUnknown
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -82,7 +84,7 @@ internal fun OrbisChatMessageLayout(
                 Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     content()
                     if (!loading && display.showDateTimeInMessage) {
-                        Text(message.createdAt.toJavaLocalDateTime().toMessageTimeString(),
+                        Text((if (message.deepSeekTimeUnknown()) "原时间未知" else message.createdAt.toJavaLocalDateTime().toMessageTimeString()),
                             modifier = Modifier.align(Alignment.End), color = OrbisTheme.colors.mutedInk,
                             fontSize = 10.sp, lineHeight = 14.sp)
                     }
@@ -95,7 +97,7 @@ internal fun OrbisChatMessageLayout(
         ) {
             content()
             if (!loading && display.showDateTimeInMessage) {
-                Text(message.createdAt.toJavaLocalDateTime().toMessageTimeString(),
+                Text((if (message.deepSeekTimeUnknown()) "原时间未知" else message.createdAt.toJavaLocalDateTime().toMessageTimeString()),
                     modifier = Modifier.align(Alignment.End), color = OrbisTheme.colors.mutedInk,
                     fontSize = 10.sp, lineHeight = 14.sp)
             }

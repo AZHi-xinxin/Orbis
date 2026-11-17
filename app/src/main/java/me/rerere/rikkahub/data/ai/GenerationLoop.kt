@@ -937,7 +937,8 @@ class GenerationLoop(
             maxAutomaticContinuations = maxAutomaticContinuations,
             onGatewayRequest = onGatewayRequest,
             onPrefixObservation = if ((me.rerere.rikkahub.BuildConfig.DEBUG ||
-                (provider as? ProviderSetting.OpenAI)?.cacheDiagnostics == true) && !readOnlyPreflight) ({ evidence ->
+                (provider as? ProviderSetting.OpenAI)?.cacheDiagnostics == true ||
+                (provider as? ProviderSetting.Claude)?.cacheDiagnostics == true) && !readOnlyPreflight) ({ evidence ->
                 LocalPrefixDiagnostics.record(context, evidence)
             }) else null,
         )

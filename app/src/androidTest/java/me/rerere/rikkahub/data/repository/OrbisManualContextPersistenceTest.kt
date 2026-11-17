@@ -58,6 +58,39 @@ class OrbisManualContextPersistenceTest {
     }
     private fun original() = Conversation(assistantId = Uuid.random(), title = "synthetic original",
         messageNodes = (0..5).map { UIMessage.user("synthetic message $it").toMessageNode() })
+
+    @Test fun segmentedSummariesAndNotesCommitWithExactlyOneArchive() = runBlocking {
+        Fixture().use { f ->
+            val c = original(); f.save(c, true)
+            val baseline = f.load(c.id)
+            val summaries = listOf("first agreement", "second human edited summary", "third unfinished task")
+            val p = prepareOrbisGeneratedContext(baseline, 4, summaries)
+            val result = f.repository.commitManual(baseline, p.replacementNodes, p.metadata, p.expectedFingerprint)
+            assertEquals(summaries.indices.map { generatedManualSummaryPart(summaries, it) }.toSet(),
+                f.db.orbisMemoryDao().search(c.assistantId.toString(), "", false, 100, 0).map { it.body }.toSet())
+            assertEquals(3, f.load(c.id).messageNodes.size)
+            assertEquals(baseline.currentMessages.map { it.parts }, f.load(result.archiveId).currentMessages.map { it.parts })
+            f.db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM ConversationEntity").use { cursor ->
+                cursor.moveToFirst(); assertEquals(2, cursor.getInt(0))
+            }
+            assertTrue(runCatching { f.repository.commitManual(baseline, p.replacementNodes, p.metadata, p.expectedFingerprint) }.isFailure)
+            assertEquals(3, f.db.orbisMemoryDao().search(c.assistantId.toString(), "", false, 100, 0).size)
+        }
+    }
+
+    @Test fun segmentedMemoryWriteFailureRollsBackPageArchiveAndAllNotes() = runBlocking {
+        Fixture().use { f ->
+            val c = original(); f.save(c, true); val baseline = f.load(c.id)
+            val p = prepareOrbisGeneratedContext(baseline, 4, listOf("first", "fail second", "third"))
+            f.db.openHelper.writableDatabase.execSQL("CREATE TRIGGER synthetic_note_failure BEFORE INSERT ON orbis_memory_note WHEN instr(NEW.body, 'fail second') > 0 BEGIN SELECT RAISE(ABORT, 'synthetic'); END")
+            assertTrue(runCatching { f.repository.commitManual(baseline, p.replacementNodes, p.metadata, p.expectedFingerprint) }.isFailure)
+            assertEquals(baseline, f.load(c.id))
+            assertTrue(f.db.orbisMemoryDao().search(c.assistantId.toString(), "", false, 100, 0).isEmpty())
+            f.db.openHelper.readableDatabase.query("SELECT COUNT(*) FROM ConversationEntity").use { cursor ->
+                cursor.moveToFirst(); assertEquals(1, cursor.getInt(0))
+            }
+        }
+    }
     private suspend fun manual(f: Fixture, c: Conversation, count: Int = 3): OrbisManualContextCommit {
         val p = prepareOrbisManualContext(c, count)
         return f.repository.commitManual(c, p.replacementNodes, p.metadata, p.expectedFingerprint)

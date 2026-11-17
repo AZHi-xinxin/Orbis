@@ -47,6 +47,10 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.PartGroup
+import me.rerere.ai.provider.providers.openai.PrefixObservation
+import me.rerere.ai.provider.providers.openai.PrefixUsageSnapshot
+import me.rerere.ai.provider.providers.openai.prefixUsageSnapshot
+import me.rerere.ai.provider.providers.openai.withUsage
 import me.rerere.ai.provider.providers.groupPartsByToolBoundary
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.ui.ImageGenerationItem
@@ -313,6 +317,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             .configureReferHeaders(providerSetting.baseUrl)
             .build()
 
+        val observation = observePrefix(providerSetting, params, requestBody, request, messages)
         Log.i(TAG, "generateText: sending request; messages=${messages.size}, tools=${params.tools.size}")
 
         val response = client.newCall(request).await()
@@ -329,6 +334,8 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val content = bodyJson["content"]?.jsonArray ?: JsonArray(emptyList())
         val stopReason = bodyJson["stop_reason"]?.jsonPrimitive?.contentOrNull ?: "unknown"
         val usage = parseTokenUsage(bodyJson)
+        if (usage != null) reportPrefixUsage(params, observation, usage,
+            listOfNotNull(nativeUsageObject(bodyJson)?.let { prefixUsageSnapshot(it, native = true) }))
 
         return TextGenerationResult(
             id = id,
@@ -367,7 +374,15 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
         Log.i(TAG, "streamText: sending request; messages=${messages.size}, tools=${params.tools.size}")
 
-        val decoder = ClaudeStreamDecoder()
+        val observation = observePrefix(providerSetting, params, requestBody, request, messages)
+        var recordedUsage: TokenUsage? = null
+        val snapshots = mutableListOf<PrefixUsageSnapshot>()
+        val decoder = ClaudeStreamDecoder(onUsage = if (observation == null) null else { usage, raw ->
+            recordedUsage = recordedUsage.merge(usage)
+            if (snapshots.size == 8) snapshots.removeAt(1)
+            snapshots.add(prefixUsageSnapshot(raw, native = true))
+            reportPrefixUsage(params, observation, requireNotNull(recordedUsage), snapshots)
+        })
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
@@ -427,6 +442,24 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
         // trySend 在缓冲满时会静默丢弃 delta，导致回复中间缺字 (#1295)，因此缓冲必须无界
     }.buffer(Channel.UNLIMITED).flowOn(Dispatchers.IO)
+
+    private fun observePrefix(provider: ProviderSetting.Claude, params: TextGenerationParams,
+        body: JsonObject, request: Request, messages: List<UIMessage>): PrefixObservation? {
+        if (!provider.cacheDiagnostics) return null
+        val callback = params.onPrefixObservation ?: return null
+        val session = params.orbisConversationId ?: return null
+        return try {
+            ClaudePrefixProbe.shared.observe("${provider.id}|$session|${body["model"]}", body, request, messages)
+                .also(callback)
+        } catch (_: Exception) { null }
+    }
+
+    private fun reportPrefixUsage(params: TextGenerationParams, observation: PrefixObservation?,
+        usage: TokenUsage, snapshots: List<PrefixUsageSnapshot>) {
+        if (observation == null) return
+        try { params.onPrefixObservation?.invoke(observation.withUsage(usage, snapshots)) }
+        catch (_: Exception) { /* Local diagnostics must not affect model requests. */ }
+    }
 
     private fun buildMessageRequest(
         providerSetting: ProviderSetting.Claude,

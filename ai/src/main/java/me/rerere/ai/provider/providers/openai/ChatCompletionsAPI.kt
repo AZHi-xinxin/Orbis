@@ -139,7 +139,8 @@ class ChatCompletionsAPI(
                 ?.content
                 ?: "unknown"
             val usage = parseTokenUsage(bodyJson["usage"] as? JsonObject)
-            usage?.let { reportPrefixUsage(params, prefixObservation, it) }
+            usage?.let { reportPrefixUsage(params, prefixObservation, it,
+                listOf(prefixUsageSnapshot(bodyJson["usage"] as JsonObject))) }
 
             TextGenerationResult(
                 id = id,
@@ -190,15 +191,18 @@ class ChatCompletionsAPI(
 
         Log.i(TAG, "streamText: request prepared, messages=${messages.size}")
 
-        val decoder = ChatCompletionsStreamDecoder()
         var prefixUsage: TokenUsage? = null
+        val usageSnapshots = mutableListOf<PrefixUsageSnapshot>()
+        val decoder = ChatCompletionsStreamDecoder(onUsage = if(prefixObservation == null) null else { usage, raw ->
+            prefixUsage = prefixUsage.merge(usage)
+            // Preserve the first and the latest seven snapshots, without summing cumulative counts.
+            if (usageSnapshots.size == 8) usageSnapshots.removeAt(1)
+            usageSnapshots.add(prefixUsageSnapshot(raw))
+            reportPrefixUsage(params, prefixObservation, requireNotNull(prefixUsage), usageSnapshots)
+        })
 
         fun sendChunks(chunks: Iterable<StreamChunk>) {
             chunks.forEach { chunk ->
-                if (chunk is StreamChunk.Usage) {
-                    prefixUsage = prefixUsage.merge(chunk.usage)
-                    reportPrefixUsage(params, prefixObservation, prefixUsage)
-                }
                 trySend(chunk).onFailure { e ->
                     Log.w(TAG, "onEvent: chunk dropped, error=${e?.javaClass?.simpleName}")
                 }
@@ -230,9 +234,10 @@ class ChatCompletionsAPI(
         } catch(_: Exception) { null /* Diagnostics must never prevent a model request. */ }
     }
 
-    private fun reportPrefixUsage(params: TextGenerationParams, observation: PrefixObservation?, usage: TokenUsage) {
+    private fun reportPrefixUsage(params: TextGenerationParams, observation: PrefixObservation?, usage: TokenUsage,
+        snapshots: List<PrefixUsageSnapshot> = emptyList()) {
         if (observation == null) return
-        try { params.onPrefixObservation?.invoke(observation.withUsage(usage)) } catch (_: Exception) { }
+        try { params.onPrefixObservation?.invoke(observation.withUsage(usage, snapshots)) } catch (_: Exception) { }
     }
 
     private fun buildChatCompletionRequest(

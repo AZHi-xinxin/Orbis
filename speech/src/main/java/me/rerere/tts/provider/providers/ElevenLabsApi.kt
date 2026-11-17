@@ -20,6 +20,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
@@ -105,10 +106,39 @@ suspend fun fetchElevenLabsTtsModels(setting: TTSProviderSetting.ElevenLabs): Li
         val request = Request.Builder().url(elevenLabsApiUrl(setting.baseUrl, "models"))
             .apply { if (setting.apiKey.isNotBlank()) header("xi-api-key", setting.apiKey) }.get().build()
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw TTSProviderException("读取模型目录失败：HTTP ${response.code}。请检查地址、API Key 的 Models 读取权限或手填模型 ID。", response.code)
+            if (!response.isSuccessful) throw elevenLabsHttpError(response, catalogue = true)
             val source = response.body.source()
             val maximumBytes = 512L * 1024L
             if (source.request(maximumBytes + 1)) error("模型目录超过大小限制。")
             parseElevenLabsTtsModels(source.readUtf8())
         }
     }
+
+/** Classify the HTTP failure without exposing response text, keys, URLs or user speech.
+ * Gate business errors to 4xx: a gateway's 502 must not become a claim of insufficient credits. */
+internal fun elevenLabsHttpError(response: Response, catalogue: Boolean = false): TTSProviderException {
+    val code = response.code
+    val detailStatus = if (code in 400..499) runCatching {
+        val body = Json.parseToJsonElement(response.peekBody(8_192).string()) as? JsonObject
+        val detail = body?.get("detail") as? JsonObject
+        (detail?.get("status") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    }.getOrNull() else null
+    val hint = when {
+        code in setOf(502, 503, 504) -> "服务端或中间网关暂时异常。请稍后重试，或对比切换网络后的结果；此状态码不代表账户额度不足。"
+        code in 500..599 -> "服务端处理异常。请稍后重试；此状态码不代表账户额度不足。"
+        detailStatus == "quota_exceeded" -> "服务返回额度不足（quota_exceeded）。请核对当前 API Key 所属工作区及其额度限制。"
+        detailStatus == "invalid_api_key" || code == 401 -> "身份验证失败。请检查 API Key 是否有效及所属工作区。"
+        code == 429 -> "请求过于频繁或服务繁忙。请稍后重试。"
+        code == 408 -> "请求超时。请检查网络连接并稍后重试。"
+        code == 403 -> if (catalogue) "访问被拒绝。请检查 API Key 的 Models 读取权限及服务访问限制，也可手填模型 ID。"
+            else "访问被拒绝。请检查 API Key 权限及服务访问限制。"
+        code == 404 || detailStatus == "voice_not_found" -> if (catalogue) "模型目录接口不存在。请检查接口地址，也可手填模型 ID。"
+            else "接口或音色未找到。请检查接口地址和 Voice ID。"
+        code == 400 || code == 422 -> if (catalogue) "模型目录请求不被接受。请检查接口地址及读取权限，也可手填模型 ID。"
+            else "朗读参数不被接受。请检查模型、Voice ID、文本长度及声音设置。"
+        code in 300..399 -> "接口要求跳转到其他地址，本次未继续请求。请核对接口地址及当前网络的跳转结果；此状态码不代表账户额度不足。"
+        else -> "服务返回异常。请核对接口地址，或稍后重试。"
+    }
+    val action = if (catalogue) "模型目录读取失败" else "朗读失败"
+    return TTSProviderException("ElevenLabs $action：HTTP $code。$hint", code)
+}

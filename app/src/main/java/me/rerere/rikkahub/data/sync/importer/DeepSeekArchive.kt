@@ -17,7 +17,7 @@ import java.time.Instant
 import java.util.zip.CRC32
 import java.util.zip.ZipFile
 
-data class DeepSeekBranchPreview(val leafId: String, val messageCount: Int, val updatedAt: Instant, val isDefault: Boolean)
+data class DeepSeekBranchPreview(val leafId: String, val messageCount: Int, val updatedAt: Instant, val isDefault: Boolean, val timeUnknown: Boolean = false)
 data class DeepSeekConversationPreview(
     val sourceId: String, val title: String, val createdAt: Instant, val updatedAt: Instant,
     val totalNodes: Int, val messageCount: Int, val branchPointCount: Int,
@@ -37,8 +37,10 @@ object DeepSeekArchive {
 
     fun inspect(file: File, checkCancelled: () -> Unit = {}): DeepSeekArchivePreview = safeRead {
         open(file, checkCancelled).use { archive ->
-            DeepSeekArchivePreview(archive.conversations().map { conversation ->
+            val warnings = linkedSetOf<String>()
+            val conversations = archive.conversations().map { conversation ->
                 checkCancelled()
+                warnings.addAll(conversation.warnings)
                 // BFS parser order makes this O(nodes), not O(leaves * history).
                 val depths = mutableMapOf<String, Int>()
                 conversation.nodes.values.forEach { node ->
@@ -49,11 +51,13 @@ object DeepSeekArchive {
                     conversation.nodes.values.count { it.children.size > 1 },
                     conversation.nodes.values.filter { it.children.isEmpty() || it.sourceId == conversation.selectedLeafId }
                         .map { DeepSeekBranchPreview(it.sourceId, depths.getValue(it.sourceId),
-                            it.message?.createdAt ?: conversation.createdAt, it.sourceId == conversation.selectedLeafId) },
+                            it.message?.createdAt ?: conversation.createdAt, it.sourceId == conversation.selectedLeafId,
+                            it.message?.sourceMetadata?.get("source_timestamp_unknown") == JsonPrimitive(true)) },
                     conversation.selectedLeafId,
                     if (conversation.original["current_node"] != null && conversation.original["current_node"] != JsonNull)
                         "source_current_node" else "newest_leaf")
-            }.toList())
+            }.toList()
+            DeepSeekArchivePreview(conversations, (archive.warnings + warnings).distinct())
         }
     }
 
@@ -64,13 +68,18 @@ object DeepSeekArchive {
         return safeRead {
             val zip = ZipFile(file)
             try {
-                if (zip.entries().asSequence().any { it.name.substringAfterLast('/') == "chat_session_index.json" })
+                val names = zip.entries().asSequence().filter { !it.isDirectory && !it.name.startsWith("__MACOSX/") }.map { it.name }.toList()
+                if (names.any { it.substringAfterLast('/') == "chat_session_index.json" } ||
+                    names.any { name -> name.substringAfterLast('/') == "manifest.json" && names.any { path ->
+                        path.startsWith(name.removeSuffix("manifest.json") + "chat_sessions/") && path.endsWith(".json")
+                    } })
                     DeepSeekV3Archive(zip, checkCancelled) else LegacyArchiveReader(zip, checkCancelled)
             } catch (failure: Throwable) { zip.close(); throw failure }
         }
     }
 
     internal interface ArchiveReader : Closeable {
+        val warnings: List<String> get() = emptyList()
         fun conversations(): Sequence<DeepSeekConversation>
         fun copyAttachment(path: String, output: java.io.OutputStream): Boolean = false
     }

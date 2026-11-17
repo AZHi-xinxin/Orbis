@@ -174,13 +174,13 @@ internal fun OrbisContextBudgetSheet(
                     }
                     if (onManualContext != null) BudgetCard {
                         Text("人类手动整理", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("超过模型上限、暂时无法回复时也能使用。你选归档终点，完整原文独立保存；预览并确认后，当前窗口只发送整理说明与保留的后文。",
+                        Text("超过模型上限、暂时无法回复时也能使用。可手写摘要，或选择分段数、填写要求来生成摘要；预览确认后保留一个完整原文存档。",
                             fontSize = 12.sp, lineHeight = 19.sp)
                         Button(onClick = onManualContext, enabled = !compactionState.busy,
                             modifier = Modifier.fillMaxWidth().testTag("orbis-manual-context-open")) {
                             Text("选择范围 · 保留原文整理")
                         }
-                        Text("不自动生成摘要、不请求模型，也不会继续发送旧队列。",
+                        Text("手写整理只在本机进行；点“开始生成”才请求模型并可能计费。分段成功后逐段保存，可断点继续；不会自动续聊。",
                             fontSize = 11.sp, lineHeight = 18.sp, color = colors.mutedInk)
                     }
                     BudgetCard {

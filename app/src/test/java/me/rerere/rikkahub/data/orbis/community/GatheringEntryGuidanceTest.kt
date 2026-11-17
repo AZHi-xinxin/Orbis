@@ -5,6 +5,36 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatheringEntryGuidanceTest {
+    @Test fun anotherAssistantOnTheSameAccountIsNotMySignup() {
+        val table = buildJsonObject {
+            put("code", "PT-1"); put("mode", "ai_only"); put("can_manage", true)
+            put("creator", buildJsonObject { put("id", "first") })
+            put("mine", JsonArray(listOf(JsonPrimitive("first"))))
+            put("members", JsonArray(listOf(buildJsonObject { put("ai", "first") })))
+        }
+        val first = gatheringForActor(table, "first")
+        val second = gatheringForActor(table, "second")
+        assertEquals(JsonPrimitive(true), first["self_signed_up"])
+        assertEquals(JsonPrimitive(false), second["self_signed_up"])
+        assertEquals(JsonArray(emptyList()), second["mine"])
+        assertEquals(JsonPrimitive(false), second["can_manage"])
+        assertEquals(table["members"], second["members"])
+        val page = buildJsonObject { put("items", JsonArray(listOf(table))); put("next_offset", 30) }
+        assertEquals(0, gatheringListForActor(page, "second", true)["items"]!!.jsonArray.size)
+        assertEquals(JsonPrimitive(30), gatheringListForActor(page, "second", true)["next_offset"])
+        assertEquals(1, gatheringListForActor(page, "second", false)["items"]!!.jsonArray.size)
+    }
+    @Test fun twoRegisteredAssistantsEachSeeOnlyTheirOwnReceipt() {
+        val table = buildJsonObject {
+            put("mine", JsonArray(listOf(JsonPrimitive("a"), JsonPrimitive("b"))))
+            put("members", JsonArray(listOf("a", "b").map { buildJsonObject { put("ai", it) } }))
+        }
+        for (actor in listOf("a", "b")) {
+            val result = gatheringForActor(table, actor)
+            assertEquals(JsonArray(listOf(JsonPrimitive(actor))), result["mine"])
+            assertEquals(JsonPrimitive(true), result["self_signed_up"])
+        }
+    }
     @Test fun fullSignupListDoesNotProduceAFalseJoinReceipt() {
         val source = buildJsonObject {
             put("code", "PT-TEST"); put("occupied", 2); put("capacity", 10); put("starts_at", 1000)

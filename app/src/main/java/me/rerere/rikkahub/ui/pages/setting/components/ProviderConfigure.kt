@@ -337,23 +337,7 @@ private fun ProviderConfigureOpenAI(
         )
     }
     if (BuildConfig.ORBIS_ENABLED && !provider.useResponseApi) {
-        val context = LocalContext.current
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("记录缓存排查信息")
-                Text("仅保存在本机：请求长度、共同前缀长度、工具和参数是否变化。不记录对话、密钥或地址，不自动上传。", style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = provider.cacheDiagnostics, onCheckedChange = { onEdit(provider.copy(cacheDiagnostics = it)) })
-        }
-        Row {
-            OutlinedButton(onClick = {
-                val value = me.rerere.rikkahub.data.ai.LocalPrefixDiagnostics.export(context)
-                context.getSystemService(android.content.ClipboardManager::class.java)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("Orbis缓存诊断", value))
-                toaster.show("缓存诊断已复制")
-            }) { Text("复制诊断") }
-            OutlinedButton(onClick = { me.rerere.rikkahub.data.ai.LocalPrefixDiagnostics.clear(context); toaster.show("本机诊断已清空") }) { Text("清空诊断") }
-        }
+        CacheDiagnosticsControls(provider.cacheDiagnostics) { onEdit(provider.copy(cacheDiagnostics = it)) }
     }
 }
 
@@ -442,6 +426,10 @@ private fun ProviderConfigureClaude(
             }
         }
     }
+    if (BuildConfig.ORBIS_ENABLED) {
+        CacheDiagnosticsControls(provider.cacheDiagnostics) { onEdit(provider.copy(cacheDiagnostics = it)) }
+    }
+
 }
 
 @Composable
@@ -599,4 +587,26 @@ private fun ProviderConfigureGoogle(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+@Composable
+private fun CacheDiagnosticsControls(enabled: Boolean, onEnabledChange: (Boolean) -> Unit) {
+    val toaster = LocalToaster.current
+        val context = LocalContext.current
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("记录缓存排查信息")
+                Text("仅保存在本机：请求长度、共同前缀、缓存用量及请求变化。不记录对话、密钥或地址，不自动上传。", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+        Row {
+            OutlinedButton(onClick = {
+                val value = me.rerere.rikkahub.data.ai.LocalPrefixDiagnostics.export(context)
+                context.getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("Orbis缓存诊断", value))
+                toaster.show("缓存诊断已复制")
+            }) { Text("复制诊断") }
+            OutlinedButton(onClick = { me.rerere.rikkahub.data.ai.LocalPrefixDiagnostics.clear(context); toaster.show("本机诊断已清空") }) { Text("清空诊断") }
+        }
 }

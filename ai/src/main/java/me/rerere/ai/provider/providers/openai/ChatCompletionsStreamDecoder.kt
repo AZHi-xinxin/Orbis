@@ -27,7 +27,9 @@ import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import kotlin.time.Clock
 
-internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
+internal class ChatCompletionsStreamDecoder(
+    private val onUsage: ((TokenUsage, JsonObject) -> Unit)? = null,
+) : StreamChunkDecoder {
     private val streamState = ChatCompletionsStreamState()
     private val toolIdsByIndex = mutableMapOf<Int, String>()
     private val reasoningDetailsByIndex = linkedMapOf<Int, JsonObject>()
@@ -78,7 +80,12 @@ internal class ChatCompletionsStreamDecoder : StreamChunkDecoder {
                     }
                     choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishReason = it }
                 }
-                parseUsage(payload["usage"] as? JsonObject)?.let { add(StreamChunk.Usage(it)) }
+                val rawUsage = payload["usage"] as? JsonObject
+                parseUsage(rawUsage)?.let {
+                    // Diagnostics cannot interrupt generation, even when a callback fails.
+                    try { onUsage?.invoke(it, requireNotNull(rawUsage)) } catch (_: Exception) { }
+                    add(StreamChunk.Usage(it))
+                }
             }
         }
         return DecodeResult(chunks)

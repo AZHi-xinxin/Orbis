@@ -34,6 +34,37 @@ data class OrbisManualContextPreview(
     val additionalProtocolMessages: Int get() = requestedArchiveCount - archivedCount
 }
 
+/** Generated through explicit per-segment requests, then reviewed by the human. */
+fun prepareOrbisGeneratedContext(conversation: Conversation, archiveThroughCount: Int, summaries: List<String>): OrbisManualContextPreview {
+    require(summaries.size in 1..me.rerere.rikkahub.data.ai.compaction.MANUAL_SUMMARY_MAX_PARTS && summaries.all { it.isNotBlank() })
+    require(summaries.sumOf { it.length } <= me.rerere.rikkahub.data.ai.compaction.MANUAL_SUMMARY_MAX_TOTAL) { "摘要总量超过一百万字符，请先精简。" }
+    require(summaries.indices.all { me.rerere.rikkahub.data.orbis.memory.OrbisMemoryBudget.compactionCapacityError(generatedManualSummaryPart(summaries, it)) == null }) {
+        "某段摘要超过记忆保存容量，请先精简；草稿和原文保留。"
+    }
+    val base = prepareOrbisManualContext(conversation, archiveThroughCount)
+    val text = generatedManualSummaryText(summaries)
+    require(text.toByteArray(Charsets.UTF_8).size <= 1024 * 1024) { "合并后的摘要超过 1 MiB，请精简各段；草稿和原文保留。" }
+    val message = UIMessage.assistant(text).copy(parts = listOf(UIMessagePart.Text(text, buildJsonObject {
+        put(COMPACTION_SUMMARY_MARKER, true); put(ORBIS_MANUAL_CONTEXT_MARKER, true)
+        put("human_authored", false); put("generated_summary", true); put("human_reviewed", true)
+    })))
+    require(JsonInstant.encodeToString(listOf(message)).toByteArray(Charsets.UTF_8).size <= 1024 * 1024) {
+        "摘要编码后超过单条保存容量，请精简各段；草稿和原文保留。"
+    }
+    val replacement = listOf(message.toMessageNode()) + base.replacementNodes.drop(1)
+    val after = estimateCompactionTokens(replacement.map { it.currentMessage })
+    return base.copy(summaryText = text, replacementNodes = replacement, afterTokens = after,
+        metadata = base.metadata.copy(summaryMessageId = message.id, summaryText = text, afterTokens = after,
+            manualSummaryParts = summaries))
+}
+
+fun generatedManualSummaryText(summaries: List<String>): String =
+    "[Orbis 人类请求分段生成并确认的历史摘要；可能经人类编辑]\n" +
+        summaries.indices.joinToString("\n\n") { generatedManualSummaryPart(summaries, it) }
+
+fun generatedManualSummaryPart(summaries: List<String>, index: Int): String =
+    "【第 ${index + 1} / ${summaries.size} 段摘要】\n${summaries[index]}"
+
 data class OrbisManualContextCommit(val archiveId: Uuid, val commit: OrbisCompactionCommit)
 
 /** Persisted timestamps are milliseconds; ignore only sub-millisecond precision and transient UI fields. */
@@ -98,12 +129,19 @@ internal fun validateManualContextReplacement(
     require(first.messages.size == 1 && first.selectIndex == 0) { "人工整理说明格式无效。" }
     val message = first.currentMessage
     val part = message.parts.singleOrNull() as? UIMessagePart.Text ?: error("人工整理说明必须为纯文本。")
+    val generated = metadata.manualSummaryParts.isNotEmpty()
+    if (generated) {
+        val verified = prepareOrbisGeneratedContext(expected, start, metadata.manualSummaryParts)
+        require(verified.summaryText == part.text && metadata.summaryText == part.text) { "分段摘要与预览不一致。" }
+        require(!metadata.captureLocalMemory && !metadata.preserveBranch && !metadata.retainOriginals)
+    }
     require(message.role == MessageRole.ASSISTANT && message.id == metadata.summaryMessageId && message.usage == null &&
         part.metadata?.get(COMPACTION_SUMMARY_MARKER) == JsonPrimitive(true) &&
         part.metadata?.get(ORBIS_MANUAL_CONTEXT_MARKER) == JsonPrimitive(true) &&
-        part.metadata?.get("human_authored") == JsonPrimitive(true) &&
-        part.metadata?.get("generated_summary") == JsonPrimitive(false) &&
-        part.text == metadata.summaryText && part.text.length <= ORBIS_MANUAL_CONTEXT_SUMMARY_MAX_CHARS + 256) {
+        part.metadata?.get("human_authored") == JsonPrimitive(!generated) &&
+        part.metadata?.get("generated_summary") == JsonPrimitive(generated) &&
+        (!generated || part.metadata?.get("human_reviewed") == JsonPrimitive(true)) &&
+        part.text == metadata.summaryText && (generated || part.text.length <= ORBIS_MANUAL_CONTEXT_SUMMARY_MAX_CHARS + 256)) {
         "人工整理说明或来源标记无效。"
     }
     require(expected.messageNodes.none { it.id == first.id || it.messages.any { old -> old.id == message.id } }) {

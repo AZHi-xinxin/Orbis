@@ -1,6 +1,6 @@
 # Orbis
 
-公开预发布：[3.0.1-rc.1](https://github.com/AZHi-xinxin/Orbis/releases/tag/v3.0.1-rc.1)（code314，群内同包）。[更新与缓存问题说明](docs/RELEASE-3.0.1-rc.1.md)。稳定版仍为 3.0.0。
+正式版：[3.0.2](https://github.com/AZHi-xinxin/Orbis/releases/tag/v3.0.2)（code316）。[分段摘要、DeepSeek 导入及本次修复说明](docs/RELEASE-3.0.2.md)。
 
 Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花园、藏书阁、海龟汤、宠物与学习陪伴、语音台和可选的手机工具放在同一个应用里。
 
@@ -9,6 +9,8 @@ Orbis 是一个原生 Android AI 客户端。除了聊天，它把本地后花�
 从聊天开始，按需要开启记忆、陪伴和工作工具；完整功能和使用步骤见下方指南。
 
 ## 从这里开始
+
+- [3.0.2 正式发布说明](docs/RELEASE-3.0.2.md)：分段摘要与断点续接、DeepSeek 官方包导入、夜间存档页面、纯 AI 接龙与语音错误提示。
 
 - [3.0.0 正式发布说明](docs/RELEASE-3.0.0.md)：安装与应用内更新、版本选择和常用入口。
 - [2.6.19 开发阶段完整更新说明](docs/RELEASE-2.6.19.md)：社区与拼桌大厅、圆桌游戏、宠物按需原画、MCP 修复和 StackChan 触摸接入。

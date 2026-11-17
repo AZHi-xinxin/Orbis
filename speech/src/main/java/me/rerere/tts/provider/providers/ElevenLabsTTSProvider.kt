@@ -7,7 +7,6 @@ import me.rerere.tts.model.AudioChunk
 import me.rerere.tts.model.AudioFormat
 import me.rerere.tts.model.TTSRequest
 import me.rerere.tts.provider.TTSProvider
-import me.rerere.tts.provider.TTSProviderException
 import me.rerere.tts.provider.TTSProviderSetting
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -26,10 +25,7 @@ class ElevenLabsTTSProvider : TTSProvider<TTSProviderSetting.ElevenLabs> {
     ): Flow<AudioChunk> = flow {
         val httpRequest = elevenLabsSpeechRequest(providerSetting, request.text)
         val audioData = httpClient.newCall(httpRequest).execute().use { response ->
-            if (!response.isSuccessful) throw TTSProviderException(
-                message = "ElevenLabs 朗读失败：HTTP ${response.code}。请检查模型、Voice ID、API Key 权限和账户额度。",
-                statusCode = response.code,
-            )
+            if (!response.isSuccessful) throw elevenLabsHttpError(response)
             response.body.bytes()
         }
 

@@ -183,6 +183,7 @@ fun ChatPage(
     val errors by vm.errors.collectAsStateWithLifecycle()
 
     var manualContextOpen by remember(id) { mutableStateOf(false) }
+    var manualSummaryOpen by remember(id) { mutableStateOf(false) }
     LaunchedEffect(conversation.messageNodes, conversation.compactionEpoch) {
         vm.invalidateManualContextPreview()
     }
@@ -197,7 +198,12 @@ fun ChatPage(
             onApply = vm::applyManualContext,
             onInvalidate = vm::invalidateManualContextPreview,
             onDismiss = { manualContextOpen = false; vm.resetManualContext() },
+            onGenerate = { manualContextOpen = false; manualSummaryOpen = true; vm.manualSummary.open() },
         )
+    }
+    if (manualSummaryOpen && BuildConfig.ORBIS_ENABLED) {
+        me.rerere.rikkahub.ui.pages.orbis.OrbisManualSummarySheet(conversation, vm.manualSummary,
+            onDismiss = { manualSummaryOpen = false })
     }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)

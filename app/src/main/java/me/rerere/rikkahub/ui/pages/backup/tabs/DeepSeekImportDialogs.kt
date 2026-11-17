@@ -130,7 +130,7 @@ internal fun DeepSeekImportDialogs(controller: DeepSeekImportController, state: 
                 text = { LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(conversation.branches.withIndex().toList(), key = { it.value.leafId }) { (index, branch) ->
                         TextButton(onClick = { selected[sourceId] = branch.leafId; branchFor = null }) {
-                            Text("路径 ${index + 1}${if (branch.isDefault) "（默认）" else ""} · ${branch.messageCount} 条\n${date.format(branch.updatedAt)}")
+                            Text("路径 ${index + 1}${if (branch.isDefault) "（默认）" else ""} · ${branch.messageCount} 条\n${if (branch.timeUnknown) "原时间未知" else date.format(branch.updatedAt)}")
                         }
                     }
                 } }, confirmButton = { TextButton(onClick = { branchFor = null }) { Text("返回") } })

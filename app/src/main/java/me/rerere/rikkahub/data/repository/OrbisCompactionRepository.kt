@@ -87,6 +87,16 @@ class OrbisCompactionRepository(
         // Insert-only. New conversation, node and message IDs retain every alternative and file URL.
         insertIndependentArchive(archive)
         val committed = commit(expected, replacementNodes, metadata, persistedBaseline = baseline)
+        if (metadata.manualSummaryParts.isNotEmpty()) {
+            val memories = me.rerere.rikkahub.data.orbis.memory.OrbisMemoryRepository(database)
+            metadata.manualSummaryParts.indices.forEach { index ->
+                val receipt = memories.storeCompaction(stored.assistantId, "${metadata.eventId}:part:${index + 1}",
+                    generatedManualSummaryPart(metadata.manualSummaryParts, index))
+                check(receipt["ok"] == kotlinx.serialization.json.JsonPrimitive(true)) {
+                    "分段记忆保存未完成；本次整理已回滚，原文保留。"
+                }
+            }
+        }
         OrbisManualContextCommit(archive.id, committed)
     }
 

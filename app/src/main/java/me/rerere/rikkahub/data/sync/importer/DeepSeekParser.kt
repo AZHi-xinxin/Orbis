@@ -29,6 +29,7 @@ data class DeepSeekConversation(
     val nodes: Map<String, DeepSeekNode>,
     /** The original JSON object is retained structurally, never treated as executable instructions. */
     val original: JsonObject,
+    val warnings: List<String> = emptyList(),
 ) {
     /** Iterative traversal supports very long chats without recursive stack overflow. */
     fun pathTo(nodeId: String, checkCancelled: () -> Unit = {}): List<DeepSeekNode> {
@@ -76,8 +77,11 @@ object DeepSeekParser {
                 // This is display metadata, never a reason to reject all its messages.
                 val title = raw["title"]?.takeUnless { it == JsonNull }?.string()
                     ?.takeIf { it.isNotBlank() } ?: "未命名会话"
-                val createdAt = raw.string("inserted_at").timestamp()
-                val updatedAt = raw.string("updated_at").timestamp()
+                val sourceCreated = deepSeekTimestamp(raw["inserted_at"])
+                val sourceUpdated = deepSeekTimestamp(raw["updated_at"])
+                val createdAt = sourceCreated ?: sourceUpdated ?: Instant.now()
+                val updatedAt = sourceUpdated ?: createdAt
+                var unknownTimes = if (sourceCreated == null || sourceUpdated == null) 1 else 0
                 val mapping = raw.getValue("mapping").obj()
                 require(mapping.isNotEmpty()) { "deepseek_node_count" }
                 val links = mapping.mapValues { (key, value) ->
@@ -138,9 +142,13 @@ object DeepSeekParser {
                             fragments.any { it.type !in USER_TYPES && it.type !in setOf("CONTENT_RISK", "TIP") } -> MessageRole.ASSISTANT
                             else -> MessageRole.USER
                         }
-                        DeepSeekMessage(role, content.string("inserted_at").timestamp(),
+                        val messageTime = deepSeekTimestamp(content["inserted_at"])
+                        if (messageTime == null) unknownTimes++
+                        DeepSeekMessage(role, messageTime ?: createdAt,
                             content["model"]?.takeUnless { it == JsonNull }?.string().orEmpty(), fragments,
-                            JsonObject(content.filterKeys { it in setOf("status", "thinking_enabled", "search_enabled", "accumulated_token_usage") }))
+                            JsonObject(content.filterKeys { it in setOf("status", "thinking_enabled", "search_enabled", "accumulated_token_usage") } +
+                                if (messageTime == null) mapOf("source_timestamp_unknown" to JsonPrimitive(true),
+                                    "source_timestamp_raw" to (content["inserted_at"] ?: JsonNull)) else emptyMap()))
                     }
                     nodes[key] = link.copy(message = parsed)
                     link.children.forEach(queue::addLast)
@@ -150,8 +158,9 @@ object DeepSeekParser {
                 if (explicit != null) require(explicit in nodes) { "deepseek_current_node" }
                 // This export format does not normally identify a selected branch: newest leaf is deterministic.
                 val leaf = explicit ?: nodes.values.filter { it.children.isEmpty() }
-                    .maxWithOrNull(compareBy<DeepSeekNode> { it.message?.createdAt ?: createdAt }.thenBy { it.sourceId })!!.sourceId
-                DeepSeekConversation(id, title, createdAt, updatedAt, roots.single().sourceId, leaf, nodes, raw)
+                    .maxWithOrNull(compareBy<DeepSeekNode> { it.message?.takeUnless { m -> m.sourceMetadata["source_timestamp_unknown"] == JsonPrimitive(true) }?.createdAt ?: Instant.EPOCH }.thenBy { it.sourceId })!!.sourceId
+                DeepSeekConversation(id, title, createdAt, updatedAt, roots.single().sourceId, leaf, nodes, raw,
+                    if (unknownTimes > 0) listOf("部分原始时间缺失或不可解析：聊天保留原顺序，消息标记为时间未知；会话排序使用可用时间或本次导入时间。") else emptyList())
             }
             return DeepSeekExport(conversations)
         } catch (cancelled: kotlinx.coroutines.CancellationException) {

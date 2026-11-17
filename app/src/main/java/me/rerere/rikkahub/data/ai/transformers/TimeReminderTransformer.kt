@@ -4,6 +4,7 @@ import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import me.rerere.ai.core.MessageRole
+import me.rerere.rikkahub.data.sync.importer.deepSeekTimeUnknown
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.utils.toLocalDateTime
 import java.time.ZoneId
@@ -35,7 +36,7 @@ internal fun applyTimeReminder(messages: List<UIMessage>): List<UIMessage> {
     var firstUserFound = false
     for (i in messages.indices) {
         val current = messages[i]
-        if (current.role == MessageRole.USER) {
+        if (current.role == MessageRole.USER && !current.deepSeekTimeUnknown()) {
             val currInstant = current.createdAt.toInstant(tz)
             if (!firstUserFound) {
                 firstUserFound = true
@@ -45,7 +46,7 @@ internal fun applyTimeReminder(messages: List<UIMessage>): List<UIMessage> {
                 val prevInstant = previous.createdAt.toInstant(tz)
                 val gapSeconds = (currInstant - prevInstant).inWholeSeconds
 
-                if (gapSeconds > TIME_GAP_THRESHOLD_SECONDS) {
+                if (!previous.deepSeekTimeUnknown() && gapSeconds > TIME_GAP_THRESHOLD_SECONDS) {
                     result.add(buildTimeReminderMessage(gapSeconds, currInstant))
                 }
             }

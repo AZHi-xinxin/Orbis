@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.rikkahub.data.sync.importer.deepSeekTimeUnknown
+
 import me.rerere.rikkahub.data.orbis.privateroom.hasPrivateRoomToolContent
 import me.rerere.rikkahub.data.orbis.privateroom.privateRoomSafePresentation
 
@@ -217,7 +219,7 @@ fun ColumnScope.ChatMessageActionButtons(
 
         if (!BuildConfig.ORBIS_ENABLED && settings.displaySetting.showDateTimeInMessage) {
             Text(
-                text = message.createdAt.toJavaLocalDateTime().toMessageTimeString(),
+                text = (if (message.deepSeekTimeUnknown()) "原时间未知" else message.createdAt.toJavaLocalDateTime().toMessageTimeString()),
                 style = MaterialTheme.typography.labelSmall,
                 color = actionIconColor.copy(alpha = if (BuildConfig.ORBIS_ENABLED) 0.9f else 0.6f),
                 maxLines = 1,
@@ -531,7 +533,7 @@ fun ChatMessageActionsSheet(
 
             // Message Info
             ProvideTextStyle(MaterialTheme.typography.labelSmall) {
-                Text(message.createdAt.toJavaLocalDateTime().toLocalString())
+                Text((if (message.deepSeekTimeUnknown()) "原时间未知" else message.createdAt.toJavaLocalDateTime().toLocalString()))
                 if (model != null) {
                     Text(model.displayName)
                 }

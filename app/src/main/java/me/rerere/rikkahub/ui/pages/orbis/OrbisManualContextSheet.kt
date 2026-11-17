@@ -73,6 +73,7 @@ internal fun OrbisManualContextSheet(
     onApply: () -> Unit,
     onInvalidate: () -> Unit,
     onDismiss: () -> Unit,
+    onGenerate: (() -> Unit)? = null,
 ) {
     val count = conversation.messageNodes.size
     var endText by remember(conversation.id) { mutableStateOf(if (count == 0) "" else (count - 32).coerceAtLeast(1).toString()) }
@@ -182,6 +183,10 @@ internal fun OrbisManualContextSheet(
                         }
                         ManualContextCard {
                             Text("2 · 给留下的上下文写一段说明（可不填）", fontWeight = FontWeight.Bold)
+                            if (onGenerate != null) OutlinedButton(onClick = onGenerate, enabled = editable,
+                                modifier = Modifier.fillMaxWidth().testTag("orbis-manual-generate")) {
+                                Text("分段生成摘要 · 自选段数和摘要要求")
+                            }
                             OutlinedTextField(value = summary, onValueChange = { value ->
                                 if (editable) {
                                     summaryRejected = value.length > ORBIS_MANUAL_CONTEXT_SUMMARY_MAX_CHARS

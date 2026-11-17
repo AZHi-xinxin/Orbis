@@ -37,6 +37,8 @@ data class OrbisCompactionMetadata(
     val captureLocalMemory: Boolean = false,
     val retainOriginals: Boolean = false,
     val preserveBranch: Boolean = false,
+    // Human-requested segmented summaries; each note commits with the same archive transaction.
+    val manualSummaryParts: List<String> = emptyList(),
 )
 
 data class OrbisCompactionCommit(

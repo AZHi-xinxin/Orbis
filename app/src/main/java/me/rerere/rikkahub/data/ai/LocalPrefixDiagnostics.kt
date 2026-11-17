@@ -37,5 +37,10 @@ internal fun mergePrefixDiagnosticLines(old: List<String>, value: PrefixObservat
         saved["slot"]?.jsonPrimitive?.contentOrNull==value.slot &&
             saved["sequence"]?.jsonPrimitive?.intOrNull==value.sequence
     }.getOrDefault(false) }
-    return (updated+Json.encodeToString(value)).takeLast(120)
+    // Richer numeric usage snapshots must not make an otherwise valid journal unexportable.
+    var bytes = 0
+    return (updated+Json.encodeToString(value)).takeLast(120).asReversed().takeWhile { line ->
+        bytes += line.toByteArray(Charsets.UTF_8).size + 1
+        bytes < 256 * 1024
+    }.asReversed()
 }

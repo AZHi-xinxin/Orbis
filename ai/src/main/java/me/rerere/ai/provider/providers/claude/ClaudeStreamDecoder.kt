@@ -18,7 +18,9 @@ import me.rerere.ai.ui.toMetadata
 import me.rerere.ai.util.json
 import me.rerere.ai.util.parseErrorDetail
 
-internal class ClaudeStreamDecoder : StreamChunkDecoder {
+internal class ClaudeStreamDecoder(
+    private val onUsage: ((TokenUsage, JsonObject) -> Unit)? = null,
+) : StreamChunkDecoder {
     private val blocks = mutableMapOf<Int, ClaudeStreamBlock>()
     private var responseId: String? = null
     private var responseModel: String? = null
@@ -43,7 +45,11 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
         }
 
         val chunks = buildList {
-            parseTokenUsage(dataJson)?.let { add(StreamChunk.Usage(it)) }
+            parseTokenUsage(dataJson)?.let { usage ->
+                try { nativeUsageObject(dataJson)?.let { onUsage?.invoke(usage, it) } }
+                catch (_: Exception) { /* Diagnostics cannot interrupt a response. */ }
+                add(StreamChunk.Usage(usage))
+            }
             val index = dataJson["index"]?.jsonPrimitive?.intOrNull
             val contentBlock = dataJson["content_block"]?.jsonObject
 
@@ -174,9 +180,7 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
     }
 
     private fun parseTokenUsage(bodyJson: JsonObject): TokenUsage? {
-        val usageJson = bodyJson["usage"]?.jsonObject
-            ?: bodyJson["message"]?.jsonObject?.get("usage")?.jsonObject
-            ?: return null
+        val usageJson = nativeUsageObject(bodyJson) ?: return null
         val inputTokens = usageJson["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
         val cachedInputTokens = usageJson["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
         val cachedCreationTokens = usageJson["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
@@ -187,6 +191,7 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
             completionTokens = completionTokens,
             totalTokens = promptTokens + completionTokens,
             cachedTokens = cachedInputTokens,
+            cachedTokensReported = usageJson["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull != null,
         )
     }
 
@@ -196,3 +201,6 @@ internal class ClaudeStreamDecoder : StreamChunkDecoder {
         val metadata: JsonObject? = null,
     )
 }
+
+internal fun nativeUsageObject(body: JsonObject): JsonObject? =
+    body["usage"] as? JsonObject ?: (body["message"] as? JsonObject)?.get("usage") as? JsonObject

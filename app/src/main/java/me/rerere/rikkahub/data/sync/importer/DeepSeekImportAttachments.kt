@@ -54,7 +54,7 @@ internal class DeepSeekAttachmentSession(private val archive: DeepSeekArchive.Ar
                     val metadata = buildJsonObject { put("import_source", "deepseek"); put("source_file", data) }
                     result[path] = if (data["is_image"] == JsonPrimitive(true) && extension in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp"))
                         UIMessagePart.Image(saved.url, metadata)
-                    else UIMessagePart.Document(saved.url, display, "application/octet-stream", metadata)
+                    else UIMessagePart.Document(saved.url, display, deepSeekMime(display), metadata)
                 } finally { temporary.delete() }
             }
         }

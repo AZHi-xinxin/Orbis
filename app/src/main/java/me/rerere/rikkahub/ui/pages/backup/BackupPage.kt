@@ -23,31 +23,40 @@ import me.rerere.rikkahub.ui.pages.backup.components.BackupDialog
 import me.rerere.rikkahub.ui.pages.backup.tabs.ImportExportTab
 import me.rerere.rikkahub.ui.pages.orbis.OrbisPageHeader
 import me.rerere.rikkahub.ui.pages.orbis.OrbisPageSurface
+import me.rerere.rikkahub.ui.pages.orbis.OrbisTheme
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
 fun BackupPage(vm: BackupVM = koinViewModel()) {
     var restart by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(0) }
+    BackupPageLayout(tab, onTabChange = { tab = it }, navigationIcon = { BackButton() }) {
+        when(tab) {
+            0 -> AutomaticBackupTab(onRestart = { restart = true }, onConnection = { tab = if(it == "webdav") 2 else 3 })
+            1 -> ImportExportTab(vm = vm, onShowRestartDialog = { restart = true })
+            2 -> WebDavTab(vm = vm, onShowRestartDialog = { restart = true })
+            3 -> S3Tab(vm = vm, onShowRestartDialog = { restart = true })
+        }
+    }
+    if (restart) BackupDialog()
+}
+
+@Composable
+internal fun BackupPageLayout(tab: Int, onTabChange: (Int) -> Unit,
+    navigationIcon: @Composable () -> Unit, content: @Composable () -> Unit) {
     OrbisPageSurface {
-        Scaffold(containerColor = Color.Transparent, topBar = {
+        Scaffold(containerColor = Color.Transparent, contentColor = OrbisTheme.colors.ink, topBar = {
             OrbisPageHeader(title = "数据与存档", subtitle = "本地先保存，服务器由你绑定",
-                avatar = { Text("↥") }, navigationIcon = { BackButton() }, modifier = Modifier.statusBarsPadding())
+                avatar = { Text("↥") }, navigationIcon = navigationIcon, modifier = Modifier.statusBarsPadding())
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 ScrollableTabRow(selectedTabIndex = tab) {
                     listOf("自动存档", "文件导入导出", "WebDAV 连接", "S3 连接").forEachIndexed { index, label ->
-                        Tab(selected = tab == index, onClick = { tab = index }, text = { Text(label) })
+                        Tab(selected = tab == index, onClick = { onTabChange(index) }, text = { Text(label) })
                     }
                 }
-                when(tab) {
-                    0 -> AutomaticBackupTab(onRestart = { restart = true }, onConnection = { tab = if(it == "webdav") 2 else 3 })
-                    1 -> ImportExportTab(vm = vm, onShowRestartDialog = { restart = true })
-                    2 -> WebDavTab(vm = vm, onShowRestartDialog = { restart = true })
-                    3 -> S3Tab(vm = vm, onShowRestartDialog = { restart = true })
-                }
+                content()
             }
         }
     }
-    if (restart) BackupDialog()
 }

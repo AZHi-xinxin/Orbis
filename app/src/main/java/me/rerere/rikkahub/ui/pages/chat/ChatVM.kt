@@ -87,6 +87,7 @@ class ChatVM(
     private val _conversationId: Uuid = Uuid.parse(id)
     suspend fun requestBoundaryResume(revision: Long, text: String) = chatService.requestBoundaryResume(_conversationId, revision, text)
     val conversation: StateFlow<Conversation> = chatService.getDisplayedConversationFlow(_conversationId)
+    internal val manualSummary = ManualSummaryController(context, viewModelScope, chatService, _conversationId)
     val humanContinuationNotice = chatService.getHumanContinuationNotice(_conversationId)
     val humanContinuationPersistenceWarning = chatService.getHumanContinuationPersistenceWarning(_conversationId)
     val eventInbox = chatService.orbisEvents.inbox.state

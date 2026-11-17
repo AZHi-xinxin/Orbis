@@ -5621,6 +5621,47 @@ class ChatService(
         }
     }
 
+    /** Explicit human-requested summarization is isolated from the interactive generation loop. */
+    suspend fun manualSummaryGenerator(conversationId: Uuid): me.rerere.rikkahub.data.ai.compaction.ManualSummaryGenerator {
+        val source = getDisplayedConversationFlow(conversationId).value
+        check(derivedModelRequestsAllowed(source)) { "当前窗口处于恢复限制，请先完成恢复再生成摘要。" }
+        val settings = settingsStore.settingsFlow.first()
+        val owner = settings.getAssistantById(source.assistantId) ?: error("当前窗口所属 AI 不存在。")
+        val model = settings.findModelById(owner.chatModelId ?: settings.chatModelId) ?: error("请先给当前 AI 选择聊天模型。")
+        val provider = model.findProvider(settings.providers) ?: error("当前模型的接口不存在。")
+        val access = boundaryHost.requestContext(source.assistantId.toString(), conversationId.toString())
+        val handler = providerManager.getProviderByType(provider, access.check)
+        return me.rerere.rikkahub.data.ai.compaction.ManualSummaryGenerator(model.id.toString(),
+            model.displayName.ifBlank { model.modelId }) { draft, index, outputTokens ->
+            withContext(Dispatchers.IO + access) {
+                val live = settingsStore.settingsFlow.first()
+                check(live.getAssistantById(source.assistantId) == owner &&
+                    live.findModelById(model.id) == model && model.findProvider(live.providers) == provider &&
+                    derivedModelRequestsAllowed(source)) { "模型或助手设置已变化，已完成摘要保留，请重新核对。" }
+                require(draft.conversationId == conversationId.toString() && draft.assistantId == source.assistantId.toString() && draft.modelId == model.id.toString())
+                val result = handler.generateText(provider,
+                    me.rerere.rikkahub.data.ai.compaction.manualSummaryMessages(draft, index),
+                    TextGenerationParams(model = model.copy(tools = emptySet(), customBodies = emptyList()),
+                        maxTokens = outputTokens, customHeaders = model.customHeaders + owner.customHeaders,
+                        reasoningLevel = me.rerere.ai.core.ReasoningLevel.OFF, maxAutomaticContinuations = 0))
+                me.rerere.rikkahub.data.ai.compaction.acceptedManualSummary(result)
+            }
+        }
+    }
+
+    suspend fun previewGeneratedManualContext(conversationId: Uuid,
+        draft: me.rerere.rikkahub.data.ai.compaction.ManualSummaryDraft): me.rerere.rikkahub.data.model.OrbisManualContextPreview {
+        draft.validate()
+        require(draft.complete) { "还有未完成的摘要，原文未改变。" }
+        val baseline = previewManualContext(conversationId, draft.archiveThrough, "")
+        require(baseline.expectedFingerprint == draft.sourceFingerprint) { "原窗口已变化；摘要草稿保留，请重新核对。" }
+        val source = getDisplayedConversationFlow(conversationId).value
+        return withContext(Dispatchers.Default) {
+            require(me.rerere.rikkahub.data.model.manualContextFingerprint(source) == draft.sourceFingerprint)
+            me.rerere.rikkahub.data.model.prepareOrbisGeneratedContext(source, draft.archiveThrough, draft.summaries.map { checkNotNull(it) })
+        }
+    }
+
     suspend fun applyManualContext(
         conversationId: Uuid,
         preview: me.rerere.rikkahub.data.model.OrbisManualContextPreview,

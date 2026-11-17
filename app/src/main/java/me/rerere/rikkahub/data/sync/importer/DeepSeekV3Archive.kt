@@ -18,18 +18,28 @@ internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCanc
             if (it.isDirectory) require(it.size == 0L)
         }
     }.associateBy { it.name }
-    private val manifest = entries.values.single { it.name.substringAfterLast('/') == "manifest.json" }
+    private val manifest = entries.values.single { !it.isDirectory && !it.name.startsWith("__MACOSX/") &&
+        it.name.substringAfterLast('/') == "manifest.json" && entries.keys.any { path ->
+            path == it.name.removeSuffix("manifest.json") + "chat_session_index.json" ||
+                path.startsWith(it.name.removeSuffix("manifest.json") + "chat_sessions/") && path.endsWith(".json")
+        } }
     private val prefix = manifest.name.removeSuffix("manifest.json").also {
         require(it.isEmpty() || !it.startsWith("__MACOSX/"))
     }
     private val index: List<JsonObject>
     private val sessionIds: Set<String>
     private var consumed = false
+    private val indexed = prefix + "chat_session_index.json" in entries
+    override val warnings: List<String> get() = if (indexed) emptyList() else
+        listOf("原包缺少会话索引，已从同一导出目录的会话文件恢复列表；请核对窗口和消息数量。")
 
     init {
         val version = readJson(manifest.name).jsonObject["export_format_version"]
         require((version as? JsonPrimitive)?.intOrNull?.let { it >= 3 } == true) { "deepseek_export_version" }
-        index = readJson(prefix + "chat_session_index.json").jsonArray.map { it.jsonObject }
+        index = if (indexed) readJson(prefix + "chat_session_index.json").jsonArray.map { it.jsonObject }
+        else entries.keys.filter { it.startsWith(prefix + "chat_sessions/") &&
+            it.removePrefix(prefix + "chat_sessions/").let { name -> '/' !in name && name.endsWith(".json") } }
+            .sorted().map { buildJsonObject { put("id", it.substringAfterLast('/').removeSuffix(".json")) } }
         require(index.isNotEmpty())
         sessionIds = index.map { it.getValue("id").jsonPrimitive.content.also(::safeId) }.toSet()
         require(sessionIds.size == index.size)
@@ -73,7 +83,7 @@ internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCanc
             val raw = readJson(prefix + "chat_sessions/$id.json").jsonObject
             require(raw["id"] == header["id"])
             val messages = raw.getValue("messages").jsonArray
-            require(header["message_count"]?.jsonPrimitive?.intOrNull == messages.size)
+            if (indexed) require(header["message_count"]?.jsonPrimitive?.intOrNull == messages.size)
             // An exported path is data, never a destination or URL. Only this chat's local folder is eligible.
             messages.forEach { message -> message.jsonObject["fragments"]?.jsonArray?.forEach { fragment ->
                 fragment.jsonObject["files"]?.jsonArray?.forEach { file ->
@@ -82,7 +92,9 @@ internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCanc
                         ArchiveCapacity.requireSafePath(path)
                         require(path.startsWith("chat_sessions/${id}_files/") && path.split('/').size == 3)
                         entries[prefix + path]?.let { entry ->
-                            require(file.jsonObject["file_size"]?.jsonPrimitive?.longOrNull == entry.size)
+                            file.jsonObject["file_size"]?.takeUnless { it == JsonNull }?.let {
+                                require((it as? JsonPrimitive)?.longOrNull == entry.size)
+                            }
                         }
                     }
                 }
@@ -126,7 +138,9 @@ internal class DeepSeekV3Archive(private val zip: ZipFile, private val checkCanc
                 val f = fragment.jsonObject
                 if (f["type"] == JsonPrimitive("FILE")) JsonObject(f + ("files" to JsonArray(f.getValue("files").jsonArray.map {
                     val file = it.jsonObject
-                    JsonObject(file + ("file_id" to file.getValue("id")))
+                    JsonObject(file + ("file_id" to (file["id"]?.takeUnless { it == JsonNull }
+                        ?: JsonPrimitive(deepSeekImportId("file", raw.getValue("id").jsonPrimitive.content,
+                            file.toString()).toString()))))
                 }))) else f
             }
             mapping[ids[position]] = node(ids[position], parents[position], JsonObject(m + mapOf(

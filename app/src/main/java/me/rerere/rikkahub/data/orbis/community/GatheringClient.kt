@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import me.rerere.rikkahub.data.orbis.market.*
 
-internal const val GATHERING_HELP = "拼桌信息统一在社区朋友圈的拼桌大厅。gathering_list 看列表；gathering_detail(target=PT-桌号)只查询报名与房间状态，不会入座；gathering_options 查游戏。gathering_create(game,mode,script可选,starts_at=Unix秒,timezone=IANA时区)发起并给自己报名；gathering_signup(target=桌号)自己报名，mixed模式会与所属人类成对占席。成功报名后自行设置一次性哨兵，到 starts_at 预约时间就调用 gathering_join(target=桌号)进入原桌，不要等 open_at（五分钟后才是解除预约留位）。members/mine 只是报名名单，members 的 joined_at 是报名时间，不证明人在游戏房；只有 gathering_join 返回 joined:true 才能报告已入桌。一次性哨兵提示必须写明这些区别。gathering_withdraw 只取消自己的报名，不解散整桌；房主在未开局时用 gathering_cancel(target=桌号,revision=detail最新revision) 解散整桌、关闭原房并释放所有名额，全部相关AI收到取消哨兵的回执；gathering_reschedule 修改时间也需要最新 revision。人类可管理自己账号发起的桌，AI只能解散自己发起的桌；已开局请在原游戏内操作。重复报名不重复占席。报名不是哨兵设置成功，需核对哨兵工具回执。"
+internal const val GATHERING_HELP = "拼桌信息统一在社区朋友圈的拼桌大厅。gathering_list 看列表；gathering_detail(target=PT-桌号)只查询报名与房间状态，不会入座；gathering_options 查游戏。gathering_create(game,mode,script可选,starts_at=Unix秒,timezone=IANA时区)发起并给自己报名；gathering_signup(target=桌号)自己报名，mixed模式会与所属人类成对占席。纯 AI 场允许同一人类的多个助手各自报名、各占一席；mine/self_signed_up仅表示当前助手，其他助手已报名不等于你已报名。成功报名后自行设置一次性哨兵，到 starts_at 预约时间就调用 gathering_join(target=桌号)进入原桌，不要等 open_at（五分钟后才是解除预约留位）。members/mine 只是报名名单，members 的 joined_at 是报名时间，不证明人在游戏房；只有 gathering_join 返回 joined:true 才能报告已入桌。一次性哨兵提示必须写明这些区别。gathering_withdraw 只取消自己的报名，不解散整桌；房主在未开局时用 gathering_cancel(target=桌号,revision=detail最新revision) 解散整桌、关闭原房并释放所有名额，全部相关AI收到取消哨兵的回执；gathering_reschedule 修改时间也需要最新 revision。人类可管理自己账号发起的桌，AI只能解散自己发起的桌；已开局请在原游戏内操作。重复报名不重复占席。报名不是哨兵设置成功，需核对哨兵工具回执。"
 
 internal fun gatheringOccupancy(g: JsonObject): String {
     val pairs=g.ms("mode")=="mixed"

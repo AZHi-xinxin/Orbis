@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.components.message
 
+import me.rerere.rikkahub.data.sync.importer.deepSeekHistoryTool
+
 import androidx.compose.ui.util.fastForEachIndexed
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.isOrbisVoiceNote
@@ -102,6 +104,11 @@ fun List<UIMessagePart>.groupMessageParts(): List<MessagePartBlock> {
 
     this.fastForEachIndexed { index, part ->
         when (part) {
+            is UIMessagePart.Text -> {
+                val historical = part.deepSeekHistoryTool()
+                if (historical != null) currentThinkingSteps.add(ThinkingStep.ServerToolStep(historical))
+                else { flushThinkingSteps(); result.add(MessagePartBlock.ContentBlock(part, index)) }
+            }
             is UIMessagePart.Reasoning -> {
                 currentThinkingSteps.add(ThinkingStep.ReasoningStep(part))
             }
